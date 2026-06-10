@@ -64,3 +64,36 @@ The Supervisory Team consensus check parses dialogue transcripts using a JSON pr
 ```python
 mock_client.generate.return_value = '{"is_healthy": true, "reason": "Dialogue approved."}'
 ```
+
+### D. Mocking Multi-Round Debate Sequences
+
+Dynamic agent committees (e.g. Planning, Editorial, or Conflict Resolution Committees) typically run sequential discussions across multiple rounds. When writing integration tests for these loops:
+
+1. **Configure sequential mock responses** by mapping `side_effect` to a custom generator function.
+2. **Prefix agent answers with `"Final Answer: "`** so that the agent's ReAct execution step terminates instantly without looping through the full 5 steps.
+3. **Differentiate by request format**: Return standard text for agents, but return valid JSON string when `require_json=True` is requested by the Supervisory Team auditor.
+
+Example integration test setup:
+
+```python
+def test_committee_debate_flow(self):
+    # Mock responses for a 1-round discussion among 3 agents
+    mock_debate_turns = [
+        "Final Answer: Sibling A argues logic consistency.",
+        "Final Answer: Sibling B proposes scene progression details.",
+        "Final Answer: Sibling C arbitrates and outputs the final draft."
+    ]
+
+    def mock_generate_side_effect(prompt, system_instruction=None, require_json=False, **kwargs):
+        if require_json:
+            # Return JSON signature for SupervisoryTeam dialogue health audit
+            return '{"is_healthy": true, "reason": "Dialogue is healthy."}'
+        # Pop the next debate turn
+        return mock_debate_turns.pop(0) if mock_debate_turns else "Final Answer: ok"
+
+    self.my_critic_client.generate.side_effect = mock_generate_side_effect
+    
+    # Execute the team debate
+    transcript = self.att_manager.execute_team_discussion(self.my_team, prompt="Start task...", rounds=1)
+    self.assertIn("Sibling C arbitrates", transcript)
+```

@@ -12,6 +12,16 @@ To understand specific systems in detail, please refer to the following document
 2. **[Gated Context Protection & File Reading](Gated_Reading.md)**: Details the size-aware `GatedFileReader`, outline sampling fallbacks for files exceeding 50 KB, paginated line chunking, and streaming tail log reads.
 3. **[Supervisor Auditor Team](Supervisory_Team.md)**: Details the dynamic **3-AI Supervisory Team** (Integrity, Continuity, and Deadlock Auditors) which monitors dialogue transcripts for circular deadlocks and performs recursive lineage parent escalations.
 
+## 📊 Visual Flowcharts Directory
+
+For visual diagrams sequencing ATT loops, refer to the flowchart index and specific diagrams:
+
+* **[Autonomy Flowcharts Index](flowcharts/README.md)**: Overview diagram of all coordinating processes.
+* **[Spawning & Escalation Flowchart](flowcharts/Spawning_Escalation.md)**: Visualizes parent escalation alerts and child team creations.
+* **[Gated Reading Slicing Sequence](flowcharts/Gated_Reading.md)**: Visualizes line chunk slicing logic and outline fallbacks.
+* **[Negotiation Broker Routing Sequence](flowcharts/Negotiation_Broker_Sibling_Routing.md)**: Sequences sibling and cross-lineage P2P talk approvals.
+* **[Supervisory Team Audit Sequence](flowcharts/Supervisory_Team_Audit.md)**: Sequences dialogue auditing and ancestor anomaly routing.
+
 ## Core Architecture Overview
 
 The ATT Topology transitions AI agents from passive context-consumers to active, collaborative team groups. It is built on a recursive team model coordinated by the master `ATTManager`:

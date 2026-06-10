@@ -12,6 +12,8 @@ Every autonomous task or research query spawns a specialized dynamic Agent Team 
 
 Both individual `Agent` instances and `AgentTeam` instances support dynamic spawning via the unified `launch_att()` method. Every team holds a trackable `team_purpose` to broadcast its objective to the network.
 
+For a detailed step-by-step visual of the spawning control flow, see the [Dynamic Spawning & Tool Binding Flowchart](flowcharts/Spawning_Escalation.md#1-dynamic-spawning--tool-binding-flowchart) and the [Tools Context Registration & Team Spawning Sequence](flowcharts/Negotiation_Broker_Sibling_Routing.md#1-sequence-of-tools-context-registration-&-team-spawning).
+
 ## 2. Bounded ReAct Execution Loop & Safe Parser
 
 Agents in dynamic teams resolve tasks inside a structured **Reasoning & Action (ReAct)** loop. The loop alternates between `Thought`, `Action` (tool call), and `Observation` until a `Final Answer` is reached or the step limit is hit (default: 5).
@@ -53,6 +55,8 @@ When an active team or agent at Level 2 determines that it needs further automat
 2. The parent team receives this payload directly into its `message_inbox`.
 3. During the parent team's next debate turn, the `ATTManager` automatically extracts these alerts and prepends them directly into the parent team's active discussion prompt.
 4. Sibling agents in the parent team consume the alerts, formulate resolutions or delegate to a sibling node, and relay results back, maintaining flat execution bounds.
+
+For a visual breakdown of sibling communication authorization and inter-team message routing gates, see the [Dynamic Sibling Talk Authorization Sequence](flowcharts/Spawning_Escalation.md#2-dynamic-sibling-talk-authorization-sequence) and the [Sibling & Cross-Lineage Negotiation Flowchart](flowcharts/Negotiation_Broker_Sibling_Routing.md#2-sibling-&-cross-lineage-negotiation-flowchart).
 
 ## 4. Consolidated Autonomy Tools
 

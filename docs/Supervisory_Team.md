@@ -12,6 +12,8 @@ To avoid circular deadlocks and logical slips within dynamic team debates, every
 
 The Supervisory Team is entirely non-participating; it does not contribute content, but audits the multi-agent discussion transcript at the end of each discussion round.
 
+For a detailed control flow of dialogue auditing, see the [3-AI Dialogue Auditing Logic Flowchart](flowcharts/Supervisory_Team_Audit.md#1-3-ai-dialogue-auditing-logic-flowchart).
+
 ## 2. Dialogue Health Auditing
 
 At the end of a team discussion, the Supervisory Team performs a batch audit of the transcript. It evaluates the debate for:
@@ -58,6 +60,8 @@ If the dialogue audit results in `is_healthy = False` (indicating a deadlock or 
 2. **Asynchronous Routing**: The Supervisor dispatches a failure alert (containing the anomaly reason and child team ID) directly into the parent team's `message_inbox`. It returns immediately, preventing synchronous blocking loops that cause API timeouts.
 3. **Context Consumption**: The parent team will consume this context in its next discussion turn, automatically summarizing the inbox if the cascade of errors exceeds the `inbox_summarize_threshold_chars` threshold.
 4. **Fallback Gating**: If no parent exists in the lineage tree, the Supervisor escalates a critical system alert directly to the **Level 0 Root AI**.
+
+For the visual flow of how failures cascade up the lineage tree, see the [Parent-Ancestor Escalation Tree Flowchart](flowcharts/Supervisory_Team_Audit.md#2-parent-ancestor-escalation-tree-flowchart).
 
 ## 4. Configuration & Usage
 

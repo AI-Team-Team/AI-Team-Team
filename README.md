@@ -16,16 +16,21 @@ Hundreds, thousands, even tens of thousands of AIs work together in an orderly m
 > If you notice any issues or have any suggestions and have the time, \
 > please leave them in the Issues section. Thank you.
 
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE.txt)
+[![Documentation](https://img.shields.io/badge/docs-specification-orange.svg)](docs/README.md)
+[![Unit Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#)
+
 ## 🚀 Key Features
 
-* **Tree-like Lineage Spawning**: Spawns hierarchical dynamic agent teams (`AgentTeam`) recursively from a root agent down to grandchild sub-teams, strictly governed by depth limits.
+* **[Tree-like Lineage Spawning](docs/Dynamic_Delegation.md)**: Spawns hierarchical dynamic agent teams (`AgentTeam`) recursively from a root agent down to grandchild sub-teams, strictly governed by depth limits.
 * **Dynamic presets & Committees**: Allows runtime registration of custom agent committees (role configurations and system prompts) like planning, writing, database management, etc.
 * **Bounded ReAct Loops**: Agents execute reasoning steps using standard ReAct (Thought/Action/Observation) protocols, supported by a safe literal argument parser.
-* **Negotiation Broker**: Gates sibling and cross-lineage peer-to-peer communication through dynamic permission rules and broker contracts.
+* **[Negotiation Broker](docs/Dynamic_Delegation.md#4-consolidated-autonomy-tools)**: Gates sibling and cross-lineage peer-to-peer communication through dynamic permission rules and broker contracts.
 * **Tool Auditor Interception Hook**: Allows host applications to register pre-execution callback hooks to audit, approve, or reject specific tool calls (e.g. database safety query vetting).
-* **Supervisory Dialogue Audits**: A 3-AI Supervisory Team audits dialogue transcripts for logical deadlocks, circular reasoning, and anomalies, recursively escalating alerts up the ancestry lineage.
+* **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A 3-AI Supervisory Team audits dialogue transcripts for logical deadlocks, circular reasoning, and anomalies, recursively escalating alerts up the ancestry lineage.
 * **UI/Logging Decoupling**: Exposes clear runtime event hooks (`on_status_change`, `on_activity_added`, `on_log_append`) to update terminal dashboards and write logs without framework pollution.
-* **Gated Context Protection**: Employs `GatedFileReader` to paginate file reading, cap line window requests, and fallback to outline warnings on large documents.
+* **[Gated Context Protection](docs/Gated_Reading.md)**: Employs `GatedFileReader` to paginate file reading, cap line window requests, and fallback to outline warnings on large documents.
 
 ## 📦 Installation
 
@@ -89,11 +94,35 @@ config = ATTConfig(
 )
 
 # 2. Setup LLM client and Root Agent
-# llm_client should implement `LLMClientProto` interface (def generate(...))
+# The llm_client must implement the LLMClientProto protocol (see details below)
 root_agent = Agent(name="Root_AI", role="Architect", llm_client=my_llm_client)
 
 # 3. Create Manager
 manager = ATTManager(root_ai=root_agent, critic_client=my_llm_client, config=config)
+```
+
+#### 🔌 LLM Client Interface (`LLMClientProto`)
+
+To integrate custom LLM backends (e.g., Google GenAI, OpenAI, Anthropic, or local inference engines), the supplied client must conform to the following signature:
+
+```python
+from typing import Optional, Protocol
+
+class LLMClientProto(Protocol):
+    def generate(
+        self,
+        prompt: str,
+        system_instruction: Optional[str] = None,
+        require_json: bool = False,
+        temperature: float = 0.0,
+        **kwargs
+    ) -> str:
+        """
+        Generates a text completion.
+        When require_json=True is requested by SupervisoryTeam consensus audits,
+        the model must return a valid, parsable JSON string.
+        """
+        ...
 ```
 
 ### 2. Register Presets & Custom Tools
@@ -118,12 +147,42 @@ def query_db(sql_command: str):
     # App database retrieval logic here
     return "Query result..."
 
+# IMPORTANT: Always specify parameter names and types in the description
+# so that ReAct agents can parse and supply arguments correctly!
 manager.register_tool(
     name="query_db",
-    description="Run safe SQL commands directly on the DB.",
+    description="Run safe SQL commands directly on the DB. Arguments: sql_command (str)",
     func=query_db
 )
 ```
+
+#### 💡 Tool Argument Convention & Parameter Discovery
+
+ReAct agents learn about available tools by inspecting the registered `description`. To ensure agents pass arguments correctly:
+
+1. Include explicit argument name and type guidelines in the description string (e.g., `Arguments: query_text (str), limit (int)`).
+2. The framework parses ReAct actions using `ast.literal_eval`. Agents can output actions using standard Python argument syntax:
+   * `Action: query_db(sql_command="SELECT * FROM characters")`
+   * `Action: search_faiss("Iris character profile", limit=3)`
+
+#### 🔗 Sibling Talk & Lineage Communication
+
+Dynamic teams support horizontal peer messaging and vertical escalations via framework-supplied tools:
+
+* **Sibling Gating**: By default, sibling teams (teams spawned by the same parent) cannot communicate. Parent teams can dynamically enable sibling talk:
+
+  ```python
+  # Programmatically set allow_sibling_talk on child team
+  child_team.communication_rules["allow_sibling_talk"] = True
+  ```
+
+  Or parent agents can run:
+  `Action: set_sibling_talk(child_id="AT-abc123", allow=True)`
+* **Inter-Team Messaging**: Peer teams can route messages directly to other teams' message inboxes using their global registry Team ID:
+  `Action: send_peer_message(team_id="AT-xyz789", message="Verify character status of Iris")`
+* **Parent Escalation**: If an agent hits a depth gate or lacks permissions, they escalate issues upward:
+  `Action: delegate_escalation(objective="Failed to verify rule consistency", rationale="Depth limit reached")`
+  The parent team automatically consumes and summarizes these inbox alerts during their next active turn.
 
 ### 3. Bind Tool Auditor (Security Hook)
 
@@ -173,6 +232,37 @@ transcript = manager.execute_team_discussion(
 )
 print("Debate result:", transcript)
 ```
+
+## ⚙️ Advanced Configuration
+
+### `ATTConfig` Parameters
+
+Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries, and latency profiles:
+
+| Configuration Property | Type | Default Value | Description |
+| :--- | :--- | :--- | :--- |
+| `enable_dynamic_delegation` | `bool` | `True` | Whether to allow agents to spawn child sub-teams (`Level 1` / `Level 2` panels). |
+| `max_delegation_depth` | `int` | `2` | The maximum hierarchy depth limit of recursive dynamic subagent spawning lineages. |
+| `min_subagent_team_size` | `int` | `3` | The minimum number of members allowed when initiating a dynamic team panel. |
+| `subagent_discussion_rounds` | `int` | `2` | The number of debate discussion rounds executed during dynamic child subagent calls. |
+| `react_max_steps` | `int` | `5` | The reasoning step limit capped per agent turn to prevent infinite ReAct loops. |
+| `inbox_summarize_threshold_chars` | `int` | `1500` | The text character threshold above which unread inbox alerts are summarized. |
+| `model_registry` | `dict` | `{}` | Mapping of specialized agent roles to specific LLM models or endpoints. |
+
+### `GatedFileReader` Parameters
+
+Configure file reading gates to safeguard the prompt context from massive logs or code databases:
+
+| Configuration Property | Type | Default Value | Description |
+| :--- | :--- | :--- | :--- |
+| `large_threshold_kb` | `int` | `50` | File size limit triggering an outline warning if no line boundaries are provided. |
+| `max_chunk` | `int` | `100` | Capped line slice count returned per paginated chunk request. |
+
+## 🧪 Developer Testing
+
+For guidelines on test structure and instructions on mocking multi-round sequential agent discussions, consult the developer guide:
+
+* **[Developer Testing & Mocking Guide](docs/dev/testing.md)**
 
 ## 📄 License
 

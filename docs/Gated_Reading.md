@@ -12,6 +12,8 @@ During autonomous ReAct reasoning runs, agents frequently need to query historic
 
 The **GatedFileReader** solves this by enforcing size pre-filtering and paginated chunk access.
 
+For a step-by-step visual of this decision logic and chunking flow, see the [Gated Read File Decision Flowchart](flowcharts/Gated_Reading.md#1-gated-read-file-decision-flowchart).
+
 ## 2. Gated Size Pre-filtering & Outline Fallbacks
 
 When an agent invokes `read_file_chunk` (or when a process attempts a file read) on a target file:
@@ -60,6 +62,8 @@ For continuous logs or discussion indexes, the agent frequently needs to inspect
 * **Logic**: Counts total lines in the file and returns a slice starting at:
   $$start\_line = \max(1, total\_lines - line\_count + 1)$$
   $$end\_line = total\_lines$$
+
+For the visual breakdown of the tail-reading logic, see the [Streaming Tail Read Decision Flowchart](flowcharts/Gated_Reading.md#2-streaming-tail-read-decision-flowchart).
 
 ## 5. Public Python Class Interface: `GatedFileReader`
 
