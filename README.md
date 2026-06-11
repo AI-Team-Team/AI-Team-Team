@@ -56,13 +56,14 @@ graph TD
     Root[Root Agent - Level 0] -->|create_agent_team| TeamA[Agent Team A - Level 1]
     Root -->|create_agent_team| TeamB[Agent Team B - Level 1]
     
-    subgraph Lineage [Hierarchical Team Lineage]
+    subgraph Lineage ["Hierarchical Team Lineage (Arbitrary Depth)"]
         TeamA -->|dispatch_subagent| SubTeamA1[Sub-Agent Team A.1 - Level 2]
+        SubTeamA1 -->|dispatch_subagent| SubTeamN[Sub-Agent Team N - Level N]
     end
 
     %% Communication Permission Gating
-    SubTeamA1 -.->|negotiate_communication| TeamB
-    Broker[NegotiationBroker] -->|Evaluate Sibling Rules & Lineage Contracts| SubTeamA1
+    SubTeamN -.->|negotiate_communication| TeamB
+    Broker[NegotiationBroker] -->|Evaluate Sibling Rules & Lineage Contracts| SubTeamN
     Broker -.->|Approve / Deny Tunnel| TeamB
 
     %% Supervisory Audits & Escalation
@@ -74,6 +75,7 @@ graph TD
     style TeamA fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
     style TeamB fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
     style SubTeamA1 fill:#ede7f6,stroke:#5e35b1,stroke-width:2px;
+    style SubTeamN fill:#f3e5f5,stroke:#ab47bc,stroke-width:2px;
     style Supervisor fill:#ffe0b2,stroke:#f57c00,stroke-width:2px;
 ```
 
