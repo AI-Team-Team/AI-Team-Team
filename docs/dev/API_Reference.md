@@ -1,6 +1,9 @@
-# API Reference
+# Developer API Reference
 
-This document provides a technical overview of the core Python classes and public interfaces in the `ai-team-team` package.
+This document provides a technical overview of the internal classes, properties, and coordination interfaces in the `ai-team-team` package for framework developers and contributors.
+
+> [!NOTE]
+> If you are an external developer integrating the library into your own application, please consult the [Public API Reference](../user/API_Reference.md) instead.
 
 ## Core Classes
 
