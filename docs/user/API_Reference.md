@@ -51,6 +51,24 @@ agent = Agent(name: str, role: str, llm_client: Optional[Any] = None)
 * **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose") -> AgentTeam`**
   Allows this agent to recursively launch a child dynamic `AgentTeam` structure.
 
+## 👥 `AgentTeam`
+
+Represents a dynamic team of agents executing discussions and tasks in a parent-child lineage. External users obtain an `AgentTeam` instance when calling `ATTManager.create_agent_team` or `Agent.launch_att`.
+
+### Properties
+
+* **`team_id`**: `str` - The unique identifier of the team (e.g. `AT-abc123`).
+* **`team_purpose`**: `str` - The global purpose/objective of this team.
+* **`depth`**: `int` - The depth level of the team in the lineage hierarchy (e.g., Level 1, Level 2).
+* **`members`**: `List[Agent]` - The list of `Agent` instances assigned to this team.
+* **`parent_team`**: `Optional[AgentTeam]` - Resolves the parent team in the lineage hierarchy.
+* **`child_teams`**: `List[AgentTeam]` - The list of active child teams spawned by this team.
+
+### Methods
+
+* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose") -> AgentTeam`**
+  Allows this team to recursively spawn a child dynamic sub-team (Level $N+1$).
+
 ## 🏛️ `ATTManager`
 
 The master controller managing the overall agent team topology, tool registrations, presets, and callback events.
@@ -123,6 +141,16 @@ reader = GatedFileReader(large_threshold_kb: int = 50, max_chunk: int = 100)
   Reads a file. Fallbacks to Outline Warning if the file size exceeds `large_threshold_kb` and no `end_line` is provided. Otherwise, returns a line-numbered paginated chunk capped at `max_chunk` lines.
 * **`read_file_tail(path: str, line_count: int = 50) -> str`**
   Returns the last `line_count` lines of a file with prepended line numbers.
+
+## 🔍 `SupervisoryTeam`
+
+A non-participating 3-AI committee (comprising Integrity, Continuity, and Deadlock Auditors) that automatically monitors dialogue logs for deadlocks and anomalies.
+
+### Details
+
+The Supervisory Team is managed and called automatically by `ATTManager` at the end of each debate session. External users do not typically interact with this class directly, but it coordinates dialogue health audits using the config's `critic_client`.
+
+* If a dialogue audit fails (`is_healthy = False`), the supervisor automatically executes the **Asynchronous Escalation Protocol**, routing anomaly warnings up to the parent team's inbox queue (or to the Level 0 Root AI if no parent exists).
 
 ## 🔌 `LLMClientProto`
 

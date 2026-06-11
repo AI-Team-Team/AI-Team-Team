@@ -14,7 +14,6 @@ Any resolved issues should not be stored in this document.
 
 1. **ReAct Step Cap Latency**: When executing long ReAct step loops, single-threaded execution blocks parent agents synchronously, leading to latency overhead in deep lineages.
 2. **Transcripts Token Overhead**: Passing full, multi-turn transcripts to the 3-AI Supervisory Team for consensus auditing increases token consumption on long debate sessions. Needs summary compression thresholds.
-3. **No Global Class API Documentation**: Missing a single unified overview listing primary classes (`ATTManager`, `AgentTeam`, `Agent`, `Tool`, `GatedFileReader`, `SupervisoryTeam`) and their public methods/protocols.
 
 ## Future Plans
 
