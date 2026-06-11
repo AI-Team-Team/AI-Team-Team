@@ -374,8 +374,8 @@ class TestATT(unittest.TestCase):
         mock_custom_client = MagicMock()
         mock_custom_client.generate.return_value = "Custom Response"
 
-        # Register custom client
-        self.manager.register_llm_client("my-custom", client=mock_custom_client)
+        # Register custom client directly to dictionary
+        self.manager.llm_clients["my-custom"] = mock_custom_client
         self.assertIn("my-custom", self.manager.llm_clients)
 
         # Spawn team and specify roles_and_models
@@ -398,98 +398,79 @@ class TestATT(unittest.TestCase):
         res = specialist_a.llm_client.generate("hello")
         self.assertEqual(res, "Custom Response")
 
-    def test_heterogeneous_registry_mode2(self):
-        """Verify Mode 2 (Built-in clients via API keys) wrappers and routing."""
-        import sys
-        from unittest.mock import patch, MagicMock
+    def test_global_generator_handler_routing(self):
+        """Verify model config registration, callback handler routing, and metadata in identity prompts."""
+        # 1. Register a model configuration
+        self.manager.register_model("gemini", {
+            "model_type": "llm",
+            "api_type": "gemini",
+            "ai_note": "gemini-3.5-flash - A very impressive large model"
+        })
+        self.assertIn("gemini", self.manager.model_configs)
 
-        mock_openai_module = MagicMock()
-        mock_google_module = MagicMock()
-        mock_anthropic_module = MagicMock()
+        # 2. Register global generator callback
+        generated_requests = []
+        def my_handler(model_name, prompt, system_instruction=None, temperature=0.3, require_json=False):
+            generated_requests.append({
+                "model": model_name,
+                "prompt": prompt,
+                "system": system_instruction,
+                "json": require_json
+            })
+            if require_json:
+                return '{"is_healthy": true, "reason": "Approved"}'
+            return "Final Answer: Handler Output"
 
-        # Setup mock behavior
-        mock_openai_instance = mock_openai_module.OpenAI.return_value
-        mock_openai_instance.chat.completions.create.return_value.choices = [
-            MagicMock(message=MagicMock(content="OpenAI Mock Response"))
-        ]
+        self.manager.register_generator_handler(my_handler)
 
-        mock_google_instance = mock_google_module.genai.Client.return_value
-        mock_google_instance.models.generate_content.return_value.text = "Google Mock Response"
+        # 3. Spawn team and assign role to the model
+        preset = self.manager.get_preset("generic")
+        team = self.manager.create_agent_team(
+            creator=self.root_ai,
+            member_count=3,
+            roles_and_presets=preset["roles"],
+            roles_and_models={"Specialist_A": "gemini"}
+        )
 
-        mock_anthropic_instance = mock_anthropic_module.Anthropic.return_value
-        mock_anthropic_instance.messages.create.return_value.content = [
-            MagicMock(text="Anthropic Mock Response")
-        ]
+        specialist_a = [m for m in team.members if m.name == "Specialist_A"][0]
+        
+        # 4. Trigger debate step
+        res = team.execute_react_step(specialist_a, "Test Task", "System instructions", max_steps=1, manager=self.manager)
+        self.assertEqual(res, "Handler Output")
+        self.assertEqual(len(generated_requests), 1)
+        self.assertEqual(generated_requests[0]["model"], "gemini")
+        # Ensure model's ai_note is present in system instructions passed to prompt builder
+        self.assertIn("gemini-3.5-flash - A very impressive large model", generated_requests[0]["system"])
 
-        modules_to_mock = {
-            "openai": mock_openai_module,
-            "google": mock_google_module,
-            "google.genai": mock_google_module.genai,
-            "google.genai.types": mock_google_module.genai.types,
-            "anthropic": mock_anthropic_module
-        }
-
-        with patch.dict(sys.modules, modules_to_mock):
-            # Register OpenAI client
-            self.manager.register_llm_client(
-                name="my-openai",
-                provider="openai",
-                api_key="sk-test",
-                model="gpt-4",
-                base_url="https://api.openai.com/v1"
-            )
-
-            # Register Google client
-            self.manager.register_llm_client(
-                name="my-google",
-                provider="google",
-                api_key="gemini-key",
-                model="gemini-1.5"
-            )
-
-            # Register Anthropic client
-            self.manager.register_llm_client(
-                name="my-anthropic",
-                provider="anthropic",
-                api_key="claude-key",
-                model="claude-3"
-            )
-
-            # Spawn team with mixed clients
-            preset = self.manager.get_preset("generic")
-            team = self.manager.create_agent_team(
-                creator=self.root_ai,
-                member_count=3,
-                roles_and_presets=preset["roles"],
-                roles_and_models={
-                    "Specialist_A": "my-openai",
-                    "Specialist_B": "my-google",
-                    "Arbitrator": "my-anthropic"
-                }
-            )
-
-            # Verify client routing
-            a = [m for m in team.members if m.name == "Specialist_A"][0]
-            b = [m for m in team.members if m.name == "Specialist_B"][0]
-            c = [m for m in team.members if m.name == "Arbitrator"][0]
-
-            self.assertEqual(a.llm_client.generate("Prompt A"), "OpenAI Mock Response")
-            self.assertEqual(b.llm_client.generate("Prompt B"), "Google Mock Response")
-            self.assertEqual(c.llm_client.generate("Prompt C"), "Anthropic Mock Response")
-
-            # Verify SDK parameters passed
-            mock_openai_instance.chat.completions.create.assert_called_once()
-            mock_google_instance.models.generate_content.assert_called_once()
-            mock_anthropic_instance.messages.create.assert_called_once()
+        # 5. Verify critic/supervisor routing fallback
+        self.manager.critic_client = None
+        is_healthy, reason = self.manager.supervisor.audit_team_dialog(team, "Dummy dialogue")
+        self.assertTrue(is_healthy)
+        self.assertEqual(reason, "Approved")
+        self.assertEqual(len(generated_requests), 2)
+        self.assertEqual(generated_requests[1]["model"], "critic")
+        self.assertTrue(generated_requests[1]["json"])
 
     def test_dispatch_subagent_routing(self):
-        """Verify that dispatch_subagent correctly propagates roles_and_models to dynamic child teams."""
+        """Verify that dispatch_subagent correctly propagates roles_and_models to dynamic child teams using configuration routing."""
         # Setup tools context
         self.manager.register_tools_context({"att_manager": self.manager})
 
-        mock_custom_client = MagicMock()
-        mock_custom_client.generate.return_value = "Custom Response"
-        self.manager.register_llm_client("my-custom", client=mock_custom_client)
+        # Register config and generator callback
+        self.manager.register_model("my-custom-model", {
+            "model_type": "llm",
+            "api_type": "custom",
+            "ai_note": "custom model note"
+        })
+        
+        called_models = []
+        def mock_handler(model_name, prompt, system_instruction=None, temperature=0.3, require_json=False):
+            called_models.append(model_name)
+            if require_json:
+                return '{"is_healthy": true, "reason": "Dialogue approved."}'
+            return "Final Answer: ok"
+
+        self.manager.register_generator_handler(mock_handler)
 
         preset = self.manager.get_preset("generic")
         team = self.manager.create_agent_team(
@@ -516,7 +497,7 @@ class TestATT(unittest.TestCase):
                 task="Do task",
                 team_purpose="Sub task",
                 member_count=3,
-                roles_and_models={"Planner": "my-custom"},
+                roles_and_models={"Planner": "my-custom-model"},
                 system_instructions="Adhere to rules"
             )
         finally:
@@ -527,7 +508,8 @@ class TestATT(unittest.TestCase):
         # Sibling names in dynamic dispatch are "Dynamic_{role_name}"
         # Let's verify client routing on the spawned child team members
         planner_member = [m for m in captured_child_team.members if m.role == "Planner"][0]
-        self.assertEqual(planner_member.llm_client, mock_custom_client)
+        self.assertEqual(planner_member.llm_client.model_name, "my-custom-model")
+        self.assertEqual(planner_member.llm_client.handler, mock_handler)
 
 if __name__ == "__main__":
     unittest.main()

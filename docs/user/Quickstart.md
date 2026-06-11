@@ -76,10 +76,21 @@ config = ATTConfig(
     min_subagent_team_size=3
 )
 
-# 2. Initialize manager
-llm_client = MyLLMClient()
-root_agent = Agent(name="Root_AI", role="Architect", llm_client=llm_client)
-manager = ATTManager(root_ai=root_agent, critic_client=llm_client, config=config)
+# 2. Initialize manager and register global generator handler callback
+root_agent = Agent(name="Root_AI", role="Architect")
+manager = ATTManager(root_ai=root_agent, config=config)
+
+def my_generator_handler(
+    model_name: str,
+    prompt: str,
+    system_instruction: Optional[str] = None,
+    temperature: float = 0.3,
+    require_json: bool = False
+) -> str:
+    # Perform actual SDK completion call here
+    return "Final Answer: Done"
+
+manager.register_generator_handler(my_generator_handler)
 
 # 3. Register a custom tool
 def search_knowledge_base(query: str, limit: int = 3) -> str:
@@ -200,40 +211,52 @@ def migration_callback(team_id: str, old_parent_id: Optional[str], new_parent_id
 manager.on_team_migration = migration_callback
 ```
 
-## 🤖 7. Heterogeneous LLM Registry (Multi-Model Support)
+## 🤖 7. Model Registry & Global Generator Callback (Multi-Model Support)
 
-ATT features a formal registry system allowing dynamic teams to assign different members to different models based on task complexity (e.g. using a fast model for basic tasks and a strong model for planning).
+ATT features a unified model registry allowing dynamic teams to assign different members to different model configurations based on task complexity (e.g. using a fast model for basic tasks and a strong model for planning). All LLM requests are resolved through a centralized global generator callback handler.
 
-### Registering Clients
+### Registering Models & Callback Handlers
 
-You can register client instances under specific names using either Mode 1 or Mode 2:
+Instead of passing raw API keys or client instances directly to the framework, register your model configuration details and provide a single callback function to execute the generation requests:
 
 ```python
-# Mode 1: Register pre-initialized custom client instance
-manager.register_llm_client(
-    name="",
-    client=my_custom_client
-)
+# 1. Register model configurations (metadata/descriptions for the AI)
+manager.register_model("gemini-flash", {
+    "model_type": "llm",
+    "api_type": "gemini",
+    "ai_note": "gemini-3.5-flash - extremely fast, good for general tasks"
+})
 
-# Mode 2: Register built-in client wrapper using API keys directly
-manager.register_llm_client(
-    name="",
-    provider="google",
-    api_key="AIzaSy...",
-    model=""
-)
+manager.register_model("openai-strong", {
+    "model_type": "llm",
+    "api_type": "openai",
+    "ai_note": "gpt-4o - highly capable reasoning model, best for planning"
+})
 
-manager.register_llm_client(
-    name="openai-strong",
-    provider="openai",
-    api_key="sk-...",
-    model=""
-)
+# 2. Register a single global callback handler to execute LLM calls
+# The host application keeps full control of API Keys, endpoint routing, and SDKs.
+def my_generator_handler(
+    model_name: str,
+    prompt: str,
+    system_instruction: Optional[str] = None,
+    temperature: float = 0.3,
+    require_json: bool = False
+) -> str:
+    # Resolve the model_name to your actual SDK/API client internally
+    if model_name == "gemini-flash":
+        return call_gemini_sdk(prompt, system_instruction, temperature, require_json)
+    elif model_name == "openai-strong":
+        return call_openai_sdk(prompt, system_instruction, temperature, require_json)
+    
+    # Fallback default model
+    return call_default_sdk(prompt, system_instruction, require_json)
+
+manager.register_generator_handler(my_generator_handler)
 ```
 
-### Assigning Clients to Agents
+### Assigning Models to Agents
 
-You can route different agents to different registered models when spawning a team using the `roles_and_models` mapping:
+You can route different agents to different registered model names when spawning a team using the `roles_and_models` mapping:
 
 ```python
 # Spawn a team where Specialist_A uses openai-strong, and Specialist_B uses gemini-flash
@@ -242,8 +265,8 @@ team = manager.create_agent_team(
     member_count=3,
     preset_name="generic",
     roles_and_models={
-        "Specialist_A": "openai",
-        "Specialist_B": "gemini"
+        "Specialist_A": "openai-strong",
+        "Specialist_B": "gemini-flash"
     }
 )
 ```
@@ -257,6 +280,6 @@ Thought: I need a strong planner and a fast writer.
 Action: dispatch_subagent(
     task="Write the report",
     team_purpose="Reporting",
-    roles_and_models={"Planner": "openai", "Writer": "gemini"}
+    roles_and_models={"Planner": "openai-strong", "Writer": "gemini-flash"}
 )
 ```

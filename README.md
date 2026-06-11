@@ -25,7 +25,7 @@ Hundreds, thousands, even tens of thousands of AIs work together in an orderly m
 
 * **[Tree-like Lineage Spawning](docs/Dynamic_Delegation.md)**: Spawns hierarchical dynamic agent teams (`AgentTeam`) recursively to arbitrary depths, strictly governed by depth limits.
 * **Dynamic presets & Committees**: Allows runtime registration of custom agent committees (role configurations and system prompts) like planning, writing, database management, etc.
-* **[Heterogeneous LLM Client Registry](docs/user/Quickstart.md#7-heterogeneous-llm-registry-multi-model-support)**: Maps dynamic agent roles to different model providers (OpenAI, Google GenAI, Anthropic, or local endpoints) via a central registry, supporting both custom clients (Mode 1) and built-in SDK wrappers (Mode 2).
+* **[Model Registry & Global Generator Callback](docs/user/Quickstart.md#7-model-registry-and-global-generator-callback)**: Maps dynamic agent roles to registered model configurations (containing metadata and descriptions), delegating all LLM invocation logic to a centralized global callback handler to keep the library keyless and lightweight.
 * **Bounded ReAct Loops**: Agents execute reasoning steps using standard ReAct (Thought/Action/Observation) protocols, supported by a safe literal argument parser.
 * **[Negotiation Broker](docs/Dynamic_Delegation.md#4-consolidated-autonomy-tools)**: Gates sibling and cross-lineage peer-to-peer communication through dynamic permission rules and broker contracts.
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Allows active teams to dynamically request parent-hierarchy migrations, arbitrated by the System Critic with cycle checks and related team alerts.
@@ -107,12 +107,26 @@ config = ATTConfig(
     react_max_steps=5
 )
 
-# 2. Setup LLM client and Root Agent
-# The llm_client must implement the LLMClientProto protocol (see details below)
-root_agent = Agent(name="Root_AI", role="Architect", llm_client=my_llm_client)
+# 2. Setup Root Agent (client is dynamically resolved if omitted)
+root_agent = Agent(name="Root_AI", role="Architect")
 
-# 3. Create Manager
-manager = ATTManager(root_ai=root_agent, critic_client=my_llm_client, config=config)
+# 3. Create Manager (critic client is optional, falls back to handler callback if None)
+manager = ATTManager(root_ai=root_agent, config=config)
+
+# 4. Register a global generator callback handler
+# All LLM invocation logic is delegated here, keeping the framework keyless and SDK-independent
+def my_handler(
+    model_name: str,
+    prompt: str,
+    system_instruction: Optional[str] = None,
+    temperature: float = 0.3,
+    require_json: bool = False
+) -> str:
+    # 1. Inspect model_name to call the correct provider/SDK
+    # 2. If require_json=True is requested, return valid JSON string
+    return "Final Answer: Processed successfully."
+
+manager.register_generator_handler(my_handler)
 ```
 
 #### 🔌 LLM Client Interface (`LLMClientProto`)

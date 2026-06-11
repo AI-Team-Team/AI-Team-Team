@@ -47,10 +47,14 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
 * **Constructor**:
 
   ```python
-  manager = ATTManager(root_ai: Agent, critic_client: Any, config: Optional[ATTConfig] = None)
+  manager = ATTManager(root_ai: Agent, critic_client: Optional[Any] = None, config: Optional[ATTConfig] = None)
   ```
 
 * **Methods**:
+  * `register_model(name: str, config: Dict[str, Any])`
+    Registers a unified model configuration (e.g. metadata, type, ai_note).
+  * `register_generator_handler(handler: Callable[..., str])`
+    Registers a global callback handler for generating text from a model alias.
   * `register_preset(name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]])`
     Registers custom dynamic committee presets.
   * `get_preset(name: str) -> dict`
@@ -61,7 +65,7 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
     Registers an auditing hook callback that intercepts specific tool calls before execution.
   * `register_tools_context(context: Dict[str, Any])`
     Registers system resources context (databases, file readers) and automatically binds coordination tools to all teams.
-  * `create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose") -> AgentTeam`
+  * `create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None) -> AgentTeam`
     Spawns a new team of size $N \ge 3$, establishes parent-child lineages, and binds generic/custom tools.
   * `execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`
     Executes a multi-agent debate session, automatically injecting unresolved inbox alerts, and running supervisory transcript audits.

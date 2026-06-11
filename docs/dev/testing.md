@@ -35,63 +35,54 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 ```
 
-## 4. Mocking LLM Clients
+## 4. Mocking LLM Responses
 
-Since the framework uses dynamic agent execution and supervisory consensus auditing, mocking the LLM client responses is critical for deterministic unit testing.
+Since the framework uses the centralized global generator callback handler, the recommended way to mock LLM responses for unit and integration testing is to register a mock handler callback on the `ATTManager`.
 
-### A. Use Sequential Mock Responses
+### A. Register a Mock Handler Callback
 
-Mock the `llm_client.generate` using a sequential response list or side-effects for successive ReAct steps:
+Map sequential responses or custom behaviors inside a mock handler function:
 
 ```python
-from unittest.mock import MagicMock
-
-mock_client = MagicMock()
-mock_client.generate.side_effect = [
+# A list of sequential debate or task responses
+mock_responses = [
     "Thought: Let's run a tool call.\nAction: query_db(SELECT * FROM users)",
-    "Thought: Got output.\nFinal Answer: Success!"
+    "Final Answer: Success!"
 ]
+
+def mock_generator_handler(model_name, prompt, system_instruction=None, temperature=0.3, require_json=False):
+    if require_json:
+        # Return valid JSON for SupervisoryTeam consensus audits
+        return '{"is_healthy": true, "reason": "Dialogue approved."}'
+    
+    # Pop next response from queue
+    return mock_responses.pop(0) if mock_responses else "Final Answer: Done"
+
+manager.register_generator_handler(mock_generator_handler)
 ```
 
 ### B. Prefix Agent Responses with `"Final Answer: "`
 
-To ensure that the ReAct loop terminates immediately during tests without iterating the maximum steps, prefix agent mock responses with `"Final Answer: "`.
+To ensure that the ReAct loop terminates immediately during tests without iterating through the maximum steps, ensure your mock agent responses prefix the final result with `"Final Answer: "`.
 
-### C. Return Valid JSON for Consensus Audits
+### C. Mocking Multi-Round Debate Sequences
 
-The Supervisory Team consensus check parses dialogue transcripts using a JSON prompt. Ensure the mock critic client returns a valid JSON string when audited:
-
-```python
-mock_client.generate.return_value = '{"is_healthy": true, "reason": "Dialogue approved."}'
-```
-
-### D. Mocking Multi-Round Debate Sequences
-
-Dynamic agent committees (e.g. Planning, Editorial, or Conflict Resolution Committees) typically run sequential discussions across multiple rounds. When writing integration tests for these loops:
-
-1. **Configure sequential mock responses** by mapping `side_effect` to a custom generator function.
-2. **Prefix agent answers with `"Final Answer: "`** so that the agent's ReAct execution step terminates instantly without looping through the full 5 steps.
-3. **Differentiate by request format**: Return standard text for agents, but return valid JSON string when `require_json=True` is requested by the Supervisory Team auditor.
-
-Example integration test setup:
+When testing complex multi-agent debates or committees running across multiple rounds, use the `model_name` parameter inside the generator handler callback to differentiate between the agent role configurations:
 
 ```python
 def test_committee_debate_flow(self):
-    # Mock responses for a 1-round discussion among 3 agents
     mock_debate_turns = [
         "Final Answer: Sibling A argues logic consistency.",
         "Final Answer: Sibling B proposes scene progression details.",
         "Final Answer: Sibling C arbitrates and outputs the final draft."
     ]
 
-    def mock_generate_side_effect(prompt, system_instruction=None, require_json=False, **kwargs):
+    def mock_handler(model_name, prompt, system_instruction=None, temperature=0.3, require_json=False):
         if require_json:
-            # Return JSON signature for SupervisoryTeam dialogue health audit
             return '{"is_healthy": true, "reason": "Dialogue is healthy."}'
-        # Pop the next debate turn
         return mock_debate_turns.pop(0) if mock_debate_turns else "Final Answer: ok"
 
-    self.my_critic_client.generate.side_effect = mock_generate_side_effect
+    self.att_manager.register_generator_handler(mock_handler)
     
     # Execute the team debate
     transcript = self.att_manager.execute_team_discussion(self.my_team, prompt="Start task...", rounds=1)

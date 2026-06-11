@@ -7,6 +7,56 @@ import ast
 from typing import List, Dict, Optional, Any, Tuple, Callable
 from .tool import Tool
 
+class HandlerClientAdapter:
+    """Wraps a global generator handler callback to conform to LLMClientProto."""
+    def __init__(self, model_name: str, handler: Callable[..., str]):
+        self.model_name = model_name
+        self.handler = handler
+
+    def generate(
+        self,
+        prompt: str,
+        system_instruction: Optional[str] = None,
+        temperature: float = 0.3,
+        require_json: bool = False
+    ) -> str:
+        return self.handler(
+            model_name=self.model_name,
+            prompt=prompt,
+            system_instruction=system_instruction,
+            temperature=temperature,
+            require_json=require_json
+        )
+
+class ManagerCriticClientAdapter:
+    """Wraps the manager's critic client and global generator handler callback."""
+    def __init__(self, manager: 'ATTManager'):
+        self.manager = manager
+
+    def generate(
+        self,
+        prompt: str,
+        system_instruction: Optional[str] = None,
+        temperature: float = 0.3,
+        require_json: bool = False
+    ) -> str:
+        if self.manager.critic_client:
+            return self.manager.critic_client.generate(
+                prompt=prompt,
+                system_instruction=system_instruction,
+                temperature=temperature,
+                require_json=require_json
+            )
+        if self.manager.generator_handler:
+            return self.manager.generator_handler(
+                model_name="critic",
+                prompt=prompt,
+                system_instruction=system_instruction,
+                temperature=temperature,
+                require_json=require_json
+            )
+        raise ValueError("No critic client or generator handler configured on ATTManager.")
+
 class ATTConfig:
     """Configuration options for the ATT multi-agent framework."""
     def __init__(
@@ -142,11 +192,21 @@ class AgentTeam:
             peer_context = f"\n### ACTIVE AGENT TEAMS TOPOLOGY (Global Map)\n{manager.render_topology_tree()}\n"
 
         # Read configuration variables safely
-        model_registry = manager.config.model_registry if manager else {}
         max_depth = manager.config.max_delegation_depth if manager else 2
         min_size = manager.config.min_subagent_team_size if manager else 3
 
-        model_options = "\n".join([f"  - {k}: {v.get('ai_note', 'No description')}" for k, v in model_registry.items()])
+        all_models = {}
+        if manager:
+            model_registry = manager.config.model_registry or {}
+            for k, v in model_registry.items():
+                if isinstance(v, dict):
+                    all_models[k] = v.get("ai_note", "No description")
+                else:
+                    all_models[k] = str(v)
+            for k, v in manager.model_configs.items():
+                all_models[k] = v.get("ai_note", "No description")
+
+        model_options = "\n".join([f"  - {k}: {note}" for k, note in all_models.items()])
         identity_header = (
             f"## AGENT IDENTITY PROFILE\n"
             f"- **Role Name**: {agent.role}\n"
@@ -429,7 +489,7 @@ class NegotiationBroker:
 
 class ATTManager:
     """Master controller managing the overall ATT (AI Team Team) topology."""
-    def __init__(self, root_ai: Agent, critic_client: Any, config: Optional[ATTConfig] = None):
+    def __init__(self, root_ai: Agent, critic_client: Optional[Any] = None, config: Optional[ATTConfig] = None):
         self.root_ai = root_ai
         self.critic_client = critic_client
         self.config = config or ATTConfig()
@@ -437,8 +497,11 @@ class ATTManager:
         self.broker = NegotiationBroker(self)
         self.llm_clients: Dict[str, Any] = {}
         
+        self.model_configs: Dict[str, Dict[str, Any]] = {}
+        self.generator_handler: Optional[Callable[..., str]] = None
+        
         from .supervision import SupervisoryTeam
-        self.supervisor = SupervisoryTeam(root_ai, critic_client)
+        self.supervisor = SupervisoryTeam(root_ai, ManagerCriticClientAdapter(self))
         self.logger = logging.getLogger("ATTManager")
         self.tools_context: Dict[str, Any] = {}
         
@@ -476,43 +539,13 @@ class ATTManager:
         """Registers an auditing hook executed before specific tool calls."""
         self.tool_auditors[tool_name] = auditor_func
 
-    def register_llm_client(
-        self,
-        name: str,
-        client: Optional[Any] = None,
-        provider: Optional[str] = None,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
-        base_url: Optional[str] = None
-    ):
-        """
-        Registers an LLM client instance under a specific name.
-        
-        If `client` is provided (Mode 1), it must conform to LLMClientProto.
-        If `provider`, `api_key`, and `model` are provided (Mode 2), a built-in client wrapper
-        using standard urllib will be initialized and registered.
-        
-        Supported providers: 'openai', 'google', 'anthropic'.
-        """
-        if client is not None:
-            self.llm_clients[name] = client
-            return
-            
-        if not provider or not api_key:
-            raise ValueError("You must provide either a pre-configured 'client' OR both 'provider' and 'api_key'.")
-            
-        provider_lower = provider.lower()
-        if provider_lower == "openai":
-            from .clients import OpenAIClient
-            self.llm_clients[name] = OpenAIClient(api_key=api_key, model=model or "gpt-4o", base_url=base_url)
-        elif provider_lower == "google":
-            from .clients import GoogleGenAIClient
-            self.llm_clients[name] = GoogleGenAIClient(api_key=api_key, model=model or "gemini-1.5-flash")
-        elif provider_lower == "anthropic":
-            from .clients import AnthropicClient
-            self.llm_clients[name] = AnthropicClient(api_key=api_key, model=model or "claude-3-5-sonnet-20240620")
-        else:
-            raise ValueError(f"Unsupported built-in provider '{provider}'. Must be 'openai', 'google', or 'anthropic'.")
+    def register_model(self, name: str, config: Dict[str, Any]):
+        """Registers a unified model configuration (e.g. metadata, type, ai_note)."""
+        self.model_configs[name] = config
+
+    def register_generator_handler(self, handler: Callable[..., str]):
+        """Registers a global callback handler for generating text from a model alias."""
+        self.generator_handler = handler
 
     def register_preset(self, name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]]):
         """Registers a custom dynamic committee preset."""
@@ -564,6 +597,7 @@ class ATTManager:
                     break
 
         def get_agent_client(role_name: str, agent_name: str) -> Any:
+            critic_wrapper = ManagerCriticClientAdapter(self)
             if roles_and_models:
                 client_name = roles_and_models.get(role_name)
                 if not client_name:
@@ -571,9 +605,11 @@ class ATTManager:
                 if client_name:
                     if client_name in self.llm_clients:
                         return self.llm_clients[client_name]
+                    elif client_name in self.model_configs and self.generator_handler:
+                        return HandlerClientAdapter(client_name, self.generator_handler)
                     else:
                         self.logger.warning(f"Client '{client_name}' not found in registry. Falling back to default critic client.")
-            return self.critic_client
+            return self.critic_client if self.critic_client is not None else critic_wrapper
 
         members = []
         if roles_and_presets:
