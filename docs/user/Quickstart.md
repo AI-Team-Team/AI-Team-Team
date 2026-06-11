@@ -4,13 +4,22 @@ Welcome to **AI-Team-Team (ATT)**! This guide will help you integrate ATT into y
 
 ## 📦 1. Installation
 
-To install the library in editable mode within your project's virtual environment:
+To install in editable mode for local developer workspace sync, it is recommended to set up a virtual environment:
 
 ```bash
-pip install -e .
+# Clone the repository
+git clone https://github.com/AI-Team-Team/AI-Team-Team.git
+cd AI-Team-Team
+
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install in editable/dev mode (quotes are required in zsh/macOS)
+pip install -e ".[dev]"
 ```
 
-Or install it directly from a Git repository:
+To install directly as a Git dependency in your own project:
 
 ```bash
 pip install git+https://github.com/AI-Team-Team/AI-Team-Team.git@main
@@ -160,4 +169,33 @@ def log_append_callback(team_id: str, title: str, content: str, chapter_num: Opt
         f.write(f"\n=== {title} ===\n{content}\n")
 
 manager.on_log_append = log_append_callback
+```
+
+## 🔗 6. Dynamic Team Migration & Topology Tree
+
+ATT supports dynamic organizational restructuring at runtime. A team can request to migrate itself under a different parent team in the active hierarchy using the `request_migration` tool.
+
+### Topology Tree Rendering
+
+You can print the current active lineage hierarchy as an indented ASCII tree:
+
+```python
+tree_representation = manager.render_topology_tree()
+print(tree_representation)
+# Outputs:
+# - [Root AI: Root_AI] (Level 0)
+#   ├── AT-abc123 (Purpose: Spec Review) [Level 1]
+#   │    └── AT-def456 (Purpose: Security Check) [Level 2]
+#   └── AT-xyz789 (Purpose: Docs Generation) [Level 1]
+```
+
+### Hooking up Migration Callbacks
+
+Register a callback on `ATTManager` to catch approved hierarchy migrations (e.g., to update a visual graph layout):
+
+```python
+def migration_callback(team_id: str, old_parent_id: Optional[str], new_parent_id: str):
+    print(f"[MIGRATION] Team {team_id} moved from {old_parent_id} to {new_parent_id}")
+
+manager.on_team_migration = migration_callback
 ```

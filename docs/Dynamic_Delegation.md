@@ -34,8 +34,8 @@ Agents in dynamic teams resolve tasks inside a structured **Reasoning & Action (
 2. **Safe Argument Parser**:
    To prevent parsing crashes when tools accept string arguments that contain commas (e.g., semantic search phrases or SQLite query arguments), the ReAct parser uses Python's safe literal evaluation (`ast.literal_eval`). This guarantees that string arguments with commas inside quotes are evaluated correctly as a single string parameter instead of being split incorrectly.
 
-3. **Global Peer Team Registry**:
-   To support horizontal cross-team communication, the ReAct prompt's `identity_header` dynamically injects a registry of all active peer ATs (their Team IDs and `team_purpose`). Agents use this registry to formulate direct communications.
+3. **Hierarchical Topology Map**:
+   To support organizational awareness and structural modifications, the ReAct prompt's `identity_header` dynamically injects a rendered indented ASCII tree topology map representing all active teams (`manager.render_topology_tree()`). Agents use this map to discover sibling and peer teams and locate potential migration parents.
 
 ## 3. Bidirectional Escalation Channel
 
@@ -67,4 +67,5 @@ AIs are dynamically equipped with system-wide tools registered centrally:
 * **`set_sibling_talk(child_id: str, allow: bool) -> str`**: Allows parent teams to dynamically authorize sibling peer communication.
 * **`update_team_purpose(new_purpose: str) -> str`**: Allows a team to dynamically update its globally broadcasted `team_purpose`.
 * **`send_peer_message(team_id: str, message: str) -> str`**: Sends a direct message to a peer team's inbox based on the global registry.
+* **`request_migration(target_parent_id: str, rationale: str) -> str`**: Requests to migrate the caller's team to a new parent team in the active hierarchy. Migrations are arbitrated by the system critic client, automatically enforce count limits, and dispatch inbox alerts to the affected parents.
 * Custom tools (e.g. database query, semantic search) can be registered dynamically by the host application on `ATTManager`.

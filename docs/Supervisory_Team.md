@@ -61,6 +61,9 @@ If the dialogue audit results in `is_healthy = False` (indicating a deadlock or 
 3. **Context Consumption**: The parent team will consume this context in its next discussion turn, automatically summarizing the inbox if the cascade of errors exceeds the `inbox_summarize_threshold_chars` threshold.
 4. **Fallback Gating**: If no parent exists in the lineage tree, the Supervisor escalates a critical system alert directly to the **Level 0 Root AI**.
 
+> [!NOTE]
+> Anomaly escalations dynamically follow the current parent-child lineage tree links, even if the failed team has migrated to a different parent branch during discussion rounds.
+
 For the visual flow of how failures cascade up the lineage tree, see the [Parent-Ancestor Escalation Tree Flowchart](flowcharts/Supervisory_Team_Audit.md#2-parent-ancestor-escalation-tree-flowchart).
 
 ## 4. Configuration & Usage

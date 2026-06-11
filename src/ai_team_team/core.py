@@ -17,7 +17,8 @@ class ATTConfig:
         subagent_discussion_rounds: int = 2,
         react_max_steps: int = 5,
         inbox_summarize_threshold_chars: int = 1500,
-        model_registry: Optional[dict] = None
+        model_registry: Optional[dict] = None,
+        max_migrations_per_team_discussion: int = 1
     ):
         self.enable_dynamic_delegation = enable_dynamic_delegation
         self.max_delegation_depth = max_delegation_depth
@@ -26,6 +27,7 @@ class ATTConfig:
         self.react_max_steps = react_max_steps
         self.inbox_summarize_threshold_chars = inbox_summarize_threshold_chars
         self.model_registry = model_registry or {}
+        self.max_migrations_per_team_discussion = max_migrations_per_team_discussion
 
 class Agent:
     def __init__(self, name: str, role: str, llm_client: Optional[Any] = None):
@@ -74,6 +76,7 @@ class AgentTeam:
         self.message_inbox: List[Dict[str, Any]] = []
         self.tools: Dict[str, Tool] = {}
         self._parent_team: Optional['AgentTeam'] = None
+        self.migration_count = 0
 
     @property
     def parent_team(self) -> Optional['AgentTeam']:
@@ -132,12 +135,7 @@ class AgentTeam:
 
         peer_context = ""
         if manager:
-            peer_lines = []
-            for tid, t in manager.teams.items():
-                if tid != self.team_id:
-                    peer_lines.append(f"  - {tid} (Purpose: {t.team_purpose})")
-            if peer_lines:
-                peer_context = f"\n### ACTIVE PEER TEAMS (Global Registry)\n" + "\n".join(peer_lines) + "\n"
+            peer_context = f"\n### ACTIVE AGENT TEAMS TOPOLOGY (Global Map)\n{manager.render_topology_tree()}\n"
 
         # Read configuration variables safely
         model_registry = manager.config.model_registry if manager else {}
@@ -158,7 +156,8 @@ class AgentTeam:
             f"1. You can dynamically spawn child ATs using the `dispatch_subagent` tool to solve sub-problems.\n"
             f"2. You MUST NOT spawn child ATs if your Delegation Depth is already at the maximum ({max_depth}). If you need help at max depth, use `delegate_escalation` to ask your parent.\n"
             f"3. A valid AT MUST have at least {min_size} members.\n"
-            f"4. When creating an AT, you can assign models based on task complexity. Available models:\n"
+            f"4. You can dynamically request to migrate your team to a different parent team in the topology using the `request_migration` tool if it helps in task routing.\n"
+            f"5. When creating an AT, you can assign models based on task complexity. Available models:\n"
             f"{model_options}\n"
         )
 
@@ -446,6 +445,7 @@ class ATTManager:
         self.on_status_change: Optional[Callable[[str, str], None]] = None
         self.on_activity_added: Optional[Callable[[str, str, str], None]] = None
         self.on_log_append: Optional[Callable[[str, str, str, Optional[int]], None]] = None
+        self.on_team_migration: Optional[Callable[[str, Optional[str], str], None]] = None
 
         # Base preset configurations
         self.presets: Dict[str, dict] = {
@@ -547,6 +547,10 @@ class ATTManager:
         
         if isinstance(creator, AgentTeam):
             creator.add_child_team(team)
+        elif isinstance(creator, Agent):
+            parent_t = self.find_parent_team(team)
+            if parent_t:
+                parent_t.add_child_team(team)
             
         self.logger.info(f"Successfully spawned Agent Team {team.team_id} (N={len(members)}, Preset: {preset_name}) spawned by {creator.name if hasattr(creator, 'name') else creator.team_id}")
         return team
@@ -563,8 +567,105 @@ class ATTManager:
                     return team
         return None
 
+    def render_topology_tree(self) -> str:
+        """Renders the active hierarchical agent team lineage as an indented tree."""
+        lines = [f"- [Root AI: {self.root_ai.name}] (Level 0)"]
+        
+        level_1_teams = []
+        for team in self.teams.values():
+            if team.parent_team is None:
+                level_1_teams.append(team)
+                
+        def traverse(team, depth=1):
+            indent = "  " * depth
+            prefix = "└── " if depth > 1 else "├── "
+            lines.append(f"{indent}{prefix}{team.team_id} (Purpose: {team.team_purpose}) [Level {team.depth}]")
+            for child in team.child_teams:
+                traverse(child, depth + 1)
+                
+        for t in level_1_teams:
+            traverse(t, 1)
+            
+        return "\n".join(lines)
+
+    def negotiate_and_execute_migration(self, team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]:
+        """Arbitrates the migration of an AgentTeam using the critic LLM client, updates structure, and broadcasts alerts."""
+        current_parent = team.parent_team
+        current_parent_id = current_parent.team_id if current_parent else "Root AI"
+        
+        arbitration_prompt = (
+            f"Arbitrate a request to reorganize the agent team hierarchy.\n\n"
+            f"Team requesting migration: {team.team_id}\n"
+            f"Current Purpose: {team.team_purpose}\n"
+            f"Current Parent Team: {current_parent_id} (Purpose: {current_parent.team_purpose if current_parent else 'Root Coordinator'})\n\n"
+            f"Target Parent Team: {target_parent.team_id}\n"
+            f"Target Parent Purpose: {target_parent.team_purpose}\n\n"
+            f"Migration Rationale provided by the team:\n\"{rationale}\"\n\n"
+            f"Please evaluate if this migration is logical, beneficial for task progress, and does not create redundant hierarchy.\n"
+            f"Output exactly a JSON payload:\n"
+            f"{{\n"
+            f"  \"approved\": true | false,\n"
+            f"  \"reason\": \"Reasoning for your arbitration decision...\"\n"
+            f"}}"
+        )
+        
+        try:
+            response = self.critic_client.generate(
+                prompt=arbitration_prompt,
+                system_instruction="You are a strict, objective Systems Architect Arbiter. Evaluate organizational restructuring proposals.",
+                temperature=0.2,
+                require_json=True
+            )
+            if "```" in response:
+                response = response.replace("```json", "").replace("```", "").strip()
+            data = json.loads(response)
+            approved = bool(data.get("approved", False))
+            reason = str(data.get("reason", "No reason provided."))
+            
+            if approved:
+                # 1. Update structural links
+                if current_parent:
+                    if team in current_parent.child_teams:
+                        current_parent.child_teams.remove(team)
+                
+                target_parent.add_child_team(team)
+                team._parent_team = target_parent
+                
+                # 2. Dispatch notifications
+                if current_parent:
+                    current_parent.receive_message({
+                        "from": "System/Migration",
+                        "type": "migration_alert",
+                        "reason": f"Child team '{team.team_id}' has migrated to parent '{target_parent.team_id}'. Rationale: {rationale}"
+                    })
+                target_parent.receive_message({
+                    "from": "System/Migration",
+                    "type": "migration_alert",
+                    "reason": f"Team '{team.team_id}' has joined as your child. Rationale: {rationale}"
+                })
+                team.receive_message({
+                    "from": "System/Migration",
+                    "type": "migration_alert",
+                    "reason": f"Your team has successfully migrated to parent '{target_parent.team_id}'. Arbiter Reason: {reason}"
+                })
+                
+                # 3. Trigger callback
+                if self.on_team_migration:
+                    self.on_team_migration(team.team_id, current_parent_id if current_parent else None, target_parent.team_id)
+                
+                self.logger.info(f"Migration of team {team.team_id} to parent {target_parent.team_id} approved. Reason: {reason}")
+                return True, f"Approved: {reason}"
+            else:
+                self.logger.info(f"Migration of team {team.team_id} to parent {target_parent.team_id} rejected. Reason: {reason}")
+                return False, f"Rejected: {reason}"
+                
+        except Exception as e:
+            self.logger.error(f"Migration arbitration error: {e}")
+            return False, f"Arbitration error: {e}"
+
     def execute_team_discussion(self, team: AgentTeam, prompt: str, rounds: int = 2) -> str:
         """Executes a multi-agent debate session inside the AT, monitored by the Supervisor."""
+        team.migration_count = 0
         self.logger.info(f"Executing discussion in team {team.team_id} (rounds={rounds})...")
         
         inbox_context = ""

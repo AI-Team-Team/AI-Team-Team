@@ -198,10 +198,56 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         })
         return f"Message successfully delivered to team '{team_id}'."
 
+    def request_migration(target_parent_id: str, rationale: str) -> str:
+        """Requests to migrate the caller's team to a new parent team. Arguments: target_parent_id (str), rationale (str)"""
+        if not att_manager:
+            return "Error: ATTManager not available."
+            
+        from .core import Agent, AgentTeam
+        actual_team = None
+        if isinstance(caller_node, AgentTeam):
+            actual_team = caller_node
+        elif isinstance(caller_node, Agent):
+            for team in att_manager.teams.values():
+                if caller_node in team.members:
+                    actual_team = team
+                    break
+        if not actual_team:
+            return "Error: Could not resolve the active AgentTeam."
+            
+        limit = att_manager.config.max_migrations_per_team_discussion
+        current_count = getattr(actual_team, "migration_count", 0)
+        if current_count >= limit:
+            return f"Error: Cannot request migration. Maximum migrations per discussion session ({limit}) reached."
+            
+        if target_parent_id not in att_manager.teams:
+            return f"Error: Target parent team '{target_parent_id}' not found."
+            
+        target_parent = att_manager.teams[target_parent_id]
+        if target_parent_id == actual_team.team_id:
+            return "Error: Cannot migrate a team to be its own parent."
+            
+        def is_descendant(t, target_id):
+            for child in t.child_teams:
+                if child.team_id == target_id or is_descendant(child, target_id):
+                    return True
+            return False
+            
+        if is_descendant(actual_team, target_parent_id):
+            return "Error: Cannot migrate a team under its own descendant (would create a cycle)."
+            
+        success, message = att_manager.negotiate_and_execute_migration(actual_team, target_parent, rationale)
+        if success:
+            actual_team.migration_count = current_count + 1
+            return f"Success: {message}"
+        else:
+            return f"Migration Rejected: {message}"
+
     return {
         "dispatch_subagent": Tool("dispatch_subagent", "Spawns a child AT. Arguments: task (str), team_purpose (str), member_count (int), roles_and_models (dict), system_instructions (str).", dispatch_subagent),
         "delegate_escalation": Tool("delegate_escalation", "Escalates objective upward in the ATT lineage tree with objective (str) and rationale (str).", delegate_escalation),
         "set_sibling_talk": Tool("set_sibling_talk", "Allows parent teams to dynamically set sibling communication permission for their child team. Arguments: child_id (str), allow (bool).", set_sibling_talk),
         "update_team_purpose": Tool("update_team_purpose", "Updates the purpose string of the caller's team. Arguments: new_purpose (str)", update_team_purpose),
-        "send_peer_message": Tool("send_peer_message", "Sends a message to a peer team's inbox using their Team ID. Arguments: team_id (str), message (str)", send_peer_message)
+        "send_peer_message": Tool("send_peer_message", "Sends a message to a peer team's inbox using their Team ID. Arguments: team_id (str), message (str)", send_peer_message),
+        "request_migration": Tool("request_migration", "Requests to migrate the caller's team to a new parent team in the hierarchy. Arguments: target_parent_id (str), rationale (str)", request_migration)
     }

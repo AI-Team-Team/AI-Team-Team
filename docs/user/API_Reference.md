@@ -18,7 +18,8 @@ config = ATTConfig(
     subagent_discussion_rounds: int = 2,
     react_max_steps: int = 5,
     inbox_summarize_threshold_chars: int = 1500,
-    model_registry: Optional[dict] = None
+    model_registry: Optional[dict] = None,
+    max_migrations_per_team_discussion: int = 1
 )
 ```
 
@@ -31,6 +32,7 @@ config = ATTConfig(
 * **`react_max_steps`**: The maximum reasoning steps capped per agent turn to prevent infinite ReAct loops.
 * **`inbox_summarize_threshold_chars`**: The character threshold above which unread inbox alerts are automatically summarized.
 * **`model_registry`**: Mapping of specialized agent roles to specific LLM models or endpoints.
+* **`max_migrations_per_team_discussion`**: The maximum number of hierarchical team migrations allowed for a team during a single discussion session.
 
 ## 👤 `Agent`
 
@@ -75,6 +77,10 @@ manager = ATTManager(root_ai: Agent, critic_client: Any, config: Optional[ATTCon
   Dynamically spawns a new recursive Agent Team (AT) with a parent-child relationship.
 * **`execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
   Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits.
+* **`render_topology_tree() -> str`**
+  Renders the active hierarchical agent team lineage as an indented ASCII tree.
+* **`negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`**
+  Arbitrates the migration of an AgentTeam using the critic LLM client, updates structure, and broadcasts alerts.
 
 ### Callbacks
 
@@ -84,6 +90,8 @@ manager = ATTManager(root_ai: Agent, critic_client: Any, config: Optional[ATTCon
   Invoked when an agent records a ReAct event. Formatted as: `(agent_name, activity_type, content)`.
 * **`on_log_append: Optional[Callable[[str, str, str, Optional[int]], None]]`**
   Invoked when detailed transcripts or execution logs are appended. Formatted as: `(team_id, title, content, chapter_num)`.
+* **`on_team_migration: Optional[Callable[[str, Optional[str], str], None]]`**
+  Invoked when a team successfully migrates to a new parent in the hierarchy. Formatted as: `(team_id, old_parent_id, new_parent_id)`.
 
 ## 🛠️ `Tool`
 

@@ -27,6 +27,8 @@ Hundreds, thousands, even tens of thousands of AIs work together in an orderly m
 * **Dynamic presets & Committees**: Allows runtime registration of custom agent committees (role configurations and system prompts) like planning, writing, database management, etc.
 * **Bounded ReAct Loops**: Agents execute reasoning steps using standard ReAct (Thought/Action/Observation) protocols, supported by a safe literal argument parser.
 * **[Negotiation Broker](docs/Dynamic_Delegation.md#4-consolidated-autonomy-tools)**: Gates sibling and cross-lineage peer-to-peer communication through dynamic permission rules and broker contracts.
+* **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Allows active teams to dynamically request parent-hierarchy migrations, arbitrated by the System Critic with cycle checks and related team alerts.
+* **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects a structured ASCII indented tree map in the agent context to provide complete hierarchical lineage visibility to ReAct agents.
 * **Tool Auditor Interception Hook**: Allows host applications to register pre-execution callback hooks to audit, approve, or reject specific tool calls (e.g. database safety query vetting).
 * **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A 3-AI Supervisory Team audits dialogue transcripts for logical deadlocks, circular reasoning, and anomalies, recursively escalating alerts up the ancestry lineage.
 * **UI/Logging Decoupling**: Exposes clear runtime event hooks (`on_status_change`, `on_activity_added`, `on_log_append`) to update terminal dashboards and write logs without framework pollution.
@@ -34,13 +36,22 @@ Hundreds, thousands, even tens of thousands of AIs work together in an orderly m
 
 ## 📦 Installation
 
-To install in editable mode for local developer workspace sync:
+To install in editable mode for local developer workspace sync, it is recommended to set up a virtual environment:
 
 ```bash
-pip install -e .
+# Clone the repository
+git clone https://github.com/AI-Team-Team/AI-Team-Team.git
+cd AI-Team-Team
+
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install in editable/dev mode (quotes are required in zsh/macOS)
+pip install -e ".[dev]"
 ```
 
-To install directly as a Git dependency:
+To install directly as a Git dependency in your own project:
 
 ```bash
 pip install git+https://github.com/AI-Team-Team/AI-Team-Team.git@main
@@ -202,7 +213,7 @@ manager.register_tool_auditor("query_db", audit_db_query)
 
 ### 4. Setup Event Hooks (UI / Logging)
 
-Connect your terminal console dashboard (e.g. `rich.live`) and custom file loggers using callbacks:
+Connect your terminal console dashboard (e.g. `rich.live`), custom file loggers, and team migration updates using callbacks:
 
 ```python
 # Wire status display updates
@@ -214,6 +225,12 @@ def my_log_callback(team_id, title, content, chapter_num):
     my_file_logger.write(f"[{team_id}] {title}\n{content}")
     
 manager.on_log_append = my_log_callback
+
+# Wire team migration callback
+def my_migration_callback(team_id, old_parent_id, new_parent_id):
+    print(f"Team {team_id} moved from {old_parent_id} to {new_parent_id}")
+
+manager.on_team_migration = my_migration_callback
 ```
 
 ### 5. Spawn Team & Execute Discussion
@@ -235,6 +252,21 @@ transcript = manager.execute_team_discussion(
 print("Debate result:", transcript)
 ```
 
+### 6. Dynamic Team Migration & Topology Tree
+
+ATT supports dynamic lineage migration, allowing active teams to request hierarchy updates at runtime. You can also print the active tree hierarchy:
+
+```python
+# Print the current active lineage hierarchy as an indented ASCII tree
+tree_representation = manager.render_topology_tree()
+print(tree_representation)
+# Outputs:
+# - [Root AI: Root_AI] (Level 0)
+#   ├── AT-abc123 (Purpose: Spec Review) [Level 1]
+#   │    └── AT-def456 (Purpose: Security Check) [Level 2]
+#   └── AT-xyz789 (Purpose: Docs Generation) [Level 1]
+```
+
 ## ⚙️ Advanced Configuration
 
 ### `ATTConfig` Parameters
@@ -250,6 +282,7 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `react_max_steps` | `int` | `5` | The reasoning step limit capped per agent turn to prevent infinite ReAct loops. |
 | `inbox_summarize_threshold_chars` | `int` | `1500` | The text character threshold above which unread inbox alerts are summarized. |
 | `model_registry` | `dict` | `{}` | Mapping of specialized agent roles to specific LLM models or endpoints. |
+| `max_migrations_per_team_discussion` | `int` | `1` | The maximum hierarchy migration requests a team can execute during a single discussion turn. |
 
 ### `GatedFileReader` Parameters
 

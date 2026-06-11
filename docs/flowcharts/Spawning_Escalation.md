@@ -58,3 +58,32 @@ sequenceDiagram
     Manager-->>Child1: Permission Approved (True)
     Note over Child1, Child2: Child 1 and Child 2 establish communication tunnel!
 ```
+
+## 3. Dynamic Lineage Migration Sequence
+
+This sequence diagram illustrates how an active Agent Team calls `request_migration` to reorganize the lineage hierarchy, arbitrated by the System Critic:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant T as Migrating Team (AT-T)
+    participant Manager as ATTManager
+    participant Critic as LLM Critic Client
+    participant P_curr as Old Parent Team (AT-Old)
+    participant P_targ as New Parent Team (AT-New)
+
+    T->>Manager: Call request_migration(target_parent_id='AT-New', rationale='...')
+    Note over Manager: Verify migration limits & cycle checks
+    Manager->>Critic: Call generate() with arbitration prompt
+    Note over Critic: Arbitrate rationale and structure
+    Critic-->>Manager: Return approved=True JSON payload
+    
+    Note over Manager: Update parent-child pointers:<br/>P_curr.child_teams.remove(T)<br/>P_targ.child_teams.append(T)<br/>T._parent_team = P_targ
+    
+    Manager->>P_curr: Dispatch "migration_alert" to inbox
+    Manager->>P_targ: Dispatch "migration_alert" to inbox
+    Manager->>T: Dispatch success alert to inbox
+    
+    Manager->>Manager: Trigger on_team_migration callback
+    Manager-->>T: Return success status
+```
