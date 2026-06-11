@@ -2,11 +2,18 @@
 
 A lightweight, generic, hierarchical dynamic multi-agent collaboration framework in Python.
 
-This allows AIs to freely form teams, define how they discuss things with each other, how AI teams discuss things, and create all sorts of incredibly complex hierarchical (or dynamic?) relationships.
+Instead of treating AI as isolated chatbots, ATT treats them as members of a living organization.
+
+AI can freely form teams, define how they discuss things with each other, how AI teams discuss things, and create all sorts of incredibly complex hierarchical (or dynamic) relationships.
 
 Hundreds, thousands, even tens of thousands of AIs work together in an orderly manner.
 
-`AI-Team-Team` (ATT) empowers AI agents to transition from passive context consumers to active, self-governing groups. It organizes agents into dynamic, tree-like recursive lineages with built-in consensus debates, ReAct reasoning loops, communication permission gating, size-aware file context protection, and supervisory health auditing.
+<details>
+<summary>More</summary>
+ATT empowers AI agents to transition from passive context consumers to active, self-governing groups. It organizes agents into dynamic, tree-like recursive lineages with built-in consensus debates, ReAct reasoning loops, communication permission gating, size-aware file context protection, and supervisory health auditing.
+</details>
+
+Many thanks to Gemini and GPT for their help!
 
 > [!NOTE]
 > The project already features a lot of really fun and innovative designs, with an even more groundbreaking architecture in the works. \
