@@ -221,16 +221,16 @@ Instead of passing raw API keys or client instances directly to the framework, r
 
 ```python
 # 1. Register model configurations (metadata/descriptions for the AI)
-manager.register_model("gemini-flash", {
+manager.register_model("gemini", {
     "model_type": "llm",
     "api_type": "gemini",
-    "ai_note": "gemini-3.5-flash - extremely fast, good for general tasks"
+    "ai_note": "gemini-3.5-flash - A very impressive large model"
 })
 
-manager.register_model("openai-strong", {
+manager.register_model("openai", {
     "model_type": "llm",
     "api_type": "openai",
-    "ai_note": "gpt-4o - highly capable reasoning model, best for planning"
+    "ai_note": "gpt-5.5 - A very impressive large model"
 })
 
 # 2. Register a single global callback handler to execute LLM calls
@@ -243,9 +243,9 @@ def my_generator_handler(
     require_json: bool = False
 ) -> str:
     # Resolve the model_name to your actual SDK/API client internally
-    if model_name == "gemini-flash":
+    if model_name == "gemini":
         return call_gemini_sdk(prompt, system_instruction, temperature, require_json)
-    elif model_name == "openai-strong":
+    elif model_name == "openai":
         return call_openai_sdk(prompt, system_instruction, temperature, require_json)
     
     # Fallback default model
@@ -259,14 +259,14 @@ manager.register_generator_handler(my_generator_handler)
 You can route different agents to different registered model names when spawning a team using the `roles_and_models` mapping:
 
 ```python
-# Spawn a team where Specialist_A uses openai-strong, and Specialist_B uses gemini-flash
+# Spawn a team where Specialist_A uses openai, and Specialist_B uses gemini
 team = manager.create_agent_team(
     creator=root_agent,
     member_count=3,
     preset_name="generic",
     roles_and_models={
-        "Specialist_A": "openai-strong",
-        "Specialist_B": "gemini-flash"
+        "Specialist_A": "openai",
+        "Specialist_B": "gemini"
     }
 )
 ```
@@ -280,6 +280,6 @@ Thought: I need a strong planner and a fast writer.
 Action: dispatch_subagent(
     task="Write the report",
     team_purpose="Reporting",
-    roles_and_models={"Planner": "openai-strong", "Writer": "gemini-flash"}
+    roles_and_models={"Planner": "openai", "Writer": "gemini"}
 )
 ```
