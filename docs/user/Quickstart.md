@@ -199,3 +199,64 @@ def migration_callback(team_id: str, old_parent_id: Optional[str], new_parent_id
 
 manager.on_team_migration = migration_callback
 ```
+
+## 🤖 7. Heterogeneous LLM Registry (Multi-Model Support)
+
+ATT features a formal registry system allowing dynamic teams to assign different members to different models based on task complexity (e.g. using a fast model for basic tasks and a strong model for planning).
+
+### Registering Clients
+
+You can register client instances under specific names using either Mode 1 or Mode 2:
+
+```python
+# Mode 1: Register pre-initialized custom client instance
+manager.register_llm_client(
+    name="",
+    client=my_custom_client
+)
+
+# Mode 2: Register built-in client wrapper using API keys directly
+manager.register_llm_client(
+    name="",
+    provider="google",
+    api_key="AIzaSy...",
+    model=""
+)
+
+manager.register_llm_client(
+    name="openai-strong",
+    provider="openai",
+    api_key="sk-...",
+    model=""
+)
+```
+
+### Assigning Clients to Agents
+
+You can route different agents to different registered models when spawning a team using the `roles_and_models` mapping:
+
+```python
+# Spawn a team where Specialist_A uses openai-strong, and Specialist_B uses gemini-flash
+team = manager.create_agent_team(
+    creator=root_agent,
+    member_count=3,
+    preset_name="generic",
+    roles_and_models={
+        "Specialist_A": "openai",
+        "Specialist_B": "gemini"
+    }
+)
+```
+
+### Dynamic Subagent Routing
+
+ReAct agents can dynamically specify different models when spawning child subagent teams via the `dispatch_subagent` tool:
+
+```text
+Thought: I need a strong planner and a fast writer.
+Action: dispatch_subagent(
+    task="Write the report",
+    team_purpose="Reporting",
+    roles_and_models={"Planner": "openai", "Writer": "gemini"}
+)
+```

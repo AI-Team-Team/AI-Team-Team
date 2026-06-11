@@ -79,7 +79,8 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                 member_count=member_count,
                 roles_and_presets=roles_and_presets,
                 system_instructions=system_instructions,
-                team_purpose=team_purpose
+                team_purpose=team_purpose,
+                roles_and_models=roles_and_models
             )
             return att_manager.execute_team_discussion(
                 child_team,

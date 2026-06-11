@@ -41,7 +41,8 @@ class Agent:
         member_count: int = 3,
         roles_and_presets: Optional[List[Tuple[str, str]]] = None,
         system_instructions: str = "",
-        team_purpose: str = "Unspecified team purpose"
+        team_purpose: str = "Unspecified team purpose",
+        roles_and_models: Optional[Dict[str, str]] = None
     ) -> 'AgentTeam':
         """Allows this agent to launch a dynamic sub-team (Level $N$)."""
         child = manager.create_agent_team(
@@ -49,7 +50,8 @@ class Agent:
             member_count=member_count,
             roles_and_presets=roles_and_presets,
             system_instructions=system_instructions,
-            team_purpose=team_purpose
+            team_purpose=team_purpose,
+            roles_and_models=roles_and_models
         )
         for team in manager.teams.values():
             if self in team.members:
@@ -100,7 +102,8 @@ class AgentTeam:
         member_count: int = 3,
         roles_and_presets: Optional[List[Tuple[str, str]]] = None,
         system_instructions: str = "",
-        team_purpose: str = "Unspecified team purpose"
+        team_purpose: str = "Unspecified team purpose",
+        roles_and_models: Optional[Dict[str, str]] = None
     ) -> 'AgentTeam':
         """Allows any active team to recursively launch their own child AT."""
         child = manager.create_agent_team(
@@ -108,7 +111,8 @@ class AgentTeam:
             member_count=member_count,
             roles_and_presets=roles_and_presets,
             system_instructions=system_instructions,
-            team_purpose=team_purpose
+            team_purpose=team_purpose,
+            roles_and_models=roles_and_models
         )
         child.chapter_num = self.chapter_num
         return child
@@ -431,6 +435,7 @@ class ATTManager:
         self.config = config or ATTConfig()
         self.teams: Dict[str, AgentTeam] = {}
         self.broker = NegotiationBroker(self)
+        self.llm_clients: Dict[str, Any] = {}
         
         from .supervision import SupervisoryTeam
         self.supervisor = SupervisoryTeam(root_ai, critic_client)
@@ -471,6 +476,44 @@ class ATTManager:
         """Registers an auditing hook executed before specific tool calls."""
         self.tool_auditors[tool_name] = auditor_func
 
+    def register_llm_client(
+        self,
+        name: str,
+        client: Optional[Any] = None,
+        provider: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None
+    ):
+        """
+        Registers an LLM client instance under a specific name.
+        
+        If `client` is provided (Mode 1), it must conform to LLMClientProto.
+        If `provider`, `api_key`, and `model` are provided (Mode 2), a built-in client wrapper
+        using standard urllib will be initialized and registered.
+        
+        Supported providers: 'openai', 'google', 'anthropic'.
+        """
+        if client is not None:
+            self.llm_clients[name] = client
+            return
+            
+        if not provider or not api_key:
+            raise ValueError("You must provide either a pre-configured 'client' OR both 'provider' and 'api_key'.")
+            
+        provider_lower = provider.lower()
+        if provider_lower == "openai":
+            from .clients import OpenAIClient
+            self.llm_clients[name] = OpenAIClient(api_key=api_key, model=model or "gpt-4o", base_url=base_url)
+        elif provider_lower == "google":
+            from .clients import GoogleGenAIClient
+            self.llm_clients[name] = GoogleGenAIClient(api_key=api_key, model=model or "gemini-1.5-flash")
+        elif provider_lower == "anthropic":
+            from .clients import AnthropicClient
+            self.llm_clients[name] = AnthropicClient(api_key=api_key, model=model or "claude-3-5-sonnet-20240620")
+        else:
+            raise ValueError(f"Unsupported built-in provider '{provider}'. Must be 'openai', 'google', or 'anthropic'.")
+
     def register_preset(self, name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]]):
         """Registers a custom dynamic committee preset."""
         self.presets[name] = {
@@ -499,7 +542,8 @@ class ATTManager:
         roles_and_presets: List[Tuple[str, str]] = None,
         preset_name: str = "custom",
         system_instructions: str = "",
-        team_purpose: str = "Unspecified team purpose"
+        team_purpose: str = "Unspecified team purpose",
+        roles_and_models: Optional[Dict[str, str]] = None
     ) -> AgentTeam:
         """Dynamically spawns a new recursive Agent Team (AT)."""
         min_size = self.config.min_subagent_team_size
@@ -519,19 +563,32 @@ class ATTManager:
                     team.chapter_num = t.chapter_num
                     break
 
+        def get_agent_client(role_name: str, agent_name: str) -> Any:
+            if roles_and_models:
+                client_name = roles_and_models.get(role_name)
+                if not client_name:
+                    client_name = roles_and_models.get(agent_name)
+                if client_name:
+                    if client_name in self.llm_clients:
+                        return self.llm_clients[client_name]
+                    else:
+                        self.logger.warning(f"Client '{client_name}' not found in registry. Falling back to default critic client.")
+            return self.critic_client
+
         members = []
         if roles_and_presets:
             for name, role in roles_and_presets:
-                members.append(Agent(name=name, role=role, llm_client=self.critic_client))
+                members.append(Agent(name=name, role=role, llm_client=get_agent_client(role, name)))
         else:
             preset = self.get_preset(preset_name)
             roles = preset.get("roles", [])
             if len(roles) >= member_count:
                 for name, role in roles[:member_count]:
-                    members.append(Agent(name=name, role=role, llm_client=self.critic_client))
+                    members.append(Agent(name=name, role=role, llm_client=get_agent_client(role, name)))
             else:
                 for i in range(member_count):
-                    members.append(Agent(name=f"{team.team_id}_member_{i+1}", role="Specialist", llm_client=self.critic_client))
+                    m_name = f"{team.team_id}_member_{i+1}"
+                    members.append(Agent(name=m_name, role="Specialist", llm_client=get_agent_client("Specialist", m_name)))
 
         team.members = members
         team.system_instructions = system_instructions or self.get_preset(preset_name).get("system_instructions", "")

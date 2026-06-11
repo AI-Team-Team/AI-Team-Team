@@ -15,6 +15,7 @@ class LLMClientProto(Protocol):
 from .core import Agent, AgentTeam, ATTManager, ATTConfig
 from .tool import Tool
 from .gated_reader import GatedFileReader
+from .clients import OpenAIClient, GoogleGenAIClient, AnthropicClient
 
 __all__ = [
     "Agent",
@@ -24,4 +25,7 @@ __all__ = [
     "Tool",
     "GatedFileReader",
     "LLMClientProto",
+    "OpenAIClient",
+    "GoogleGenAIClient",
+    "AnthropicClient",
 ]

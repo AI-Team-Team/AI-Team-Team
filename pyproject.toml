@@ -23,3 +23,8 @@ dependencies = []
 dev = [
     "numpy",
 ]
+llm = [
+    "openai",
+    "google-genai",
+    "anthropic",
+]

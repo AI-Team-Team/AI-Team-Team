@@ -369,5 +369,165 @@ class TestATT(unittest.TestCase):
         self.assertIn("Error", res)
         self.assertIn("would create a cycle", res)
 
+    def test_heterogeneous_registry_mode1(self):
+        """Verify Mode 1 (Dependency Injection) client registration and routing."""
+        mock_custom_client = MagicMock()
+        mock_custom_client.generate.return_value = "Custom Response"
+
+        # Register custom client
+        self.manager.register_llm_client("my-custom", client=mock_custom_client)
+        self.assertIn("my-custom", self.manager.llm_clients)
+
+        # Spawn team and specify roles_and_models
+        preset = self.manager.get_preset("generic")
+        team = self.manager.create_agent_team(
+            creator=self.root_ai,
+            member_count=3,
+            roles_and_presets=preset["roles"],
+            roles_and_models={"Specialist_A": "my-custom"}
+        )
+
+        # Check client assignment
+        specialist_a = [m for m in team.members if m.name == "Specialist_A"][0]
+        specialist_b = [m for m in team.members if m.name == "Specialist_B"][0]
+
+        self.assertEqual(specialist_a.llm_client, mock_custom_client)
+        self.assertEqual(specialist_b.llm_client, self.manager.critic_client)
+
+        # Run generate to ensure it uses the custom client
+        res = specialist_a.llm_client.generate("hello")
+        self.assertEqual(res, "Custom Response")
+
+    def test_heterogeneous_registry_mode2(self):
+        """Verify Mode 2 (Built-in clients via API keys) wrappers and routing."""
+        import sys
+        from unittest.mock import patch, MagicMock
+
+        mock_openai_module = MagicMock()
+        mock_google_module = MagicMock()
+        mock_anthropic_module = MagicMock()
+
+        # Setup mock behavior
+        mock_openai_instance = mock_openai_module.OpenAI.return_value
+        mock_openai_instance.chat.completions.create.return_value.choices = [
+            MagicMock(message=MagicMock(content="OpenAI Mock Response"))
+        ]
+
+        mock_google_instance = mock_google_module.genai.Client.return_value
+        mock_google_instance.models.generate_content.return_value.text = "Google Mock Response"
+
+        mock_anthropic_instance = mock_anthropic_module.Anthropic.return_value
+        mock_anthropic_instance.messages.create.return_value.content = [
+            MagicMock(text="Anthropic Mock Response")
+        ]
+
+        modules_to_mock = {
+            "openai": mock_openai_module,
+            "google": mock_google_module,
+            "google.genai": mock_google_module.genai,
+            "google.genai.types": mock_google_module.genai.types,
+            "anthropic": mock_anthropic_module
+        }
+
+        with patch.dict(sys.modules, modules_to_mock):
+            # Register OpenAI client
+            self.manager.register_llm_client(
+                name="my-openai",
+                provider="openai",
+                api_key="sk-test",
+                model="gpt-4",
+                base_url="https://api.openai.com/v1"
+            )
+
+            # Register Google client
+            self.manager.register_llm_client(
+                name="my-google",
+                provider="google",
+                api_key="gemini-key",
+                model="gemini-1.5"
+            )
+
+            # Register Anthropic client
+            self.manager.register_llm_client(
+                name="my-anthropic",
+                provider="anthropic",
+                api_key="claude-key",
+                model="claude-3"
+            )
+
+            # Spawn team with mixed clients
+            preset = self.manager.get_preset("generic")
+            team = self.manager.create_agent_team(
+                creator=self.root_ai,
+                member_count=3,
+                roles_and_presets=preset["roles"],
+                roles_and_models={
+                    "Specialist_A": "my-openai",
+                    "Specialist_B": "my-google",
+                    "Arbitrator": "my-anthropic"
+                }
+            )
+
+            # Verify client routing
+            a = [m for m in team.members if m.name == "Specialist_A"][0]
+            b = [m for m in team.members if m.name == "Specialist_B"][0]
+            c = [m for m in team.members if m.name == "Arbitrator"][0]
+
+            self.assertEqual(a.llm_client.generate("Prompt A"), "OpenAI Mock Response")
+            self.assertEqual(b.llm_client.generate("Prompt B"), "Google Mock Response")
+            self.assertEqual(c.llm_client.generate("Prompt C"), "Anthropic Mock Response")
+
+            # Verify SDK parameters passed
+            mock_openai_instance.chat.completions.create.assert_called_once()
+            mock_google_instance.models.generate_content.assert_called_once()
+            mock_anthropic_instance.messages.create.assert_called_once()
+
+    def test_dispatch_subagent_routing(self):
+        """Verify that dispatch_subagent correctly propagates roles_and_models to dynamic child teams."""
+        # Setup tools context
+        self.manager.register_tools_context({"att_manager": self.manager})
+
+        mock_custom_client = MagicMock()
+        mock_custom_client.generate.return_value = "Custom Response"
+        self.manager.register_llm_client("my-custom", client=mock_custom_client)
+
+        preset = self.manager.get_preset("generic")
+        team = self.manager.create_agent_team(
+            creator=self.root_ai,
+            member_count=3,
+            roles_and_presets=preset["roles"]
+        )
+
+        dispatch_tool = team.tools["dispatch_subagent"]
+
+        # Intercept execute_team_discussion to check the spawned team
+        original_execute = self.manager.execute_team_discussion
+        captured_child_team = None
+
+        def mock_execute_team_discussion(child_team, prompt, rounds=2):
+            nonlocal captured_child_team
+            captured_child_team = child_team
+            return "Mocked debate result"
+
+        self.manager.execute_team_discussion = mock_execute_team_discussion
+
+        try:
+            dispatch_tool(
+                task="Do task",
+                team_purpose="Sub task",
+                member_count=3,
+                roles_and_models={"Planner": "my-custom"},
+                system_instructions="Adhere to rules"
+            )
+        finally:
+            self.manager.execute_team_discussion = original_execute
+
+        self.assertIsNotNone(captured_child_team)
+        self.assertEqual(captured_child_team.depth, 2)
+        # Sibling names in dynamic dispatch are "Dynamic_{role_name}"
+        # Let's verify client routing on the spawned child team members
+        planner_member = [m for m in captured_child_team.members if m.role == "Planner"][0]
+        self.assertEqual(planner_member.llm_client, mock_custom_client)
+
 if __name__ == "__main__":
     unittest.main()

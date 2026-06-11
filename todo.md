@@ -6,9 +6,8 @@ Any resolved issues should not be stored in this document.
 
 ## In Progress
 
-1. **Heterogeneous LLM Provider Registry**: Introduce a formal registry system to allow dynamic teams to assign different members to different LLM providers (e.g. Google GenAI, OpenAI, Anthropic, or local endpoints) based on task complexity.
-2. **Async/Await Execution Optimization**: Refactor `ATTManager.execute_team_discussion` and `SupervisoryTeam` consensus audits to run steps concurrently where possible, reducing total debate latency.
-3. **Cross-Lineage Broker Mode**: Implement full support for rule-gated cross-lineage communication channels in the `NegotiationBroker`.
+1. **Async/Await Execution Optimization**: Refactor `ATTManager.execute_team_discussion` and `SupervisoryTeam` consensus audits to run steps concurrently where possible, reducing total debate latency.
+2. **Cross-Lineage Broker Mode**: Implement full support for rule-gated cross-lineage communication channels in the `NegotiationBroker`.
 
 ## Known Issues
 

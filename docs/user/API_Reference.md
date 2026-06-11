@@ -87,11 +87,13 @@ manager = ATTManager(root_ai: Agent, critic_client: Any, config: Optional[ATTCon
   Registers a custom utility tool globally to be automatically bound to all dynamic teams.
 * **`register_tool_auditor(tool_name: str, auditor_func: Callable[..., Tuple[bool, str]])`**
   Registers an auditing hook executed before specific tool calls.
+* **`register_llm_client(name: str, client: Optional[Any] = None, provider: Optional[str] = None, api_key: Optional[str] = None, model: Optional[str] = None, base_url: Optional[str] = None)`**
+  Registers an LLM client in the heterogeneous registry. Supports custom clients (Mode 1) or official SDK wrappers (Mode 2).
 * **`register_preset(name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]])`**
   Registers a custom dynamic committee preset (e.g. roles and system prompt).
 * **`register_tools_context(context: Dict[str, Any])`**
   Registers system resources context (databases, file readers) and automatically binds coordination tools to all teams.
-* **`create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified") -> AgentTeam`**
+* **`create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified", roles_and_models: Optional[Dict[str, str]] = None) -> AgentTeam`**
   Dynamically spawns a new recursive Agent Team (AT) with a parent-child relationship.
 * **`execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
   Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits.
@@ -151,6 +153,34 @@ A non-participating 3-AI committee (comprising Integrity, Continuity, and Deadlo
 The Supervisory Team is managed and called automatically by `ATTManager` at the end of each debate session. External users do not typically interact with this class directly, but it coordinates dialogue health audits using the config's `critic_client`.
 
 * If a dialogue audit fails (`is_healthy = False`), the supervisor automatically executes the **Asynchronous Escalation Protocol**, routing anomaly warnings up to the parent team's inbox queue (or to the Level 0 Root AI if no parent exists).
+
+## 📦 Built-in SDK Client Wrappers
+
+ATT provides built-in client wrappers around official SDKs. These classes implement the `LLMClientProto` protocol. To use them, install the official SDKs or install ATT with the `llm` optional extra: `pip install "ai-team-team[llm]"`.
+
+### `OpenAIClient`
+
+```python
+from ai_team_team import OpenAIClient
+
+client = OpenAIClient(api_key: str, model: str = "gpt", base_url: Optional[str] = None)
+```
+
+### `GoogleGenAIClient`
+
+```python
+from ai_team_team import GoogleGenAIClient
+
+client = GoogleGenAIClient(api_key: str, model: str = "gemini-3.5-flash")
+```
+
+### `AnthropicClient`
+
+```python
+from ai_team_team import AnthropicClient
+
+client = AnthropicClient(api_key: str, model: str = "claude")
+```
 
 ## 🔌 `LLMClientProto`
 

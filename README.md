@@ -25,6 +25,7 @@ Hundreds, thousands, even tens of thousands of AIs work together in an orderly m
 
 * **[Tree-like Lineage Spawning](docs/Dynamic_Delegation.md)**: Spawns hierarchical dynamic agent teams (`AgentTeam`) recursively to arbitrary depths, strictly governed by depth limits.
 * **Dynamic presets & Committees**: Allows runtime registration of custom agent committees (role configurations and system prompts) like planning, writing, database management, etc.
+* **[Heterogeneous LLM Client Registry](docs/user/Quickstart.md#7-heterogeneous-llm-registry-multi-model-support)**: Maps dynamic agent roles to different model providers (OpenAI, Google GenAI, Anthropic, or local endpoints) via a central registry, supporting both custom clients (Mode 1) and built-in SDK wrappers (Mode 2).
 * **Bounded ReAct Loops**: Agents execute reasoning steps using standard ReAct (Thought/Action/Observation) protocols, supported by a safe literal argument parser.
 * **[Negotiation Broker](docs/Dynamic_Delegation.md#4-consolidated-autonomy-tools)**: Gates sibling and cross-lineage peer-to-peer communication through dynamic permission rules and broker contracts.
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Allows active teams to dynamically request parent-hierarchy migrations, arbitrated by the System Critic with cycle checks and related team alerts.

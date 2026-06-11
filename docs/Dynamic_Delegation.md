@@ -10,7 +10,7 @@ Every autonomous task or research query spawns a specialized dynamic Agent Team 
 * **Level 1 (Child AT)**: Dynamic Agent Teams spawned by Level 0 or its active members to manage specific domains. Must satisfy `config.min_subagent_team_size` (default: $\ge 3$).
 * **Level $N$ (Descendant ATs)**: Dynamic sub-teams recursively launched by higher-level members to run specialized tasks. Depth is strictly constrained by `config.max_delegation_depth`.
 
-Both individual `Agent` instances and `AgentTeam` instances support dynamic spawning via the unified `launch_att()` method. Every team holds a trackable `team_purpose` to broadcast its objective to the network.
+Both individual `Agent` instances and `AgentTeam` instances support dynamic spawning via the unified `launch_att()` method. Every team holds a trackable `team_purpose` to broadcast its objective to the network. Furthermore, dynamic teams support **heterogeneous LLM client assignments**, allowing different subagent roles (e.g. Planner, Writer) to be dynamically routed to different model providers (Google GenAI, OpenAI, Anthropic, or local endpoints) via the central client registry in `ATTManager`.
 
 For a detailed step-by-step visual of the spawning control flow, see the [Dynamic Spawning & Tool Binding Flowchart](flowcharts/Spawning_Escalation.md#1-dynamic-spawning--tool-binding-flowchart) and the [Tools Context Registration & Team Spawning Sequence](flowcharts/Negotiation_Broker_Sibling_Routing.md#1-sequence-of-tools-context-registration-&-team-spawning).
 
