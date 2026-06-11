@@ -30,7 +30,7 @@ Represents a dynamic team of at least 3 agents ($N \ge 3$) executing discussions
 
 * **Properties**:
   * `parent_team -> Optional[AgentTeam]`: Resolves the parent team in the lineage tree.
-  * `depth -> int`: Returns the lineage depth of the team (Level 1, Level 2, etc.).
+  * `depth -> int`: Returns the lineage depth of the team (Level 1, Level 2, ..., Level $N$).
 * **Methods**:
   * `launch_att(...) -> AgentTeam`: Allows the active team to recursively spawn a child team.
   * `receive_message(message: Dict[str, Any])`: Appends incoming signals or parent alerts to the team's inbox queue.

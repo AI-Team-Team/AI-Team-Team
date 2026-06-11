@@ -243,5 +243,53 @@ class TestATT(unittest.TestCase):
         # Logs should have been appended with team ID and chapter num
         self.assertTrue(any(l[0] == team.team_id and l[3] == 100 for l in logs))
 
+    def test_agent_spawned_subteam_depth(self):
+        """Verify that sub-teams spawned by agents correctly track lineage depth and parent team."""
+        preset = self.manager.get_preset("generic")
+        parent_team = self.manager.create_agent_team(
+            creator=self.root_ai,
+            member_count=3,
+            roles_and_presets=preset["roles"]
+        )
+        self.assertEqual(parent_team.depth, 1)
+        self.assertNil = parent_team.parent_team
+        
+        # Level 2 team spawned by agent of Level 1 team
+        member1 = parent_team.members[0]
+        c1 = member1.launch_att(self.manager, member_count=3, roles_and_presets=preset["roles"])
+        self.assertEqual(c1.depth, 2)
+        self.assertEqual(c1.parent_team, parent_team)
+        
+        # Level 3 team spawned by agent of Level 2 team
+        member2 = c1.members[0]
+        c2 = member2.launch_att(self.manager, member_count=3, roles_and_presets=preset["roles"])
+        self.assertEqual(c2.depth, 3)
+        self.assertEqual(c2.parent_team, c1)
+
+    def test_arbitrary_depth_limit(self):
+        """Verify that configuring a larger depth limit works and triggers rejection only at that limit."""
+        config = ATTConfig(max_delegation_depth=4)
+        manager = ATTManager(root_ai=self.root_ai, critic_client=self.mock_client, config=config)
+        # Register tools context on manager to bind dispatch_subagent
+        manager.register_tools_context({"att_manager": manager})
+        
+        preset = manager.get_preset("generic")
+        team1 = manager.create_agent_team(creator=self.root_ai, member_count=3, roles_and_presets=preset["roles"])
+        self.assertEqual(team1.depth, 1)
+        
+        team2 = team1.members[0].launch_att(manager, member_count=3, roles_and_presets=preset["roles"])
+        self.assertEqual(team2.depth, 2)
+        
+        team3 = team2.members[0].launch_att(manager, member_count=3, roles_and_presets=preset["roles"])
+        self.assertEqual(team3.depth, 3)
+        
+        team4 = team3.members[0].launch_att(manager, member_count=3, roles_and_presets=preset["roles"])
+        self.assertEqual(team4.depth, 4)
+        
+        # Call dispatch_subagent tool on team4, which has depth 4 (>= max_delegation_depth 4), should be blocked
+        dispatch_tool = team4.tools["dispatch_subagent"]
+        res = dispatch_tool(task="Verify logic", team_purpose="Review")
+        self.assertIn("Max delegation depth (4) reached", res)
+
 if __name__ == "__main__":
     unittest.main()

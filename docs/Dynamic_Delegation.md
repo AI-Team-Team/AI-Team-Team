@@ -8,7 +8,7 @@ Every autonomous task or research query spawns a specialized dynamic Agent Team 
 
 * **Level 0 (Root AI)**: The primary coordinating workflow agent (e.g. Root_AI_Level_0).
 * **Level 1 (Child AT)**: Dynamic Agent Teams spawned by Level 0 or its active members to manage specific domains. Must satisfy `config.min_subagent_team_size` (default: $\ge 3$).
-* **Level 2 (Grandchild AT)**: Dynamic sub-teams recursively launched by Level 1 members to run micro-specialized validations. Depth is strictly constrained by `config.max_delegation_depth`.
+* **Level $N$ (Descendant ATs)**: Dynamic sub-teams recursively launched by higher-level members to run specialized tasks. Depth is strictly constrained by `config.max_delegation_depth`.
 
 Both individual `Agent` instances and `AgentTeam` instances support dynamic spawning via the unified `launch_att()` method. Every team holds a trackable `team_purpose` to broadcast its objective to the network.
 
@@ -39,7 +39,7 @@ Agents in dynamic teams resolve tasks inside a structured **Reasoning & Action (
 
 ## 3. Bidirectional Escalation Channel
 
-When an active team or agent at Level 2 determines that it needs further automated delegation or hits parent-routing gates:
+When an active team or agent at a deep delegation level determines that it needs further automated delegation or hits parent-routing gates:
 
 1. It dispatches a structured escalation message upward to its parent team:
 

@@ -8,7 +8,7 @@ This directory contains deep-dive design guides, parameters, and operation specs
 
 To understand specific systems in detail, please refer to the following documents:
 
-1. **[Hierarchical Dynamic Delegation](Dynamic_Delegation.md)**: Explains the recursive `Agent` and `AgentTeam` lineages (Level 0 Root AI spawning Level 1 ATs, who spawn Level 2 ATs), ReAct execution loops with safe literal evaluation, and the lineage escalation channels.
+1. **[Hierarchical Dynamic Delegation](Dynamic_Delegation.md)**: Explains the recursive `Agent` and `AgentTeam` lineages (Level 0 Root AI spawning Level 1 ATs, which recursively spawn deeper sub-teams of Level $N$), ReAct execution loops with safe literal evaluation, and the lineage escalation channels.
 2. **[Gated Context Protection & File Reading](Gated_Reading.md)**: Details the size-aware `GatedFileReader`, outline sampling fallbacks for files exceeding 50 KB, paginated line chunking, and streaming tail log reads.
 3. **[Supervisor Auditor Team](Supervisory_Team.md)**: Details the dynamic **3-AI Supervisory Team** (Integrity, Continuity, and Deadlock Auditors) which monitors dialogue transcripts for circular deadlocks and performs recursive lineage parent escalations.
 

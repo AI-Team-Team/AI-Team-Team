@@ -41,7 +41,7 @@ class Agent:
         system_instructions: str = "",
         team_purpose: str = "Unspecified team purpose"
     ) -> 'AgentTeam':
-        """Allows this agent to launch a dynamic sub-team (Level 2+)."""
+        """Allows this agent to launch a dynamic sub-team (Level $N$)."""
         child = manager.create_agent_team(
             creator=self,
             member_count=member_count,
@@ -73,9 +73,12 @@ class AgentTeam:
         self.logger = logging.getLogger(f"AgentTeam:{self.team_id}")
         self.message_inbox: List[Dict[str, Any]] = []
         self.tools: Dict[str, Tool] = {}
+        self._parent_team: Optional['AgentTeam'] = None
 
     @property
     def parent_team(self) -> Optional['AgentTeam']:
+        if self._parent_team is not None:
+            return self._parent_team
         if isinstance(self.creator, AgentTeam):
             return self.creator
         return None
@@ -503,6 +506,10 @@ class ATTManager:
         assert member_count >= min_size, f"An Agent Team must contain at least {min_size} members to debate properly."
         
         team = AgentTeam(creator=creator, preset_name=preset_name, team_purpose=team_purpose)
+        if isinstance(creator, AgentTeam):
+            team._parent_team = creator
+        else:
+            team._parent_team = self.find_parent_team(team)
         
         if isinstance(creator, AgentTeam):
             team.chapter_num = creator.chapter_num

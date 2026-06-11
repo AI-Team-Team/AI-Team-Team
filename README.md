@@ -23,7 +23,7 @@ Hundreds, thousands, even tens of thousands of AIs work together in an orderly m
 
 ## 🚀 Key Features
 
-* **[Tree-like Lineage Spawning](docs/Dynamic_Delegation.md)**: Spawns hierarchical dynamic agent teams (`AgentTeam`) recursively from a root agent down to grandchild sub-teams, strictly governed by depth limits.
+* **[Tree-like Lineage Spawning](docs/Dynamic_Delegation.md)**: Spawns hierarchical dynamic agent teams (`AgentTeam`) recursively to arbitrary depths, strictly governed by depth limits.
 * **Dynamic presets & Committees**: Allows runtime registration of custom agent committees (role configurations and system prompts) like planning, writing, database management, etc.
 * **Bounded ReAct Loops**: Agents execute reasoning steps using standard ReAct (Thought/Action/Observation) protocols, supported by a safe literal argument parser.
 * **[Negotiation Broker](docs/Dynamic_Delegation.md#4-consolidated-autonomy-tools)**: Gates sibling and cross-lineage peer-to-peer communication through dynamic permission rules and broker contracts.
@@ -241,7 +241,7 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 
 | Configuration Property | Type | Default Value | Description |
 | :--- | :--- | :--- | :--- |
-| `enable_dynamic_delegation` | `bool` | `True` | Whether to allow agents to spawn child sub-teams (`Level 1` / `Level 2` panels). |
+| `enable_dynamic_delegation` | `bool` | `True` | Whether to allow agents to spawn child sub-teams (Level $N$ panels). |
 | `max_delegation_depth` | `int` | `2` | The maximum hierarchy depth limit of recursive dynamic subagent spawning lineages. |
 | `min_subagent_team_size` | `int` | `3` | The minimum number of members allowed when initiating a dynamic team panel. |
 | `subagent_discussion_rounds` | `int` | `2` | The number of debate discussion rounds executed during dynamic child subagent calls. |
