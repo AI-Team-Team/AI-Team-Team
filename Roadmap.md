@@ -39,23 +39,9 @@ The next iterations of the ATT framework focus on:
 
   * Increment `team.migration_count += 1` immediately upon successful migration arbitration.
 
-### 1.4 Clean Exception Isolation
-
-* **Problem**: If an LLM client throws an API rate-limit error or network exception during a ReAct loop, it is caught and returned as a string `"Error executing task: {e}"`. This error text is treated as a normal `Final Answer` and appended to the dialog history, causing downstream agents to hallucinate or misinterpret system failures as business logic conclusions.
-* **Solution**:
-  * Implement an internal retry policy (e.g. up to 3 retries with exponential backoff) for transient API network failures.
-  * If retries fail, propagate the exception to halt the loop safely or escalate the failure as a structured system anomaly to the Supervisory Team, preventing it from polluting the discussion transcript.
-
 ## 2. Next-Gen Evolution Path
 
-### 2.1 Standard Lexical Argument Parsing
-
-* **Blue-sky Concept**: Replace the fragile `split(",")` fallback when `ast.literal_eval` fails to evaluate arguments.
-* **Design**:
-  * Utilize Python's standard `shlex` (shell lexical analyzer) module or a custom parser to extract arguments.
-  * Ensure parameters containing commas (such as SQL strings `SELECT name, age FROM characters` or text queries) are parsed as a single argument instead of being split incorrectly.
-
-### 2.2 Active Permission Gates in Tool Execution
+### 2.1 Active Permission Gates in Tool Execution
 
 * **Blue-sky Concept**: Ensure agents operate strictly within the communication bounds defined by their parent teams.
 * **Design**:

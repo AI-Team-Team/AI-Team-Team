@@ -12,7 +12,7 @@ class LLMClientProto(Protocol):
         """Generates text from the LLM model."""
         ...
 
-from .core import Agent, AgentTeam, ATTManager, ATTConfig
+from .core import Agent, AgentTeam, ATTManager, ATTConfig, ATTException, LLMGenerationError
 from .tool import Tool
 from .gated_reader import GatedFileReader
 
@@ -24,4 +24,6 @@ __all__ = [
     "Tool",
     "GatedFileReader",
     "LLMClientProto",
+    "ATTException",
+    "LLMGenerationError",
 ]

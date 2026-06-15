@@ -20,7 +20,9 @@ config = ATTConfig(
     inbox_summarize_threshold_chars: int = 1500,
     model_registry: Optional[dict] = None,
     max_migrations_per_team_discussion: int = 1,
-    enable_membership_voting: bool = False
+    enable_membership_voting: bool = False,
+    llm_max_retries: int = 3,
+    llm_retry_backoff_factor: float = 1.5
 )
 ```
 
@@ -35,6 +37,8 @@ config = ATTConfig(
 * **`model_registry`**: Mapping of specialized agent roles to specific LLM models or endpoints.
 * **`max_migrations_per_team_discussion`**: The maximum number of hierarchical team migrations allowed for a team during a single discussion session.
 * **`enable_membership_voting`**: Whether to enable the democratic membership voting system for dynamic teams.
+* **`llm_max_retries`**: The maximum retry attempts for LLM generation failures.
+* **`llm_retry_backoff_factor`**: The exponential backoff factor for retrying LLM calls.
 
 ## 👤 `Agent`
 

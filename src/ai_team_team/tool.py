@@ -15,6 +15,9 @@ class Tool:
             res = self.func(*args, **kwargs)
             return str(res)
         except Exception as e:
+            from .core import ATTException
+            if isinstance(e, ATTException):
+                raise e
             logger.error(f"Error executing tool '{self.name}': {e}")
             return f"Error executing tool '{self.name}': {e}"
 

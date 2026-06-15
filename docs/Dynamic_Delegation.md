@@ -32,7 +32,7 @@ Agents in dynamic teams resolve tasks inside a structured **Reasoning & Action (
    ```
 
 2. **Safe Argument Parser**:
-   To prevent parsing crashes when tools accept string arguments that contain commas (e.g., semantic search phrases or SQLite query arguments), the ReAct parser uses Python's safe literal evaluation (`ast.literal_eval`). This guarantees that string arguments with commas inside quotes are evaluated correctly as a single string parameter instead of being split incorrectly.
+   To prevent parsing crashes when tools accept string arguments that contain commas (e.g., semantic search phrases or SQLite query arguments) or keyword assignments (e.g., `key=value`), the ReAct parser employs a custom lexical tokenizing scanner. This scanner splits arguments by commas only at the outer level (respecting quotes, and nesting structures like parentheses, brackets, and braces). It evaluates arguments using Python's safe literal evaluation (`ast.literal_eval`) with a graceful fallback for unquoted strings, ensuring robust parameter mapping under varying output structures.
 
 3. **Hierarchical Topology Map**:
    To support organizational awareness and structural modifications, the ReAct prompt's `identity_header` dynamically injects a rendered indented ASCII tree topology map representing all active teams (`manager.render_topology_tree()`). Agents use this map to discover sibling and peer teams and locate potential migration parents.

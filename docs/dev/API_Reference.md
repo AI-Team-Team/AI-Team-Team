@@ -86,7 +86,9 @@ Configuration options for tuning the ATT multi-agent framework.
       inbox_summarize_threshold_chars: int = 1500,
       model_registry: Optional[dict] = None,
       max_migrations_per_team_discussion: int = 1,
-      enable_membership_voting: bool = False
+      enable_membership_voting: bool = False,
+      llm_max_retries: int = 3,
+      llm_retry_backoff_factor: float = 1.5
   )
   ```
 

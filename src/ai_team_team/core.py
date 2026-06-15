@@ -7,6 +7,43 @@ import ast
 from typing import List, Dict, Optional, Any, Tuple, Callable
 from .tool import Tool
 
+class ATTException(Exception):
+    """Base exception for ATT framework errors."""
+    pass
+
+class LLMGenerationError(ATTException):
+    """Raised when LLM generation fails after all retry attempts."""
+    pass
+
+def generate_with_retry(
+    llm_client: Any,
+    prompt: str,
+    system_instruction: Optional[str] = None,
+    temperature: float = 0.3,
+    require_json: bool = False,
+    retries: int = 3,
+    backoff_factor: float = 1.5
+) -> str:
+    """Invokes LLM generate with a retry policy and exponential backoff."""
+    last_ex = None
+    logger = logging.getLogger("ATT.Core")
+    for attempt in range(retries):
+        try:
+            return llm_client.generate(
+                prompt=prompt,
+                system_instruction=system_instruction,
+                temperature=temperature,
+                require_json=require_json
+            )
+        except Exception as e:
+            last_ex = e
+            if attempt == retries - 1:
+                break
+            sleep_time = backoff_factor ** attempt
+            logger.warning(f"LLM generation failed (attempt {attempt+1}/{retries}): {e}. Retrying in {sleep_time:.2f}s...")
+            time.sleep(sleep_time)
+    raise LLMGenerationError(f"LLM generation failed after {retries} attempts: {last_ex}") from last_ex
+
 class HandlerClientAdapter:
     """Wraps a global generator handler callback to conform to LLMClientProto."""
     def __init__(self, model_name: str, handler: Callable[..., str]):
@@ -69,7 +106,9 @@ class ATTConfig:
         inbox_summarize_threshold_chars: int = 1500,
         model_registry: Optional[dict] = None,
         max_migrations_per_team_discussion: int = 1,
-        enable_membership_voting: bool = False
+        enable_membership_voting: bool = False,
+        llm_max_retries: int = 3,
+        llm_retry_backoff_factor: float = 1.5
     ):
         self.enable_dynamic_delegation = enable_dynamic_delegation
         self.max_delegation_depth = max_delegation_depth
@@ -80,6 +119,8 @@ class ATTConfig:
         self.model_registry = model_registry or {}
         self.max_migrations_per_team_discussion = max_migrations_per_team_discussion
         self.enable_membership_voting = enable_membership_voting
+        self.llm_max_retries = llm_max_retries
+        self.llm_retry_backoff_factor = llm_retry_backoff_factor
 
 class Agent:
     def __init__(self, name: str, role: str, llm_client: Optional[Any] = None, role_description: str = "", system_instructions: str = ""):
@@ -302,10 +343,15 @@ class AgentTeam:
                                 f"Next step:"
                             )
 
-                        response = agent.llm_client.generate(
+                        retries = manager.config.llm_max_retries if manager else 3
+                        backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
+                        response = generate_with_retry(
+                            llm_client=agent.llm_client,
                             prompt=full_prompt,
                             system_instruction=react_system_instruction,
-                            temperature=0.3
+                            temperature=0.3,
+                            retries=retries,
+                            backoff_factor=backoff
                         ).strip()
 
                         self.logger.info(f"Agent {agent.name} ReAct step {step+1} response:\n{response}")
@@ -357,25 +403,127 @@ class AgentTeam:
                             def parse_args(args_str):
                                 if not args_str:
                                     return [], {}
-                                try:
-                                    parsed = ast.literal_eval(f"({args_str})")
-                                    if isinstance(parsed, tuple):
-                                        args = list(parsed)
+
+                                # 1. Split arguments by top-level commas (not inside quotes or nesting symbols)
+                                chunks = []
+                                current_chunk = []
+                                in_single_quote = False
+                                in_double_quote = False
+                                escape = False
+                                paren_depth = 0
+                                bracket_depth = 0
+                                brace_depth = 0
+
+                                for char in args_str:
+                                    if escape:
+                                        escape = False
+                                        current_chunk.append(char)
+                                        continue
+                                    if char == '\\':
+                                        escape = True
+                                        current_chunk.append(char)
+                                        continue
+                                    if char == "'" and not in_double_quote:
+                                        in_single_quote = not in_single_quote
+                                    elif char == '"' and not in_single_quote:
+                                        in_double_quote = not in_double_quote
+
+                                    if not in_single_quote and not in_double_quote:
+                                        if char == '(':
+                                            paren_depth += 1
+                                        elif char == ')':
+                                            paren_depth = max(0, paren_depth - 1)
+                                        elif char == '[':
+                                            bracket_depth += 1
+                                        elif char == ']':
+                                            bracket_depth = max(0, bracket_depth - 1)
+                                        elif char == '{':
+                                            brace_depth += 1
+                                        elif char == '}':
+                                            brace_depth = max(0, brace_depth - 1)
+                                        elif char == ',' and paren_depth == 0 and bracket_depth == 0 and brace_depth == 0:
+                                            chunks.append("".join(current_chunk).strip())
+                                            current_chunk = []
+                                            continue
+
+                                    current_chunk.append(char)
+
+                                chunks.append("".join(current_chunk).strip())
+
+                                # 2. Helper to clean and parse value
+                                def parse_val(val_str):
+                                    val_str = val_str.strip()
+                                    if not val_str:
+                                        return ""
+                                    try:
+                                        return ast.literal_eval(val_str)
+                                    except Exception:
+                                        # Fallback to unquoting
+                                        if (val_str.startswith("'") and val_str.endswith("'")) or (val_str.startswith('"') and val_str.endswith('"')):
+                                            return val_str[1:-1]
+                                        if val_str.lower() == "true":
+                                            return True
+                                        if val_str.lower() == "false":
+                                            return False
+                                        if val_str.lower() == "none":
+                                            return None
+                                        return val_str
+
+                                # 3. Process each chunk
+                                args = []
+                                kwargs = {}
+
+                                for chunk in chunks:
+                                    if not chunk:
+                                        continue
+                                    # Find top-level '=' in the chunk
+                                    eq_idx = -1
+                                    c_in_single_quote = False
+                                    c_in_double_quote = False
+                                    c_escape = False
+                                    c_paren = 0
+                                    c_bracket = 0
+                                    c_brace = 0
+
+                                    for idx, char in enumerate(chunk):
+                                        if c_escape:
+                                            c_escape = False
+                                            continue
+                                        if char == '\\':
+                                            c_escape = True
+                                            continue
+                                        if char == "'" and not c_in_double_quote:
+                                            c_in_single_quote = not c_in_single_quote
+                                        elif char == '"' and not c_in_single_quote:
+                                            c_in_double_quote = not c_in_double_quote
+
+                                        if not c_in_single_quote and not c_in_double_quote:
+                                            if char == '(':
+                                                c_paren += 1
+                                            elif char == ')':
+                                                c_paren = max(0, c_paren - 1)
+                                            elif char == '[':
+                                                c_bracket += 1
+                                            elif char == ']':
+                                                c_bracket = max(0, c_bracket - 1)
+                                            elif char == '{':
+                                                c_brace += 1
+                                            elif char == '}':
+                                                c_brace = max(0, c_brace - 1)
+                                            elif char == '=' and c_paren == 0 and c_bracket == 0 and c_brace == 0:
+                                                eq_idx = idx
+                                                break
+
+                                    if eq_idx != -1:
+                                        k = chunk[:eq_idx].strip()
+                                        if (k.startswith("'") and k.endswith("'")) or (k.startswith('"') and k.endswith('"')):
+                                            k = k[1:-1]
+                                        v_str = chunk[eq_idx+1:].strip()
+                                        kwargs[k] = parse_val(v_str)
                                     else:
-                                        args = [parsed]
-                                    return args, {}
-                                except Exception:
-                                    args = []
-                                    kwargs = {}
-                                    parts = args_str.split(",")
-                                    for p in parts:
-                                        p = p.strip()
-                                        if "=" in p:
-                                            k, v = p.split("=", 1)
-                                            kwargs[k.strip()] = v.strip().strip("'\"")
-                                        else:
-                                            args.append(p.strip().strip("'\""))
-                                    return args, kwargs
+                                        args.append(parse_val(chunk))
+
+                                return args, kwargs
 
                             args, kwargs = parse_args(tool_args_str)
 
@@ -437,6 +585,8 @@ class AgentTeam:
                                 return response
                             react_history.append(response)
                             react_history.append("Observation: Please output either 'Action: tool_name(args)' or 'Final Answer: <content>'.")
+                    except ATTException as e:
+                        raise e
                     except Exception as e:
                         self.logger.error(f"Error in ReAct step {step+1} for agent {agent.name}: {e}")
                         return f"Error executing task during ReAct loop: {e}"
@@ -454,10 +604,15 @@ class AgentTeam:
                 )
 
                 try:
-                    response = agent.llm_client.generate(
+                    retries = manager.config.llm_max_retries if manager else 3
+                    backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
+                    response = generate_with_retry(
+                        llm_client=agent.llm_client,
                         prompt=prompt,
                         system_instruction=full_system_instruction,
-                        temperature=0.3
+                        temperature=0.3,
+                        retries=retries,
+                        backoff_factor=backoff
                     ).strip()
                     
                     if manager and manager.on_log_append:
@@ -487,6 +642,8 @@ class AgentTeam:
                             manager.on_activity_added(agent.name, "Final Answer", final_ans_content)
                         return final_ans_content
                     return response
+                except ATTException as e:
+                    raise e
                 except Exception as e:
                     self.logger.error(f"Agent {agent.name} execution error: {e}")
                     return f"Error executing task: {e}"
@@ -557,7 +714,7 @@ class ATTManager:
         self.generator_handler: Optional[Callable[..., str]] = None
         
         from .supervision import SupervisoryTeam
-        self.supervisor = SupervisoryTeam(root_ai, ManagerCriticClientAdapter(self))
+        self.supervisor = SupervisoryTeam(root_ai, ManagerCriticClientAdapter(self), manager=self)
         self.logger = logging.getLogger("ATTManager")
         self.tools_context: Dict[str, Any] = {}
         
@@ -779,11 +936,14 @@ class ATTManager:
         )
         
         try:
-            response = self.critic_client.generate(
+            response = generate_with_retry(
+                llm_client=self.critic_client,
                 prompt=arbitration_prompt,
                 system_instruction="You are a strict, objective Systems Architect Arbiter. Evaluate organizational restructuring proposals.",
                 temperature=0.2,
-                require_json=True
+                require_json=True,
+                retries=self.config.llm_max_retries,
+                backoff_factor=self.config.llm_retry_backoff_factor
             )
             if "```" in response:
                 response = response.replace("```json", "").replace("```", "").strip()
@@ -849,10 +1009,13 @@ class ATTManager:
                 self.logger.info("Inbox context too large, summarizing before injection...")
                 summary_prompt = f"Summarize the following system alerts and escalations concisely:\n\n{raw_inbox_text}"
                 try:
-                    raw_inbox_text = self.critic_client.generate(
-                        summary_prompt,
+                    raw_inbox_text = generate_with_retry(
+                        llm_client=self.critic_client,
+                        prompt=summary_prompt,
                         system_instruction="You are a strict system summarizer. Compress alerts while keeping critical facts and failures.",
-                        temperature=0.1
+                        temperature=0.1,
+                        retries=self.config.llm_max_retries,
+                        backoff_factor=self.config.llm_retry_backoff_factor
                     )
                 except Exception as e:
                     self.logger.warning(f"Failed to summarize inbox: {e}")
@@ -871,14 +1034,19 @@ class ATTManager:
         for r in range(1, rounds + 1):
             for agent in team.members:
                 self.logger.info(f"Agent {agent.name} thinking...")
-                final_answer = team.execute_react_step(
-                    agent=agent, 
-                    prompt=full_prompt, 
-                    system_instruction=team.system_instructions,
-                    max_steps=self.config.react_max_steps,
-                    manager=self
-                )
-                dialog_history.append(f"{agent.name}: {final_answer}")
+                try:
+                    final_answer = team.execute_react_step(
+                        agent=agent, 
+                        prompt=full_prompt, 
+                        system_instruction=team.system_instructions,
+                        max_steps=self.config.react_max_steps,
+                        manager=self
+                    )
+                    dialog_history.append(f"{agent.name}: {final_answer}")
+                except ATTException as e:
+                    self.logger.error(f"Failed to execute discussion step due to ATT error: {e}")
+                    self.supervisor.report_anomaly(team, f"LLM client invocation error: {e}", self)
+                    raise e
 
         transcript = "\n".join(dialog_history)
         

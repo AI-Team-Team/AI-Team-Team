@@ -1,13 +1,14 @@
 import logging
 import json
 from typing import Tuple, Any, Optional
-from .core import Agent, AgentTeam
+from .core import Agent, AgentTeam, generate_with_retry, ATTException
 
 class SupervisoryTeam:
     """Composed of exactly 3 AIs. Audits intra-team and inter-team dialog effectiveness, and triggers recursive parent escalation."""
-    def __init__(self, root_ai: Agent, critic_client: Any):
+    def __init__(self, root_ai: Agent, critic_client: Any, manager: Optional[Any] = None):
         self.root_ai = root_ai
         self.critic_client = critic_client
+        self.manager = manager
         self.auditors = [
             Agent(name="Auditor_Integrity_01", role="Integrity_Auditor", llm_client=critic_client),
             Agent(name="Auditor_Continuity_02", role="Continuity_Auditor", llm_client=critic_client),
@@ -34,11 +35,16 @@ class SupervisoryTeam:
         )
 
         try:
-            response = self.critic_client.generate(
+            retries = self.manager.config.llm_max_retries if (self.manager and self.manager.config) else 3
+            backoff = self.manager.config.llm_retry_backoff_factor if (self.manager and self.manager.config) else 1.5
+            response = generate_with_retry(
+                llm_client=self.critic_client,
                 prompt=audit_prompt,
                 system_instruction="You are a strict, objective Supervisory Auditor. Evaluate communication effectiveness.",
                 temperature=0.2,
-                require_json=True
+                require_json=True,
+                retries=retries,
+                backoff_factor=backoff
             )
             if "```" in response:
                 response = response.replace("```json", "").replace("```", "").strip()
