@@ -221,15 +221,15 @@ Instead of passing raw API keys or client instances directly to the framework, r
 
 ```python
 # 1. Register model configurations (metadata/descriptions for the AI)
-manager.register_model("gemini", {
+manager.register_model("gemini-123", {
     "model_type": "llm",
-    "api_type": "gemini",
+    "model_name": "gemini-3.5-flash",
     "ai_note": "gemini-3.5-flash - A very impressive large model"
 })
 
-manager.register_model("openai", {
+manager.register_model("openai-123", {
     "model_type": "llm",
-    "api_type": "openai",
+    "model_name": "gpt-5.5",
     "ai_note": "gpt-5.5 - A very impressive large model"
 })
 
@@ -242,10 +242,13 @@ def my_generator_handler(
     temperature: float = 0.3,
     require_json: bool = False
 ) -> str:
-    # Resolve the model_name to your actual SDK/API client internally
-    if model_name == "gemini":
+    # Look up the registered config to get the real model name
+    config = manager.model_configs.get(model_name)
+    real_name = config.get("model_name") if config else model_name
+
+    if real_name == "gemini-3.5-flash":
         return call_gemini_sdk(prompt, system_instruction, temperature, require_json)
-    elif model_name == "openai":
+    elif real_name == "gpt-5.5":
         return call_openai_sdk(prompt, system_instruction, temperature, require_json)
     
     # Fallback default model
@@ -259,14 +262,14 @@ manager.register_generator_handler(my_generator_handler)
 You can route different agents to different registered model names when spawning a team using the `roles_and_models` mapping:
 
 ```python
-# Spawn a team where Specialist_A uses openai, and Specialist_B uses gemini
+# Spawn a team where Specialist_A uses openai-123, and Specialist_B uses gemini-123
 team = manager.create_agent_team(
     creator=root_agent,
     member_count=3,
     preset_name="generic",
     roles_and_models={
-        "Specialist_A": "openai",
-        "Specialist_B": "gemini"
+        "Specialist_A": "openai-123",
+        "Specialist_B": "gemini-123"
     }
 )
 ```
@@ -275,11 +278,27 @@ team = manager.create_agent_team(
 
 ReAct agents can dynamically specify different models when spawning child subagent teams via the `dispatch_subagent` tool:
 
-```text
-Thought: I need a strong planner and a fast writer.
+```plaintext
+Thought: I need a strong planner and a fast writer. I will spawn a child team of 3 agents.
 Action: dispatch_subagent(
     task="Write the report",
     team_purpose="Reporting",
-    roles_and_models={"Planner": "openai", "Writer": "gemini"}
+    member_configs={
+        "Planner": {
+            "model": "openai-123",
+            "role_description": "Designs outline and schedules work",
+            "system_instructions": "Focus on clarity and conciseness"
+        },
+        "Writer": {
+            "model": "gemini-123",
+            "role_description": "Drafts the report sections",
+            "system_instructions": "Use rich descriptors and clean prose"
+        },
+        "Reviewer": {
+            "model": "gemini-123",
+            "role_description": "Checks logic and style consistency",
+            "system_instructions": "Be strict on formatting rules"
+        }
+    }
 )
 ```

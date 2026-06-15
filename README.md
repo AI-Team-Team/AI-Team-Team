@@ -31,12 +31,14 @@ Many thanks to Gemini and GPT for their help!
 ## 🚀 Key Features
 
 * **[Tree-like Lineage Spawning](docs/Dynamic_Delegation.md)**: Spawns hierarchical dynamic agent teams (`AgentTeam`) recursively to arbitrary depths, strictly governed by depth limits.
+* **[Autonomous Member Configurations](docs/Dynamic_Delegation.md#1-dynamic-spawning-&-lineage-hierarchy)**: Defines dynamic child team memberships using structured `member_configs` mapping custom roles, individual system instructions, and model aliases to shape custom agent behaviors.
+* **[Democratic Voting & Governance](docs/Dynamic_Delegation.md#5-team-governance-&-democratic-voting-system)**: Introduces an optional asynchronous voting system to democratically manage team memberships. Voting requires unanimous active member participation and a $\ge 2/3$ agreement threshold to auto-execute.
 * **Dynamic presets & Committees**: Allows runtime registration of custom agent committees (role configurations and system prompts) like planning, writing, database management, etc.
 * **[Model Registry & Global Generator Callback](docs/user/Quickstart.md#7-model-registry-and-global-generator-callback)**: Maps dynamic agent roles to registered model configurations (containing metadata and descriptions), delegating all LLM invocation logic to a centralized global callback handler to keep the library keyless and lightweight.
 * **Bounded ReAct Loops**: Agents execute reasoning steps using standard ReAct (Thought/Action/Observation) protocols, supported by a safe literal argument parser.
 * **[Negotiation Broker](docs/Dynamic_Delegation.md#4-consolidated-autonomy-tools)**: Gates sibling and cross-lineage peer-to-peer communication through dynamic permission rules and broker contracts.
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Allows active teams to dynamically request parent-hierarchy migrations, arbitrated by the System Critic with cycle checks and related team alerts.
-* **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects a structured ASCII indented tree map in the agent context to provide complete hierarchical lineage visibility to ReAct agents.
+* **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects a structured ASCII indented tree map representing all active teams (displaying team purposes and progress in real-time) in the agent context.
 * **Tool Auditor Interception Hook**: Allows host applications to register pre-execution callback hooks to audit, approve, or reject specific tool calls (e.g. database safety query vetting).
 * **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A 3-AI Supervisory Team audits dialogue transcripts for logical deadlocks, circular reasoning, and anomalies, recursively escalating alerts up the ancestry lineage.
 * **UI/Logging Decoupling**: Exposes clear runtime event hooks (`on_status_change`, `on_activity_added`, `on_log_append`) to update terminal dashboards and write logs without framework pollution.
@@ -76,7 +78,7 @@ graph TD
     Root -->|create_agent_team| TeamB[Agent Team B - Level 1]
     
     subgraph Lineage ["Hierarchical Team Lineage (Arbitrary Depth)"]
-        TeamA -->|dispatch_subagent| SubTeamA1[Sub-Agent Team A.1 - Level 2]
+        TeamA -->|dispatch_subagent\nmember_configs| SubTeamA1[Sub-Agent Team A.1 - Level 2]
         SubTeamA1 -->|dispatch_subagent| SubTeamN[Sub-Agent Team N - Level N]
     end
 
@@ -85,9 +87,13 @@ graph TD
     Broker[NegotiationBroker] -->|Evaluate Sibling Rules & Lineage Contracts| SubTeamN
     Broker -.->|Approve / Deny Tunnel| TeamB
 
-    %% Supervisory Audits & Escalation
+    %% Supervisory Dialogue Audits & Escalation
     Supervisor[3-AI SupervisoryTeam] -->|audit_team_dialog| TeamA
     Supervisor -->|report_anomaly escalation| Root
+
+    %% Democratic Voting System
+    SubTeamA1 -->|initiate_membership_vote| Voting{Democratic Voting\nThreshold: >= 2/3}
+    Voting -->|Approved: add/remove| SubTeamA1
     
     %% Styles
     style Root fill:#d4e1f5,stroke:#3b5998,stroke-width:2px;
@@ -96,6 +102,7 @@ graph TD
     style SubTeamA1 fill:#ede7f6,stroke:#5e35b1,stroke-width:2px;
     style SubTeamN fill:#f3e5f5,stroke:#ab47bc,stroke-width:2px;
     style Supervisor fill:#ffe0b2,stroke:#f57c00,stroke-width:2px;
+    style Voting fill:#ffebee,stroke:#e53935,stroke-width:2px;
 ```
 
 ## 🛠️ Getting Started
@@ -305,6 +312,7 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `inbox_summarize_threshold_chars` | `int` | `1500` | The text character threshold above which unread inbox alerts are summarized. |
 | `model_registry` | `dict` | `{}` | Mapping of specialized agent roles to specific LLM models or endpoints. |
 | `max_migrations_per_team_discussion` | `int` | `1` | The maximum hierarchy migration requests a team can execute during a single discussion turn. |
+| `enable_membership_voting` | `bool` | `False` | Whether to enable the optional democratic membership voting system. |
 
 ### `GatedFileReader` Parameters
 

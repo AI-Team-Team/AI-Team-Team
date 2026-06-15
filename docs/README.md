@@ -51,5 +51,9 @@ The ATT Topology transitions AI agents from passive context-consumers to active,
          ┌────────────────────────┐   ┌────────────────────────┐
          │    Agent Team (AT)     │   │    Agent Team (AT)     │
          │      (Size N >= 3)     │   │      (Size N >= 3)     │
-         └────────────────────────┘   └────────────────────────┘
+         │ ┌────────────────────┐ │   └────────────────────────┘
+         │ │ Democratic Voting  │ │
+         │ │   (Threshold 2/3)  │ │
+         │ └────────────────────┘ │
+         └────────────────────────┘
 ```

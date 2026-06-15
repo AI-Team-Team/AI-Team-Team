@@ -8,7 +8,7 @@ This flowchart outlines the logic executed when an individual `Agent` or `AgentT
 
 ```mermaid
 flowchart TD
-    Start["Call creator.launch_att(manager, member_count)"] --> EnforceSize{"member_count >= 3?"}
+    Start["Call creator.launch_att(manager, member_configs)"] --> EnforceSize{"len(member_configs) >= 3?"}
     
     EnforceSize -- "No" --> RaiseAssert["Raise AssertionError\n(Spawning blocked)"]
     EnforceSize -- "Yes" --> GenerateID["Generate unique team_id: AT-xxxxxx"]
@@ -86,4 +86,30 @@ sequenceDiagram
     
     Manager->>Manager: Trigger on_team_migration callback
     Manager-->>T: Return success status
+```
+
+## 4. Democratic Membership Voting Sequence
+
+This sequence diagram illustrates the lifecycle of a democratic membership proposal, from initiation to unanimous voting and execution:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A1 as Initiator (Agent 1)
+    participant T as Agent Team (AT)
+    participant A2 as Sibling (Agent 2)
+    participant A3 as Sibling (Agent 3)
+    participant Manager as ATTManager
+
+    A1->>T: Call initiate_membership_vote(action='add', target='QA', proposed_details={...})
+    Note over T: Create VP-xxxx proposal<br/>Set Agent 1 vote to 'Agree'
+    T-->>A1: Return Proposal ID (VP-xxxx)
+
+    A2->>T: Call cast_vote(proposal_id='VP-xxxx', vote='Agree')
+    T-->>A2: Success (1 voter remaining)
+
+    A3->>T: Call cast_vote(proposal_id='VP-xxxx', vote='Agree')
+    Note over T: All 3 active members have voted.<br/>Agree: 3/3 (100% >= 2/3)<br/>Execute action: spawn Dynamic_QA
+    T->>Manager: Spawn new member (Dynamic_QA) and append to T.members
+    T-->>A3: Success (Proposal approved and executed)
 ```

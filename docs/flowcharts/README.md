@@ -24,7 +24,7 @@ flowchart TD
     Task["Run Dynamic Committee debate or ReAct task"] --> RootNode["1. Instantiate Root AI (Level 0)"]
     
     RootNode --> Spawning{"2. Spawn dynamic Agent Team (AT)?"}
-    Spawning -- "Yes" --> SpawningCheck["Create AgentTeam (N >= 3)\nBind Centralized Tools context"]
+    Spawning -- "Yes" --> SpawningCheck["Create AgentTeam (N >= 3)\nValidate member_configs / roles\nBind Centralized Tools context"]
     
     SpawningCheck --> ToolCall{"3. Agent executes ReAct step?"}
     
@@ -38,6 +38,9 @@ flowchart TD
     ToolCall -- "Peer Sibling Talk" --> NegotiationBroker["NegotiationBroker dispatch"]
     NegotiationBroker -- "Sibling AT" --> SiblingRule{"Parent rules allow?"}
     NegotiationBroker -- "Cross-Lineage AT" --> ParentNegotiate["Parents agreement debate"]
+    
+    ToolCall -- "Voting Actions" --> Voting{"Democratic Voting Process"}
+    Voting -- "Unanimous participation & >= 2/3 Agree" --> ExecVote["Update team membership (add/remove)"]
     
     ToolCall -- "Discussion finished" --> SupervisoryTeam["3-AI Supervisory Team audits dialogue logs"]
     SupervisoryTeam -- "Anomaly found (is_healthy = False)" --> Escalate["Climb lineage up to find healthy parent\nRoute Failure Alert to Parent Inbox"]

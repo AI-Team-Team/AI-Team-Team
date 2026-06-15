@@ -68,7 +68,8 @@ class ATTConfig:
         react_max_steps: int = 5,
         inbox_summarize_threshold_chars: int = 1500,
         model_registry: Optional[dict] = None,
-        max_migrations_per_team_discussion: int = 1
+        max_migrations_per_team_discussion: int = 1,
+        enable_membership_voting: bool = False
     ):
         self.enable_dynamic_delegation = enable_dynamic_delegation
         self.max_delegation_depth = max_delegation_depth
@@ -78,12 +79,15 @@ class ATTConfig:
         self.inbox_summarize_threshold_chars = inbox_summarize_threshold_chars
         self.model_registry = model_registry or {}
         self.max_migrations_per_team_discussion = max_migrations_per_team_discussion
+        self.enable_membership_voting = enable_membership_voting
 
 class Agent:
-    def __init__(self, name: str, role: str, llm_client: Optional[Any] = None):
+    def __init__(self, name: str, role: str, llm_client: Optional[Any] = None, role_description: str = "", system_instructions: str = ""):
         self.name = name
         self.role = role
         self.llm_client = llm_client
+        self.role_description = role_description
+        self.system_instructions = system_instructions
 
     def launch_att(
         self,
@@ -92,7 +96,8 @@ class Agent:
         roles_and_presets: Optional[List[Tuple[str, str]]] = None,
         system_instructions: str = "",
         team_purpose: str = "Unspecified team purpose",
-        roles_and_models: Optional[Dict[str, str]] = None
+        roles_and_models: Optional[Dict[str, str]] = None,
+        member_configs: Optional[Dict[str, Dict[str, Any]]] = None
     ) -> 'AgentTeam':
         """Allows this agent to launch a dynamic sub-team (Level $N$)."""
         child = manager.create_agent_team(
@@ -101,7 +106,8 @@ class Agent:
             roles_and_presets=roles_and_presets,
             system_instructions=system_instructions,
             team_purpose=team_purpose,
-            roles_and_models=roles_and_models
+            roles_and_models=roles_and_models,
+            member_configs=member_configs
         )
         for team in manager.teams.values():
             if self in team.members:
@@ -115,6 +121,8 @@ class AgentTeam:
         self.creator = creator
         self.preset_name = preset_name
         self.team_purpose = team_purpose
+        self.team_progress = "Not started"
+        self.proposals: Dict[str, Dict[str, Any]] = {}
         self.chapter_num: Optional[int] = None
         self.status_map: Dict[str, str] = {}
         self.members: List[Agent] = []
@@ -153,7 +161,8 @@ class AgentTeam:
         roles_and_presets: Optional[List[Tuple[str, str]]] = None,
         system_instructions: str = "",
         team_purpose: str = "Unspecified team purpose",
-        roles_and_models: Optional[Dict[str, str]] = None
+        roles_and_models: Optional[Dict[str, str]] = None,
+        member_configs: Optional[Dict[str, Dict[str, Any]]] = None
     ) -> 'AgentTeam':
         """Allows any active team to recursively launch their own child AT."""
         child = manager.create_agent_team(
@@ -162,7 +171,8 @@ class AgentTeam:
             roles_and_presets=roles_and_presets,
             system_instructions=system_instructions,
             team_purpose=team_purpose,
-            roles_and_models=roles_and_models
+            roles_and_models=roles_and_models,
+            member_configs=member_configs
         )
         child.chapter_num = self.chapter_num
         return child
@@ -197,19 +207,18 @@ class AgentTeam:
 
         all_models = {}
         if manager:
-            model_registry = manager.config.model_registry or {}
-            for k, v in model_registry.items():
-                if isinstance(v, dict):
-                    all_models[k] = v.get("ai_note", "No description")
-                else:
-                    all_models[k] = str(v)
             for k, v in manager.model_configs.items():
                 all_models[k] = v.get("ai_note", "No description")
+            for k in manager.llm_clients.keys():
+                if k not in all_models:
+                    all_models[k] = "No description"
 
         model_options = "\n".join([f"  - {k}: {note}" for k, note in all_models.items()])
+        role_desc_str = f"- **Role Description**: {agent.role_description}\n" if getattr(agent, "role_description", "") else ""
         identity_header = (
             f"## AGENT IDENTITY PROFILE\n"
             f"- **Role Name**: {agent.role}\n"
+            f"{role_desc_str}"
             f"- **Agent Name**: {agent.name}\n"
             f"- **Parent Team**: {self.team_id} (Preset: {self.preset_name})\n"
             f"- **Team Purpose**: {self.team_purpose}\n"
@@ -232,9 +241,37 @@ class AgentTeam:
                     tools_desc.append(f"- **{t_name}**: {tool.description}")
                 tools_list_str = "\n".join(tools_desc)
 
+                agent_sys_inst = f"### YOUR INDIVIDUAL MISSION\n{agent.system_instructions}\n\n" if getattr(agent, "system_instructions", "") else ""
+                
+                voting_context = ""
+                if manager and manager.config.enable_membership_voting and self.proposals:
+                    voting_lines = ["### ACTIVE MEMBERSHIP VOTES:"]
+                    for vp_id, prop in self.proposals.items():
+                        if prop.get("status") == "active":
+                            voted_list = []
+                            for voter, v_data in prop["votes"].items():
+                                if v_data["public"]:
+                                    voted_list.append(f"{voter}: {v_data['vote']} (Public)")
+                                else:
+                                    voted_list.append(f"Anonymous Voter: {v_data['vote']}")
+                            voted_str = ", ".join(voted_list) if voted_list else "None"
+                            remaining = [m.name for m in self.members if m.name not in prop["votes"]]
+                            remaining_str = ", ".join(remaining) if remaining else "None"
+                            voting_lines.append(
+                                f"- Proposal [{vp_id}]: {prop['action'].upper()} '{prop['target']}'\n"
+                                f"  - Initiator: {prop['initiator_type'].capitalize()} ({prop['initiator_name']})\n"
+                                f"  - Rationale: {prop['rationale']}\n"
+                                f"  - Current Votes: {voted_str}\n"
+                                f"  - Remaining Voters: {remaining_str} (You can cast your vote using the 'cast_vote' tool)"
+                            )
+                    if len(voting_lines) > 1:
+                        voting_context = "\n" + "\n".join(voting_lines) + "\n"
+
                 react_system_instruction = (
                     f"{system_instruction}\n\n"
-                    f"{identity_header}\n"
+                    f"{agent_sys_inst}"
+                    f"{identity_header}"
+                    f"{voting_context}"
                     f"### AVAILABLE TOOLS\n"
                     f"{tools_list_str}\n\n"
                     f"### REACT FORMAT INSTRUCTIONS\n"
@@ -408,8 +445,10 @@ class AgentTeam:
 
             else:
                 # Fallback to direct call if no tools are bound
+                agent_sys_inst = f"### YOUR INDIVIDUAL MISSION\n{agent.system_instructions}\n\n" if getattr(agent, "system_instructions", "") else ""
                 full_system_instruction = (
                     f"{system_instruction}\n\n"
+                    f"{agent_sys_inst}"
                     f"{identity_header}\n"
                     f"Output exactly 'Final Answer: <content>' when complete."
                 )
@@ -461,6 +500,7 @@ class NegotiationBroker:
     def __init__(self, manager: 'ATTManager'):
         self.manager = manager
         self.logger = logging.getLogger("NegotiationBroker")
+        self.peer_talk_agreements = set() # Set of Tuple[str, str] (sender_id, recipient_id)
 
     def negotiate_communication(self, sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool:
         sender_parent = sender.parent_team or self.manager.find_parent_team(sender)
@@ -472,12 +512,28 @@ class NegotiationBroker:
             self.logger.info(f"Sibling negotiation between {sender.team_id} and {recipient.team_id}: Parent {parent.team_id} decision={allow}")
             return allow
 
+        # Check for negotiated cross-lineage peer agreement
+        pair = (sender.team_id, recipient.team_id)
+        if pair in self.peer_talk_agreements:
+            return True
+
+        self.logger.warning(f"Communication denied between {sender.team_id} and {recipient.team_id}. No active agreement exists.")
+        return False
+
+    def establish_peer_agreement(self, sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool:
+        sender_parent = sender.parent_team or self.manager.find_parent_team(sender)
+        recipient_parent = recipient.parent_team or self.manager.find_parent_team(recipient)
+
         if not sender_parent or not recipient_parent:
-            self.logger.warning(f"Lineage incomplete. Cannot negotiate communication between {sender.team_id} and {recipient.team_id}.")
+            self.logger.warning(f"Lineage incomplete. Cannot establish peer agreement between {sender.team_id} and {recipient.team_id}.")
             return False
 
-        self.logger.info(f"Cross-lineage negotiation requested between {sender.team_id} and {recipient.team_id} (via parents {sender_parent.team_id} and {recipient_parent.team_id}).")
-        return self._run_parent_negotiation_loop(sender_parent, recipient_parent, mode)
+        self.logger.info(f"Cross-lineage peer talk negotiation requested between {sender.team_id} and {recipient.team_id}.")
+        success = self._run_parent_negotiation_loop(sender_parent, recipient_parent, mode)
+        if success:
+            self.peer_talk_agreements.add((sender.team_id, recipient.team_id))
+            return True
+        return False
 
     def _run_parent_negotiation_loop(self, p1: AgentTeam, p2: AgentTeam, mode: str) -> bool:
         self.logger.info(f"Parents {p1.team_id} and {p2.team_id} are negotiating communication channel (mode: {mode})...")
@@ -576,9 +632,13 @@ class ATTManager:
         preset_name: str = "custom",
         system_instructions: str = "",
         team_purpose: str = "Unspecified team purpose",
-        roles_and_models: Optional[Dict[str, str]] = None
+        roles_and_models: Optional[Dict[str, str]] = None,
+        member_configs: Optional[Dict[str, Dict[str, Any]]] = None
     ) -> AgentTeam:
         """Dynamically spawns a new recursive Agent Team (AT)."""
+        if member_configs:
+            member_count = len(member_configs)
+            
         min_size = self.config.min_subagent_team_size
         assert member_count >= min_size, f"An Agent Team must contain at least {min_size} members to debate properly."
         
@@ -596,23 +656,39 @@ class ATTManager:
                     team.chapter_num = t.chapter_num
                     break
 
-        def get_agent_client(role_name: str, agent_name: str) -> Any:
+        def get_agent_client_by_name(client_name: Optional[str]) -> Any:
             critic_wrapper = ManagerCriticClientAdapter(self)
-            if roles_and_models:
-                client_name = roles_and_models.get(role_name)
-                if not client_name:
-                    client_name = roles_and_models.get(agent_name)
-                if client_name:
-                    if client_name in self.llm_clients:
-                        return self.llm_clients[client_name]
-                    elif client_name in self.model_configs and self.generator_handler:
-                        return HandlerClientAdapter(client_name, self.generator_handler)
-                    else:
-                        self.logger.warning(f"Client '{client_name}' not found in registry. Falling back to default critic client.")
+            if client_name:
+                if client_name in self.llm_clients:
+                    return self.llm_clients[client_name]
+                elif client_name in self.model_configs and self.generator_handler:
+                    return HandlerClientAdapter(client_name, self.generator_handler)
+                else:
+                    self.logger.warning(f"Client '{client_name}' not found in registry. Falling back to default critic client.")
             return self.critic_client if self.critic_client is not None else critic_wrapper
 
+        def get_agent_client(role_name: str, agent_name: str) -> Any:
+            client_name = None
+            if roles_and_models:
+                client_name = roles_and_models.get(role_name) or roles_and_models.get(agent_name)
+            return get_agent_client_by_name(client_name)
+
         members = []
-        if roles_and_presets:
+        if member_configs:
+            for role_name, config in member_configs.items():
+                model_alias = config.get("model")
+                role_desc = config.get("role_description", "")
+                sys_inst = config.get("system_instructions", "")
+                agent_name = f"Dynamic_{role_name}"
+                client = get_agent_client_by_name(model_alias)
+                members.append(Agent(
+                    name=agent_name,
+                    role=role_name,
+                    llm_client=client,
+                    role_description=role_desc,
+                    system_instructions=sys_inst
+                ))
+        elif roles_and_presets:
             for name, role in roles_and_presets:
                 members.append(Agent(name=name, role=role, llm_client=get_agent_client(role, name)))
         else:
@@ -672,7 +748,7 @@ class ATTManager:
         def traverse(team, depth=1):
             indent = "  " * depth
             prefix = "└── " if depth > 1 else "├── "
-            lines.append(f"{indent}{prefix}{team.team_id} (Purpose: {team.team_purpose}) [Level {team.depth}]")
+            lines.append(f"{indent}{prefix}{team.team_id} (Purpose: {team.team_purpose} | Progress: {team.team_progress}) [Level {team.depth}]")
             for child in team.child_teams:
                 traverse(child, depth + 1)
                 

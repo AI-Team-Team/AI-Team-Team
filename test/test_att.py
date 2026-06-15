@@ -403,7 +403,7 @@ class TestATT(unittest.TestCase):
         # 1. Register a model configuration
         self.manager.register_model("gemini", {
             "model_type": "llm",
-            "api_type": "gemini",
+            "model_name": "gemini-3.5-flash",
             "ai_note": "gemini-3.5-flash - A very impressive large model"
         })
         self.assertIn("gemini", self.manager.model_configs)
@@ -459,7 +459,7 @@ class TestATT(unittest.TestCase):
         # Register config and generator callback
         self.manager.register_model("my-custom-model", {
             "model_type": "llm",
-            "api_type": "custom",
+            "model_name": "custom-real-model",
             "ai_note": "custom model note"
         })
         
@@ -496,8 +496,11 @@ class TestATT(unittest.TestCase):
             dispatch_tool(
                 task="Do task",
                 team_purpose="Sub task",
-                member_count=3,
-                roles_and_models={"Planner": "my-custom-model"},
+                member_configs={
+                    "Planner": {"model": "my-custom-model"},
+                    "Researcher": {"model": "my-custom-model"},
+                    "Writer": {"model": "my-custom-model"}
+                },
                 system_instructions="Adhere to rules"
             )
         finally:
@@ -510,6 +513,328 @@ class TestATT(unittest.TestCase):
         planner_member = [m for m in captured_child_team.members if m.role == "Planner"][0]
         self.assertEqual(planner_member.llm_client.model_name, "my-custom-model")
         self.assertEqual(planner_member.llm_client.handler, mock_handler)
+
+    def test_dispatch_subagent_dynamic_member_count_validation(self):
+        """Verify dynamic subagent member count resolution and validation from member_configs."""
+        self.manager.register_tools_context({"att_manager": self.manager})
+
+        called_models = []
+        def mock_handler(model_name, prompt, system_instruction=None, temperature=0.3, require_json=False):
+            called_models.append(model_name)
+            if require_json:
+                return '{"is_healthy": true, "reason": "Dialogue approved."}'
+            return "Final Answer: ok"
+
+        self.manager.register_generator_handler(mock_handler)
+
+        preset = self.manager.get_preset("generic")
+        team = self.manager.create_agent_team(
+            creator=self.root_ai,
+            member_count=3,
+            roles_and_presets=preset["roles"]
+        )
+
+        dispatch_tool = team.tools["dispatch_subagent"]
+
+        # 1. Spawn dynamic subagent with 3 dynamic roles -> success
+        res = dispatch_tool(
+            task="Do task",
+            team_purpose="Sub task",
+            member_configs={
+                "Code_Architect": {"model": "default"},
+                "Security_Auditor": {"model": "default"},
+                "Quality_Assurance": {"model": "default"}
+            },
+            system_instructions="Adhere to rules"
+        )
+        self.assertNotIn("Error", res)
+
+        # 2. Spawn dynamic subagent with 2 dynamic roles -> failure (min_subagent_team_size is 3)
+        res_fail = dispatch_tool(
+            task="Do task",
+            team_purpose="Sub task",
+            member_configs={
+                "Architect": {"model": "default"},
+                "Reviewer": {"model": "default"}
+            },
+            system_instructions="Adhere to rules"
+        )
+        self.assertIn("Error", res_fail)
+        self.assertIn("MUST have at least 3 members", res_fail)
+
+    def test_member_configs_spawning_and_prompting(self):
+        """Verify dynamic role prompts and ai_note prompt injection."""
+        self.manager.register_tools_context({"att_manager": self.manager})
+        self.manager.register_model("my-custom-model", {
+            "model_type": "llm",
+            "model_name": "custom-real-model",
+            "ai_note": "A very impressive large model"
+        })
+
+        system_instruction_captured = None
+        def mock_handler(model_name, prompt, system_instruction=None, temperature=0.3, require_json=False):
+            nonlocal system_instruction_captured
+            system_instruction_captured = system_instruction
+            if require_json:
+                return '{"is_healthy": true, "reason": "Dialogue approved."}'
+            return "Final Answer: ok"
+
+        self.manager.register_generator_handler(mock_handler)
+
+        # Create a child team using member_configs
+        member_configs = {
+            "Lead_Planner": {
+                "model": "my-custom-model",
+                "role_description": "Responsible for structural orchestration and task scheduling.",
+                "system_instructions": "Prioritize clarity, decompose objectives, and verify sub-tasks."
+            },
+            "Senior_Researcher": {
+                "model": "default",
+                "role_description": "Responsible for factual lookup.",
+                "system_instructions": "Ensure sources are reliable."
+            },
+            "Technical_Writer": {
+                "model": "default",
+                "role_description": "Responsible for drafting cohesive documents.",
+                "system_instructions": "Maintain high readability."
+            }
+        }
+
+        team = self.manager.create_agent_team(
+            creator=self.root_ai,
+            member_configs=member_configs
+        )
+
+        self.assertEqual(len(team.members), 3)
+        planner = [m for m in team.members if m.role == "Lead_Planner"][0]
+        self.assertEqual(planner.role_description, "Responsible for structural orchestration and task scheduling.")
+        self.assertEqual(planner.system_instructions, "Prioritize clarity, decompose objectives, and verify sub-tasks.")
+
+        # Run execute_react_step on Lead_Planner to capture system instructions
+        team.execute_react_step(planner, "Start task", "Base system instruction", max_steps=1, manager=self.manager)
+
+        self.assertIsNotNone(system_instruction_captured)
+        self.assertIn("Prioritize clarity, decompose objectives, and verify sub-tasks.", system_instruction_captured)
+        self.assertIn("Responsible for structural orchestration and task scheduling.", system_instruction_captured)
+        self.assertIn("my-custom-model: A very impressive large model", system_instruction_captured)
+
+    def test_peer_talk_broker_negotiation(self):
+        """Verify cross-lineage message blocking and negotiation channel validation."""
+        self.manager.register_tools_context({"att_manager": self.manager})
+
+        # Spawn two level-1 teams
+        team_a = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team_b = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+
+        # Spawn level-2 child teams
+        team_a1 = self.manager.create_agent_team(creator=team_a, member_count=3)
+        team_b1 = self.manager.create_agent_team(creator=team_b, member_count=3)
+
+        send_tool_a1 = team_a1.tools["send_peer_message"]
+        negotiate_tool_a1 = team_a1.tools["negotiate_peer_talk"]
+
+        # Default: no agreement exists, communication should be denied
+        res_denied = send_tool_a1(team_id=team_b1.team_id, message="Hello from A1")
+        self.assertIn("Permission Denied", res_denied)
+
+        # Establish peer agreement
+        res_negotiated = negotiate_tool_a1(target_team_id=team_b1.team_id, rationale="Align on cross-team dependencies")
+        self.assertIn("Success", res_negotiated)
+
+        # Now communication should succeed
+        res_success = send_tool_a1(team_id=team_b1.team_id, message="Hello from A1")
+        self.assertIn("Message successfully delivered", res_success)
+        self.assertEqual(len(team_b1.message_inbox), 1)
+        self.assertEqual(team_b1.message_inbox[0]["objective"], "Hello from A1")
+
+    def test_parent_admin_member_tools(self):
+        """Verify parent member addition/removal with size checks."""
+        self.manager.register_tools_context({"att_manager": self.manager})
+
+        # Spawn parent team A and child team B
+        team_a = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team_b = self.manager.create_agent_team(creator=team_a, member_count=3)
+
+        add_tool = team_a.tools["add_team_member"]
+        remove_tool = team_a.tools["remove_team_member"]
+
+        # 1. Try to remove a member when size is at minimum (3) -> should fail
+        res_remove_fail = remove_tool(team_id=team_b.team_id, agent_name=team_b.members[0].name)
+        self.assertIn("must maintain at least 3 members", res_remove_fail)
+
+        # 2. Add a member -> should succeed
+        res_add = add_tool(
+            team_id=team_b.team_id,
+            role_name="QA_Expert",
+            model_name="default",
+            role_description="Performs quality checks",
+            system_instructions="Check test suite thoroughly"
+        )
+        self.assertIn("Successfully added new member", res_add)
+        self.assertEqual(len(team_b.members), 4)
+        new_member = [m for m in team_b.members if m.role == "QA_Expert"][0]
+        self.assertEqual(new_member.name, "Dynamic_QA_Expert")
+
+        # 3. Remove a member now that size is 4 -> should succeed
+        res_remove = remove_tool(team_id=team_b.team_id, agent_name="Dynamic_QA_Expert")
+        self.assertIn("Successfully removed member 'Dynamic_QA_Expert'", res_remove)
+        self.assertEqual(len(team_b.members), 3)
+
+        # 4. Try from a non-parent team B trying to modify itself or another non-child team -> should be blocked
+        other_team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        add_tool_other = other_team.tools["add_team_member"]
+        res_unauthorized = add_tool_other(
+            team_id=team_b.team_id,
+            role_name="Hacker",
+            model_name="default",
+            role_description="Attacks",
+            system_instructions="Hack"
+        )
+        self.assertIn("is not the parent of child", res_unauthorized)
+
+    def test_real_time_status_and_topology_tree(self):
+        """Verify update_team_status progress propagation to topology tree output."""
+        self.manager.register_tools_context({"att_manager": self.manager})
+
+        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        update_status_tool = team.tools["update_team_status"]
+
+        # Initial checks
+        self.assertEqual(team.team_purpose, "Unspecified team purpose")
+        self.assertEqual(team.team_progress, "Not started")
+
+        # Update status
+        res = update_status_tool(purpose="Refactor test suite", progress="80% done")
+        self.assertIn("Successfully updated team purpose", res)
+        self.assertEqual(team.team_purpose, "Refactor test suite")
+        self.assertEqual(team.team_progress, "80% done")
+
+        # Check topology representation
+        tree = self.manager.render_topology_tree()
+        self.assertIn("Purpose: Refactor test suite", tree)
+        self.assertIn("Progress: 80% done", tree)
+
+    def test_membership_voting_system(self):
+        """Verify proposal initiation, casting ballots, abstaining/skipping, automatic execution when all members vote, and retraction."""
+        # Enable membership voting in config
+        config = ATTConfig(enable_membership_voting=True)
+        self.manager.config = config
+        self.manager.register_tools_context({"att_manager": self.manager})
+
+        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        agent1, agent2, agent3 = team.members
+
+        # Settle tools context for individual agents by letting them invoke tools
+        from ai_team_team.tool import get_default_tools
+
+        # Bind tools with caller_node = agent1
+        tools_agent1 = get_default_tools({"att_manager": self.manager}, agent1)
+        initiate_vote = tools_agent1["initiate_membership_vote"]
+        retract_vote = tools_agent1["retract_membership_vote"]
+        cast_vote_agent1 = tools_agent1["cast_vote"]
+
+        # Bind tools with caller_node = agent2
+        tools_agent2 = get_default_tools({"att_manager": self.manager}, agent2)
+        cast_vote_agent2 = tools_agent2["cast_vote"]
+        retract_vote_agent2 = tools_agent2["retract_membership_vote"]
+
+        # Bind tools with caller_node = agent3
+        tools_agent3 = get_default_tools({"att_manager": self.manager}, agent3)
+        cast_vote_agent3 = tools_agent3["cast_vote"]
+
+        # 1. Initiate vote to add a member
+        res_init = initiate_vote(
+            action="add",
+            target="Tester",
+            rationale="Need testing help",
+            initiator_type="individual",
+            proposed_details={
+                "model": "default",
+                "role_description": "Performs testing",
+                "system_instructions": "Test everything"
+            }
+        )
+        self.assertIn("Vote proposal", res_init)
+        
+        # Extract proposal ID from output (typically contains VP-<hex>)
+        import re
+        match = re.search(r"'(VP-[0-9a-fA-F]+)'", res_init)
+        self.assertIsNotNone(match)
+        proposal_id = match.group(1)
+
+        # The proposal should be active, initiator voted Agree
+        self.assertIn(proposal_id, team.proposals)
+        proposal = team.proposals[proposal_id]
+        self.assertEqual(proposal["status"], "active")
+        self.assertIn(agent1.name, proposal["votes"])
+        self.assertEqual(proposal["votes"][agent1.name]["vote"], "Agree")
+
+        # 2. Test retraction authorization: Agent2 tries to retract Agent1's proposal -> should fail
+        res_retract_fail = retract_vote_agent2(proposal_id=proposal_id)
+        self.assertIn("Error: Only the initiator", res_retract_fail)
+        self.assertEqual(proposal["status"], "active")
+
+        # 3. Test retraction by initiator -> should succeed
+        res_retract_success = retract_vote(proposal_id=proposal_id)
+        self.assertIn("Successfully retracted", res_retract_success)
+        self.assertEqual(proposal["status"], "retracted")
+
+        # 4. Initiate a new proposal VP-2
+        res_init2 = initiate_vote(
+            action="add",
+            target="Auditor",
+            rationale="Security audit",
+            initiator_type="individual",
+            proposed_details={
+                "model": "default",
+                "role_description": "Performs security audits",
+                "system_instructions": "Find vulnerabilities"
+            }
+        )
+        match2 = re.search(r"'(VP-[0-9a-fA-F]+)'", res_init2)
+        proposal_id2 = match2.group(1)
+        proposal2 = team.proposals[proposal_id2]
+
+        # 5. Vote: Agent 2 votes Agree, Agent 3 votes Agree
+        # This makes it 3/3 Agree. Since all members voted, it should automatically evaluate and approve the proposal
+        res_vote2 = cast_vote_agent2(proposal_id=proposal_id2, vote="Agree")
+        self.assertIn("Successfully cast vote", res_vote2)
+        self.assertEqual(proposal2["status"], "active") # Still 1 voter remaining (agent 3)
+
+        res_vote3 = cast_vote_agent3(proposal_id=proposal_id2, vote="Agree")
+        self.assertIn("approved", res_vote3)
+        self.assertEqual(proposal2["status"], "approved")
+
+        # Verify that the new member is added
+        self.assertEqual(len(team.members), 4)
+        new_agent = [m for m in team.members if m.role == "Auditor"][0]
+        self.assertEqual(new_agent.name, "Dynamic_Auditor")
+
+        # 6. Test vote rejection: Initiate a proposal to remove the newly added member
+        # This time, we want to reject it. Team now has 4 members: agent1, agent2, agent3, Dynamic_Auditor
+        tools_auditor = get_default_tools({"att_manager": self.manager}, new_agent)
+        cast_vote_auditor = tools_auditor["cast_vote"]
+
+        res_init3 = initiate_vote(
+            action="remove",
+            target="Dynamic_Auditor",
+            rationale="Auditing complete",
+            initiator_type="individual"
+        )
+        match3 = re.search(r"'(VP-[0-9a-fA-F]+)'", res_init3)
+        proposal_id3 = match3.group(1)
+        proposal3 = team.proposals[proposal_id3]
+
+        # agent1 (initiator) voted Agree.
+        # agent2, agent3, Dynamic_Auditor vote Disagree.
+        cast_vote_agent2(proposal_id=proposal_id3, vote="Disagree")
+        cast_vote_agent3(proposal_id=proposal_id3, vote="Disagree")
+        res_final_vote = cast_vote_auditor(proposal_id=proposal_id3, vote="Disagree")
+
+        self.assertIn("rejected", res_final_vote)
+        self.assertEqual(proposal3["status"], "rejected")
+        # Dynamic_Auditor should still be in the team
+        self.assertIn(new_agent, team.members)
 
 if __name__ == "__main__":
     unittest.main()

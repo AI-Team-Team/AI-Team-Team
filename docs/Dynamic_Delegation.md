@@ -62,10 +62,25 @@ For a visual breakdown of sibling communication authorization and inter-team mes
 
 AIs are dynamically equipped with system-wide tools registered centrally:
 
-* **`dispatch_subagent(task: str, team_purpose: str, member_count: int = 3, roles_and_models: dict = None, system_instructions: str = "") -> str`**: Spawns and executes a child dynamic subagent panel, dynamically bound by `max_delegation_depth` and `min_subagent_team_size`.
+* **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, system_instructions: str = "", allow_sibling_talk: bool = False, sibling_talk_rules: str = "") -> str`**: Spawns a recursive child AT under the ATT tree. Each AT (AI-Team) must have at least 3 Agents, specified inside `member_configs` (mapping role names to their model alias, role description, and system instructions).
 * **`delegate_escalation(objective: str, rationale: str) -> str`**: Escalates task objectives upward in the lineage tree to the direct parent.
 * **`set_sibling_talk(child_id: str, allow: bool) -> str`**: Allows parent teams to dynamically authorize sibling peer communication.
-* **`update_team_purpose(new_purpose: str) -> str`**: Allows a team to dynamically update its globally broadcasted `team_purpose`.
-* **`send_peer_message(team_id: str, message: str) -> str`**: Sends a direct message to a peer team's inbox based on the global registry.
+* **`update_team_status(purpose: str, progress: str) -> str`**: Allows a team to dynamically update its globally broadcasted purpose and progress metrics.
+* **`negotiate_peer_talk(target_team_id: str, rationale: str) -> str`**: Requests parent teams to negotiate a cross-lineage communication agreement.
+* **`send_peer_message(team_id: str, message: str) -> str`**: Sends a direct message to a peer team's inbox, subject to sibling rules or parent brokerage agreements.
+* **`add_team_member(team_id: str, role_name: str, model_name: str, role_description: str, system_instructions: str) -> str`**: Allows parent teams to administratively add a new member with custom configurations to a child team.
+* **`remove_team_member(team_id: str, agent_name: str) -> str`**: Allows parent teams to administratively remove a member from a child team, enforcing the minimum team size constraint of 3.
+* **`initiate_membership_vote(action: str, target: str, rationale: str, initiator_type: str = "individual", proposed_details: dict = None) -> str`**: Initiates a democratic membership proposal to add/remove a member.
+* **`cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str`**: Casts a vote ("Agree", "Disagree", or "Abstain") on an active membership proposal.
+* **`retract_membership_vote(proposal_id: str) -> str`**: Allows the initiator of an active proposal to withdraw it.
 * **`request_migration(target_parent_id: str, rationale: str) -> str`**: Requests to migrate the caller's team to a new parent team in the active hierarchy. Migrations are arbitrated by the system critic client, automatically enforce count limits, and dispatch inbox alerts to the affected parents.
 * Custom tools (e.g. database query, semantic search) can be registered dynamically by the host application on `ATTManager`.
+
+## 5. Team Governance & Democratic Voting System
+
+To ensure team autonomy and collaborative membership management, the ATT framework introduces an optional, asynchronous democratic voting system:
+
+* **Optional Activation**: Enabled via `ATTConfig(enable_membership_voting=True)`. By default, it is disabled (`False`).
+* **Proposal Mechanics**: Any agent can call `initiate_membership_vote` to propose adding a new member (defining their role, description, instructions, and model) or removing an existing member.
+* **Unanimous Participation**: The vote remains active and pending in the team's context. A proposal is only resolved and evaluated once **all** active members of the team have explicitly cast their vote (`"Agree"`, `"Disagree"`, or `"Abstain"`).
+* **Consensus Gate**: If all members have voted, the framework calculates the ratio of `"Agree"` votes. A **$\ge 2/3$ majority** of total members is required to approve the proposal. Approved proposals automatically execute their action (creating/appending the new agent or deleting the target agent), while rejected proposals are closed without modification.

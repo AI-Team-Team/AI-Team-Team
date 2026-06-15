@@ -14,11 +14,11 @@ Represents an individual AI specialist equipped with role definitions and genera
 * **Constructor**:
 
   ```python
-  agent = Agent(name: str, role: str, llm_client: Optional[Any] = None)
+  agent = Agent(name: str, role: str, llm_client: Optional[Any] = None, role_description: str = "", system_instructions: str = "")
   ```
 
 * **Methods**:
-  * `launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose") -> AgentTeam`
+  * `launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None) -> AgentTeam`
         Allows any active agent to recursively launch their own child dynamic `AgentTeam` structure.
 
 ### `AgentTeam`
@@ -65,7 +65,7 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
     Registers an auditing hook callback that intercepts specific tool calls before execution.
   * `register_tools_context(context: Dict[str, Any])`
     Registers system resources context (databases, file readers) and automatically binds coordination tools to all teams.
-  * `create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None) -> AgentTeam`
+  * `create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None) -> AgentTeam`
     Spawns a new team of size $N \ge 3$, establishes parent-child lineages, and binds generic/custom tools.
   * `execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`
     Executes a multi-agent debate session, automatically injecting unresolved inbox alerts, and running supervisory transcript audits.
@@ -84,7 +84,9 @@ Configuration options for tuning the ATT multi-agent framework.
       subagent_discussion_rounds: int = 2,
       react_max_steps: int = 5,
       inbox_summarize_threshold_chars: int = 1500,
-      model_registry: Optional[dict] = None
+      model_registry: Optional[dict] = None,
+      max_migrations_per_team_discussion: int = 1,
+      enable_membership_voting: bool = False
   )
   ```
 

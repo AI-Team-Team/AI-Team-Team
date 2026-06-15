@@ -19,7 +19,8 @@ config = ATTConfig(
     react_max_steps: int = 5,
     inbox_summarize_threshold_chars: int = 1500,
     model_registry: Optional[dict] = None,
-    max_migrations_per_team_discussion: int = 1
+    max_migrations_per_team_discussion: int = 1,
+    enable_membership_voting: bool = False
 )
 ```
 
@@ -33,6 +34,7 @@ config = ATTConfig(
 * **`inbox_summarize_threshold_chars`**: The character threshold above which unread inbox alerts are automatically summarized.
 * **`model_registry`**: Mapping of specialized agent roles to specific LLM models or endpoints.
 * **`max_migrations_per_team_discussion`**: The maximum number of hierarchical team migrations allowed for a team during a single discussion session.
+* **`enable_membership_voting`**: Whether to enable the democratic membership voting system for dynamic teams.
 
 ## 👤 `Agent`
 
@@ -43,12 +45,12 @@ Represents an individual AI specialist equipped with role definitions.
 ```python
 from ai_team_team import Agent
 
-agent = Agent(name: str, role: str, llm_client: Optional[Any] = None)
+agent = Agent(name: str, role: str, llm_client: Optional[Any] = None, role_description: str = "", system_instructions: str = "")
 ```
 
 ### Methods
 
-* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose") -> AgentTeam`**
+* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None) -> AgentTeam`**
   Allows this agent to recursively launch a child dynamic `AgentTeam` structure.
 
 ## 👥 `AgentTeam`
@@ -66,7 +68,7 @@ Represents a dynamic team of agents executing discussions and tasks in a parent-
 
 ### Methods
 
-* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose") -> AgentTeam`**
+* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None) -> AgentTeam`**
   Allows this team to recursively spawn a child dynamic sub-team (Level $N+1$).
 
 ## 🏛️ `ATTManager`
@@ -95,7 +97,7 @@ manager = ATTManager(root_ai: Agent, critic_client: Optional[Any] = None, config
   Registers a custom dynamic committee preset (e.g. roles and system prompt).
 * **`register_tools_context(context: Dict[str, Any])`**
   Registers system resources context (databases, file readers) and automatically binds coordination tools to all teams.
-* **`create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified", roles_and_models: Optional[Dict[str, str]] = None) -> AgentTeam`**
+* **`create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None) -> AgentTeam`**
   Dynamically spawns a new recursive Agent Team (AT) with a parent-child relationship.
 * **`execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
   Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits.
