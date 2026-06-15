@@ -916,6 +916,11 @@ class ATTManager:
 
     def negotiate_and_execute_migration(self, team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]:
         """Arbitrates the migration of an AgentTeam using the critic LLM client, updates structure, and broadcasts alerts."""
+        limit = self.config.max_migrations_per_team_discussion
+        current_count = getattr(team, "migration_count", 0)
+        if current_count >= limit:
+            return False, f"Rejected: Cannot request migration. Maximum migrations per discussion session ({limit}) reached."
+
         current_parent = team.parent_team
         current_parent_id = current_parent.team_id if current_parent else "Root AI"
         
@@ -959,6 +964,7 @@ class ATTManager:
                 
                 target_parent.add_child_team(team)
                 team._parent_team = target_parent
+                team.migration_count = current_count + 1
                 
                 # 2. Dispatch notifications
                 if current_parent:

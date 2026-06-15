@@ -26,19 +26,6 @@ The next iterations of the ATT framework focus on:
   * Compile regex with `re.DOTALL` to support multiline argument blocks.
   * Provide an alternative XML-based structured parser (e.g. `<action name="query_db">...</action>`), which models follow with high compliance.
 
-### 1.3 Organizational Restructuring Migration Gates
-
-* **Problem**: `ATTConfig` declares `max_migrations_per_team_discussion = 1`, and `AgentTeam` tracks `migration_count`, but `ATTManager.negotiate_and_execute_migration` fails to validate or increment this counter. Unstable agents could cause endless reorganizational loops.
-* **Solution**:
-  * Add validation check at the beginning of `negotiate_and_execute_migration`:
-
-  ```python
-  if team.migration_count >= self.config.max_migrations_per_team_discussion:
-      return False, "Rejected: Migration limit exceeded for this discussion session."
-  ```
-
-  * Increment `team.migration_count += 1` immediately upon successful migration arbitration.
-
 ## 2. Next-Gen Evolution Path
 
 ### 2.1 Active Permission Gates in Tool Execution

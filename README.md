@@ -311,7 +311,7 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `react_max_steps` | `int` | `5` | The reasoning step limit capped per agent turn to prevent infinite ReAct loops. |
 | `inbox_summarize_threshold_chars` | `int` | `1500` | The text character threshold above which unread inbox alerts are summarized. |
 | `model_registry` | `dict` | `{}` | Mapping of specialized agent roles to specific LLM models or endpoints. |
-| `max_migrations_per_team_discussion` | `int` | `1` | The maximum hierarchy migration requests a team can execute during a single discussion turn. |
+| `max_migrations_per_team_discussion` | `int` | `1` | The maximum hierarchy migration requests a team can execute during a single discussion session. |
 | `enable_membership_voting` | `bool` | `False` | Whether to enable the optional democratic membership voting system. |
 | `llm_max_retries` | `int` | `3` | The maximum retry attempts for LLM generation failures. |
 | `llm_retry_backoff_factor` | `float` | `1.5` | The exponential backoff multiplier for retrying LLM calls. |

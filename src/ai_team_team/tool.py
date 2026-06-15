@@ -539,11 +539,6 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
             
-        limit = att_manager.config.max_migrations_per_team_discussion
-        current_count = getattr(actual_team, "migration_count", 0)
-        if current_count >= limit:
-            return f"Error: Cannot request migration. Maximum migrations per discussion session ({limit}) reached."
-            
         if target_parent_id not in att_manager.teams:
             return f"Error: Target parent team '{target_parent_id}' not found."
             
@@ -562,10 +557,9 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         success, message = att_manager.negotiate_and_execute_migration(actual_team, target_parent, rationale)
         if success:
-            actual_team.migration_count = current_count + 1
             return f"Success: {message}"
         else:
-            return f"Migration Rejected: {message}"
+            return f"Error: Migration Rejected: {message}"
 
     base_tools = {
         "dispatch_subagent": Tool("dispatch_subagent", "Spawns a child AT. Each AT (AI-Team) must have at least 3 Agents. Arguments: task (str), team_purpose (str), member_configs (dict), system_instructions (str), allow_sibling_talk (bool), sibling_talk_rules (str).", dispatch_subagent),
