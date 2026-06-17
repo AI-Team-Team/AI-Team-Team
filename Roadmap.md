@@ -18,14 +18,6 @@ The next iterations of the ATT framework focus on:
   * Transition all execution chains (`execute_team_discussion`, `execute_react_step`, and `generate` adapters) to native Python `asyncio` (`async def` and `await`).
   * Introduce parallel execution blocks where independent agents (such as initial analysts or validation nodes) run their ReAct loops concurrently, significantly reducing response times.
 
-### 1.2 Robust ReAct Action Parser
-
-* **Problem**: The parser relies on the regex `Action:\s*(\w+)\((.*)\)`. High temperature configurations or smaller open-source models often output actions enclosed in Markdown tags (e.g. `Action: ```python query_db(...) ``` `) or formatting containing newlines, causing parser failures and agent loops.
-* **Solution**:
-  * Pre-process LLM outputs to strip Markdown code block fences (e.g., ` ```python ` / ` ``` `) before regex evaluation.
-  * Compile regex with `re.DOTALL` to support multiline argument blocks.
-  * Provide an alternative XML-based structured parser (e.g. `<action name="query_db">...</action>`), which models follow with high compliance.
-
 ## 2. Next-Gen Evolution Path
 
 ### 2.1 Active Permission Gates in Tool Execution

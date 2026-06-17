@@ -395,10 +395,30 @@ class AgentTeam:
                                 manager.on_activity_added(agent.name, "Thought", thought_content)
 
                         # Parse Action
-                        action_match = re.search(r"Action:\s*(\w+)\((.*)\)", response, re.IGNORECASE)
-                        if action_match:
-                            tool_name = action_match.group(1).strip()
-                            tool_args_str = action_match.group(2).strip()
+                        tool_name = None
+                        tool_args_str = None
+
+                        # 1. Try XML-style match
+                        xml_match = re.search(r'<action\s+name="(\w+)"\s*>(.*?)</action>', response, re.DOTALL | re.IGNORECASE)
+                        if xml_match:
+                            tool_name = xml_match.group(1).strip()
+                            tool_args_str = xml_match.group(2).strip()
+                            # Strip code block markers if the model wrapped args inside the XML tag
+                            if tool_args_str.startswith("```") and tool_args_str.endswith("```"):
+                                lines = tool_args_str.splitlines()
+                                if lines[0].startswith("```"):
+                                    lines = lines[1:]
+                                if lines and lines[-1].endswith("```"):
+                                    lines = lines[:-1]
+                                tool_args_str = "\n".join(lines).strip()
+                        else:
+                            # 2. Try standard Action: func(args) match with robust markdown fence support and DOTALL
+                            react_match = re.search(r'Action:\s*(?:```(?:python)?\s*)?(\w+)\((.*?)\)(?:\s*```)?', response, re.DOTALL | re.IGNORECASE)
+                            if react_match:
+                                tool_name = react_match.group(1).strip()
+                                tool_args_str = react_match.group(2).strip()
+
+                        if tool_name is not None:
 
                             def parse_args(args_str):
                                 if not args_str:

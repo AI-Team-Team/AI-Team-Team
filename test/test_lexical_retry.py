@@ -114,5 +114,49 @@ class TestLexicalRetry(unittest.TestCase):
 
         self.assertTrue(anomaly_reported)
 
+    def test_robust_action_parser(self):
+        """Verify that XML-style actions, Markdown fences, and multiline parameter blocks are parsed correctly."""
+        received_args = []
+        received_kwargs = {}
+
+        def mock_tool(*args, **kwargs):
+            nonlocal received_args, received_kwargs
+            received_args = list(args)
+            received_kwargs = kwargs
+            return "Success"
+
+        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team.tools = {
+            "query_db": Tool("query_db", "Query DB", mock_tool)
+        }
+        agent = team.members[0]
+
+        # 1. XML-style Action tag
+        received_args, received_kwargs = [], {}
+        self.mock_client.generate.side_effect = [
+            '<action name="query_db">\nsql_command="SELECT * FROM characters", limit=10\n</action>',
+            'Final Answer: Done'
+        ]
+        team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        self.assertEqual(received_kwargs, {"sql_command": "SELECT * FROM characters", "limit": 10})
+
+        # 2. Markdown Code Block Fences
+        received_args, received_kwargs = [], {}
+        self.mock_client.generate.side_effect = [
+            'Action: ```python\nquery_db(sql_command="SELECT * FROM characters")\n```',
+            'Final Answer: Done'
+        ]
+        team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        self.assertEqual(received_kwargs, {"sql_command": "SELECT * FROM characters"})
+
+        # 3. Multiline Argument Block
+        received_args, received_kwargs = [], {}
+        self.mock_client.generate.side_effect = [
+            'Action: query_db(\n  sql_command="SELECT * FROM characters",\n  limit=5\n)',
+            'Final Answer: Done'
+        ]
+        team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        self.assertEqual(received_kwargs, {"sql_command": "SELECT * FROM characters", "limit": 5})
+
 if __name__ == "__main__":
     unittest.main()

@@ -31,8 +31,12 @@ Agents in dynamic teams resolve tasks inside a structured **Reasoning & Action (
    Final Answer: Timeline conflict found: Iris is dead, contradiction exists.
    ```
 
-2. **Safe Argument Parser**:
-   To prevent parsing crashes when tools accept string arguments that contain commas (e.g., semantic search phrases or SQLite query arguments) or keyword assignments (e.g., `key=value`), the ReAct parser employs a custom lexical tokenizing scanner. This scanner splits arguments by commas only at the outer level (respecting quotes, and nesting structures like parentheses, brackets, and braces). It evaluates arguments using Python's safe literal evaluation (`ast.literal_eval`) with a graceful fallback for unquoted strings, ensuring robust parameter mapping under varying output structures.
+2. **Robust Action & Safe Argument Parser**:
+   To ensure high parsing resilience under varying LLM temperatures or when using smaller models, the ReAct parser supports multiple action parsing strategies:
+   * **Alternative XML Tag Format**: The parser natively extracts actions structured as XML tags, e.g. `<action name="tool_name">arguments</action>`. If the arguments inside the XML block are wrapped in Markdown code fences (e.g., ` ```python ... ``` `), the parser automatically strips them.
+   * **Standard Action Format with Markdown Code Block Stripping**: The parser supports the classic `Action: tool_name(arguments)` pattern and handles wrapping inside Markdown code blocks (e.g., `Action: ```python tool_name(arguments) ``` `).
+   * **Multiline Argument Lists**: Regex patterns are compiled with `re.DOTALL` to support multiline argument inputs.
+   * **Safe Lexical Scanner**: Once the argument string is extracted, a custom character-by-character tokenizing scanner parses individual parameters. This scanner splits arguments by commas only at the top level (ignoring commas within quotes, or nesting structures like parentheses, brackets, and braces). It evaluates arguments using Python's safe literal evaluation (`ast.literal_eval`) with a graceful fallback for unquoted strings, preventing parser crashes when tools accept complex strings (e.g., SQL statements or multi-line configurations).
 
 3. **Hierarchical Topology Map**:
    To support organizational awareness and structural modifications, the ReAct prompt's `identity_header` dynamically injects a rendered indented ASCII tree topology map representing all active teams (`manager.render_topology_tree()`). Agents use this map to discover sibling and peer teams and locate potential migration parents.
