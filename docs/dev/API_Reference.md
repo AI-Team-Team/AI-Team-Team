@@ -125,3 +125,21 @@ Size-aware paginated file reader protecting agent context windows.
     Reads a file. Fallbacks to Outline Warning if the file size exceeds threshold and no line window is provided.
   * `read_file_tail(path: str, line_count: int = 50) -> str`
     Returns the last line_count lines of a file with prepended line numbers.
+
+### `DocumentLibrary`
+
+Represents a team's document database with prefix-based permissions and path traversal protection.
+
+* **Constructor**:
+
+  ```python
+  lib = DocumentLibrary(lib_id: str, name: str, owner_team_id: str, description: str = "", is_public_visible: bool = False, root_dir: Optional[str] = None)
+  ```
+
+* **Properties**:
+  * `root_dir -> str`: Absolute path to the persistent workspace folder (.att_doc_libs/<lib_id>).
+* **Methods**:
+  * `write_file(path: str, content: str)`
+  * `read_file(path: str, start_line: int, end_line: Optional[int]) -> str`
+  * `delete_file(path: str) -> str`
+  * `list_contents(path: str) -> List[str]`

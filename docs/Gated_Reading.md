@@ -91,3 +91,11 @@ class GatedFileReader:
         """
         ...
 ```
+
+## 5. Document Libraries (DocLib)
+
+To enable secure document storage and sharing between agent teams, the framework introduces `DocumentLibrary`:
+
+* **Built-in Storage**: Every spawned `AgentTeam` automatically receives a default document library (root folder: `.att_doc_libs/<lib_id>`) mapped as `team.doc_library`.
+* **Gated Interoperability**: When agents call the `read_library_file` tool, the request is routed through `GatedFileReader`. This ensures files stored in libraries undergo the exact same size gating, line chunking, and outline checks to safeguard the LLM context window.
+* **Access Control List (ACL)**: File access is governed by team-level permissions (`READ` or `WRITE`) registered under matching prefix segments. Sibling or cross-lineage teams can request access by sending peer messages to the library owner.

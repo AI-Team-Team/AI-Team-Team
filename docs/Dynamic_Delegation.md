@@ -64,9 +64,7 @@ For a visual breakdown of sibling communication authorization and inter-team mes
 
 ## 4. Consolidated Autonomy Tools
 
-AIs are dynamically equipped with system-wide tools registered centrally:
-
-* **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, system_instructions: str = "", allow_sibling_talk: bool = False, sibling_talk_rules: str = "") -> str`**: Spawns a recursive child AT under the ATT tree. Each AT (AI-Team) must have at least 3 Agents, specified inside `member_configs` (mapping role names to their model alias, role description, and system instructions).
+* **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, system_instructions: str = "", allow_sibling_talk: bool = False, sibling_talk_rules: str = "", is_public_visible: bool = False, initial_documents: dict = None) -> str`**: Spawns a recursive child AT under the ATT tree. Each AT (AI-Team) must have at least 3 Agents, specified inside `member_configs` (mapping role names to their model alias, role description, and system instructions). Supports optional context passing via `initial_documents` (a map of file paths to content strings pre-populated in the child team's default DocLib).
 * **`delegate_escalation(objective: str, rationale: str) -> str`**: Escalates task objectives upward in the lineage tree to the direct parent.
 * **`set_sibling_talk(child_id: str, allow: bool) -> str`**: Allows parent teams to dynamically authorize sibling peer communication.
 * **`update_team_status(purpose: str, progress: str) -> str`**: Allows a team to dynamically update its globally broadcasted purpose and progress metrics.
@@ -78,6 +76,15 @@ AIs are dynamically equipped with system-wide tools registered centrally:
 * **`cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str`**: Casts a vote ("Agree", "Disagree", or "Abstain") on an active membership proposal.
 * **`retract_membership_vote(proposal_id: str) -> str`**: Allows the initiator of an active proposal to withdraw it.
 * **`request_migration(target_parent_id: str, rationale: str) -> str`**: Requests to migrate the caller's team to a new parent team in the active hierarchy. Migrations are arbitrated by the system critic client, automatically enforce count limits, and dispatch inbox alerts to the affected parents.
+* **`create_doc_library(name: str, description: str, is_public: bool) -> str`**: Creates a new document library owned by the caller's team.
+* **`update_library_metadata(lib_id: str, description: Optional[str], is_public: Optional[bool]) -> str`**: Updates metadata or visibility of a library owned by the caller's team.
+* **`list_public_libraries() -> str`**: Lists all document libraries registered as publicly visible.
+* **`grant_library_permission(lib_id: str, path: str, target_team_id: str, permission: str) -> str`**: Owner team grants READ/WRITE permission to a target team for a path in their library.
+* **`revoke_library_permission(lib_id: str, path: str, target_team_id: str) -> str`**: Owner team revokes permissions.
+* **`write_library_file(lib_id: str, path: str, content: str) -> str`**: Writes content to a file in a library (requires WRITE permission).
+* **`read_library_file(lib_id: str, path: str, start_line: int, end_line: Optional[int]) -> str`**: Reads a file chunk from a library (requires READ permission, checks file-gating).
+* **`delete_library_file(lib_id: str, path: str) -> str`**: Deletes a file or directory in a library (requires WRITE permission).
+* **`list_library_files(lib_id: str, path: str) -> str`**: Lists files and directories under a path in a library (requires READ permission).
 * Custom tools (e.g. database query, semantic search) can be registered dynamically by the host application on `ATTManager`.
 
 ## 5. Team Governance & Democratic Voting System

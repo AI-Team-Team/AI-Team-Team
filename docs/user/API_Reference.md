@@ -54,8 +54,8 @@ agent = Agent(name: str, role: str, llm_client: Optional[Any] = None, role_descr
 
 ### Methods
 
-* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None) -> AgentTeam`**
-  Allows this agent to recursively launch a child dynamic `AgentTeam` structure.
+* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
+  Allows this agent to recursively launch a child dynamic `AgentTeam` structure, passing visibility and initial documents.
 
 ## 👥 `AgentTeam`
 
@@ -67,13 +67,15 @@ Represents a dynamic team of agents executing discussions and tasks in a parent-
 * **`team_purpose`**: `str` - The global purpose/objective of this team.
 * **`depth`**: `int` - The depth level of the team in the lineage hierarchy (e.g., Level 1, Level 2).
 * **`members`**: `List[Agent]` - The list of `Agent` instances assigned to this team.
+* **`doc_library`**: `Optional[DocumentLibrary]` - Resolves the built-in document library for the team.
 * **`parent_team`**: `Optional[AgentTeam]` - Resolves the parent team in the lineage hierarchy.
 * **`child_teams`**: `List[AgentTeam]` - The list of active child teams spawned by this team.
 
 ### Methods
 
-* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None) -> AgentTeam`**
-  Allows this team to recursively spawn a child dynamic sub-team (Level $N+1$).
+* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
+  Allows this team to recursively spawn a child dynamic sub-team (Level $N+1$), propagating visibility and context docs to the subteam's DocLib.
+
 
 ## 🏛️ `ATTManager`
 
@@ -101,8 +103,9 @@ manager = ATTManager(root_ai: Agent, critic_client: Optional[Any] = None, config
   Registers a custom dynamic committee preset (e.g. roles and system prompt).
 * **`register_tools_context(context: Dict[str, Any])`**
   Registers system resources context (databases, file readers) and automatically binds coordination tools to all teams.
-* **`create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None) -> AgentTeam`**
-  Dynamically spawns a new recursive Agent Team (AT) with a parent-child relationship.
+* **`create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
+  Dynamically spawns a new recursive Agent Team (AT) with a parent-child relationship. `is_public_visible` sets library visibility for discovery, and `initial_docs` maps file paths to initial contents to populate in the team's DocLib.
+
 * **`execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
   Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits.
 * **`render_topology_tree() -> str`**
@@ -151,6 +154,44 @@ reader = GatedFileReader(large_threshold_kb: int = 50, max_chunk: int = 100)
   Reads a file. Fallbacks to Outline Warning if the file size exceeds `large_threshold_kb` and no `end_line` is provided. Otherwise, returns a line-numbered paginated chunk capped at `max_chunk` lines.
 * **`read_file_tail(path: str, line_count: int = 50) -> str`**
   Returns the last `line_count` lines of a file with prepended line numbers.
+
+## 📁 `DocumentLibrary`
+
+A collaborative document storage library for Agent Teams, providing persistent directory structure and access controls.
+
+### Constructor
+
+```python
+from ai_team_team import DocumentLibrary
+
+lib = DocumentLibrary(
+    lib_id: str, 
+    name: str, 
+    owner_team_id: str, 
+    description: str = "", 
+    is_public_visible: bool = False,
+    root_dir: Optional[str] = None
+)
+```
+
+### Properties
+
+* **`lib_id`**: `str` - Unique ID of the library (e.g. `DL-AT-abc123`).
+* **`name`**: `str` - Human readable name.
+* **`owner_team_id`**: `str` - The ID of the owner AgentTeam.
+* **`description`**: `str` - Summary of the library content.
+* **`is_public_visible`**: `bool` - True if visible to other teams for discovery.
+
+### Methods
+
+* **`write_file(path: str, content: str)`**
+  Writes content to a relative file path, creating parent directories as needed.
+* **`read_file(path: str, start_line: int = 1, end_line: Optional[int] = None) -> str`**
+  Reads a file, routing through the GatedFileReader for context window protection.
+* **`delete_file(path: str) -> str`**
+  Deletes a file or recursively deletes a directory.
+* **`list_contents(path: str = "/") -> List[str]`**
+  Lists relative file paths and directory paths under the target path.
 
 ## 🔍 `SupervisoryTeam`
 

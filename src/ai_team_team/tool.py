@@ -41,9 +41,11 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
         system_instructions: str = "",
         allow_sibling_talk: bool = False,
-        sibling_talk_rules: str = ""
+        sibling_talk_rules: str = "",
+        is_public_visible: bool = False,
+        initial_documents: Optional[Dict[str, str]] = None
     ) -> str:
-        """Spawns a recursive child AT under the ATT tree. Each AT (AI-Team) must have at least 3 Agents. Arguments: task (str), team_purpose (str), member_configs (dict), system_instructions (str), allow_sibling_talk (bool), sibling_talk_rules (str)"""
+        """Spawns a recursive child AT under the ATT tree. Each AT (AI-Team) must have at least 3 Agents. Arguments: task (str), team_purpose (str), member_configs (dict), system_instructions (str), allow_sibling_talk (bool), sibling_talk_rules (str), is_public_visible (bool), initial_documents (dict - mapping file paths to their content strings to be populated in the child team's default DocLib)"""
         if not att_manager:
             return "Error: ATTManager not available in tools context."
         
@@ -82,7 +84,9 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                 member_count=member_count,
                 system_instructions=system_instructions,
                 team_purpose=team_purpose,
-                member_configs=member_configs
+                member_configs=member_configs,
+                is_public_visible=is_public_visible,
+                initial_docs=initial_documents
             )
             
             # Setup communication rules
@@ -97,6 +101,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             )
         except Exception as e:
             return f"Dispatch Subagent Team Error: {e}"
+
 
     async def delegate_escalation(objective: str, rationale: str) -> str:
         """Escalates objective upward in the ATT lineage tree. Arguments: objective (str), rationale (str)"""
@@ -566,8 +571,252 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         else:
             return f"Error: Migration Rejected: {message}"
 
+    async def create_doc_library(name: str, description: str, is_public: bool = False) -> str:
+        """Creates a new document library owned by the caller's team. Arguments: name (str), description (str), is_public (bool)"""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        
+        from .core import Agent, AgentTeam
+        caller_team = None
+        if isinstance(caller_node, AgentTeam):
+            caller_team = caller_node
+        elif isinstance(caller_node, Agent):
+            for team in att_manager.teams.values():
+                if caller_node in team.members:
+                    caller_team = team
+                    break
+        if not caller_team:
+            return "Error: Could not resolve the active AgentTeam."
+            
+        import uuid
+        lib_id = f"DL-{uuid.uuid4().hex[:6]}"
+        from .doc_library import DocumentLibrary
+        lib = DocumentLibrary(
+            lib_id=lib_id,
+            name=name,
+            owner_team_id=caller_team.team_id,
+            description=description,
+            is_public_visible=is_public
+        )
+        att_manager.libraries[lib_id] = lib
+        return f"Successfully created document library '{name}' with ID '{lib_id}'."
+
+    async def update_library_metadata(lib_id: str, description: Optional[str] = None, is_public: Optional[bool] = None) -> str:
+        """Updates description or visibility of a library owned by the caller's team. Arguments: lib_id (str), description (str, optional), is_public (bool, optional)"""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        if lib_id not in att_manager.libraries:
+            return f"Error: Document library '{lib_id}' not found."
+            
+        lib = att_manager.libraries[lib_id]
+        from .core import Agent, AgentTeam
+        caller_team = None
+        if isinstance(caller_node, AgentTeam):
+            caller_team = caller_node
+        elif isinstance(caller_node, Agent):
+            for team in att_manager.teams.values():
+                if caller_node in team.members:
+                    caller_team = team
+                    break
+        if not caller_team or lib.owner_team_id != caller_team.team_id:
+            return f"Error: Permission denied. Your team does not own library '{lib_id}'."
+            
+        if description is not None:
+            lib.description = description
+        if is_public is not None:
+            lib.is_public_visible = is_public
+        return f"Successfully updated metadata for library '{lib_id}'."
+
+    async def list_public_libraries() -> str:
+        """Lists all document libraries registered as publicly visible. Arguments: none"""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        libs = []
+        for lib in att_manager.libraries.values():
+            if lib.is_public_visible:
+                libs.append(f"- ID: {lib.lib_id} | Name: {lib.name} | Owner: {lib.owner_team_id} | Description: {lib.description}")
+        if not libs:
+            return "No public document libraries found."
+        return "Public Document Libraries:\n" + "\n".join(libs)
+
+    async def grant_library_permission(lib_id: str, path: str, target_team_id: str, permission: str) -> str:
+        """Grants permission ('READ' or 'WRITE') to a target team for a path in a library owned by the caller's team. Arguments: lib_id (str), path (str), target_team_id (str), permission (str)"""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        if lib_id not in att_manager.libraries:
+            return f"Error: Document library '{lib_id}' not found."
+        if target_team_id not in att_manager.teams:
+            return f"Error: Target team '{target_team_id}' not found."
+        if permission not in {"READ", "WRITE"}:
+            return "Error: Permission must be 'READ' or 'WRITE'."
+            
+        lib = att_manager.libraries[lib_id]
+        from .core import Agent, AgentTeam
+        caller_team = None
+        if isinstance(caller_node, AgentTeam):
+            caller_team = caller_node
+        elif isinstance(caller_node, Agent):
+            for team in att_manager.teams.values():
+                if caller_node in team.members:
+                    caller_team = team
+                    break
+        if not caller_team or lib.owner_team_id != caller_team.team_id:
+            return f"Error: Permission denied. Your team does not own library '{lib_id}'."
+            
+        clean_path = "/" + path.strip("/").replace("\\", "/")
+        if lib_id not in att_manager.library_permissions:
+            att_manager.library_permissions[lib_id] = {}
+        if clean_path not in att_manager.library_permissions[lib_id]:
+            att_manager.library_permissions[lib_id][clean_path] = {}
+            
+        att_manager.library_permissions[lib_id][clean_path][target_team_id] = permission
+        return f"Successfully granted '{permission}' permission for path '{clean_path}' in library '{lib_id}' to team '{target_team_id}'."
+
+    async def revoke_library_permission(lib_id: str, path: str, target_team_id: str) -> str:
+        """Revokes all permissions for a target team under a path in a library owned by the caller's team. Arguments: lib_id (str), path (str), target_team_id (str)"""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        if lib_id not in att_manager.libraries:
+            return f"Error: Document library '{lib_id}' not found."
+            
+        lib = att_manager.libraries[lib_id]
+        from .core import Agent, AgentTeam
+        caller_team = None
+        if isinstance(caller_node, AgentTeam):
+            caller_team = caller_node
+        elif isinstance(caller_node, Agent):
+            for team in att_manager.teams.values():
+                if caller_node in team.members:
+                    caller_team = team
+                    break
+        if not caller_team or lib.owner_team_id != caller_team.team_id:
+            return f"Error: Permission denied. Your team does not own library '{lib_id}'."
+            
+        clean_path = "/" + path.strip("/").replace("\\", "/")
+        if lib_id in att_manager.library_permissions and clean_path in att_manager.library_permissions[lib_id]:
+            if target_team_id in att_manager.library_permissions[lib_id][clean_path]:
+                del att_manager.library_permissions[lib_id][clean_path][target_team_id]
+                return f"Successfully revoked permissions for path '{clean_path}' in library '{lib_id}' for team '{target_team_id}'."
+        return f"No permissions found for path '{clean_path}' in library '{lib_id}' for team '{target_team_id}'."
+
+    async def write_library_file(lib_id: str, path: str, content: str) -> str:
+        """Writes content to a file in a library. Requires 'WRITE' permission. Arguments: lib_id (str), path (str), content (str)"""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        if lib_id not in att_manager.libraries:
+            return f"Error: Document library '{lib_id}' not found."
+            
+        from .core import Agent, AgentTeam
+        caller_team = None
+        if isinstance(caller_node, AgentTeam):
+            caller_team = caller_node
+        elif isinstance(caller_node, Agent):
+            for team in att_manager.teams.values():
+                if caller_node in team.members:
+                    caller_team = team
+                    break
+        if not caller_team:
+            return "Error: Could not resolve the active AgentTeam."
+            
+        if not att_manager.check_library_access(caller_team.team_id, lib_id, path, "WRITE"):
+            return f"Error: Permission denied. You do not have 'WRITE' permission for path '{path}' in library '{lib_id}'."
+            
+        try:
+            lib = att_manager.libraries[lib_id]
+            lib.write_file(path, content)
+            return f"Successfully written file '{path}' in library '{lib_id}'."
+        except Exception as e:
+            return f"Error writing file '{path}' in library '{lib_id}': {e}"
+
+    async def read_library_file(lib_id: str, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str:
+        """Reads a file chunk from a library. Requires 'READ' permission. Arguments: lib_id (str), path (str), start_line (int, default 1), end_line (int, optional)"""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        if lib_id not in att_manager.libraries:
+            return f"Error: Document library '{lib_id}' not found."
+            
+        from .core import Agent, AgentTeam
+        caller_team = None
+        if isinstance(caller_node, AgentTeam):
+            caller_team = caller_node
+        elif isinstance(caller_node, Agent):
+            for team in att_manager.teams.values():
+                if caller_node in team.members:
+                    caller_team = team
+                    break
+        if not caller_team:
+            return "Error: Could not resolve the active AgentTeam."
+            
+        if not att_manager.check_library_access(caller_team.team_id, lib_id, path, "READ"):
+            return f"Error: Permission denied. You do not have 'READ' permission for path '{path}' in library '{lib_id}'."
+            
+        try:
+            lib = att_manager.libraries[lib_id]
+            return lib.read_file(path, start_line, end_line)
+        except Exception as e:
+            return f"Error reading file '{path}' in library '{lib_id}': {e}"
+
+    async def delete_library_file(lib_id: str, path: str) -> str:
+        """Deletes a file or directory in a library. Requires 'WRITE' permission. Arguments: lib_id (str), path (str)"""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        if lib_id not in att_manager.libraries:
+            return f"Error: Document library '{lib_id}' not found."
+            
+        from .core import Agent, AgentTeam
+        caller_team = None
+        if isinstance(caller_node, AgentTeam):
+            caller_team = caller_node
+        elif isinstance(caller_node, Agent):
+            for team in att_manager.teams.values():
+                if caller_node in team.members:
+                    caller_team = team
+                    break
+        if not caller_team:
+            return "Error: Could not resolve the active AgentTeam."
+            
+        if not att_manager.check_library_access(caller_team.team_id, lib_id, path, "WRITE"):
+            return f"Error: Permission denied. You do not have 'WRITE' permission for path '{path}' in library '{lib_id}'."
+            
+        try:
+            lib = att_manager.libraries[lib_id]
+            return lib.delete_file(path)
+        except Exception as e:
+            return f"Error deleting path '{path}' in library '{lib_id}': {e}"
+
+    async def list_library_files(lib_id: str, path: str = "/") -> str:
+        """Lists files and directories under a path in a library. Requires 'READ' permission. Arguments: lib_id (str), path (str, default '/')"""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        if lib_id not in att_manager.libraries:
+            return f"Error: Document library '{lib_id}' not found."
+            
+        from .core import Agent, AgentTeam
+        caller_team = None
+        if isinstance(caller_node, AgentTeam):
+            caller_team = caller_node
+        elif isinstance(caller_node, Agent):
+            for team in att_manager.teams.values():
+                if caller_node in team.members:
+                    caller_team = team
+                    break
+        if not caller_team:
+            return "Error: Could not resolve the active AgentTeam."
+            
+        if not att_manager.check_library_access(caller_team.team_id, lib_id, path, "READ"):
+            return f"Error: Permission denied. You do not have 'READ' permission for path '{path}' in library '{lib_id}'."
+            
+        try:
+            lib = att_manager.libraries[lib_id]
+            items = lib.list_contents(path)
+            if not items:
+                return f"Library '{lib_id}' path '{path}' is empty or not a directory."
+            return f"Contents of library '{lib_id}' path '{path}':\n" + "\n".join(items)
+        except Exception as e:
+            return f"Error listing path '{path}' in library '{lib_id}': {e}"
+
     base_tools = {
-        "dispatch_subagent": Tool("dispatch_subagent", "Spawns a child AT. Each AT (AI-Team) must have at least 3 Agents. Arguments: task (str), team_purpose (str), member_configs (dict), system_instructions (str), allow_sibling_talk (bool), sibling_talk_rules (str).", dispatch_subagent),
+        "dispatch_subagent": Tool("dispatch_subagent", "Spawns a child AT. Each AT (AI-Team) must have at least 3 Agents. Arguments: task (str), team_purpose (str), member_configs (dict), system_instructions (str), allow_sibling_talk (bool), sibling_talk_rules (str), is_public_visible (bool), initial_documents (dict - mapping file paths to their content strings to be populated in the child team's default DocLib).", dispatch_subagent),
         "delegate_escalation": Tool("delegate_escalation", "Escalates objective upward in the ATT lineage tree with objective (str) and rationale (str).", delegate_escalation),
         "set_sibling_talk": Tool("set_sibling_talk", "Allows parent teams to dynamically set sibling communication permission for their child team. Arguments: child_id (str), allow (bool).", set_sibling_talk),
         "update_team_purpose": Tool("update_team_purpose", "Updates the purpose string of the caller's team. Arguments: new_purpose (str)", update_team_purpose),
@@ -576,8 +825,18 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         "negotiate_peer_talk": Tool("negotiate_peer_talk", "Requests parents to negotiate a cross-lineage communication channel with a target team. Arguments: target_team_id (str), rationale (str)", negotiate_peer_talk),
         "add_team_member": Tool("add_team_member", "Administratively adds a new member to a child team. Arguments: team_id (str), role_name (str), model_name (str), role_description (str), system_instructions (str)", add_team_member),
         "remove_team_member": Tool("remove_team_member", "Administratively removes a member from a child team. Arguments: team_id (str), agent_name (str)", remove_team_member),
-        "request_migration": Tool("request_migration", "Requests to migrate the caller's team to a new parent team in the hierarchy. Arguments: target_parent_id (str), rationale (str)", request_migration)
+        "request_migration": Tool("request_migration", "Requests to migrate the caller's team to a new parent team in the hierarchy. Arguments: target_parent_id (str), rationale (str)", request_migration),
+        "create_doc_library": Tool("create_doc_library", "Creates a new document library owned by the caller's team. Arguments: name (str), description (str), is_public (bool)", create_doc_library),
+        "update_library_metadata": Tool("update_library_metadata", "Updates description or visibility of a library owned by the caller's team. Arguments: lib_id (str), description (str, optional), is_public (bool, optional)", update_library_metadata),
+        "list_public_libraries": Tool("list_public_libraries", "Lists all document libraries registered as publicly visible. Arguments: none", list_public_libraries),
+        "grant_library_permission": Tool("grant_library_permission", "Grants permission ('READ' or 'WRITE') to a target team for a path in a library owned by the caller's team. Arguments: lib_id (str), path (str), target_team_id (str), permission (str)", grant_library_permission),
+        "revoke_library_permission": Tool("revoke_library_permission", "Revokes all permissions for a target team under a path in a library owned by the caller's team. Arguments: lib_id (str), path (str), target_team_id (str)", revoke_library_permission),
+        "write_library_file": Tool("write_library_file", "Writes content to a file in a library. Requires 'WRITE' permission. Arguments: lib_id (str), path (str), content (str)", write_library_file),
+        "read_library_file": Tool("read_library_file", "Reads a file chunk from a library. Requires 'READ' permission. Arguments: lib_id (str), path (str), start_line (int, default 1), end_line (int, optional)", read_library_file),
+        "delete_library_file": Tool("delete_library_file", "Deletes a file or directory in a library. Requires 'WRITE' permission. Arguments: lib_id (str), path (str)", delete_library_file),
+        "list_library_files": Tool("list_library_files", "Lists files and directories under a path in a library. Requires 'READ' permission. Arguments: lib_id (str), path (str, default '/')", list_library_files)
     }
+
 
     if att_manager and att_manager.config.enable_membership_voting:
         base_tools["initiate_membership_vote"] = Tool("initiate_membership_vote", "Initiates a democratic vote to add or remove a team member. Arguments: action (str - 'add' or 'remove'), target (str - role name for 'add', agent name for 'remove'), rationale (str), initiator_type (str - 'individual' or 'AT'), proposed_details (dict - containing 'model', 'role_description', 'system_instructions' if action is 'add')", initiate_membership_vote)

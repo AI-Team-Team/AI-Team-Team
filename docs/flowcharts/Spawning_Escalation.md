@@ -17,7 +17,9 @@ flowchart TD
     
     SpawnMembers --> CreateTeam["Instantiate AgentTeam with creator link"]
     
-    CreateTeam --> ToolsContext{"Tools Context registered\nin ATTManager?"}
+    CreateTeam --> CreateDocLib["Create & register built-in DocumentLibrary\nPopulate any initial_docs"]
+    
+    CreateDocLib --> ToolsContext{"Tools Context registered\nin ATTManager?"}
     
     ToolsContext -- "Yes" --> GetDefaultTools["Call get_default_tools(tools_context, Team)"]
     GetDefaultTools --> BindTools["Bind Tools map onto Team.tools"]

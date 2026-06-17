@@ -43,6 +43,7 @@ Many thanks to Gemini and GPT for their help!
 * **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A 3-AI Supervisory Team audits dialogue transcripts for logical deadlocks, circular reasoning, and anomalies, recursively escalating alerts up the ancestry lineage.
 * **UI/Logging Decoupling**: Exposes clear runtime event hooks (`on_status_change`, `on_activity_added`, `on_log_append`) to update terminal dashboards and write logs without framework pollution.
 * **[Gated Context Protection](docs/Gated_Reading.md)**: Employs `GatedFileReader` to paginate file reading, cap line window requests, and fallback to outline warnings on large documents.
+* **[Collaborative Document Library (DocLib)](docs/Gated_Reading.md#5-document-libraries-doclib)**: Equips each Agent Team with a built-in document library to manage nested directories/files, with fine-grained team-level permissions (READ/WRITE), discoverability listing, and dynamic parent-to-child context passing.
 
 ## 📦 Installation
 
@@ -82,6 +83,14 @@ graph TD
         SubTeamA1 -->|dispatch_subagent| SubTeamN[Sub-Agent Team N - Level N]
     end
 
+    %% Document Library
+    TeamA --- DocLibA[(DocLib A)]
+    SubTeamA1 --- DocLibA1[(DocLib A.1)]
+    SubTeamN --- DocLibN[(DocLib N)]
+    TeamB --- DocLibB[(DocLib B)]
+    
+    DocLibA1 -.->|Request access / Grant READ| DocLibB
+
     %% Communication Permission Gating
     SubTeamN -.->|negotiate_communication| TeamB
     Broker[NegotiationBroker] -->|Evaluate Sibling Rules & Lineage Contracts| SubTeamN
@@ -103,6 +112,10 @@ graph TD
     style SubTeamN fill:#f3e5f5,stroke:#ab47bc,stroke-width:2px;
     style Supervisor fill:#ffe0b2,stroke:#f57c00,stroke-width:2px;
     style Voting fill:#ffebee,stroke:#e53935,stroke-width:2px;
+    style DocLibA fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    style DocLibA1 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    style DocLibN fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    style DocLibB fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
 ```
 
 ## 🛠️ Getting Started

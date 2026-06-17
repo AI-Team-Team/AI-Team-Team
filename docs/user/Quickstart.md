@@ -302,3 +302,61 @@ Action: dispatch_subagent(
     }
 )
 ```
+
+## 📂 8. Collaborative Document Library (DocLib)
+
+Every Agent Team features a built-in document library (`DocLib`) to store documents, pass context down, and share specs across teams.
+
+### Spawning with Context Documents
+
+To bridge the context gap when spawning a child team, you can pass initial files directly into the child's default DocLib during `dispatch_subagent`:
+
+```plaintext
+Thought: I need a subagent team to write a report. I will pass the design outline directly to their library.
+Action: dispatch_subagent(
+    task="Draft the report using design_outline.md as reference.",
+    team_purpose="Report Draft",
+    initial_documents={
+        "design_outline.md": "# Design Outline\n1. Intro\n2. Design Specs\n3. Conclusion"
+    }
+)
+```
+
+### Library Discovery & Metadata
+
+An Agent Team can publish its library globally (allowing other teams to find its name and description) by setting visibility to public:
+
+```python
+# Create a team with globally discoverable library
+team = manager.create_agent_team(
+    creator=root_agent,
+    member_count=3,
+    is_public_visible=True
+)
+```
+
+Other teams can search for discoverable libraries at runtime:
+
+- `Action: list_public_libraries()`
+
+### Granting and Requesting Access (ACL)
+
+By default, a team's DocLib is private and only accessible by its own members. To share a document or folder, the owner team can grant permissions:
+
+- **Grant access**: `Action: grant_library_permission(lib_id="DL-AT-abc123", path="/specs", target_team_id="AT-xyz789", permission="READ")`
+- **Revoke access**: `Action: revoke_library_permission(lib_id="DL-AT-abc123", path="/specs", target_team_id="AT-xyz789")`
+
+Agent teams can request access by sending a peer message to the owner team:
+
+- `Action: send_peer_message(team_id="AT-abc123", message="Please grant READ permission to team AT-xyz789 for library DL-AT-abc123 path /specs.")`
+
+### File Operations (Gated Context Protection)
+
+Agent teams can use standard file operations:
+
+- **Write file**: `Action: write_library_file(lib_id="DL-AT-abc123", path="/specs/guide.txt", content="New guide text")`
+- **Read file**: `Action: read_library_file(lib_id="DL-AT-abc123", path="/specs/guide.txt", start_line=1, end_line=50)`
+- **List files**: `Action: list_library_files(lib_id="DL-AT-abc123", path="/")`
+- **Delete file**: `Action: delete_library_file(lib_id="DL-AT-abc123", path="/specs/guide.txt")`
+
+All `read_library_file` operations are automatically audited by the `GatedFileReader`. If a team member attempts to read a file exceeding 50 KB without specifying a line chunk window, the operation will be rejected and return an Outline Warning, protecting the LLM context from pollution.

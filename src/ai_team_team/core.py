@@ -1,5 +1,7 @@
 import asyncio
+import os
 import inspect
+
 import uuid
 import logging
 import time
@@ -8,6 +10,8 @@ import re
 import ast
 from typing import List, Dict, Optional, Any, Tuple, Callable
 from .tool import Tool
+from .doc_library import DocumentLibrary
+
 
 class ATTException(Exception):
     """Base exception for ATT framework errors."""
@@ -142,7 +146,9 @@ class Agent:
         system_instructions: str = "",
         team_purpose: str = "Unspecified team purpose",
         roles_and_models: Optional[Dict[str, str]] = None,
-        member_configs: Optional[Dict[str, Dict[str, Any]]] = None
+        member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        is_public_visible: bool = False,
+        initial_docs: Optional[Dict[str, str]] = None
     ) -> 'AgentTeam':
         """Allows this agent to launch a dynamic sub-team (Level $N$)."""
         child = manager.create_agent_team(
@@ -152,13 +158,16 @@ class Agent:
             system_instructions=system_instructions,
             team_purpose=team_purpose,
             roles_and_models=roles_and_models,
-            member_configs=member_configs
+            member_configs=member_configs,
+            is_public_visible=is_public_visible,
+            initial_docs=initial_docs
         )
         for team in manager.teams.values():
             if self in team.members:
                 child.chapter_num = team.chapter_num
                 break
         return child
+
 
 class AgentTeam:
     def __init__(self, creator: Any, preset_name: str, team_purpose: str = "Unspecified team purpose"):
@@ -182,6 +191,8 @@ class AgentTeam:
         self.tools: Dict[str, Tool] = {}
         self._parent_team: Optional['AgentTeam'] = None
         self.migration_count = 0
+        self.doc_library: Optional[DocumentLibrary] = None
+
 
     @property
     def parent_team(self) -> Optional['AgentTeam']:
@@ -207,7 +218,9 @@ class AgentTeam:
         system_instructions: str = "",
         team_purpose: str = "Unspecified team purpose",
         roles_and_models: Optional[Dict[str, str]] = None,
-        member_configs: Optional[Dict[str, Dict[str, Any]]] = None
+        member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        is_public_visible: bool = False,
+        initial_docs: Optional[Dict[str, str]] = None
     ) -> 'AgentTeam':
         """Allows any active team to recursively launch their own child AT."""
         child = manager.create_agent_team(
@@ -217,10 +230,13 @@ class AgentTeam:
             system_instructions=system_instructions,
             team_purpose=team_purpose,
             roles_and_models=roles_and_models,
-            member_configs=member_configs
+            member_configs=member_configs,
+            is_public_visible=is_public_visible,
+            initial_docs=initial_docs
         )
         child.chapter_num = self.chapter_num
         return child
+
 
     def receive_message(self, message: Dict[str, Any]):
         self.message_inbox.append(message)
@@ -745,6 +761,9 @@ class ATTManager:
         self.supervisor = SupervisoryTeam(root_ai, ManagerCriticClientAdapter(self), manager=self)
         self.logger = logging.getLogger("ATTManager")
         self.tools_context: Dict[str, Any] = {}
+        self.libraries: Dict[str, DocumentLibrary] = {}
+        self.library_permissions: Dict[str, Dict[str, Dict[str, str]]] = {} # lib_id -> path -> team_id -> permission
+
         
         # Public Tool registries
         self.global_tools: Dict[str, Tool] = {}
@@ -818,8 +837,11 @@ class ATTManager:
         system_instructions: str = "",
         team_purpose: str = "Unspecified team purpose",
         roles_and_models: Optional[Dict[str, str]] = None,
-        member_configs: Optional[Dict[str, Dict[str, Any]]] = None
+        member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        is_public_visible: bool = False,
+        initial_docs: Optional[Dict[str, str]] = None
     ) -> AgentTeam:
+
         """Dynamically spawns a new recursive Agent Team (AT)."""
         if member_configs:
             member_count = len(member_configs)
@@ -899,6 +921,26 @@ class ATTManager:
             
         self.teams[team.team_id] = team
         
+        # Instantiate and associate default built-in DocLib for the team
+        lib_id = f"DL-{team.team_id}"
+        lib_name = f"{team.team_id} Built-in Library"
+        lib_desc = f"Default document library for team {team.team_id}."
+        lib = DocumentLibrary(
+            lib_id=lib_id,
+            name=lib_name,
+            owner_team_id=team.team_id,
+            description=lib_desc,
+            is_public_visible=is_public_visible
+        )
+        self.libraries[lib_id] = lib
+        team.doc_library = lib
+        
+        # Write initial_docs if any
+        if initial_docs:
+            for file_path, content in initial_docs.items():
+                lib.write_file(file_path, content)
+
+        
         if isinstance(creator, AgentTeam):
             creator.add_child_team(team)
         elif isinstance(creator, Agent):
@@ -920,6 +962,48 @@ class ATTManager:
                 if creator in team.members:
                     return team
         return None
+        
+    def check_library_access(self, team_id: str, lib_id: str, path: str, required_permission: str) -> bool:
+        """
+        Checks if a team has the required permission ('READ' or 'WRITE') for a path in a DocLib.
+        Owner of the library always has 'WRITE' (which includes 'READ') for all paths.
+        """
+        if lib_id not in self.libraries:
+            return False
+        lib = self.libraries[lib_id]
+        if lib.owner_team_id == team_id:
+            return True
+            
+        # Check explicit permissions
+        if lib_id not in self.library_permissions:
+            return False
+            
+        # Find prefix/parent path matches.
+        clean_path = "/" + path.strip("/").replace("\\", "/")
+        if clean_path == "/":
+            parts = ["/"]
+        else:
+            parts = []
+            current = clean_path
+            while current and current != "/":
+                parts.append(current)
+                current = os.path.dirname(current)
+            parts.append("/")
+            
+        # Check permissions for each segment
+        for p in parts:
+            if p in self.library_permissions[lib_id]:
+                team_perms = self.library_permissions[lib_id][p]
+                if team_id in team_perms:
+                    perm = team_perms[team_id]
+                    if required_permission == "READ":
+                        if perm in {"READ", "WRITE"}:
+                            return True
+                    elif required_permission == "WRITE":
+                        if perm == "WRITE":
+                            return True
+        return False
+
 
     def render_topology_tree(self) -> str:
         """Renders the active hierarchical agent team lineage as an indented tree."""

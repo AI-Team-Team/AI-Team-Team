@@ -16,7 +16,7 @@ To understand specific systems in detail, please refer to the following document
 ### 🛠️ System Specifications & Dev Docs
 
 1. **[Hierarchical Dynamic Delegation](Dynamic_Delegation.md)**: Explains the recursive `Agent` and `AgentTeam` lineages (Level 0 Root AI spawning Level 1 ATs, which recursively spawn deeper sub-teams of Level $N$), ReAct execution loops with safe literal evaluation, and the lineage escalation channels.
-2. **[Gated Context Protection & File Reading](Gated_Reading.md)**: Details the size-aware `GatedFileReader`, outline sampling fallbacks for files exceeding 50 KB, paginated line chunking, and streaming tail log reads.
+2. **[Gated Context Protection & File Reading](Gated_Reading.md)**: Details the size-aware `GatedFileReader`, Outline Warning fallbacks, paginated line chunking, and the built-in collaborative `DocumentLibrary` (DocLib) storage system.
 3. **[Supervisor Auditor Team](Supervisory_Team.md)**: Details the dynamic **3-AI Supervisory Team** (Integrity, Continuity, and Deadlock Auditors) which monitors dialogue transcripts for circular deadlocks and performs recursive lineage parent escalations.
 4. **[Developer Testing & Mocking Guide](dev/testing.md)**: Guidelines for writing unit tests and mocking sequence responses.
 5. **[Developer API Reference](dev/API_Reference.md)**: Reference listing system internals and execution logic.
@@ -51,9 +51,11 @@ The ATT Topology transitions AI agents from passive context-consumers to active,
          ┌────────────────────────┐   ┌────────────────────────┐
          │    Agent Team (AT)     │   │    Agent Team (AT)     │
          │      (Size N >= 3)     │   │      (Size N >= 3)     │
+         │ ┌────────────────────┐ │   │ ┌────────────────────┐ │
+         │ │ Document Library   │ │   │ │ Document Library   │ │
+         │ └────────────────────┘ │   │ └────────────────────┘ │
          │ ┌────────────────────┐ │   └────────────────────────┘
          │ │ Democratic Voting  │ │
-         │ │   (Threshold 2/3)  │ │
          │ └────────────────────┘ │
          └────────────────────────┘
 ```

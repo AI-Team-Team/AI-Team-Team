@@ -24,14 +24,18 @@ flowchart TD
     Task["Run Dynamic Committee debate or ReAct task"] --> RootNode["1. Instantiate Root AI (Level 0)"]
     
     RootNode --> Spawning{"2. Spawn dynamic Agent Team (AT)?"}
-    Spawning -- "Yes" --> SpawningCheck["Create AgentTeam (N >= 3)\nValidate member_configs / roles\nBind Centralized Tools context"]
+    Spawning -- "Yes" --> SpawningCheck["Create AgentTeam (N >= 3)\nValidate member_configs / roles\nBind Centralized Tools context\nInstantiate default DocLib"]
     
     SpawningCheck --> ToolCall{"3. Agent executes ReAct step?"}
     
     ToolCall -- "Action: tool(args)" --> SafeParser["Parse args using ast.literal_eval"]
     SafeParser --> ExecTool["Execute bound tool"]
     
-    ToolCall -- "Read File" --> GatedFileReader["GatedFileReader Gated Check"]
+    ToolCall -- "Library File Access" --> DocLibPermission{"Has READ/WRITE permission?"}
+    DocLibPermission -- "No" --> Denied["Return Permission Denied"]
+    DocLibPermission -- "Yes (Read)" --> GatedFileReader["GatedFileReader Gated Check"]
+    DocLibPermission -- "Yes (Write/Delete)" --> ExecDoc["Modify library files"]
+    
     GatedFileReader -- "File exceeds 50KB and No Slice" --> Outline["Return File Outline Sample"]
     GatedFileReader -- "Safe Size OR Window" --> Chunk["Return Paginated Lines Chunk"]
     

@@ -15,6 +15,7 @@ class LLMClientProto(Protocol):
 from .core import Agent, AgentTeam, ATTManager, ATTConfig, ATTException, LLMGenerationError
 from .tool import Tool
 from .gated_reader import GatedFileReader
+from .doc_library import DocumentLibrary
 
 __all__ = [
     "Agent",
@@ -26,4 +27,5 @@ __all__ = [
     "LLMClientProto",
     "ATTException",
     "LLMGenerationError",
+    "DocumentLibrary",
 ]
