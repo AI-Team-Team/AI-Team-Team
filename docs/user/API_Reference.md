@@ -170,7 +170,7 @@ Protocol definition for integration of custom LLM backends (adapters).
 from typing import Optional, Protocol
 
 class LLMClientProto(Protocol):
-    def generate(
+    async def generate(
         self,
         prompt: str,
         system_instruction: Optional[str] = None,

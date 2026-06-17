@@ -129,7 +129,7 @@ manager = ATTManager(root_ai=root_agent, config=config)
 
 # 4. Register a global generator callback handler
 # All LLM invocation logic is delegated here, keeping the framework keyless and SDK-independent
-def my_handler(
+async def my_handler(
     model_name: str,
     prompt: str,
     system_instruction: Optional[str] = None,
@@ -151,7 +151,7 @@ To integrate custom LLM backends (e.g., Google GenAI, OpenAI, Anthropic, or loca
 from typing import Optional, Protocol
 
 class LLMClientProto(Protocol):
-    def generate(
+    async def generate(
         self,
         prompt: str,
         system_instruction: Optional[str] = None,

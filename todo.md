@@ -6,13 +6,11 @@ Any resolved issues should not be stored in this document.
 
 ## In Progress
 
-1. **Async/Await Execution Optimization**: Refactor `ATTManager.execute_team_discussion` and `SupervisoryTeam` consensus audits to run steps concurrently where possible, reducing total debate latency.
-2. **Cross-Lineage Broker Mode**: Implement full support for rule-gated cross-lineage communication channels in the `NegotiationBroker`.
+1. **Cross-Lineage Broker Mode**: Implement full support for rule-gated cross-lineage communication channels in the `NegotiationBroker`.
 
 ## Known Issues
 
-1. **ReAct Step Cap Latency**: When executing long ReAct step loops, single-threaded execution blocks parent agents synchronously, leading to latency overhead in deep lineages.
-2. **Transcripts Token Overhead**: Passing full, multi-turn transcripts to the 3-AI Supervisory Team for consensus auditing increases token consumption on long debate sessions. Needs summary compression thresholds.
+1. **Transcripts Token Overhead**: Passing full, multi-turn transcripts to the 3-AI Supervisory Team for consensus auditing increases token consumption on long debate sessions. Needs summary compression thresholds.
 
 ## Future Plans
 

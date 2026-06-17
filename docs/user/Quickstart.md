@@ -35,7 +35,7 @@ The adapter class must implement a `generate` method with the following signatur
 from typing import Optional, Any
 
 class MyLLMClient:
-    def generate(
+    async def generate(
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
@@ -80,7 +80,7 @@ config = ATTConfig(
 root_agent = Agent(name="Root_AI", role="Architect")
 manager = ATTManager(root_ai=root_agent, config=config)
 
-def my_generator_handler(
+async def my_generator_handler(
     model_name: str,
     prompt: str,
     system_instruction: Optional[str] = None,
@@ -235,7 +235,7 @@ manager.register_model("openai-123", {
 
 # 2. Register a single global callback handler to execute LLM calls
 # The host application keeps full control of API Keys, endpoint routing, and SDKs.
-def my_generator_handler(
+async def my_generator_handler(
     model_name: str,
     prompt: str,
     system_instruction: Optional[str] = None,
@@ -247,12 +247,12 @@ def my_generator_handler(
     real_name = config.get("model_name") if config else model_name
 
     if real_name == "gemini-3.5-flash":
-        return call_gemini_sdk(prompt, system_instruction, temperature, require_json)
+        return await call_gemini_sdk(prompt, system_instruction, temperature, require_json)
     elif real_name == "gpt-5.5":
-        return call_openai_sdk(prompt, system_instruction, temperature, require_json)
+        return await call_openai_sdk(prompt, system_instruction, temperature, require_json)
     
     # Fallback default model
-    return call_default_sdk(prompt, system_instruction, require_json)
+    return await call_default_sdk(prompt, system_instruction, require_json)
 
 manager.register_generator_handler(my_generator_handler)
 ```

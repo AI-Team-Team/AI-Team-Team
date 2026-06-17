@@ -6,21 +6,11 @@ This document outlines the design blueprints, architectural optimizations, and n
 
 The next iterations of the ATT framework focus on:
 
-1. **Concurrency & RT Reduction**: Resolving synchronous ReAct blocking bottlenecks using async execution.
-2. **Robustness & Security Gating**: Hardening parser resilience, isolating exceptions, and enforcing organizational migration limits.
+1. **Robustness & Security Gating**: Hardening parser resilience, isolating exceptions, and enforcing organizational migration limits.
 
-## 1. Core Architectural Optimizations
+## 1. Next-Gen Evolution Path
 
-### 1.1 Async/Await ReAct Loops (Concurrency)
-
-* **Problem**: Currently, the discussion loop inside `execute_team_discussion` and `execute_react_step` is entirely synchronous and single-threaded. In multi-agent panels, this leads to $N \times R \times S$ (Members $\times$ Rounds $\times$ Steps) sequential blocking LLM requests, causing latency overheads of several minutes.
-* **Solution**:
-  * Transition all execution chains (`execute_team_discussion`, `execute_react_step`, and `generate` adapters) to native Python `asyncio` (`async def` and `await`).
-  * Introduce parallel execution blocks where independent agents (such as initial analysts or validation nodes) run their ReAct loops concurrently, significantly reducing response times.
-
-## 2. Next-Gen Evolution Path
-
-### 2.1 Active Permission Gates in Tool Execution
+### 1.1 Active Permission Gates in Tool Execution
 
 * **Blue-sky Concept**: Ensure agents operate strictly within the communication bounds defined by their parent teams.
 * **Design**:
