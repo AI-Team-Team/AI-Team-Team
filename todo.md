@@ -17,3 +17,4 @@ Any resolved issues should not be stored in this document.
 1. **Visual Lineage Dashboard**: Build a lightweight web-based viewer to render the active dynamic Agent Team lineages tree, agent roles, real-time thinking states, and debate transcripts.
 2. **Token Budget Circuit Breakers**: Implement token and financial cost tracking directly in the ReAct step executor, throwing cost limit anomalies to the Supervisory Team for graceful fallback.
 3. **Human-in-the-Loop Interception Hook**: Extend the tool auditor callback system to support asynchronous human approval prompts before executing destructive or high-cost tools.
+4. **SQLAlchemy ORM Migration**: Transition the SQLite-backed state snapshotting layer to use SQLAlchemy ORM. This will replace raw parameters SQL strings with structured Python objects, greatly improving schema maintainability and readability.

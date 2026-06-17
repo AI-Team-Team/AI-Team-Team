@@ -44,6 +44,7 @@ Many thanks to Gemini and GPT for their help!
 * **UI/Logging Decoupling**: Exposes clear runtime event hooks (`on_status_change`, `on_activity_added`, `on_log_append`) to update terminal dashboards and write logs without framework pollution.
 * **[Gated Context Protection](docs/Gated_Reading.md)**: Employs `GatedFileReader` to paginate file reading, cap line window requests, and fallback to outline warnings on large documents.
 * **[Collaborative Document Library (DocLib)](docs/Gated_Reading.md#5-document-libraries-doclib)**: Equips each Agent Team with a built-in document library to manage nested directories/files, with fine-grained team-level permissions (READ/WRITE), discoverability listing, and dynamic parent-to-child context passing.
+* **[SQLite State Snapshotting & Recovery](docs/State_Persistence.md)**: Auto-saves active team topologies, lineages, inboxes, proposals, broker tunnels, and Document Libraries (including files/directories) into SQLite on any state changes, enabling seamless crash-recovery and resume capabilities.
 
 ## 📦 Installation
 
@@ -137,10 +138,15 @@ config = ATTConfig(
 # 2. Setup Root Agent (client is dynamically resolved if omitted)
 root_agent = Agent(name="Root_AI", role="Architect")
 
-# 3. Create Manager (critic client is optional, falls back to handler callback if None)
-manager = ATTManager(root_ai=root_agent, config=config)
+# 3. Create Manager with SQLite State Snapshotting enabled
+# All actions, tool calls, and debates will auto-save to this file
+manager = ATTManager(root_ai=root_agent, config=config, db_path="att_state.db")
 
-# 4. Register a global generator callback handler
+# 4. (Optional) Resume from a previous session or crash
+# if os.path.exists("att_state.db"):
+#     manager.load_state("att_state.db")
+
+# 5. Register a global generator callback handler
 # All LLM invocation logic is delegated here, keeping the framework keyless and SDK-independent
 async def my_handler(
     model_name: str,

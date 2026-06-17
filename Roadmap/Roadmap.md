@@ -26,11 +26,10 @@ The next iterations of the ATT framework focus on:
   * Implement symmetric rule evaluation (e.g. `allow_all`, `allow_team`, `allow_parent`, `allow_purpose`) and Critic-based dynamic arbitration.
   * For full architectural details, see the detailed design document: [Cross-Lineage Broker Mode Design Plan](Cross_Lineage_Broker_Mode.md).
 
-### 3. State Persistence and Workflow Recovery (State Snapshotting)
+### 3. State Persistence and Workflow Recovery (State Snapshotting) [COMPLETED]
 
-* **Context:** Currently, all team structures (`manager.teams`), member configurations, message inboxes, and historical proposals are strictly stored in memory.
-* **Problem:** Multi-agent collaboration usually involves long-running workflows. If the program crashes due to API rate limits, OOM (Out of Memory) errors, or unexpected interruptions, the execution progress and state of the entire topology tree will be completely lost.
-* **Action Item:** Implement a serialization interface (e.g., `manager.save_state()` and `manager.load_state()`). Export the tree hierarchy of `AgentTeam`, `team_purpose`, execution progress, and message inboxes as a JSON file. This will enable pause/resume capabilities and allow large-scale AI networks to be restored across different sessions or machines.
+* **Context:** Previously, all team structures, memory queues, inboxes, and historical proposals were strictly stored in memory and lost on crash.
+* **Solution:** Implemented SQLite-backed database persistence via `manager.save_state()` and `manager.load_state()`. The framework serializes the active topology tree, parent-child lineages, agent message queues (multi-turn histories), and Document Library directories/files seamlessly. Auto-save triggers automatically on all state modifications (debates, tool calls, migrations).
 
 ### 4. The "Passive Inbox" Trap for Asynchronous Escalations
 
