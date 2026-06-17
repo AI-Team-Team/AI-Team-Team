@@ -1,3 +1,5 @@
+import asyncio
+import inspect
 import uuid
 import logging
 import time
@@ -15,7 +17,7 @@ class LLMGenerationError(ATTException):
     """Raised when LLM generation fails after all retry attempts."""
     pass
 
-def generate_with_retry(
+async def generate_with_retry(
     llm_client: Any,
     prompt: str,
     system_instruction: Optional[str] = None,
@@ -29,20 +31,22 @@ def generate_with_retry(
     logger = logging.getLogger("ATT.Core")
     for attempt in range(retries):
         try:
-            return llm_client.generate(
+            result = await llm_client.generate(
                 prompt=prompt,
                 system_instruction=system_instruction,
                 temperature=temperature,
                 require_json=require_json
             )
+            return result
         except Exception as e:
             last_ex = e
             if attempt == retries - 1:
                 break
             sleep_time = backoff_factor ** attempt
             logger.warning(f"LLM generation failed (attempt {attempt+1}/{retries}): {e}. Retrying in {sleep_time:.2f}s...")
-            time.sleep(sleep_time)
+            await asyncio.sleep(sleep_time)
     raise LLMGenerationError(f"LLM generation failed after {retries} attempts: {last_ex}") from last_ex
+
 
 class HandlerClientAdapter:
     """Wraps a global generator handler callback to conform to LLMClientProto."""
@@ -50,14 +54,14 @@ class HandlerClientAdapter:
         self.model_name = model_name
         self.handler = handler
 
-    def generate(
+    async def generate(
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
         temperature: float = 0.3,
         require_json: bool = False
     ) -> str:
-        return self.handler(
+        return await self.handler(
             model_name=self.model_name,
             prompt=prompt,
             system_instruction=system_instruction,
@@ -70,7 +74,7 @@ class ManagerCriticClientAdapter:
     def __init__(self, manager: 'ATTManager'):
         self.manager = manager
 
-    def generate(
+    async def generate(
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
@@ -78,14 +82,14 @@ class ManagerCriticClientAdapter:
         require_json: bool = False
     ) -> str:
         if self.manager.critic_client:
-            return self.manager.critic_client.generate(
+            return await self.manager.critic_client.generate(
                 prompt=prompt,
                 system_instruction=system_instruction,
                 temperature=temperature,
                 require_json=require_json
             )
         if self.manager.generator_handler:
-            return self.manager.generator_handler(
+            return await self.manager.generator_handler(
                 model_name="critic",
                 prompt=prompt,
                 system_instruction=system_instruction,
@@ -222,7 +226,7 @@ class AgentTeam:
         self.message_inbox.append(message)
         self.logger.info(f"Team {self.team_id} received message of type '{message.get('type')}' from '{message.get('from')}'")
 
-    def execute_react_step(
+    async def execute_react_step(
         self,
         agent: Agent,
         prompt: str,
@@ -345,14 +349,14 @@ class AgentTeam:
 
                         retries = manager.config.llm_max_retries if manager else 3
                         backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
-                        response = generate_with_retry(
+                        response = (await generate_with_retry(
                             llm_client=agent.llm_client,
                             prompt=full_prompt,
                             system_instruction=react_system_instruction,
                             temperature=0.3,
                             retries=retries,
                             backoff_factor=backoff
-                        ).strip()
+                        )).strip()
 
                         self.logger.info(f"Agent {agent.name} ReAct step {step+1} response:\n{response}")
 
@@ -559,13 +563,17 @@ class AgentTeam:
 
                                 # Audit execution if an auditor is registered
                                 if manager and tool_name in manager.tool_auditors:
-                                    approved, audit_reason = manager.tool_auditors[tool_name](*args, **kwargs)
+                                    auditor = manager.tool_auditors[tool_name]
+                                    if inspect.iscoroutinefunction(auditor):
+                                        approved, audit_reason = await auditor(*args, **kwargs)
+                                    else:
+                                        approved, audit_reason = await asyncio.to_thread(auditor, *args, **kwargs)
                                     if not approved:
                                         observation = f"Error: Tool execution rejected by auditor: {audit_reason}"
                                     else:
-                                        observation = tool_obj(*args, **kwargs)
+                                        observation = await tool_obj(*args, **kwargs)
                                 else:
-                                    observation = tool_obj(*args, **kwargs)
+                                    observation = await tool_obj(*args, **kwargs)
                                 
                                 self.status_map[agent.name] = "Thinking..."
                                 if manager and manager.on_status_change:
@@ -626,14 +634,14 @@ class AgentTeam:
                 try:
                     retries = manager.config.llm_max_retries if manager else 3
                     backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
-                    response = generate_with_retry(
+                    response = (await generate_with_retry(
                         llm_client=agent.llm_client,
                         prompt=prompt,
                         system_instruction=full_system_instruction,
                         temperature=0.3,
                         retries=retries,
                         backoff_factor=backoff
-                    ).strip()
+                    )).strip()
                     
                     if manager and manager.on_log_append:
                         log_content = (
@@ -679,7 +687,7 @@ class NegotiationBroker:
         self.logger = logging.getLogger("NegotiationBroker")
         self.peer_talk_agreements = set() # Set of Tuple[str, str] (sender_id, recipient_id)
 
-    def negotiate_communication(self, sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool:
+    async def negotiate_communication(self, sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool:
         sender_parent = sender.parent_team or self.manager.find_parent_team(sender)
         recipient_parent = recipient.parent_team or self.manager.find_parent_team(recipient)
 
@@ -697,7 +705,7 @@ class NegotiationBroker:
         self.logger.warning(f"Communication denied between {sender.team_id} and {recipient.team_id}. No active agreement exists.")
         return False
 
-    def establish_peer_agreement(self, sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool:
+    async def establish_peer_agreement(self, sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool:
         sender_parent = sender.parent_team or self.manager.find_parent_team(sender)
         recipient_parent = recipient.parent_team or self.manager.find_parent_team(recipient)
 
@@ -706,13 +714,13 @@ class NegotiationBroker:
             return False
 
         self.logger.info(f"Cross-lineage peer talk negotiation requested between {sender.team_id} and {recipient.team_id}.")
-        success = self._run_parent_negotiation_loop(sender_parent, recipient_parent, mode)
+        success = await self._run_parent_negotiation_loop(sender_parent, recipient_parent, mode)
         if success:
             self.peer_talk_agreements.add((sender.team_id, recipient.team_id))
             return True
         return False
 
-    def _run_parent_negotiation_loop(self, p1: AgentTeam, p2: AgentTeam, mode: str) -> bool:
+    async def _run_parent_negotiation_loop(self, p1: AgentTeam, p2: AgentTeam, mode: str) -> bool:
         self.logger.info(f"Parents {p1.team_id} and {p2.team_id} are negotiating communication channel (mode: {mode})...")
         if mode in {"proxied", "indirect", "rule_gated"}:
             self.logger.info("Negotiation loop succeeded: communication contract established.")
@@ -934,7 +942,7 @@ class ATTManager:
             
         return "\n".join(lines)
 
-    def negotiate_and_execute_migration(self, team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]:
+    async def negotiate_and_execute_migration(self, team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]:
         """Arbitrates the migration of an AgentTeam using the critic LLM client, updates structure, and broadcasts alerts."""
         limit = self.config.max_migrations_per_team_discussion
         current_count = getattr(team, "migration_count", 0)
@@ -961,7 +969,7 @@ class ATTManager:
         )
         
         try:
-            response = generate_with_retry(
+            response = await generate_with_retry(
                 llm_client=self.critic_client,
                 prompt=arbitration_prompt,
                 system_instruction="You are a strict, objective Systems Architect Arbiter. Evaluate organizational restructuring proposals.",
@@ -1018,8 +1026,12 @@ class ATTManager:
             self.logger.error(f"Migration arbitration error: {e}")
             return False, f"Arbitration error: {e}"
 
-    def execute_team_discussion(self, team: AgentTeam, prompt: str, rounds: int = 2) -> str:
-        """Executes a multi-agent debate session inside the AT, monitored by the Supervisor."""
+    async def execute_team_discussion(self, team: AgentTeam, prompt: str, rounds: int = 2) -> str:
+        """Executes a multi-agent debate session inside the AT, monitored by the Supervisor.
+        
+        Agents within the same round execute concurrently via asyncio.gather.
+        Between rounds, dialog history is injected so agents can build on previous outputs.
+        """
         team.migration_count = 0
         self.logger.info(f"Executing discussion in team {team.team_id} (rounds={rounds})...")
         
@@ -1035,7 +1047,7 @@ class ATTManager:
                 self.logger.info("Inbox context too large, summarizing before injection...")
                 summary_prompt = f"Summarize the following system alerts and escalations concisely:\n\n{raw_inbox_text}"
                 try:
-                    raw_inbox_text = generate_with_retry(
+                    raw_inbox_text = await generate_with_retry(
                         llm_client=self.critic_client,
                         prompt=summary_prompt,
                         system_instruction="You are a strict system summarizer. Compress alerts while keeping critical facts and failures.",
@@ -1055,31 +1067,51 @@ class ATTManager:
             team.message_inbox = []
 
         dialog_history = []
-        full_prompt = f"{prompt}{inbox_context}"
+        base_prompt = f"{prompt}{inbox_context}"
         
         for r in range(1, rounds + 1):
-            for agent in team.members:
-                self.logger.info(f"Agent {agent.name} thinking...")
-                try:
-                    final_answer = team.execute_react_step(
-                        agent=agent, 
-                        prompt=full_prompt, 
-                        system_instruction=team.system_instructions,
-                        max_steps=self.config.react_max_steps,
-                        manager=self
-                    )
-                    dialog_history.append(f"{agent.name}: {final_answer}")
-                except ATTException as e:
-                    self.logger.error(f"Failed to execute discussion step due to ATT error: {e}")
-                    self.supervisor.report_anomaly(team, f"LLM client invocation error: {e}", self)
-                    raise e
+            # Build round prompt with accumulated dialog history from previous rounds
+            if dialog_history:
+                history_text = "\n".join(dialog_history)
+                round_prompt = (
+                    f"{base_prompt}\n\n"
+                    f"### PREVIOUS DISCUSSION\n"
+                    f"{history_text}\n\n"
+                    f"Continue the discussion. Build on or challenge previous arguments."
+                )
+            else:
+                round_prompt = base_prompt
+
+            # Execute all agents in this round concurrently
+            async def _run_agent(agent):
+                return await team.execute_react_step(
+                    agent=agent,
+                    prompt=round_prompt,
+                    system_instruction=team.system_instructions,
+                    max_steps=self.config.react_max_steps,
+                    manager=self
+                )
+
+            tasks = [_run_agent(agent) for agent in team.members]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for agent, result in zip(team.members, results):
+                if isinstance(result, ATTException):
+                    self.logger.error(f"Failed to execute discussion step due to ATT error: {result}")
+                    await self.supervisor.report_anomaly(team, f"LLM client invocation error: {result}", self)
+                    raise result
+                elif isinstance(result, Exception):
+                    self.logger.error(f"Agent {agent.name} encountered an error: {result}")
+                    dialog_history.append(f"{agent.name}: Error: {result}")
+                else:
+                    dialog_history.append(f"{agent.name}: {result}")
 
         transcript = "\n".join(dialog_history)
         
         # Run supervisory audit
-        is_healthy, reason = self.supervisor.audit_team_dialog(team, transcript)
+        is_healthy, reason = await self.supervisor.audit_team_dialog(team, transcript)
         if not is_healthy:
-            self.supervisor.report_anomaly(team, reason, self)
+            await self.supervisor.report_anomaly(team, reason, self)
             
         # Log debate transcript using logger callback
         if self.on_log_append:

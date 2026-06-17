@@ -16,7 +16,7 @@ class SupervisoryTeam:
         ]
         self.logger = logging.getLogger("SupervisoryTeam")
 
-    def audit_team_dialog(self, team: AgentTeam, dialog_transcript: str) -> Tuple[bool, str]:
+    async def audit_team_dialog(self, team: AgentTeam, dialog_transcript: str) -> Tuple[bool, str]:
         """
         Evaluates dialogue transcript efficiency inside an AT.
         Returns (is_healthy, reason).
@@ -37,7 +37,7 @@ class SupervisoryTeam:
         try:
             retries = self.manager.config.llm_max_retries if (self.manager and self.manager.config) else 3
             backoff = self.manager.config.llm_retry_backoff_factor if (self.manager and self.manager.config) else 1.5
-            response = generate_with_retry(
+            response = await generate_with_retry(
                 llm_client=self.critic_client,
                 prompt=audit_prompt,
                 system_instruction="You are a strict, objective Supervisory Auditor. Evaluate communication effectiveness.",
@@ -57,7 +57,7 @@ class SupervisoryTeam:
             self.logger.warning(f"Supervisory audit failed, defaulting to healthy: {e}")
             return True, f"Audit failed: {e}"
 
-    def report_anomaly(self, failed_team: AgentTeam, reason: str, manager: Any):
+    async def report_anomaly(self, failed_team: AgentTeam, reason: str, manager: Any):
         """
         Escalates anomaly up the lineage tree by reporting to the direct parent.
         If the parent is not found, escalates directly to the root AI (Level 0).

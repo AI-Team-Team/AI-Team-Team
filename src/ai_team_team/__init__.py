@@ -2,7 +2,7 @@ from typing import Protocol, Optional
 
 class LLMClientProto(Protocol):
     """Protocol defining the standard interface for LLM client generation."""
-    def generate(
+    async def generate(
         self,
         prompt: str,
         system_instruction: Optional[str] = None,

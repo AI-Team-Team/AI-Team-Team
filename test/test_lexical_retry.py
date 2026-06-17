@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 
 # Setup paths
 CURRENT_DIR = os.path.dirname(__file__)
@@ -12,15 +12,15 @@ if SRC_DIR not in sys.path:
 
 from ai_team_team import ATTConfig, ATTManager, Agent, Tool, ATTException, LLMGenerationError
 
-class TestLexicalRetry(unittest.TestCase):
+class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.mock_client = MagicMock()
-        self.mock_client.generate.return_value = '{"is_healthy": true, "reason": "Approved"}'
+        self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Approved"}')
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
         self.config = ATTConfig(llm_max_retries=2, llm_retry_backoff_factor=0.01) # fast retry for test
         self.manager = ATTManager(root_ai=self.root_ai, critic_client=self.mock_client, config=self.config)
 
-    def test_lexical_argument_parsing_with_commas(self):
+    async def test_lexical_argument_parsing_with_commas(self):
         """Verify that tool arguments containing commas inside quotes are parsed correctly."""
         received_args = []
         received_kwargs = {}
@@ -42,7 +42,7 @@ class TestLexicalRetry(unittest.TestCase):
             'Final Answer: Done'
         ]
         agent = team.members[0]
-        team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
         self.assertEqual(received_kwargs, {"sql": "SELECT name, age FROM users", "limit": 5})
         self.assertEqual(received_args, [])
 
@@ -51,7 +51,7 @@ class TestLexicalRetry(unittest.TestCase):
             'Thought: Run tool.\nAction: query_db(configs={"Planner": {"model": "default"}, "Writer": {"model": "default"}})',
             'Final Answer: Done'
         ]
-        team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
         self.assertEqual(received_kwargs, {
             "configs": {
                 "Planner": {"model": "default"},
@@ -59,12 +59,12 @@ class TestLexicalRetry(unittest.TestCase):
             }
         })
 
-    def test_configurable_retry_mechanism_success(self):
+    async def test_configurable_retry_mechanism_success(self):
         """Verify that LLM client generation retries upon failure and succeeds when it eventually works."""
         call_count = 0
 
         class FlakyClient:
-            def generate(self, prompt, system_instruction=None, temperature=0.3, require_json=False):
+            async def generate(self, prompt, system_instruction=None, temperature=0.3, require_json=False):
                 nonlocal call_count
                 call_count += 1
                 if call_count < 2:
@@ -82,14 +82,14 @@ class TestLexicalRetry(unittest.TestCase):
         # Replace flaky agent in the team
         team.members[0] = agent
 
-        res = team.execute_react_step(agent, "run", "inst", max_steps=2, manager=manager)
+        res = await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=manager)
         self.assertEqual(res, "Worked after retry")
         self.assertEqual(call_count, 2) # 1 fail + 1 success
 
-    def test_exception_isolation_propagation(self):
+    async def test_exception_isolation_propagation(self):
         """Verify that permanent LLM failures raise LLMGenerationError and escalate anomaly without polluting history."""
         class DeadClient:
-            def generate(self, prompt, system_instruction=None, temperature=0.3, require_json=False):
+            async def generate(self, prompt, system_instruction=None, temperature=0.3, require_json=False):
                 raise RuntimeError("Permanent API Error")
 
         dead = DeadClient()
@@ -102,19 +102,19 @@ class TestLexicalRetry(unittest.TestCase):
         anomaly_reported = False
         original_report = manager.supervisor.report_anomaly
 
-        def mock_report_anomaly(failed_team, reason, mgr):
+        async def mock_report_anomaly(failed_team, reason, mgr):
             nonlocal anomaly_reported
             anomaly_reported = True
-            original_report(failed_team, reason, mgr)
+            await original_report(failed_team, reason, mgr)
 
         manager.supervisor.report_anomaly = mock_report_anomaly
 
         with self.assertRaises(LLMGenerationError):
-            manager.execute_team_discussion(team, "run", rounds=1)
+            await manager.execute_team_discussion(team, "run", rounds=1)
 
         self.assertTrue(anomaly_reported)
 
-    def test_robust_action_parser(self):
+    async def test_robust_action_parser(self):
         """Verify that XML-style actions, Markdown fences, and multiline parameter blocks are parsed correctly."""
         received_args = []
         received_kwargs = {}
@@ -137,7 +137,7 @@ class TestLexicalRetry(unittest.TestCase):
             '<action name="query_db">\nsql_command="SELECT * FROM characters", limit=10\n</action>',
             'Final Answer: Done'
         ]
-        team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
         self.assertEqual(received_kwargs, {"sql_command": "SELECT * FROM characters", "limit": 10})
 
         # 2. Markdown Code Block Fences
@@ -146,7 +146,7 @@ class TestLexicalRetry(unittest.TestCase):
             'Action: ```python\nquery_db(sql_command="SELECT * FROM characters")\n```',
             'Final Answer: Done'
         ]
-        team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
         self.assertEqual(received_kwargs, {"sql_command": "SELECT * FROM characters"})
 
         # 3. Multiline Argument Block
@@ -155,7 +155,7 @@ class TestLexicalRetry(unittest.TestCase):
             'Action: query_db(\n  sql_command="SELECT * FROM characters",\n  limit=5\n)',
             'Final Answer: Done'
         ]
-        team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
         self.assertEqual(received_kwargs, {"sql_command": "SELECT * FROM characters", "limit": 5})
 
 if __name__ == "__main__":

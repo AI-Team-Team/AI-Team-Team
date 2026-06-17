@@ -1,3 +1,5 @@
+import asyncio
+import inspect
 import logging
 from typing import Dict, Any, Optional, Callable, List, Tuple
 
@@ -10,9 +12,12 @@ class Tool:
         self.description = description
         self.func = func
 
-    def __call__(self, *args, **kwargs) -> str:
+    async def __call__(self, *args, **kwargs) -> str:
         try:
-            res = self.func(*args, **kwargs)
+            if inspect.iscoroutinefunction(self.func):
+                res = await self.func(*args, **kwargs)
+            else:
+                res = await asyncio.to_thread(self.func, *args, **kwargs)
             return str(res)
         except Exception as e:
             from .core import ATTException
@@ -30,7 +35,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
     """
     att_manager = context.get("att_manager")
 
-    def dispatch_subagent(
+    async def dispatch_subagent(
         task: str,
         team_purpose: str,
         member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -85,7 +90,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             if sibling_talk_rules:
                 child_team.communication_rules["rules"].append(sibling_talk_rules)
 
-            return att_manager.execute_team_discussion(
+            return await att_manager.execute_team_discussion(
                 child_team,
                 task,
                 rounds=config.subagent_discussion_rounds
@@ -93,7 +98,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         except Exception as e:
             return f"Dispatch Subagent Team Error: {e}"
 
-    def delegate_escalation(objective: str, rationale: str) -> str:
+    async def delegate_escalation(objective: str, rationale: str) -> str:
         """Escalates objective upward in the ATT lineage tree. Arguments: objective (str), rationale (str)"""
         if not att_manager:
             return "Error: ATTManager not available in tools context."
@@ -127,7 +132,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         except Exception as e:
             return f"Escalation Error: {e}"
 
-    def set_sibling_talk(child_id: str, allow: bool = True) -> str:
+    async def set_sibling_talk(child_id: str, allow: bool = True) -> str:
         """Sets sibling talk permission for a child team. Arguments: child_id (str), allow (bool)"""
         if not att_manager:
             return "Error: ATTManager not available in tools context."
@@ -157,7 +162,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         child.communication_rules["allow_sibling_talk"] = bool(allow)
         return f"Successfully set sibling talk for child team '{child_id}' to {allow}."
 
-    def update_team_purpose(new_purpose: str) -> str:
+    async def update_team_purpose(new_purpose: str) -> str:
         """Updates the purpose string of the caller's team. Arguments: new_purpose (str)"""
         from .core import Agent, AgentTeam
         actual_team = None
@@ -175,7 +180,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         actual_team.team_purpose = new_purpose
         return f"Successfully updated team purpose from '{old_purpose}' to '{new_purpose}'."
 
-    def update_team_status(purpose: str, progress: str) -> str:
+    async def update_team_status(purpose: str, progress: str) -> str:
         """Updates the purpose and progress string of the caller's team. Arguments: purpose (str), progress (str)"""
         from .core import Agent, AgentTeam
         actual_team = None
@@ -193,7 +198,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         actual_team.team_progress = progress
         return f"Successfully updated team purpose to '{purpose}' and progress to '{progress}'."
 
-    def send_peer_message(team_id: str, message: str) -> str:
+    async def send_peer_message(team_id: str, message: str) -> str:
         """Sends a message to the inbox of a peer team using their Team ID. Arguments: team_id (str), message (str)"""
         if not att_manager:
             return "Error: ATTManager not available."
@@ -216,7 +221,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return "Error: Could not resolve the active AgentTeam."
 
         # Check sibling or peer communication permission
-        allowed = att_manager.broker.negotiate_communication(actual_team, target)
+        allowed = await att_manager.broker.negotiate_communication(actual_team, target)
         if not allowed:
             return "Error: Permission Denied. Cross-lineage channel must be negotiated via parents first."
             
@@ -228,7 +233,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         })
         return f"Message successfully delivered to team '{team_id}'."
 
-    def negotiate_peer_talk(target_team_id: str, rationale: str) -> str:
+    async def negotiate_peer_talk(target_team_id: str, rationale: str) -> str:
         """Requests parents to negotiate a cross-lineage communication channel with a target team. Arguments: target_team_id (str), rationale (str)"""
         if not att_manager:
             return "Error: ATTManager not available."
@@ -250,13 +255,13 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
             
-        success = att_manager.broker.establish_peer_agreement(actual_team, target)
+        success = await att_manager.broker.establish_peer_agreement(actual_team, target)
         if success:
             return f"Success: Cross-lineage peer channel established with team '{target_team_id}'."
         else:
             return f"Negotiation Rejected: Parents could not agree on establishing communication with team '{target_team_id}'."
 
-    def add_team_member(team_id: str, role_name: str, model_name: str, role_description: str, system_instructions: str) -> str:
+    async def add_team_member(team_id: str, role_name: str, model_name: str, role_description: str, system_instructions: str) -> str:
         """Administratively adds a new member to a child team. Arguments: team_id (str), role_name (str), model_name (str), role_description (str), system_instructions (str)"""
         if not att_manager:
             return "Error: ATTManager not available."
@@ -303,7 +308,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         child.members.append(new_agent)
         return f"Successfully added new member '{new_agent.name}' (Role: {role_name}) to team '{team_id}'."
 
-    def remove_team_member(team_id: str, agent_name: str) -> str:
+    async def remove_team_member(team_id: str, agent_name: str) -> str:
         """Administratively removes a member from a child team. Arguments: team_id (str), agent_name (str)"""
         if not att_manager:
             return "Error: ATTManager not available."
@@ -344,7 +349,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         child.members.remove(target_agent)
         return f"Successfully removed member '{agent_name}' from team '{team_id}'."
 
-    def initiate_membership_vote(
+    async def initiate_membership_vote(
         action: str,
         target: str,
         rationale: str,
@@ -395,7 +400,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         actual_team.proposals[vp_id] = proposal
         return f"Vote proposal '{vp_id}' successfully initiated. Other members must vote using 'cast_vote'."
 
-    def cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str:
+    async def cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str:
         """Casts a ballot on an active proposal. Arguments: proposal_id (str), vote (str - 'Agree', 'Disagree', or 'Abstain'), public (bool), rationale (str)"""
         if not att_manager or not att_manager.config.enable_membership_voting:
             return "Error: Membership voting is disabled."
@@ -488,7 +493,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                 
         return f"Successfully cast vote on proposal '{proposal_id}'."
 
-    def retract_membership_vote(proposal_id: str) -> str:
+    async def retract_membership_vote(proposal_id: str) -> str:
         """Withdraws an active proposal. Only the initiator can retract. Arguments: proposal_id (str)"""
         if not att_manager or not att_manager.config.enable_membership_voting:
             return "Error: Membership voting is disabled."
@@ -522,7 +527,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         prop["status"] = "retracted"
         return f"Successfully retracted proposal '{proposal_id}'."
 
-    def request_migration(target_parent_id: str, rationale: str) -> str:
+    async def request_migration(target_parent_id: str, rationale: str) -> str:
         """Requests to migrate the caller's team to a new parent team. Arguments: target_parent_id (str), rationale (str)"""
         if not att_manager:
             return "Error: ATTManager not available."
@@ -555,7 +560,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if is_descendant(actual_team, target_parent_id):
             return "Error: Cannot migrate a team under its own descendant (would create a cycle)."
             
-        success, message = att_manager.negotiate_and_execute_migration(actual_team, target_parent, rationale)
+        success, message = await att_manager.negotiate_and_execute_migration(actual_team, target_parent, rationale)
         if success:
             return f"Success: {message}"
         else:
