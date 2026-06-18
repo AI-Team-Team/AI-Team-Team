@@ -18,6 +18,21 @@ from .exceptions import ATTException
 from .utils import generate_with_retry
 from .adapters import ManagerDefaultClientAdapter, HandlerClientAdapter
 
+from ai_team_team.database.session import get_session
+from ai_team_team.database.models import (
+    Base,
+    ManagerConfigModel,
+    AgentModel,
+    AgentMessageModel,
+    TeamModel,
+    TeamInboxModel,
+    TeamProposalModel,
+    BrokerAgreementModel,
+    LibraryModel,
+    LibraryPermissionModel,
+    DocLibFileModel
+)
+
 class ATTManager:
     """Master controller managing the overall ATT (AI Team Team) topology."""
     def __init__(self, root_ai: Agent, config: Optional[ATTConfig] = None, db_path: Optional[str] = None):
@@ -517,146 +532,30 @@ class ATTManager:
             self.save_state()
 
     def save_state(self, db_path: Optional[str] = None):
-        """Serializes the entire manager topology, agents, teams, libraries, etc. to SQLite."""
+        """Serializes the entire manager topology, agents, teams, libraries, etc. to SQLite using SQLAlchemy ORM."""
         target_path = db_path or self.db_path
         if not target_path:
             return
 
         try:
-            conn = sqlite3.connect(target_path)
-            try:
-                # Disable Foreign Keys during save to allow arbitrary insertion order
-                conn.execute("PRAGMA foreign_keys = OFF;")
-                
-                # Create Tables
-                conn.execute("""
-                CREATE TABLE IF NOT EXISTS manager_config (
-                    config_key TEXT PRIMARY KEY,
-                    config_value TEXT
-                );
-                """)
-                conn.execute("""
-                CREATE TABLE IF NOT EXISTS agents (
-                    name TEXT PRIMARY KEY,
-                    role TEXT,
-                    role_description TEXT,
-                    system_instructions TEXT,
-                    model_alias TEXT,
-                    last_context TEXT
-                );
-                """)
-                conn.execute("""
-                CREATE TABLE IF NOT EXISTS agent_messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    agent_name TEXT,
-                    role TEXT,
-                    content TEXT,
-                    created_at REAL,
-                    FOREIGN KEY(agent_name) REFERENCES agents(name) ON DELETE CASCADE
-                );
-                """)
-                conn.execute("""
-                CREATE TABLE IF NOT EXISTS teams (
-                    team_id TEXT PRIMARY KEY,
-                    preset_name TEXT,
-                    team_purpose TEXT,
-                    team_progress TEXT,
-                    depth INTEGER,
-                    chapter_num INTEGER,
-                    parent_team_id TEXT,
-                    migration_count INTEGER,
-                    creator_type TEXT,
-                    creator_id TEXT,
-                    communication_rules TEXT,
-                    status_map TEXT,
-                    system_instructions TEXT
-                );
-                """)
-                conn.execute("""
-                CREATE TABLE IF NOT EXISTS team_members (
-                    team_id TEXT,
-                    agent_name TEXT,
-                    PRIMARY KEY(team_id, agent_name),
-                    FOREIGN KEY(team_id) REFERENCES teams(team_id) ON DELETE CASCADE,
-                    FOREIGN KEY(agent_name) REFERENCES agents(name) ON DELETE CASCADE
-                );
-                """)
-                conn.execute("""
-                CREATE TABLE IF NOT EXISTS team_inbox (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    team_id TEXT,
-                    sender TEXT,
-                    msg_type TEXT,
-                    payload TEXT,
-                    created_at REAL,
-                    FOREIGN KEY(team_id) REFERENCES teams(team_id) ON DELETE CASCADE
-                );
-                """)
-                conn.execute("""
-                CREATE TABLE IF NOT EXISTS team_proposals (
-                    proposal_id TEXT PRIMARY KEY,
-                    team_id TEXT,
-                    action TEXT,
-                    target TEXT,
-                    initiator_type TEXT,
-                    initiator_name TEXT,
-                    rationale TEXT,
-                    proposed_details TEXT,
-                    votes TEXT,
-                    status TEXT,
-                    FOREIGN KEY(team_id) REFERENCES teams(team_id) ON DELETE CASCADE
-                );
-                """)
-                conn.execute("""
-                CREATE TABLE IF NOT EXISTS broker_agreements (
-                    sender_team_id TEXT,
-                    recipient_team_id TEXT,
-                    PRIMARY KEY(sender_team_id, recipient_team_id)
-                );
-                """)
-                conn.execute("""
-                CREATE TABLE IF NOT EXISTS libraries (
-                    lib_id TEXT PRIMARY KEY,
-                    name TEXT,
-                    owner_team_id TEXT,
-                    description TEXT,
-                    is_public_visible INTEGER
-                );
-                """)
-                conn.execute("""
-                CREATE TABLE IF NOT EXISTS library_permissions (
-                    lib_id TEXT,
-                    path TEXT,
-                    team_id TEXT,
-                    permission TEXT,
-                    PRIMARY KEY(lib_id, path, team_id)
-                );
-                """)
-                conn.execute("""
-                CREATE TABLE IF NOT EXISTS doc_lib_files (
-                    lib_id TEXT,
-                    path TEXT,
-                    content TEXT,
-                    PRIMARY KEY(lib_id, path),
-                    FOREIGN KEY(lib_id) REFERENCES libraries(lib_id) ON DELETE CASCADE
-                );
-                """)
-
-                # Clear Existing Data
+            from sqlalchemy import text
+            with get_session(target_path, disable_fks=True) as session:
+                # 1. Clear Existing Data
                 tables = [
                     "doc_lib_files", "library_permissions", "libraries", "broker_agreements",
                     "team_proposals", "team_inbox", "team_members", "teams", "agent_messages", "agents", "manager_config"
                 ]
                 for t in tables:
-                    conn.execute(f"DELETE FROM {t};")
+                    session.execute(text(f"DELETE FROM {t};"))
 
-                # 1. Save Configs
+                # 2. Save Configs
                 att_config_data = json.dumps(self.config.__dict__)
-                conn.execute("INSERT INTO manager_config (config_key, config_value) VALUES (?, ?);", ("att_config", att_config_data))
+                session.add(ManagerConfigModel(config_key="att_config", config_value=att_config_data))
                 if self.root_ai:
-                    conn.execute("INSERT INTO manager_config (config_key, config_value) VALUES (?, ?);", ("root_ai_name", self.root_ai.name))
+                    session.add(ManagerConfigModel(config_key="root_ai_name", config_value=self.root_ai.name))
 
-                # 2. Save Agents
+                # 3. Save Agents
+                agent_models_map = {}
                 for agent in self.agents.values():
                     model_alias = None
                     if agent.llm_client:
@@ -667,20 +566,29 @@ class ATTManager:
                             model_alias = str(agent.llm_client.model_name)
                         elif hasattr(agent.llm_client, "manager") and not isinstance(agent.llm_client.manager, Mock):
                             model_alias = "default"
-                    
+
                     last_ctx_json = json.dumps(agent.last_context) if agent.last_context else None
-                    conn.execute(
-                        "INSERT INTO agents (name, role, role_description, system_instructions, model_alias, last_context) VALUES (?, ?, ?, ?, ?, ?);",
-                        (agent.name, agent.role, getattr(agent, "role_description", ""), getattr(agent, "system_instructions", ""), model_alias, last_ctx_json)
+                    agent_model = AgentModel(
+                        name=agent.name,
+                        role=agent.role,
+                        role_description=getattr(agent, "role_description", ""),
+                        system_instructions=getattr(agent, "system_instructions", ""),
+                        model_alias=model_alias,
+                        last_context=last_ctx_json
                     )
+                    session.add(agent_model)
+                    agent_models_map[agent.name] = agent_model
 
                     for idx, msg in enumerate(agent.messages):
-                        conn.execute(
-                            "INSERT INTO agent_messages (agent_name, role, content, created_at) VALUES (?, ?, ?, ?);",
-                            (agent.name, msg.get("role", "user"), msg.get("content", ""), time.time() + idx * 0.001)
+                        msg_model = AgentMessageModel(
+                            agent_name=agent.name,
+                            role=msg.get("role", "user"),
+                            content=msg.get("content", ""),
+                            created_at=time.time() + idx * 0.001
                         )
+                        session.add(msg_model)
 
-                # 3. Save Teams
+                # 4. Save Teams
                 for team in self.teams.values():
                     parent_id = team.parent_team.team_id if team.parent_team else None
                     
@@ -697,52 +605,72 @@ class ATTManager:
                     comm_rules_json = json.dumps(team.communication_rules)
                     status_map_json = json.dumps(team.status_map)
                     
-                    conn.execute(
-                        """INSERT INTO teams (
-                            team_id, preset_name, team_purpose, team_progress, depth, chapter_num, parent_team_id,
-                            migration_count, creator_type, creator_id, communication_rules, status_map, system_instructions
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
-                        (
-                            team.team_id, team.preset_name, team.team_purpose, team.team_progress, team.depth,
-                            team.chapter_num, parent_id, team.migration_count, creator_type, creator_id,
-                            comm_rules_json, status_map_json, getattr(team, "system_instructions", "")
-                        )
+                    team_model = TeamModel(
+                        team_id=team.team_id,
+                        preset_name=team.preset_name,
+                        team_purpose=team.team_purpose,
+                        team_progress=team.team_progress,
+                        depth=team.depth,
+                        chapter_num=team.chapter_num,
+                        parent_team_id=parent_id,
+                        migration_count=team.migration_count,
+                        creator_type=creator_type,
+                        creator_id=creator_id,
+                        communication_rules=comm_rules_json,
+                        status_map=status_map_json,
+                        system_instructions=getattr(team, "system_instructions", "")
                     )
+                    session.add(team_model)
 
-                    for member in team.members:
-                        conn.execute("INSERT INTO team_members (team_id, agent_name) VALUES (?, ?);", (team.team_id, member.name))
+                    # Save team members via relationship
+                    team_model.members = [agent_models_map[m.name] for m in team.members if m.name in agent_models_map]
 
                     for idx, msg in enumerate(team.message_inbox):
                         sender = msg.get("from", "Unknown")
                         msg_type = msg.get("type", "Unknown")
                         payload = json.dumps(msg)
-                        conn.execute(
-                            "INSERT INTO team_inbox (team_id, sender, msg_type, payload, created_at) VALUES (?, ?, ?, ?, ?);",
-                            (team.team_id, sender, msg_type, payload, time.time() + idx * 0.001)
+                        inbox_model = TeamInboxModel(
+                            team_id=team.team_id,
+                            sender=sender,
+                            msg_type=msg_type,
+                            payload=payload,
+                            created_at=time.time() + idx * 0.001
                         )
+                        session.add(inbox_model)
 
                     for prop_id, prop in team.proposals.items():
-                        conn.execute(
-                            """INSERT INTO team_proposals (
-                                proposal_id, team_id, action, target, initiator_type, initiator_name, rationale, proposed_details, votes, status
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
-                            (
-                                prop_id, team.team_id, prop.get("action"), prop.get("target"),
-                                prop.get("initiator_type"), prop.get("initiator_name"), prop.get("rationale"),
-                                json.dumps(prop.get("proposed_details", {})), json.dumps(prop.get("votes", {})), prop.get("status")
-                            )
+                        proposal_model = TeamProposalModel(
+                            proposal_id=prop_id,
+                            team_id=team.team_id,
+                            action=prop.get("action"),
+                            target=prop.get("target"),
+                            initiator_type=prop.get("initiator_type"),
+                            initiator_name=prop.get("initiator_name"),
+                            rationale=prop.get("rationale"),
+                            proposed_details=json.dumps(prop.get("proposed_details", {})),
+                            votes=json.dumps(prop.get("votes", {})),
+                            status=prop.get("status")
                         )
+                        session.add(proposal_model)
 
-                # 4. Save Broker agreements
+                # 5. Save Broker agreements
                 for sender_id, recipient_id in self.broker.peer_talk_agreements:
-                    conn.execute("INSERT INTO broker_agreements (sender_team_id, recipient_team_id) VALUES (?, ?);", (sender_id, recipient_id))
-
-                # 5. Save Libraries and Permissions
-                for lib_id, lib in self.libraries.items():
-                    conn.execute(
-                        "INSERT INTO libraries (lib_id, name, owner_team_id, description, is_public_visible) VALUES (?, ?, ?, ?, ?);",
-                        (lib.lib_id, lib.name, lib.owner_team_id, lib.description, 1 if lib.is_public_visible else 0)
+                    agreement_model = BrokerAgreementModel(
+                        sender_team_id=sender_id,
+                        recipient_team_id=recipient_id
                     )
+                    session.add(agreement_model)
+
+                # 6. Save Libraries and Permissions
+                for lib_id, lib in self.libraries.items():
+                    lib_model = LibraryModel(
+                        lib_id=lib.lib_id,
+                        name=lib.name,
+                        owner_team_id=lib.owner_team_id,
+                        description=lib.description,
+                        is_public_visible=1 if lib.is_public_visible else 0
+                    )
+                    session.add(lib_model)
 
                     if os.path.exists(lib.root_dir):
                         for root, dirs, files in os.walk(lib.root_dir):
@@ -752,41 +680,37 @@ class ATTManager:
                                 try:
                                     with open(full_path, "r", encoding="utf-8") as f:
                                         content = f.read()
-                                    conn.execute(
-                                        "INSERT INTO doc_lib_files (lib_id, path, content) VALUES (?, ?, ?);",
-                                        (lib.lib_id, rel_path, content)
+                                    file_model = DocLibFileModel(
+                                        lib_id=lib.lib_id,
+                                        path=rel_path,
+                                        content=content
                                     )
+                                    session.add(file_model)
                                 except Exception as e:
                                     self.logger.warning(f"Failed to read/serialize file {full_path}: {e}")
 
                 for lib_id, paths_map in self.library_permissions.items():
                     for path, teams_map in paths_map.items():
                         for team_id, permission in teams_map.items():
-                            conn.execute(
-                                "INSERT INTO library_permissions (lib_id, path, team_id, permission) VALUES (?, ?, ?, ?);",
-                                (lib_id, path, team_id, permission)
+                            perm_model = LibraryPermissionModel(
+                                lib_id=lib_id,
+                                path=path,
+                                team_id=team_id,
+                                permission=permission
                             )
-                            
-                conn.commit()
-            except Exception as db_err:
-                conn.rollback()
-                raise db_err
-            finally:
-                conn.close()
+                            session.add(perm_model)
+
             self.logger.info(f"Successfully saved state to SQLite database: {target_path}")
         except Exception as e:
             self.logger.error(f"Error saving state to SQLite database at {target_path}: {e}")
 
     def load_state(self, db_path: str):
-        """Loads and reconstructs the entire manager topology, configs, and agent states from SQLite."""
+        """Loads and reconstructs the entire manager topology, configs, and agent states from SQLite using SQLAlchemy ORM."""
         if not os.path.exists(db_path):
             raise FileNotFoundError(f"State database file '{db_path}' not found.")
 
         try:
-            conn = sqlite3.connect(db_path)
-            try:
-                conn.row_factory = sqlite3.Row
-                
+            with get_session(db_path) as session:
                 # Helper function to restore LLM clients
                 def get_agent_client_by_name(client_name: Optional[str]) -> Any:
                     default_wrapper = ManagerDefaultClientAdapter(self)
@@ -804,48 +728,48 @@ class ATTManager:
                     return default_wrapper
 
                 # 1. Load Configs
-                config_row = conn.execute("SELECT config_value FROM manager_config WHERE config_key = 'att_config';").fetchone()
-                if config_row:
-                    config_data = json.loads(config_row["config_value"])
+                config_rows = session.query(ManagerConfigModel).all()
+                config_map = {row.config_key: row.config_value for row in config_rows}
+                
+                if "att_config" in config_map:
+                    config_data = json.loads(config_map["att_config"])
                     for k, v in config_data.items():
                         setattr(self.config, k, v)
                 
                 # 2. Reconstruct Agents
                 self.agents.clear()
-                agents_rows = conn.execute("SELECT * FROM agents;").fetchall()
-                for row in agents_rows:
-                    client = get_agent_client_by_name(row["model_alias"])
+                agent_rows = session.query(AgentModel).all()
+                for row in agent_rows:
+                    client = get_agent_client_by_name(row.model_alias)
                     agent = Agent(
-                        name=row["name"],
-                        role=row["role"],
+                        name=row.name,
+                        role=row.role,
                         llm_client=client,
-                        role_description=row["role_description"],
-                        system_instructions=row["system_instructions"]
+                        role_description=row.role_description,
+                        system_instructions=row.system_instructions
                     )
-                    agent.last_context = json.loads(row["last_context"]) if row["last_context"] else None
+                    agent.last_context = json.loads(row.last_context) if row.last_context else None
                     
-                    # Restore agent messages
-                    msg_rows = conn.execute("SELECT * FROM agent_messages WHERE agent_name = ? ORDER BY created_at ASC;", (agent.name,)).fetchall()
-                    agent.messages = [{"role": r["role"], "content": r["content"]} for r in msg_rows]
+                    # Restore agent messages ordered by created_at in the relationship definition
+                    agent.messages = [{"role": msg.role, "content": msg.content} for msg in row.messages]
                     
                     self.agents[agent.name] = agent
 
-                root_ai_row = conn.execute("SELECT config_value FROM manager_config WHERE config_key = 'root_ai_name';").fetchone()
-                if root_ai_row:
-                    root_ai_name = root_ai_row["config_value"]
+                if "root_ai_name" in config_map:
+                    root_ai_name = config_map["root_ai_name"]
                     if root_ai_name in self.agents:
                         self.root_ai = self.agents[root_ai_name]
 
                 # 3. Reconstruct Libraries
                 self.libraries.clear()
-                libraries_rows = conn.execute("SELECT * FROM libraries;").fetchall()
-                for row in libraries_rows:
+                library_rows = session.query(LibraryModel).all()
+                for row in library_rows:
                     lib = DocumentLibrary(
-                        lib_id=row["lib_id"],
-                        name=row["name"],
-                        owner_team_id=row["owner_team_id"],
-                        description=row["description"],
-                        is_public_visible=bool(row["is_public_visible"])
+                        lib_id=row.lib_id,
+                        name=row.name,
+                        owner_team_id=row.owner_team_id,
+                        description=row.description,
+                        is_public_visible=bool(row.is_public_visible)
                     )
                     # Clear local directory before restoring
                     import shutil
@@ -853,20 +777,20 @@ class ATTManager:
                     os.makedirs(lib.root_dir, exist_ok=True)
                     self.libraries[lib.lib_id] = lib
 
-                files_rows = conn.execute("SELECT * FROM doc_lib_files;").fetchall()
+                files_rows = session.query(DocLibFileModel).all()
                 for row in files_rows:
-                    lib_id = row["lib_id"]
+                    lib_id = row.lib_id
                     if lib_id in self.libraries:
-                        self.libraries[lib_id].write_file(row["path"], row["content"])
+                        self.libraries[lib_id].write_file(row.path, row.content)
 
                 # Restore library permissions
                 self.library_permissions.clear()
-                perms_rows = conn.execute("SELECT * FROM library_permissions;").fetchall()
+                perms_rows = session.query(LibraryPermissionModel).all()
                 for row in perms_rows:
-                    lib_id = row["lib_id"]
-                    path = row["path"]
-                    team_id = row["team_id"]
-                    perm = row["permission"]
+                    lib_id = row.lib_id
+                    path = row.path
+                    team_id = row.team_id
+                    perm = row.permission
                     if lib_id not in self.library_permissions:
                         self.library_permissions[lib_id] = {}
                     if path not in self.library_permissions[lib_id]:
@@ -875,54 +799,54 @@ class ATTManager:
 
                 # 4. Reconstruct Teams
                 self.teams.clear()
-                teams_rows = conn.execute("SELECT * FROM teams;").fetchall()
+                teams_rows = session.query(TeamModel).all()
                 team_map = {}
                 
                 # First pass: Instantiate teams without resolving parent/children references (since some might not be instantiated yet)
                 for row in teams_rows:
-                    creator_type = row["creator_type"]
-                    creator_id = row["creator_id"]
+                    creator_type = row.creator_type
+                    creator_id = row.creator_id
                     
                     creator = None
                     if creator_type == "agent":
                         creator = self.agents.get(creator_id)
                     
-                    team = AgentTeam(creator=creator, preset_name=row["preset_name"], team_purpose=row["team_purpose"])
-                    team.team_id = row["team_id"]
+                    team = AgentTeam(creator=creator, preset_name=row.preset_name, team_purpose=row.team_purpose)
+                    team.team_id = row.team_id
                     team.logger = logging.getLogger(f"AgentTeam:{team.team_id}")
-                    team.team_progress = row["team_progress"]
-                    team.chapter_num = row["chapter_num"]
-                    team.migration_count = row["migration_count"]
-                    team.communication_rules = json.loads(row["communication_rules"])
-                    team.status_map = json.loads(row["status_map"])
-                    team.system_instructions = row["system_instructions"]
+                    team.team_progress = row.team_progress
+                    team.chapter_num = row.chapter_num
+                    team.migration_count = row.migration_count
+                    team.communication_rules = json.loads(row.communication_rules) if row.communication_rules else {}
+                    team.status_map = json.loads(row.status_map) if row.status_map else {}
+                    team.system_instructions = row.system_instructions
                     team.manager = self
                     team_map[team.team_id] = team
 
                 # Second pass: Resolve hierarchy & team creator references
                 for row in teams_rows:
-                    team_id = row["team_id"]
+                    team_id = row.team_id
                     team = team_map[team_id]
                     
-                    parent_team_id = row["parent_team_id"]
+                    parent_team_id = row.parent_team_id
                     if parent_team_id:
                         parent_team = team_map.get(parent_team_id)
                         team._parent_team = parent_team
                         if team not in parent_team.child_teams:
                             parent_team.child_teams.append(team)
                             
-                    if row["creator_type"] == "team" and row["creator_id"]:
-                        team.creator = team_map.get(row["creator_id"])
+                    if row.creator_type == "team" and row.creator_id:
+                        team.creator = team_map.get(row.creator_id)
 
                 self.teams = team_map
 
                 # 5. Populate Team Members
-                members_rows = conn.execute("SELECT * FROM team_members;").fetchall()
-                for row in members_rows:
-                    t_id = row["team_id"]
-                    a_name = row["agent_name"]
-                    if t_id in self.teams and a_name in self.agents:
-                        self.teams[t_id].members.append(self.agents[a_name])
+                for row in teams_rows:
+                    t_id = row.team_id
+                    if t_id in self.teams:
+                        for member_row in row.members:
+                            if member_row.name in self.agents:
+                                self.teams[t_id].members.append(self.agents[member_row.name])
 
                 # 6. Associate Built-in DocLibs & Re-bind Tools to Teams
                 from ai_team_team.tool import get_default_tools
@@ -934,38 +858,36 @@ class ATTManager:
                     team.tools.update(self.global_tools)
 
                 # 7. Restore Team Inboxes
-                inbox_rows = conn.execute("SELECT * FROM team_inbox ORDER BY created_at ASC;").fetchall()
-                for row in inbox_rows:
-                    t_id = row["team_id"]
+                for row in teams_rows:
+                    t_id = row.team_id
                     if t_id in self.teams:
-                        msg = json.loads(row["payload"])
-                        self.teams[t_id].message_inbox.append(msg)
+                        for inbox_row in row.inbox:
+                            msg = json.loads(inbox_row.payload)
+                            self.teams[t_id].message_inbox.append(msg)
 
                 # 8. Restore Proposals
-                proposals_rows = conn.execute("SELECT * FROM team_proposals;").fetchall()
-                for row in proposals_rows:
-                    t_id = row["team_id"]
+                for row in teams_rows:
+                    t_id = row.team_id
                     if t_id in self.teams:
-                        prop_id = row["proposal_id"]
-                        self.teams[t_id].proposals[prop_id] = {
-                            "action": row["action"],
-                            "target": row["target"],
-                            "initiator_type": row["initiator_type"],
-                            "initiator_name": row["initiator_name"],
-                            "rationale": row["rationale"],
-                            "proposed_details": json.loads(row["proposed_details"]),
-                            "votes": json.loads(row["votes"]),
-                            "status": row["status"]
-                        }
+                        for prop_row in row.proposals:
+                            prop_id = prop_row.proposal_id
+                            self.teams[t_id].proposals[prop_id] = {
+                                "action": prop_row.action,
+                                "target": prop_row.target,
+                                "initiator_type": prop_row.initiator_type,
+                                "initiator_name": prop_row.initiator_name,
+                                "rationale": prop_row.rationale,
+                                "proposed_details": json.loads(prop_row.proposed_details) if prop_row.proposed_details else {},
+                                "votes": json.loads(prop_row.votes) if prop_row.votes else {},
+                                "status": prop_row.status
+                            }
 
                 # 9. Restore Broker peer agreements
                 self.broker.peer_talk_agreements.clear()
-                agreements_rows = conn.execute("SELECT * FROM broker_agreements;").fetchall()
+                agreements_rows = session.query(BrokerAgreementModel).all()
                 for row in agreements_rows:
-                    self.broker.peer_talk_agreements.add((row["sender_team_id"], row["recipient_team_id"]))
+                    self.broker.peer_talk_agreements.add((row.sender_team_id, row.recipient_team_id))
 
-            finally:
-                conn.close()
             self.logger.info(f"Successfully loaded state from SQLite database: {db_path}")
         except Exception as e:
             self.logger.error(f"Error loading state from SQLite database {db_path}: {e}")

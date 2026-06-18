@@ -17,7 +17,9 @@ classifiers = [
     "Operating System :: OS Independent",
     "License :: OSI Approved :: Apache Software License",
 ]
-dependencies = []
+dependencies = [
+    "sqlalchemy>=2.0.0",
+]
 
 [project.optional-dependencies]
 dev = [

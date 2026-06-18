@@ -1,6 +1,6 @@
 # State Persistence & Multi-Turn Memory Architecture
 
-This document describes the SQLite-backed state snapshotting, workflow recovery, and true multi-turn agent memory architecture implemented in the ATT (AI-Team-Team) framework.
+This document describes the SQLAlchemy ORM and SQLite-backed state snapshotting, workflow recovery, and true multi-turn agent memory architecture implemented in the ATT (AI-Team-Team) framework.
 
 ## 1. Architectural Overview
 
@@ -10,7 +10,7 @@ Instead of stateless executions or pseudo-memory constructed via transient strin
 2. **Smooth Team Transition Notices**: Supportive transition updates appended to the agent's message queue automatically when a shared agent transitions between teams.
 3. **Dialogue Memory Compression & Pruning**: Automatic token conservation that summarizes early conversation logs while keeping the latest high-fidelity messages untouched.
 4. **Global Expert Directory Injection**: Dynamic listing of all system-registered experts injected into the agent identity header to facilitate discovery and hiring.
-5. **SQLite State Snapshotting**: A single self-contained local SQLite database file that serializes the entire active manager topology, lineage nodes, inbox metrics, debate proposals, and document libraries.
+5. **SQLAlchemy ORM & SQLite State Persistence**: A local SQLite database managed via SQLAlchemy ORM that serializes the entire active manager topology, lineage nodes, inbox metrics, debate proposals, and document libraries.
 
 ### Memory Pruning & Compression
 
@@ -54,7 +54,7 @@ To allow agents to dynamically discover and hire existing system specialists, a 
 
 ### Topology Schema (ER Diagram)
 
-The SQLite database mirrors the dynamic parent-child topology, agent properties, libraries, and inbox states:
+The SQLAlchemy ORM declarative models mirror the dynamic parent-child topology, agent properties, libraries, and inbox states:
 
 ```mermaid
 erDiagram
@@ -147,7 +147,7 @@ erDiagram
     libraries ||--o{ doc_lib_files : "contains files"
 ```
 
-## 2. SQLite Database Schema Tables
+## 2. Database Schema Tables
 
 ### `manager_config`
 
