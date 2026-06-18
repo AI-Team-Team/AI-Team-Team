@@ -10,15 +10,7 @@ The next iterations of the ATT framework focus on:
 
 ## Next-Gen Evolution Path
 
-### 1. Active Permission Gates in Tool Execution
-
-* **Blue-sky Concept**: Ensure agents operate strictly within the communication bounds defined by their parent teams.
-* **Design**:
-  * Integrate a pre-execution verification hook in the Tool runner.
-  * When an agent calls `send_peer_message` or `dispatch_subagent`, the executor calls `NegotiationBroker.negotiate_communication` beforehand.
-  * If unauthorized, instead of raising an error, return a structured observation: `Observation: Error: Permission Denied. Sibling talk is not authorized. You must call set_sibling_talk to request access.` This trains agents to adapt dynamically to permission boundaries.
-
-### 2. The "Passive Inbox" Trap for Asynchronous Escalations
+### 1. The "Passive Inbox" Trap for Asynchronous Escalations
 
 * **Context:** When the `SupervisoryTeam` detects a deadlock, it triggers `report_anomaly` and appends an escalation warning to the parent team's `message_inbox`.
 * **Problem:** The `message_inbox` is only read and processed when `execute_team_discussion(parent)` is explicitly invoked. If the parent team is currently "idle" (not actively running a discussion loop), this critical hierarchy-collapse alert will be left pending indefinitely.

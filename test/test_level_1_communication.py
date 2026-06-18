@@ -128,5 +128,49 @@ class TestLevel1Communication(unittest.IsolatedAsyncioTestCase):
         can_talk = await self.manager.broker.negotiate_communication(team_a, team_b)
         self.assertFalse(can_talk)
 
+    async def test_guided_observation_messages(self):
+        """Verify that send_peer_message returns the expected structured guiding Observation messages when blocked."""
+        self.config.communication_policy = "proxied"
+
+        # 1. Sibling block: Spawn two Level 1 teams (both parents are None, so they are siblings under Root AI)
+        team_a = self.manager.create_agent_team(
+            creator=self.root_ai,
+            team_purpose="Research Domain A",
+            member_configs={
+                "A1": {"model": "default"}, "A2": {"model": "default"}, "A3": {"model": "default"}
+            }
+        )
+        team_b = self.manager.create_agent_team(
+            creator=self.root_ai,
+            team_purpose="Research Domain B",
+            member_configs={
+                "B1": {"model": "default"}, "B2": {"model": "default"}, "B3": {"model": "default"}
+            }
+        )
+
+        self.manager.broker.peer_talk_agreements.clear()
+
+        # Since no agreement is established, trying to send a peer message from team_a to team_b (siblings under Root) should return sibling block error
+        send_tool_a = team_a.tools["send_peer_message"]
+        res_sibling = await send_tool_a(team_id=team_b.team_id, message="Test sibling")
+        expected_sibling = f"Observation: Error: Permission Denied. Sibling talk is not authorized. You must call set_sibling_talk(child_id='{team_b.team_id}', allow=True) via your parent to request access."
+        self.assertEqual(res_sibling, expected_sibling)
+
+        # 2. Cross-lineage block: Spawn a Level 2 team under team_a (parent is team_a)
+        agent_a1 = team_a.members[0]
+        team_a_1 = self.manager.create_agent_team(
+            creator=agent_a1,
+            team_purpose="Sub-Research Domain A",
+            member_configs={
+                "A1_1": {"model": "default"}, "A1_2": {"model": "default"}, "A1_3": {"model": "default"}
+            }
+        )
+
+        # Trying to send a peer message from team_a_1 to team_b (parent team_a != parent None) should return cross-lineage block error
+        send_tool_a1 = team_a_1.tools["send_peer_message"]
+        res_cross = await send_tool_a1(team_id=team_b.team_id, message="Test cross lineage")
+        expected_cross = f"Observation: Error: Permission Denied. Cross-lineage agreement does not exist. You must call negotiate_peer_talk(target_team_id='{team_b.team_id}', rationale='...') first to establish a tunnel."
+        self.assertEqual(res_cross, expected_cross)
+
 if __name__ == "__main__":
     unittest.main()
