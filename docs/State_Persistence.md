@@ -2,15 +2,55 @@
 
 This document describes the SQLite-backed state snapshotting, workflow recovery, and true multi-turn agent memory architecture implemented in the ATT (AI-Team-Team) framework.
 
----
-
 ## 1. Architectural Overview
 
 Instead of stateless executions or pseudo-memory constructed via transient string concatenation, the ATT framework uses:
 
 1. **Multi-Turn Agent Memory**: Structured message threads (`List[Dict[str, str]]`) stored inside each `Agent` instance, compatible with Chat APIs.
-2. **Context-Switching Notices**: Diagnostic warning logs injected automatically when a shared agent transitions between teams/roles/tools.
-3. **SQLite State Snapshotting**: A single self-contained local SQLite database file that serializes the entire active manager topology, lineage nodes, inbox metrics, debate proposals, and document libraries.
+2. **Smooth Team Transition Notices**: Supportive transition updates appended to the agent's message queue automatically when a shared agent transitions between teams.
+3. **Dialogue Memory Compression & Pruning**: Automatic token conservation that summarizes early conversation logs while keeping the latest high-fidelity messages untouched.
+4. **Global Expert Directory Injection**: Dynamic listing of all system-registered experts injected into the agent identity header to facilitate discovery and hiring.
+5. **SQLite State Snapshotting**: A single self-contained local SQLite database file that serializes the entire active manager topology, lineage nodes, inbox metrics, debate proposals, and document libraries.
+
+### Memory Pruning & Compression
+
+To prevent context window overflow and reduce API token consumption during long discussions, the framework employs an automatic turn-based dialogue compression pipeline:
+
+* **Configurable Gates**: Controlled via `enable_memory_compression: bool` (default `True`) and `max_memory_turns: int` (default `20`, representing 10 rounds of conversation) in `ATTConfig`.
+* **Pruning Process**: When an agent's memory queue (`agent.messages`) exceeds `max_memory_turns + 2` turns:
+  1. The initial instruction profile (index 0) is kept untouched.
+  2. All intermediate messages (from index 1 to `len - max_memory_turns - 1`) are extracted and serialized.
+  3. The intermediate messages are sent to the Critic client with a summarization prompt: `"Summarize the preceding execution logs and discussions into a single cohesive paragraph of historical facts. Focus on what was completed."`
+  4. The intermediate messages are replaced by a single system message: `*** HISTORICAL SUMMARY ARCHIVE ***\n{summary}`.
+  5. The latest `max_memory_turns` messages are retained fully as high-fidelity context.
+
+### Smooth Team Transitions
+
+When a shared agent is hired or migrated across different teams, the framework automatically appends a supportive transition notice instead of interrupting or wiping out memory:
+
+* **Trigger Condition**: When the active team ID during a ReAct step execution changes (`agent.last_context["team_id"] != self.team_id`).
+* **Format**:
+
+  ```markdown
+  *** TRANSITION NOTICE: ACTIVE TEAM UPDATE ***
+  You have transitioned to work with another team group:
+  - Active Team: {team_id} (Preset: {preset_name})
+  - Team Purpose: {team_purpose}
+  - Your Assigned Role: {role}
+  Please continue your work and cooperate in this team based on your prior memory.
+  ```
+
+### Global Expert Directory Injection
+
+To allow agents to dynamically discover and hire existing system specialists, a directory of all active global experts is injected into the agent's system instruction identity header at the start of every ReAct step:
+
+* Loops through all registered agents in `manager.agents`.
+* Appends them under `## GLOBAL EXPERTS AVAILABLE FOR HIRE` detailing their name, role, and description:
+
+  ```markdown
+  ## GLOBAL EXPERTS AVAILABLE FOR HIRE
+  - **{name}** ({role}): {description}
+  ```
 
 ### Topology Schema (ER Diagram)
 
@@ -106,8 +146,6 @@ erDiagram
     teams ||--o{ team_proposals : "has proposals"
     libraries ||--o{ doc_lib_files : "contains files"
 ```
-
----
 
 ## 2. SQLite Database Schema Tables
 

@@ -88,7 +88,9 @@ Configuration options for tuning the ATT multi-agent framework.
       max_migrations_per_team_discussion: int = 1,
       enable_membership_voting: bool = False,
       llm_max_retries: int = 3,
-      llm_retry_backoff_factor: float = 1.5
+      llm_retry_backoff_factor: float = 1.5,
+      enable_memory_compression: bool = True,
+      max_memory_turns: int = 20
   )
   ```
 

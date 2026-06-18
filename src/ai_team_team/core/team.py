@@ -97,6 +97,7 @@ class AgentTeam:
         manager: Optional['ATTManager'] = None
     ) -> str:
         """Executes a ReAct loop for a single agent inside the AT."""
+        manager = manager if manager is not None else getattr(self, "manager", None)
         if not agent.llm_client:
             return "Error: Agent has no LLM client configured."
 
@@ -122,6 +123,15 @@ class AgentTeam:
 
         model_options = "\n".join([f"  - {k}: {note}" for k, note in all_models.items()])
         role_desc_str = f"- **Role Description**: {agent.role_description}\n" if getattr(agent, "role_description", "") else ""
+        experts_str = ""
+        if manager:
+            experts_lines = []
+            for name, exp_agent in sorted(manager.agents.items()):
+                role_desc = getattr(exp_agent, "role_description", "") or "No description"
+                experts_lines.append(f"  - **{name}** ({exp_agent.role}): {role_desc}")
+            if experts_lines:
+                experts_str = f"## GLOBAL EXPERTS AVAILABLE FOR HIRE\n" + "\n".join(experts_lines) + "\n\n"
+
         identity_header = (
             f"## AGENT IDENTITY PROFILE\n"
             f"- **Role Name**: {agent.role}\n"
@@ -132,6 +142,7 @@ class AgentTeam:
             f"- **Current Objective**: Cooperate in team tasks.\n"
             f"- **AT Delegation Depth**: {self.depth} / {max_depth}\n"
             f"{peer_context}"
+            f"{experts_str}"
             f"### AUTONOMY RULES\n"
             f"1. You can dynamically spawn child ATs using the `dispatch_subagent` tool to solve sub-problems.\n"
             f"2. You MUST NOT spawn child ATs if your Delegation Depth is already at the maximum ({max_depth}). If you need help at max depth, use `delegate_escalation` to ask your parent.\n"
@@ -152,28 +163,84 @@ class AgentTeam:
                 "system_instructions": getattr(agent, "system_instructions", ""),
                 "tools": sorted(list(self.tools.keys())) if getattr(self, "tools", None) else []
             }
-            if agent.last_context and agent.last_context != current_context:
-                tools_str = ""
-                if current_context["tools"]:
-                    for t_name in current_context["tools"]:
-                        tool = self.tools[t_name]
-                        tools_str += f"- {t_name}: {tool.description}\n"
+            if agent.last_context and agent.last_context.get("team_id") != self.team_id:
                 notice = (
-                    f"*** SYSTEM NOTICE: CONTEXT SWITCH ***\n"
-                    f"You are now acting in a different team environment:\n"
+                    f"*** TRANSITION NOTICE: ACTIVE TEAM UPDATE ***\n"
+                    f"You have transitioned to work with another team group:\n"
                     f"- Active Team: {self.team_id} (Preset: {self.preset_name})\n"
                     f"- Team Purpose: {self.team_purpose}\n"
-                    f"- Your Role: {agent.role}\n"
-                    f"- Your Role Description: {current_context['role_description']}\n"
-                    f"- Your System Instructions: {current_context['system_instructions']}\n\n"
-                    f"Available Tools in this team:\n{tools_str}\n"
-                    f"Please review your prior memories and address the following prompt under your current role and tools."
+                    f"- Your Assigned Role: {agent.role}\n"
+                    f"Please continue your work and cooperate in this team based on your prior memory."
                 )
                 agent.messages.append({"role": "system", "content": notice})
             agent.last_context = current_context
 
             # Append current prompt objective to private multi-turn history
             agent.messages.append({"role": "user", "content": prompt})
+
+            # Dialogue Memory Pruning / Compression
+            enable_compression = manager.config.enable_memory_compression if manager else True
+            max_turns = manager.config.max_memory_turns if manager else 20
+
+            if enable_compression and len(agent.messages) > max_turns + 2:
+                # 1. Keep the first message (index 0)
+                first_msg = agent.messages[0]
+                
+                # 2. Extract intermediate messages
+                intermediate_messages = agent.messages[1 : len(agent.messages) - max_turns]
+                
+                # 3. Format intermediate messages to string for summarization
+                history_text_parts = []
+                for msg in intermediate_messages:
+                    r = msg.get("role", "unknown").upper()
+                    c = msg.get("content", "")
+                    history_text_parts.append(f"{r}: {c}")
+                history_text = "\n".join(history_text_parts)
+                
+                # 4. Generate summary using critic client
+                summary_prompt = (
+                    f"Summarize the preceding execution logs and discussions into a single cohesive paragraph of historical facts. "
+                    f"Focus on what was completed.\n\n"
+                    f"--- EXECUTION LOGS AND DISCUSSIONS BEGIN ---\n"
+                    f"{history_text}\n"
+                    f"--- EXECUTION LOGS AND DISCUSSIONS END ---\n"
+                )
+                
+                # Retrieve critic client
+                critic_client = None
+                if manager:
+                    critic_client = manager.critic_client if manager.critic_client is not None else ManagerCriticClientAdapter(manager)
+                
+                if not critic_client:
+                    critic_client = agent.llm_client
+                
+                retries = manager.config.llm_max_retries if manager else 3
+                backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
+                
+                try:
+                    summary_text = await generate_with_retry(
+                        llm_client=critic_client,
+                        prompt=summary_prompt,
+                        system_instruction="You are a precise summarization assistant.",
+                        temperature=0.3,
+                        retries=retries,
+                        backoff_factor=backoff
+                    )
+                    summary_text = summary_text.strip()
+                except Exception as e:
+                    self.logger.warning(f"Memory compression summarization failed: {e}. Using a generic fallback summary.")
+                    summary_text = "Early execution history compressed due to context limits."
+                
+                archive_message = {
+                    "role": "system",
+                    "content": f"*** HISTORICAL SUMMARY ARCHIVE ***\n{summary_text}"
+                }
+                
+                # 5. Keep the latest max_turns messages
+                latest_messages = agent.messages[len(agent.messages) - max_turns :]
+                
+                # Re-assemble agent.messages
+                agent.messages = [first_msg, archive_message] + latest_messages
 
             if getattr(self, "tools", None):
                 tools_desc = []

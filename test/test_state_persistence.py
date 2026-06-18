@@ -95,7 +95,7 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         system_notices = [m for m in agent.messages if m.get("role") == "system"]
         self.assertTrue(len(system_notices) >= 1)
         notice_content = system_notices[-1]["content"]
-        self.assertIn("SYSTEM NOTICE: CONTEXT SWITCH", notice_content)
+        self.assertIn("TRANSITION NOTICE: ACTIVE TEAM UPDATE", notice_content)
         self.assertIn(team_b.team_id, notice_content)
         self.assertIn("Senior Developer", notice_content)
 
@@ -136,7 +136,74 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(agent.messages) > 2)
         # Verify Team B step triggered switch notice
         system_notices = [m for m in agent.messages if m.get("role") == "system"]
-        self.assertTrue(any("SYSTEM NOTICE: CONTEXT SWITCH" in m["content"] for m in system_notices))
+        self.assertTrue(any("TRANSITION NOTICE: ACTIVE TEAM UPDATE" in m["content"] for m in system_notices))
+
+    async def test_memory_compression_audit(self):
+        """Verify that dialogue is compressed and early turns summarized when exceeding max_turns + 2."""
+        self.manager.config.enable_memory_compression = True
+        self.manager.config.max_memory_turns = 4
+
+        self.mock_critic.generate = AsyncMock(
+            return_value="This is a summary of early task executions."
+        )
+
+        agent = Agent(name="Compressed_Agent", role="Summarizer", llm_client=self.mock_react_client)
+        
+        team = self.manager.create_agent_team(
+            creator=self.root_ai,
+            preset_name="generic",
+            team_purpose="Testing compression"
+        )
+        team.members.append(agent)
+
+        agent.messages = [
+            {"role": "system", "content": "Initial System Instructions"},
+            {"role": "user", "content": "Turn 1 request"},
+            {"role": "assistant", "content": "Turn 1 answer"},
+            {"role": "user", "content": "Turn 2 request"},
+            {"role": "assistant", "content": "Turn 2 answer"},
+            {"role": "user", "content": "Turn 3 request"},
+            {"role": "assistant", "content": "Turn 3 answer"},
+        ]
+
+        await team.execute_react_step(agent, "Turn 4 request", "Sys instructions")
+
+        system_archives = [m for m in agent.messages if "*** HISTORICAL SUMMARY ARCHIVE ***" in m.get("content", "")]
+        self.assertEqual(len(system_archives), 1)
+        self.assertIn("This is a summary of early task executions.", system_archives[0]["content"])
+        self.assertEqual(agent.messages[0]["content"], "Initial System Instructions")
+
+    async def test_global_expert_listing(self):
+        """Verify that all global experts are injected into the agent's identity profile header."""
+        expert_a = Agent(name="Expert_A", role="Database Analyst", role_description="Handles DB queries")
+        expert_b = Agent(name="Expert_B", role="Security Auditor", role_description="Inspects vulnerabilities")
+        
+        self.manager.agents["Expert_A"] = expert_a
+        self.manager.agents["Expert_B"] = expert_b
+        
+        captured_sys_instruction = []
+        async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):
+            captured_sys_instruction.append(system_instruction)
+            return 'Final Answer: Done'
+        
+        self.mock_react_client.generate = mock_generate
+        
+        team = self.manager.create_agent_team(
+            creator=self.root_ai,
+            preset_name="generic",
+            team_purpose="Testing expert discovery"
+        )
+        team.members.append(self.root_ai)
+        
+        await team.execute_react_step(self.root_ai, "List experts", "System base instructions")
+        
+        self.assertTrue(len(captured_sys_instruction) > 0)
+        sys_inst = captured_sys_instruction[0]
+        self.assertIn("## GLOBAL EXPERTS AVAILABLE FOR HIRE", sys_inst)
+        self.assertIn("Expert_A", sys_inst)
+        self.assertIn("Expert_B", sys_inst)
+        self.assertIn("Database Analyst", sys_inst)
+        self.assertIn("Handles DB queries", sys_inst)
 
     async def test_state_persistence_and_recovery(self):
         """Verify the complete serialization & deserialization pipeline."""

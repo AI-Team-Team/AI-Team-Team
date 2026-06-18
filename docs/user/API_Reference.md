@@ -22,7 +22,9 @@ config = ATTConfig(
     max_migrations_per_team_discussion: int = 1,
     enable_membership_voting: bool = False,
     llm_max_retries: int = 3,
-    llm_retry_backoff_factor: float = 1.5
+    llm_retry_backoff_factor: float = 1.5,
+    enable_memory_compression: bool = True,
+    max_memory_turns: int = 20
 )
 ```
 
@@ -39,6 +41,8 @@ config = ATTConfig(
 * **`enable_membership_voting`**: Whether to enable the democratic membership voting system for dynamic teams.
 * **`llm_max_retries`**: The maximum retry attempts for LLM generation failures.
 * **`llm_retry_backoff_factor`**: The exponential backoff factor for retrying LLM calls.
+* **`enable_memory_compression`**: Whether to enable automatic dialogue compression/pruning of early conversation turns (default: `True`).
+* **`max_memory_turns`**: The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns (default: `20`).
 
 ## 👤 `Agent`
 
@@ -75,7 +79,6 @@ Represents a dynamic team of agents executing discussions and tasks in a parent-
 
 * **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
   Allows this team to recursively spawn a child dynamic sub-team (Level $N+1$), propagating visibility and context docs to the subteam's DocLib.
-
 
 ## 🏛️ `ATTManager`
 

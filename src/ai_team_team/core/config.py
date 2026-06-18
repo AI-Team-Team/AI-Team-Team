@@ -14,7 +14,9 @@ class ATTConfig:
         max_migrations_per_team_discussion: int = 1,
         enable_membership_voting: bool = False,
         llm_max_retries: int = 3,
-        llm_retry_backoff_factor: float = 1.5
+        llm_retry_backoff_factor: float = 1.5,
+        enable_memory_compression: bool = True,
+        max_memory_turns: int = 20
     ):
         self.enable_dynamic_delegation = enable_dynamic_delegation
         self.max_delegation_depth = max_delegation_depth
@@ -27,3 +29,5 @@ class ATTConfig:
         self.enable_membership_voting = enable_membership_voting
         self.llm_max_retries = llm_max_retries
         self.llm_retry_backoff_factor = llm_retry_backoff_factor
+        self.enable_memory_compression = enable_memory_compression
+        self.max_memory_turns = max_memory_turns

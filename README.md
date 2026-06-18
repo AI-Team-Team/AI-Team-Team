@@ -45,6 +45,8 @@ Many thanks to Gemini and GPT for their help!
 * **[Gated Context Protection](docs/Gated_Reading.md)**: Employs `GatedFileReader` to paginate file reading, cap line window requests, and fallback to outline warnings on large documents.
 * **[Collaborative Document Library (DocLib)](docs/Gated_Reading.md#5-document-libraries-doclib)**: Equips each Agent Team with a built-in document library to manage nested directories/files, with fine-grained team-level permissions (READ/WRITE), discoverability listing, and dynamic parent-to-child context passing.
 * **[SQLite State Snapshotting & Recovery](docs/State_Persistence.md)**: Auto-saves active team topologies, lineages, inboxes, proposals, broker tunnels, and Document Libraries (including files/directories) into SQLite on any state changes, enabling seamless crash-recovery and resume capabilities.
+* **[Dialogue Memory Pruning & Transitions](docs/State_Persistence.md)**: Automatically compresses and summarizes early conversation turns while keeping the latest high-fidelity messages untouched to prevent context window overflow. Appends supportive transition notices when shared agents transition across teams.
+* **[Global Expert Discovery](docs/State_Persistence.md)**: Automatically injects a directory of all active global experts into the agent system prompt context to facilitate dynamic delegation and agent hiring.
 
 ## 📦 Installation
 
@@ -334,6 +336,8 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `enable_membership_voting` | `bool` | `False` | Whether to enable the optional democratic membership voting system. |
 | `llm_max_retries` | `int` | `3` | The maximum retry attempts for LLM generation failures. |
 | `llm_retry_backoff_factor` | `float` | `1.5` | The exponential backoff multiplier for retrying LLM calls. |
+| `enable_memory_compression` | `bool` | `True` | Whether to enable automatic dialogue compression/pruning of early conversation turns. |
+| `max_memory_turns` | `int` | `20` | The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns. |
 
 ### `GatedFileReader` Parameters
 
