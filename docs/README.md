@@ -19,8 +19,9 @@ To understand specific systems in detail, please refer to the following document
 2. **[Gated Context Protection & File Reading](Gated_Reading.md)**: Details the size-aware `GatedFileReader`, Outline Warning fallbacks, paginated line chunking, and the built-in collaborative `DocumentLibrary` (DocLib) storage system.
 3. **[Supervisor Auditor Team](Supervisory_Team.md)**: Details the dynamic **3-AI Supervisory Team** (Integrity, Continuity, and Deadlock Auditors) which monitors dialogue transcripts for circular deadlocks and performs recursive lineage parent escalations.
 4. **[State Persistence & Multi-Turn Memory](State_Persistence.md)**: Explains the SQLite-backed state snapshotting structure, ER diagrams, recovery lifecycles, Multi-Turn agent memory switches, turn-based dialogue pruning, and expert directory injection.
-5. **[Developer Testing & Mocking Guide](dev/testing.md)**: Guidelines for writing unit tests and mocking sequence responses.
-6. **[Developer API Reference](dev/API_Reference.md)**: Reference listing system internals and execution logic.
+5. **[Policy-Based Governance & Rules](Policies.md)**: Details inter-team communication rules (permissive, rule-gated, proxied) and parent hierarchy migration strategy-policies (ancestor approval, lineage path).
+6. **[Developer Testing & Mocking Guide](dev/testing.md)**: Guidelines for writing unit tests and mocking sequence responses.
+7. **[Developer API Reference](dev/API_Reference.md)**: Reference listing system internals and execution logic.
 
 ## 📊 Visual Flowcharts Directory
 

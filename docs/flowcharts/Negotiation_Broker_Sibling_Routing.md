@@ -26,24 +26,32 @@ sequenceDiagram
 
 ## 2. Sibling & Cross-Lineage Negotiation Flowchart
 
-This flowchart outlines the gating logic executed inside `NegotiationBroker.negotiate_communication` when a dynamic team attempts to establish a communication tunnel with a peer:
+This flowchart outlines the gating logic executed inside `NegotiationBroker.negotiate_communication` and `NegotiationBroker.establish_peer_agreement` when dynamic teams check or negotiate communication tunnels:
 
 ```mermaid
 flowchart TD
-    Start["Call negotiate_communication(sender, recipient, mode)"] --> GetParents["Resolve sender_parent and recipient_parent\n(Traverse tree creator links)"]
+    %% negotiate_communication flow
+    Start1["Call negotiate_communication(sender, recipient)"] --> SiblingCheck{"sender_parent == recipient_parent?\n(Sibling Team Check)"}
+    SiblingCheck -- "Yes" --> ParentSiblingTalk{"Parent rules set\nallow_sibling_talk == True?"}
+    ParentSiblingTalk -- "Yes" --> ApproveSibling["Return True"]
+    ParentSiblingTalk -- "No" --> DenySibling["Return False"]
     
-    GetParents --> SiblingCheck{"sender_parent == recipient_parent?\n(Sibling Team Check)"}
+    SiblingCheck -- "No" --> AgreementCheck{"(sender_id, recipient_id) in\npeer_talk_agreements?"}
+    AgreementCheck -- "Yes" --> ApproveSibling
+    AgreementCheck -- "No" --> DenySibling
+
+    %% establish_peer_agreement flow
+    Start2["Call establish_peer_agreement(sender, recipient, rationale, mode)"] --> LineageCheck{"Both sender_parent and\nrecipient_parent exist?"}
+    LineageCheck -- "No" --> FailAgreement["Return False\n(Lineage Incomplete)"]
+    LineageCheck -- "Yes" --> ResolvePolicy["Resolve policy_name from config\n(or overridden by mode)"]
     
-    SiblingCheck -- "Yes (Sibling ATs)" --> ParentSiblingTalk{"Parent rules set\nallow_sibling_talk == True?"}
-    ParentSiblingTalk -- "Yes" --> ApproveSibling["Approve Sibling Talk (return True)"]
-    ParentSiblingTalk -- "No" --> DenySibling["Deny Sibling Talk (return False)"]
+    ResolvePolicy --> PolicyCheck{"Policy strategy matches?"}
+    PolicyCheck -- "permissive" --> ApproveCross["Add pair to peer_talk_agreements\nSave State\nReturn True"]
+    PolicyCheck -- "rule_gated" --> CheckRules{"Symmetric parent rules match?\n(evaluate rules)"}
+    CheckRules -- "Yes" --> ApproveCross
+    CheckRules -- "No" --> FailAgreement
     
-    SiblingCheck -- "No (Cross-Lineage ATs)" --> ParentLineageCheck{"Respective parent teams exist?"}
-    
-    ParentLineageCheck -- "No (Incomplete lineage)" --> DenyCross["Deny communication (return False)"]
-    ParentLineageCheck -- "Yes" --> ParentAgreementDebate["Run _run_parent_negotiation_loop\n(Agreement debate between parent teams)"]
-    
-    ParentAgreementDebate --> SupportedMode{"Negotiation mode is supported?\n('proxied' | 'indirect' | 'rule_gated')"}
-    SupportedMode -- "Yes" --> ApproveCross["Establish cross-lineage communication tunnel (return True)"]
-    SupportedMode -- "No" --> DenyCross
+    PolicyCheck -- "proxied" --> QueryLeaders{"Query parent representatives\nvia LLM evaluation"}
+    QueryLeaders -- "Both Approved" --> ApproveCross
+    QueryLeaders -- "Any Rejected" --> FailAgreement
 ```

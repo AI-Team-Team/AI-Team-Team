@@ -18,20 +18,7 @@ The next iterations of the ATT framework focus on:
   * When an agent calls `send_peer_message` or `dispatch_subagent`, the executor calls `NegotiationBroker.negotiate_communication` beforehand.
   * If unauthorized, instead of raising an error, return a structured observation: `Observation: Error: Permission Denied. Sibling talk is not authorized. You must call set_sibling_talk to request access.` This trains agents to adapt dynamically to permission boundaries.
 
-### 2. Rule-Gated Cross-Lineage Communication (Cross-Lineage Broker Mode) [COMPLETED]
-
-* **Concept**: Fully support rule-gated cross-lineage communication channels in the `NegotiationBroker`.
-* **Design & Implementation**:
-  * Decoupled communication and migration rules into configurable strategies under `core/policies.py`.
-  * Extended `negotiate_peer_talk` tool to support passing a negotiation `mode`.
-  * Implemented symmetric rule evaluation (`allow_all`, `allow_team`, `allow_parent`, `allow_purpose` with regex support) and dynamic arbitration utilizing the representative agents' own LLM clients instead of the global `critic_client`.
-
-### 3. State Persistence and Workflow Recovery (State Snapshotting) [COMPLETED]
-
-* **Context:** Previously, all team structures, memory queues, inboxes, and historical proposals were strictly stored in memory and lost on crash.
-* **Solution:** Implemented SQLite-backed database persistence via `manager.save_state()` and `manager.load_state()`. The framework serializes the active topology tree, parent-child lineages, agent message queues (multi-turn histories), and Document Library directories/files seamlessly. Auto-save triggers automatically on all state modifications (debates, tool calls, migrations).
-
-### 4. The "Passive Inbox" Trap for Asynchronous Escalations
+### 2. The "Passive Inbox" Trap for Asynchronous Escalations
 
 * **Context:** When the `SupervisoryTeam` detects a deadlock, it triggers `report_anomaly` and appends an escalation warning to the parent team's `message_inbox`.
 * **Problem:** The `message_inbox` is only read and processed when `execute_team_discussion(parent)` is explicitly invoked. If the parent team is currently "idle" (not actively running a discussion loop), this critical hierarchy-collapse alert will be left pending indefinitely.
