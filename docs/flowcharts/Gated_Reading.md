@@ -53,3 +53,42 @@ flowchart TD
     
     ReadTailSlice --> ReturnTail["Return line-numbered tail slice"]
 ```
+
+## 3. DocLib ACL Segment-Based Path Permission Resolution Flowchart
+
+This flowchart details the segment-based folder/file path traversal logic executed during `check_library_access` to evaluate read/write permissions:
+
+```mermaid
+flowchart TD
+    Start["Call check_library_access(team_id, lib_id, path, required_permission)"] --> IsOwner{"Is team_id == lib.owner_team_id?"}
+    
+    IsOwner -- "Yes" --> ApproveOwner["Approve Access (Return True)"]
+    IsOwner -- "No" --> HasPerms{"Any permissions defined for lib_id?"}
+    
+    HasPerms -- "No" --> DenyAccess["Deny Access (Return False)"]
+    
+    HasPerms -- "Yes" --> DecomposePath["Clean path & decompose into segments:<br/>e.g., '/specs/sub/file.txt' becomes:<br/>['/specs/sub/file.txt', '/specs/sub', '/specs', '/']"]
+    
+    DecomposePath --> LoopSegments["For each segment p in segments<br/>(ordered from deepest to root '/')"]
+    
+    LoopSegments --> HasSegmentPerm{"Has permission registered for segment p?"}
+    
+    HasSegmentPerm -- "No" --> NextSegment["Next segment in loop"]
+    
+    HasSegmentPerm -- "Yes" --> TeamInPerm{"Is team_id granted permission for p?"}
+    
+    TeamInPerm -- "No" --> NextSegment
+    TeamInPerm -- "Yes" --> ResolvePerm{"Verify permission type:"}
+    
+    ResolvePerm -- "required_permission == 'READ'" --> CheckRead{"Granted permission is 'READ' or 'WRITE'?"}
+    CheckRead -- "Yes" --> ApproveAccess["Approve Access (Return True)"]
+    CheckRead -- "No" --> NextSegment
+    
+    ResolvePerm -- "required_permission == 'WRITE'" --> CheckWrite{"Granted permission is 'WRITE'?"}
+    CheckWrite -- "Yes" --> ApproveAccess
+    CheckWrite -- "No" --> NextSegment
+    
+    NextSegment --> LoopEnd{"More segments to evaluate?"}
+    LoopEnd -- "Yes" --> LoopSegments
+    LoopEnd -- "No" --> DenyAccess
+```

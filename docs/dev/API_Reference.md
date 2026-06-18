@@ -69,6 +69,18 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
     Spawns a new team of size $N \ge 3$, establishes parent-child lineages, and binds generic/custom tools.
   * `execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`
     Executes a multi-agent debate session, automatically injecting unresolved inbox alerts, and running supervisory transcript audits.
+  * `find_parent_team(target: AgentTeam) -> Optional[AgentTeam]`
+    Locates the parent team in the active team topology using child references and creator pointers.
+  * `check_library_access(team_id: str, lib_id: str, path: str, required_permission: str) -> bool`
+    Evaluates if a team is granted `READ` or `WRITE` access to a Document Library path based on prefix segments.
+  * `render_topology_tree() -> str`
+    Renders the active lineage tree map in ASCII format.
+  * `negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`
+    Arbitrates dynamic team reorganizations and updates parental references.
+  * `save_state(db_path: Optional[str] = None)`
+    Serializes all manager topologies, configs, lineages, agent conversation queues, proposals, agreements, and Document Libraries into SQLite.
+  * `load_state(db_path: str)`
+    Deserializes and hydrates the entire ATTManager registry state from SQLite database snapshots.
 
 ### `ATTConfig`
 
@@ -148,3 +160,37 @@ Represents a team's document database with prefix-based permissions and path tra
   * `read_file(path: str, start_line: int, end_line: Optional[int]) -> str`
   * `delete_file(path: str) -> str`
   * `list_contents(path: str) -> List[str]`
+
+## Policies & Strategy Interfaces
+
+ Pluggable strategies governing communication and migrations defined in [policies.py](file:///Users/charlestsaur/Documents/sandbox/AI-Team-Team/src/ai_team_team/core/policies.py):
+
+### Communication Policies
+
+* **`BaseCommunicationPolicy`**: Base protocol defining `authorize_peer_talk(sender, recipient, manager, rationale) -> bool`.
+* **`PermissiveCommunicationPolicy`**: Always returns `True` (default strategy).
+* **`RuleGatedCommunicationPolicy`**: Evaluates static regular expression pattern rules and parent rule mappings on opposing teams.
+* **`ProxiedCommunicationPolicy`**: Queries the LLM generator client of parent representatives dynamically for consent.
+
+### Migration Policies
+
+* **`BaseMigrationPolicy`**: Base protocol defining `authorize_migration(team, target_parent, manager, rationale) -> Tuple[bool, str]`.
+* **`PermissiveMigrationPolicy`**: Always returns `(True, "Allowed")`.
+* **`AncestorApprovalMigrationPolicy`**: Consults the representatives of the current parent, target parent, and Least Common Ancestor (LCA) teams (default strategy).
+* **`LineagePathMigrationPolicy`**: Traverses and queries every team representative along the traversal path from the current parent up to the LCA, and from the target parent up to the LCA.
+
+## Database Schema & ORM Models
+
+SQLAlchemy Declarative Models mapping the topology schema, defined in [models.py](file:///Users/charlestsaur/Documents/sandbox/AI-Team-Team/src/ai_team_team/database/models.py):
+
+* **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
+* **`AgentModel` & `AgentMessageModel`**: Persists agent identity profiles and sequential conversation history message buffers.
+* **`TeamModel`**: Tracks active topologies, migration counts, sibling settings, and links dual-linked parent-child hierarchy nodes.
+* **`TeamInboxModel` & `TeamProposalModel`**: Persists child escalations, peer messages, and democratic proposal votes.
+* **`BrokerAgreementModel`**: Tracks cross-lineage tunnels negotiated by the broker.
+* **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel`**: Persists libraries, ACL segments, and physical document path contents inside the SQLite database.
+
+### Database Session Factory
+
+* **`get_session(db_path: str, disable_fks: bool = False) -> Generator[Session, None, None]`**
+  A context manager defined in [session.py](file:///Users/charlestsaur/Documents/sandbox/AI-Team-Team/src/ai_team_team/database/session.py) that initializes SQLite database engines, migrates schemas, and yields transactional SQLAlchemy session instances. Allows setting `PRAGMA foreign_keys = OFF` to bypass constraint audits during state purges.

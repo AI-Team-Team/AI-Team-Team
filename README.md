@@ -28,25 +28,40 @@ Many thanks to Gemini and GPT for their help!
 [![Documentation](https://img.shields.io/badge/docs-specification-orange.svg)](docs/README.md)
 [![Unit Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#)
 
-## 🚀 Key Features
+The ATT framework organizes dynamic multi-agent topologies into clean, recursive lineages with robust governance, safety gates, and state persistence:
 
-* **[Tree-like Lineage Spawning](docs/Dynamic_Delegation.md)**: Spawns hierarchical dynamic agent teams (`AgentTeam`) recursively to arbitrary depths, strictly governed by depth limits.
-* **[Autonomous Member Configurations](docs/Dynamic_Delegation.md#1-dynamic-spawning-&-lineage-hierarchy)**: Defines dynamic child team memberships using structured `member_configs` mapping custom roles, individual system instructions, and model aliases to shape custom agent behaviors.
-* **[Democratic Voting & Governance](docs/Dynamic_Delegation.md#5-team-governance-&-democratic-voting-system)**: Introduces an optional asynchronous voting system to democratically manage team memberships. Voting requires unanimous active member participation and a $\ge 2/3$ agreement threshold to auto-execute.
-* **Dynamic presets & Committees**: Allows runtime registration of custom agent committees (role configurations and system prompts) like planning, writing, database management, etc.
-* **[Model Registry & Global Generator Callback](docs/user/Quickstart.md#7-model-registry-and-global-generator-callback)**: Maps dynamic agent roles to registered model configurations (containing metadata and descriptions), delegating all LLM invocation logic to a centralized global callback handler to keep the library keyless and lightweight.
-* **Bounded ReAct Loops**: Agents execute reasoning steps using standard ReAct (Thought/Action/Observation) protocols, supported by a safe literal argument parser.
-* **[Negotiation Broker](docs/Dynamic_Delegation.md#4-consolidated-autonomy-tools)**: Gates sibling and cross-lineage peer-to-peer communication through dynamic permission rules and broker contracts.
-* **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Allows active teams to dynamically request parent-hierarchy migrations, arbitrated by modular migration policies with cycle checks and related team alerts.
-* **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects a structured ASCII indented tree map representing all active teams (displaying team purposes and progress in real-time) in the agent context.
-* **Tool Auditor Interception Hook**: Allows host applications to register pre-execution callback hooks to audit, approve, or reject specific tool calls (e.g. database safety query vetting).
-* **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A 3-AI Supervisory Team audits dialogue transcripts for logical deadlocks, circular reasoning, and anomalies, recursively escalating alerts up the ancestry lineage.
-* **UI/Logging Decoupling**: Exposes clear runtime event hooks (`on_status_change`, `on_activity_added`, `on_log_append`) to update terminal dashboards and write logs without framework pollution.
-* **[Gated Context Protection](docs/Gated_Reading.md)**: Employs `GatedFileReader` to paginate file reading, cap line window requests, and fallback to outline warnings on large documents.
-* **[Collaborative Document Library (DocLib)](docs/Gated_Reading.md#5-document-libraries-doclib)**: Equips each Agent Team with a built-in document library to manage nested directories/files, with fine-grained team-level permissions (READ/WRITE), discoverability listing, and dynamic parent-to-child context passing.
-* **[SQLite State Snapshotting & Recovery](docs/State_Persistence.md)**: Auto-saves active team topologies, lineages, inboxes, proposals, broker tunnels, and Document Libraries (including files/directories) into SQLite on any state changes, enabling seamless crash-recovery and resume capabilities.
-* **[Dialogue Memory Pruning & Transitions](docs/State_Persistence.md)**: Automatically compresses and summarizes early conversation turns while keeping the latest high-fidelity messages untouched to prevent context window overflow. Appends supportive transition notices when shared agents transition across teams.
-* **[Global Expert Discovery](docs/State_Persistence.md)**: Automatically injects a directory of all active global experts into the agent system prompt context to facilitate dynamic delegation and agent hiring.
+### 🧬 Topology & Lineage Control
+
+* **[Tree-like Lineage Spawning](docs/Dynamic_Delegation.md)**: Spawns recursive child agent teams (`AgentTeam`) at runtime to arbitrary depths, strictly bounded by depth limits to prevent stack overflow.
+* **[Autonomous Member Configs](docs/Dynamic_Delegation.md#1-dynamic-spawning-&-lineage-hierarchy)**: Defines dynamic child memberships mapping role presets, custom system instructions, and LLM aliases to shape custom agent personalities.
+* **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Permits active teams to request parent-hierarchy migrations, arbitrated by modular strategies with loop/cycle detection and parent notification logs.
+* **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects an ASCII-drawn indented tree map of active teams (displaying purposes, status, and progress metrics in real-time) directly into the agent prompt context.
+* **[Global Expert Discovery](docs/State_Persistence.md)**: Automatically appends a directory of all active system experts (names, roles, and profiles) into the agent's identity context to facilitate peer discovery.
+
+### 🧠 ReAct Loops & Execution Engine
+
+* **Bounded ReAct Loops**: Executes standard Thought/Action/Observation reasoning cycles, capped by max steps to prevent runaway API tokens.
+* **Robust Argument Parser**: A safe literal lexical parser (`ast.literal_eval`) with multiline XML support, code block stripping, and a comma-merging heuristic to handle unquoted complex strings (like SQL queries).
+* **[Dialogue Memory Compression](docs/State_Persistence.md)**: Automates memory pruning by summarizing early conversation turns using the agent's LLM while preserving the latest high-fidelity messages.
+* **[Model Registry & Callbacks](docs/user/Quickstart.md#7-model-registry-and-global-generator-callback)**: Delegates all LLM generation logic to a single global callback handler (`generator_handler`), keeping the framework lightweight and vendor-independent.
+
+### 🗳️ Governance & Inter-Team Communication
+
+* **[Democratic Voting System](docs/Dynamic_Delegation.md#5-team-governance-&-democratic-voting-system)**: Features an asynchronous voting pipeline to add or remove members, requiring unanimous participation and a $\ge 2/3$ agreement majority.
+* **Anonymous Voting**: Enforces voter anonymity via `cast_vote(..., public=False)` which masks voter names as `"Anonymous Voter"` in the team prompt context.
+* **[Negotiation Broker](docs/Dynamic_Delegation.md#4-consolidated-autonomy-tools)**: Regulates P2P messaging and agreement tunnels through dynamic parent rules (allowing regex purpose/lineage checks) or interactive LLM leader proxies.
+
+### 🔒 Context Protection & Safety Gates
+
+* **[Gated Context Protection](docs/Gated_Reading.md)**: Restricts direct large file reads; falls back to Outline Warnings with a 5-line sample of files exceeding 50 KB, prompting agents to make paginated, sliced chunk requests.
+* **[Collaborative DocLib Storage](docs/Gated_Reading.md#5-document-libraries-doclib)**: Equips teams with built-in document libraries. Access is governed by prefix path ACL permissions (`READ`/`WRITE`) that inherit recursively downward to subdirectories.
+* **Tool Auditor Interception**: Registers pre-execution interception hooks to audit, vet, approve, or reject specific tool calls (e.g. database safety query check).
+
+### 💾 Persistence & Diagnostics
+
+* **[SQLite State Snapshots](docs/State_Persistence.md)**: Automatically serializes topologies, lineages, memory logs, DocLib files, and active voting proposals to SQLite on state changes, enabling 100% crash-recovery.
+* **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A non-participating 3-AI Supervisory Team (Integrity, Continuity, Deadlock) reviews round transcripts, recursively escalating anomalies up the tree lineage.
+* **Decoupled Dashboards**: Exposes clear runtime callback event hooks (`on_status_change`, `on_activity_added`, `on_log_append`) to update console UIs without codebase pollution.
 
 ## 📦 Installation
 
@@ -77,48 +92,117 @@ The master `ATTManager` coordinates the lifecycle, communications, and supervisi
 
 ```mermaid
 graph TD
+    %% Coordinator Layer
+    subgraph Coordinator ["ATT Coordinator Layer"]
+        Manager[ATTManager] <-->|Auto-Save / Restore| SQLite[(SQLite Database)]
+        Manager -->|Resolve Model Configs| ModelRegistry[Model Registry & Presets]
+        ModelRegistry -->|Route Requests| Generator[Global Generator Handler]
+        Manager -->|Tracks Subscribed Callbacks| EventHooks[Event Callbacks: Status / Activity / Logs]
+    end
+
     %% Lineage Spawning
     Root[Root Agent - Level 0] -->|create_agent_team| TeamA[Agent Team A - Level 1]
     Root -->|create_agent_team| TeamB[Agent Team B - Level 1]
     
+    Manager -->|Manages Lineages| Root
+    
     subgraph Lineage ["Hierarchical Team Lineage (Arbitrary Depth)"]
-        TeamA -->|dispatch_subagent\nmember_configs| SubTeamA1[Sub-Agent Team A.1 - Level 2]
+        subgraph TeamA_Node ["Agent Team A - Level 1 (N >= 3 Members)"]
+            Agent_A1["Agent A1"] <-->|True Multi-Turn Memory| A1_Memory[(Agent Messages Buffer)]
+            A1_Memory -->|Turns > Max + 2| MemoryPruning[Memory Pruning / LLM Summarization]
+        end
+        
+        TeamA_Node -->|dispatch_subagent\nmember_configs| SubTeamA1[Sub-Agent Team A.1 - Level 2]
         SubTeamA1 -->|dispatch_subagent| SubTeamN[Sub-Agent Team N - Level N]
     end
 
-    %% Document Library
-    TeamA --- DocLibA[(DocLib A)]
-    SubTeamA1 --- DocLibA1[(DocLib A.1)]
-    SubTeamN --- DocLibN[(DocLib N)]
-    TeamB --- DocLibB[(DocLib B)]
+    %% Tool Execution & Auditing Hook
+    subgraph ToolExecution ["Tool Execution Gating"]
+        ToolRegistry[Tool Registry: default & custom tools] -->|Intercepts & Vets| ToolAuditor[ToolAuditor Hook]
+        Agent_A1 -->|"Action: tool_name(args)"| ToolRegistry
+    end
     
-    DocLibA1 -.->|Request access / Grant READ| DocLibB
+    Manager -->|Registers Tools & Auditors| ToolRegistry
+
+    %% Document Library & Gated Reading
+    subgraph DocStorage ["Gated Document Storage (DocLib)"]
+        GatedReader[GatedFileReader] -->|Size Filters / Outline Warnings / Paginated Chunking| DocLibA[(DocLib A)]
+        GatedReader -->|Slices Context Lines| DocLibA1[(DocLib A.1)]
+        GatedReader -->|Restricts Tokens| DocLibN[(DocLib N)]
+        GatedReader -->|Path ACL Segment Inheritance| DocLibB[(DocLib B)]
+    end
+    
+    ToolRegistry -->|Built-in Lib Read/Write| GatedReader
+    
+    TeamA_Node --- DocLibA
+    SubTeamA1 --- DocLibA1
+    SubTeamN --- DocLibN
+    TeamB --- DocLibB
+    
+    DocLibA1 -.->|Request Access / Grant READ-WRITE| DocLibB
 
     %% Communication Permission Gating
-    SubTeamN -.->|negotiate_communication| TeamB
-    Broker[NegotiationBroker] -->|Evaluate Sibling Rules & Lineage Contracts| SubTeamN
-    Broker -.->|Approve / Deny Tunnel| TeamB
+    subgraph CommunicationGating ["P2P Communication Gating"]
+        Broker[NegotiationBroker] -->|Consults Strategy| CommPolicy[Communication Policy: Permissive / RuleGated / Proxied]
+        CommPolicy -->|Evaluate Sibling Rules & Lineage Contracts| SubTeamN
+        CommPolicy -.->|Approve / Deny Tunnel| TeamB
+    end
+    
+    Manager -.->|Coordinates Tunnels| Broker
+    ToolRegistry -->|P2P Messaging| Broker
+
+    %% Lineage Reorganization & Context Transition
+    subgraph LineageMigration ["Lineage Migration Arbitration"]
+        MigrationPolicy[Migration Policy: LCA Approval / Path Approval] -->|Tree Restructuring Pointers| Manager
+        MigrationPolicy -.->|Hires Shared Agent| TransitionNotice[Inject Context Transition Notice]
+    end
+    
+    SubTeamN -->|request_migration| MigrationPolicy
+    TransitionNotice -.->|Appends Notice to Memory| A1_Memory
+    ToolRegistry -->|Migration Actions| MigrationPolicy
 
     %% Supervisory Dialogue Audits & Escalation
-    Supervisor[3-AI SupervisoryTeam] -->|audit_team_dialog| TeamA
-    Supervisor -->|report_anomaly escalation| Root
+    subgraph Supervision ["Lineage Supervision & Audit"]
+        Supervisor[3-AI SupervisoryTeam] -->|audit_team_dialog| TeamA_Node
+        Supervisor -->|report_anomaly escalation| ParentInbox[(Parent Team Inbox)]
+        ParentInbox -->|Injected into Discussion| TeamA_Node
+        Supervisor -->|Fallback Escalation| Root
+    end
+    
+    Manager -.->|Orchestrates Audits| Supervisor
 
     %% Democratic Voting System
-    SubTeamA1 -->|initiate_membership_vote| Voting{Democratic Voting\nThreshold: >= 2/3}
-    Voting -->|Approved: add/remove| SubTeamA1
+    subgraph TeamGovernance ["Democratic Team Governance"]
+        SubTeamA1 -->|initiate_membership_vote| Voting{Democratic Voting\nThreshold: >= 2/3}
+        Voting -->|Approved: add/remove member| SubTeamA1
+    end
     
+    ToolRegistry -->|Voting Actions| Voting
+
     %% Styles
+    style Coordinator fill:#eceff1,stroke:#37474f,stroke-width:2px;
+    style Manager fill:#cfd8dc,stroke:#37474f,stroke-width:2px;
+    style SQLite fill:#ffffff,stroke:#455a64,stroke-width:1px;
+    style ModelRegistry fill:#ffffff,stroke:#455a64,stroke-width:1px;
+    style Generator fill:#ffffff,stroke:#455a64,stroke-width:1px;
+    style EventHooks fill:#ffffff,stroke:#455a64,stroke-width:1px;
     style Root fill:#d4e1f5,stroke:#3b5998,stroke-width:2px;
-    style TeamA fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    style TeamA_Node fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
     style TeamB fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
     style SubTeamA1 fill:#ede7f6,stroke:#5e35b1,stroke-width:2px;
     style SubTeamN fill:#f3e5f5,stroke:#ab47bc,stroke-width:2px;
     style Supervisor fill:#ffe0b2,stroke:#f57c00,stroke-width:2px;
+    style ParentInbox fill:#ffe0b2,stroke:#f57c00,stroke-width:2px;
     style Voting fill:#ffebee,stroke:#e53935,stroke-width:2px;
+    style DocStorage fill:#f1f8e9,stroke:#558b2f,stroke-width:2px;
+    style GatedReader fill:#ffffff,stroke:#558b2f,stroke-width:1px;
     style DocLibA fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
     style DocLibA1 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
     style DocLibN fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
     style DocLibB fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    style ToolExecution fill:#fffde7,stroke:#fbc02d,stroke-width:2px;
+    style ToolRegistry fill:#ffffff,stroke:#fbc02d,stroke-width:1px;
+    style ToolAuditor fill:#ffffff,stroke:#fbc02d,stroke-width:1px;
 ```
 
 ## 🛠️ Getting Started
@@ -126,6 +210,7 @@ graph TD
 ### 1. Initialize Configuration & Manager
 
 ```python
+from typing import Union, List, Dict, Optional
 from ai_team_team import ATTManager, Agent, ATTConfig, GatedFileReader
 
 # 1. Configure the framework
@@ -144,15 +229,17 @@ root_agent = Agent(name="Root_AI", role="Architect")
 # All actions, tool calls, and debates will auto-save to this file
 manager = ATTManager(root_ai=root_agent, config=config, db_path="att_state.db")
 
-# 4. (Optional) Resume from a previous session or crash
+# 4. (Optional) Resume from a previous session, or manually save snapshot
 # if os.path.exists("att_state.db"):
 #     manager.load_state("att_state.db")
+#
+# manager.save_state("att_backup.db")  # Manually save a backup state snapshot
 
 # 5. Register a global generator callback handler
 # All LLM invocation logic is delegated here, keeping the framework keyless and SDK-independent
 async def my_handler(
     model_name: str,
-    prompt: str,
+    prompt: Union[str, List[Dict[str, str]]],
     system_instruction: Optional[str] = None,
     temperature: float = 0.3,
     require_json: bool = False
@@ -349,6 +436,20 @@ Configure file reading gates to safeguard the prompt context from massive logs o
 | :--- | :--- | :--- | :--- |
 | `large_threshold_kb` | `int` | `50` | File size limit triggering an outline warning if no line boundaries are provided. |
 | `max_chunk` | `int` | `100` | Capped line slice count returned per paginated chunk request. |
+
+## 📊 Architecture & Control Flow Diagrams
+
+For visual flowcharts and sequencing diagrams detailing the runtime loops, gated checks, and state serialization flows, refer to:
+
+* **[ATT Autonomy Suite Flowcharts Index](docs/flowcharts/README.md)**
+* **[Discussion & ReAct Execution Loop](docs/flowcharts/Execution_Loop.md)**
+* **[Gated Paginator Reading & DocLib ACL Traversal](docs/flowcharts/Gated_Reading.md)**
+* **[Spawning, Voting, & Migration Sequence](docs/flowcharts/Spawning_Escalation.md)**
+* **[Negotiation Broker Sibling Gating Sequence](docs/flowcharts/Negotiation_Broker_Sibling_Routing.md)**
+* **[3-AI Supervisory Dialogue Audit & Escalation](docs/flowcharts/Supervisory_Team_Audit.md)**
+* **[SQLite Database Auto-Save & Recovery Pipeline](docs/flowcharts/State_Persistence.md)**
+* **[Database Schema ER Diagram](docs/flowcharts/Database_Schema.md)**
+* **[Lineage Migration Arbitration Sequence](docs/flowcharts/Lineage_Migration_Arbitration.md)**
 
 ## 🧪 Developer Testing
 

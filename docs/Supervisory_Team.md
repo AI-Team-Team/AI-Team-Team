@@ -33,6 +33,13 @@ The Supervisory Team produces a strict JSON health evaluation:
 }
 ```
 
+### Graceful Fallback & Fault Tolerance
+
+To ensure that transient LLM client API failures or JSON parsing errors do not halt active team discussions, the auditing mechanism implements a graceful fallback:
+
+* **Default to Healthy**: If any exception or generation failure occurs during the dialogue audit, the Supervisory Team automatically defaults to `is_healthy = True` and logs a warning with the error details.
+* **Error Traceability**: The audit reason is set to `"Audit failed: <error message>"` to preserve traceability in logs.
+
 ## 3. Asynchronous Parent Escalation Channel
 
 If the dialogue audit results in `is_healthy = False` (indicating a deadlock or severe logic violation), the Supervisory Team triggers the **Asynchronous Escalation Protocol**:

@@ -24,7 +24,9 @@ config = ATTConfig(
     llm_max_retries: int = 3,
     llm_retry_backoff_factor: float = 1.5,
     enable_memory_compression: bool = True,
-    max_memory_turns: int = 20
+    max_memory_turns: int = 20,
+    communication_policy: str = "permissive",
+    migration_policy: str = "ancestor_approval"
 )
 ```
 
@@ -43,6 +45,8 @@ config = ATTConfig(
 * **`llm_retry_backoff_factor`**: The exponential backoff factor for retrying LLM calls.
 * **`enable_memory_compression`**: Whether to enable automatic dialogue compression/pruning of early conversation turns (default: `True`).
 * **`max_memory_turns`**: The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns (default: `20`).
+* **`communication_policy`**: The strategy used for inter-team communication gating. Options: `"permissive"`, `"rule_gated"`, `"proxied"`.
+* **`migration_policy`**: The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`.
 
 ## 👤 `Agent`
 
@@ -69,11 +73,14 @@ Represents a dynamic team of agents executing discussions and tasks in a parent-
 
 * **`team_id`**: `str` - The unique identifier of the team (e.g. `AT-abc123`).
 * **`team_purpose`**: `str` - The global purpose/objective of this team.
+* **`team_progress`**: `str` - The real-time status/progress of this team (default: `"Not started"`).
 * **`depth`**: `int` - The depth level of the team in the lineage hierarchy (e.g., Level 1, Level 2).
 * **`members`**: `List[Agent]` - The list of `Agent` instances assigned to this team.
 * **`doc_library`**: `Optional[DocumentLibrary]` - Resolves the built-in document library for the team.
 * **`parent_team`**: `Optional[AgentTeam]` - Resolves the parent team in the lineage hierarchy.
 * **`child_teams`**: `List[AgentTeam]` - The list of active child teams spawned by this team.
+* **`proposals`**: `Dict[str, Dict[str, Any]]` - Active membership voting proposals mapped by ID.
+* **`status_map`**: `Dict[str, str]` - Dictionary mapping member names to their current statuses (e.g. `"Thinking..."`, `"Idle"`).
 
 ### Methods
 
@@ -115,6 +122,10 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
   Renders the active hierarchical agent team lineage as an indented ASCII tree.
 * **`negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`**
   Arbitrates the migration of an AgentTeam using the configured migration policy strategy (which defaults to requiring approvals from the Least Common Ancestor and parent team representatives using their own LLM clients), updates structure, and broadcasts alerts.
+* **`save_state(db_path: Optional[str] = None)`**
+  Serializes the entire manager configuration, registered agents, active team lineages, inboxes, proposals, broker agreements, and Document Library folders (with full directory structure and file contents) into a local SQLite database.
+* **`load_state(db_path: str)`**
+  Restores the entire manager topology, configs, agent histories, document libraries, inbox alerts, agreements, and proposals from a local SQLite database snapshot.
 
 ### Callbacks
 
@@ -230,3 +241,66 @@ class LLMClientProto(Protocol):
         """
         ...
 ```
+
+## 🛠️ Built-in ReAct Tools Reference
+
+These tools are automatically registered and bound to all agent teams by default. ReAct agents can invoke them using standard positional/keyword call syntax:
+
+### Spawning & Communication
+
+* **`dispatch_subagent(task: str, team_purpose: str, member_configs: Optional[dict] = None, system_instructions: str = "", allow_sibling_talk: bool = False, sibling_talk_rules: str = "", is_public_visible: bool = False, initial_documents: Optional[dict] = None) -> str`**
+  Spawns a recursive child `AgentTeam` (Level $N+1$). Each team must contain at least 3 members. Optional context files can be pre-populated via `initial_documents` (maps file paths to contents).
+* **`delegate_escalation(objective: str, rationale: str) -> str`**
+  Escalates a task or deadlock upward to the team's direct parent in the lineage hierarchy.
+* **`set_sibling_talk(child_id: str, allow: bool = True) -> str`**
+  Allows a parent team to dynamically authorize sibling peer communication for a specific child team.
+* **`send_peer_message(team_id: str, message: str) -> str`**
+  Sends a direct message to a peer team's inbox, subject to communication policy gates.
+* **`negotiate_peer_talk(target_team_id: str, rationale: str) -> str`**
+  Requests parent representatives to negotiate a cross-lineage communication agreement tunnel.
+
+### Team Status & Membership
+
+* **`update_team_purpose(new_purpose: str) -> str`**
+  Updates the purpose string of the caller's team.
+* **`update_team_status(purpose: str, progress: str) -> str`**
+  Updates both the purpose and progress strings of the caller's team.
+* **`add_team_member(team_id: str, role_name: str, model_name: str, role_description: str, system_instructions: str) -> str`**
+  Allows a parent team to administratively add a new member with custom configurations to a child team.
+* **`remove_team_member(team_id: str, agent_name: str) -> str`**
+  Allows a parent team to administratively remove a member from a child team, enforcing the minimum size of 3.
+
+### Democratic Membership Voting
+
+* **`initiate_membership_vote(action: str, target: str, rationale: str, initiator_type: str = "individual", proposed_details: Optional[dict] = None) -> str`**
+  Initiates a democratic proposal to `"add"` or `"remove"` a member. Requires unanimous participation of current members to resolve.
+* **`cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str`**
+  Casts a ballot (`"Agree"`, `"Disagree"`, or `"Abstain"`). Setting `public=False` enforces anonymity.
+* **`retract_membership_vote(proposal_id: str) -> str`**
+  Withdraws an active proposal. Only the initiator can retract.
+
+### Reorganization
+
+* **`request_migration(target_parent_id: str, rationale: str) -> str`**
+  Requests to migrate the caller's team to a new parent in the hierarchy, audited by the configured `migration_policy`.
+
+### Document Library (DocLib) File Actions
+
+* **`create_doc_library(name: str, description: str, is_public: bool = False) -> str`**
+  Creates a new document library owned by the caller's team.
+* **`update_library_metadata(lib_id: str, description: Optional[str] = None, is_public: Optional[bool] = None) -> str`**
+  Updates description or visibility of a library owned by the caller's team.
+* **`list_public_libraries() -> str`**
+  Lists all document libraries registered as publicly visible.
+* **`grant_library_permission(lib_id: str, path: str, target_team_id: str, permission: str) -> str`**
+  Grants access (`"READ"` or `"WRITE"`) to a target team for a path segment in the library.
+* **`revoke_library_permission(lib_id: str, path: str, target_team_id: str) -> str`**
+  Revokes permissions for a target team under a path.
+* **`write_library_file(lib_id: str, path: str, content: str) -> str`**
+  Writes content to a file in a library (requires WRITE permission).
+* **`read_library_file(lib_id: str, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str`**
+  Reads a file segment from a library (requires READ permission, checks file-gating).
+* **`delete_library_file(lib_id: str, path: str) -> str`**
+  Deletes a file or directory in a library (requires WRITE permission).
+* **`list_library_files(lib_id: str, path: str = "/") -> str`**
+  Lists contents under a library path (requires READ permission).

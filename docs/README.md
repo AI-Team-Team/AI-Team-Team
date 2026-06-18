@@ -32,6 +32,10 @@ For visual diagrams sequencing ATT loops, refer to the flowchart index and speci
 * **[Gated Reading Slicing Sequence](flowcharts/Gated_Reading.md)**: Visualizes line chunk slicing logic and outline fallbacks.
 * **[Negotiation Broker Routing Sequence](flowcharts/Negotiation_Broker_Sibling_Routing.md)**: Sequences sibling and cross-lineage P2P talk approvals.
 * **[Supervisory Team Audit Sequence](flowcharts/Supervisory_Team_Audit.md)**: Sequences dialogue auditing and ancestor anomaly routing.
+* **[State Persistence Flowchart](flowcharts/State_Persistence.md)**: Sequences SQLite auto-saving event triggers and reconstruction cycles.
+* **[Discussion & ReAct Execution Loop](flowcharts/Execution_Loop.md)**: Sequences the master debate rounds and individual agent ReAct steps.
+* **[Database Schema ER Diagram](flowcharts/Database_Schema.md)**: Details tables, types, keys, and schemas mapped in the SQLite database.
+* **[Lineage Migration Arbitration](flowcharts/Lineage_Migration_Arbitration.md)**: Details the representatives harvesting and LLM voting cycles for dynamic migrations.
 
 ## Core Architecture Overview
 

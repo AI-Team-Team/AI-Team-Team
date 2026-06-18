@@ -52,7 +52,7 @@ sequenceDiagram
     Parent->>Manager: Call set_sibling_talk(child_id='AT-Child1', allow=True)
     Note over Manager: Verify if caller AT-Parent is the parent of AT-Child1
     Manager-->>Parent: Authorization Confirmed
-    Note over Manager: Set AT-Child1.allow_sibling_talk = True
+    Note over Manager: Set AT-Child1.communication_rules["allow_sibling_talk"] = True
     
     Child1->>Manager: Call negotiate_communication(AT-Child1, AT-Child2)
     Note over Manager: Resolve common parent AT-Parent
@@ -107,7 +107,8 @@ sequenceDiagram
     Note over T: Create VP-xxxx proposal<br/>Set Agent 1 vote to 'Agree'
     T-->>A1: Return Proposal ID (VP-xxxx)
 
-    A2->>T: Call cast_vote(proposal_id='VP-xxxx', vote='Agree')
+    A2->>T: Call cast_vote(proposal_id='VP-xxxx', vote='Agree', public=False)
+    Note over T: Voter 2 vote is cast anonymously (masked as "Anonymous Voter")
     T-->>A2: Success (1 voter remaining)
 
     A3->>T: Call cast_vote(proposal_id='VP-xxxx', vote='Agree')

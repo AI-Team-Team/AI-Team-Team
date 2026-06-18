@@ -12,10 +12,10 @@ flowchart TD
     
     FormulatePrompt --> BatchCall["Run 3-AI Auditor consensus check\n(Single batch LLM JSON call)"]
     
-    BatchCall --> ParseResponse{"Parse health evaluation JSON\n{'is_healthy': bool, 'reason': str}"}
+    BatchCall --> TryBlock{"Try LLM generation & JSON parse?"}
     
-    ParseResponse -- "Parse Fails" --> FallbackHealthy["Log parse error\nDefault health to True"]
-    ParseResponse -- "Parse Success" --> HealthGate{"is_healthy == True?"}
+    TryBlock -- "Exception / Parse Fails" --> FallbackHealthy["Log warning with error details\nDefault to healthy=True with warning reason"]
+    TryBlock -- "Success" --> HealthGate{"is_healthy == True?"}
     
     HealthGate -- "Yes" --> End["Discussion healthy (No intervention needed)"]
     FallbackHealthy --> End

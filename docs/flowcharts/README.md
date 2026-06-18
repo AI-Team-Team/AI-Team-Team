@@ -3,17 +3,20 @@
 This directory contains detailed technical flowcharts and Mermaid sequencing diagrams detailing the operational control flows of the **ATT (AI Team Team) Autonomy & Dynamic Delegation Suite**.
 
 > [!NOTE]
-> All flowcharts in this directory were largely written by Gemini and the content described at present is incomplete, \
-> so it is for reference only.
+> All flowcharts in this directory are fully updated, aligned with the Python package specifications, and represent the actual runtime execution control flows.
 
 ## Flowchart Index
 
 Please refer to the following documents for granular flow diagrams:
 
 1. **[Spawning, Escalation & Migration](Spawning_Escalation.md)**: Details the recursive `AgentTeam` lineages (Level 0 Root AI spawning Level 1 ATs, which recursively spawn deeper sub-teams of Level $N$), closed-loop parent escalation alerts, and LLM-arbitrated parent migrations.
-2. **[Gated Paginator Reading](Gated_Reading.md)**: Visualizes the context protection pre-filters, outline generation samples, and paginated line-numbered chunk slicing logic.
+2. **[Gated Paginator Reading](Gated_Reading.md)**: Visualizes the context protection pre-filters, outline warnings, paginated chunk slicing, and the segment-based DocLib ACL path permission resolution.
 3. **[Negotiation Broker & Sibling Routing](Negotiation_Broker_Sibling_Routing.md)**: Sequences the dynamic P2P sibling and cross-lineage communication permissions negotiated by the `NegotiationBroker`.
 4. **[Supervisory Team Audits & Escalations](Supervisory_Team_Audit.md)**: Diagrams the 3-AI Supervisory Team's dialogue auditing and the recursive parent-ancestor climb escalation process.
+5. **[State Persistence & Recovery](State_Persistence.md)**: Visualizes the SQLite-backed auto-saving event triggers and the manager's two-pass deserialization pipeline.
+6. **[Discussion & ReAct Execution Loop](Execution_Loop.md)**: Visualizes the master multi-round debate sequence and the granular agent turn ReAct execution step compilation.
+7. **[Database Schema ER Diagram](Database_Schema.md)**: Visualizes the relational tables, schemas, field types, and keys mapped out in the persistence SQLite engine.
+8. **[Lineage Migration Arbitration Sequence](Lineage_Migration_Arbitration.md)**: Diagrams the step-by-step Least Common Ancestor (LCA) resolution, representatives harvesting, and LLM arbitration rounds during team migrations.
 
 ## Unified High-Level Flow Overview
 
