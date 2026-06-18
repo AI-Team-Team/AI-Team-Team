@@ -89,7 +89,7 @@ The master controller managing the overall agent team topology, tool registratio
 ```python
 from ai_team_team import ATTManager
 
-manager = ATTManager(root_ai: Agent, critic_client: Optional[Any] = None, config: Optional[ATTConfig] = None)
+manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path: Optional[str] = None)
 ```
 
 ### Methods
@@ -114,7 +114,7 @@ manager = ATTManager(root_ai: Agent, critic_client: Optional[Any] = None, config
 * **`render_topology_tree() -> str`**
   Renders the active hierarchical agent team lineage as an indented ASCII tree.
 * **`negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`**
-  Arbitrates the migration of an AgentTeam using the critic LLM client, updates structure, and broadcasts alerts.
+  Arbitrates the migration of an AgentTeam using the configured migration policy strategy (which defaults to requiring approvals from the Least Common Ancestor and parent team representatives using their own LLM clients), updates structure, and broadcasts alerts.
 
 ### Callbacks
 
@@ -200,9 +200,7 @@ lib = DocumentLibrary(
 
 A non-participating 3-AI committee (comprising Integrity, Continuity, and Deadlock Auditors) that automatically monitors dialogue logs for deadlocks and anomalies.
 
-### Details
-
-The Supervisory Team is managed and called automatically by `ATTManager` at the end of each debate session. External users do not typically interact with this class directly, but it coordinates dialogue health audits using the config's `critic_client`.
+The Supervisory Team is managed and called automatically by `ATTManager` at the end of each debate session. External users do not typically interact with this class directly, but it coordinates dialogue health audits using the manager's `critic_client` or falls back to the manager's global `generator_handler` under the `"critic"` model alias.
 
 * If a dialogue audit fails (`is_healthy = False`), the supervisor automatically executes the **Asynchronous Escalation Protocol**, routing anomaly warnings up to the parent team's inbox queue (or to the Level 0 Root AI if no parent exists).
 

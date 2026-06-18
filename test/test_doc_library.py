@@ -23,7 +23,7 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
         self.mock_client = MagicMock()
         self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Dialogue approved."}')
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
-        self.manager = ATTManager(root_ai=self.root_ai, critic_client=self.mock_client)
+        self.manager = ATTManager(root_ai=self.root_ai)
         self.manager.register_tools_context({"att_manager": self.manager})
 
     def tearDown(self):

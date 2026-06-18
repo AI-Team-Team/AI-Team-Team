@@ -75,7 +75,7 @@ For a visual breakdown of sibling communication authorization and inter-team mes
 * **`initiate_membership_vote(action: str, target: str, rationale: str, initiator_type: str = "individual", proposed_details: dict = None) -> str`**: Initiates a democratic membership proposal to add/remove a member.
 * **`cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str`**: Casts a vote ("Agree", "Disagree", or "Abstain") on an active membership proposal.
 * **`retract_membership_vote(proposal_id: str) -> str`**: Allows the initiator of an active proposal to withdraw it.
-* **`request_migration(target_parent_id: str, rationale: str) -> str`**: Requests to migrate the caller's team to a new parent team in the active hierarchy. Migrations are arbitrated by the system critic client, automatically enforce count limits, and dispatch inbox alerts to the affected parents.
+* **`request_migration(target_parent_id: str, rationale: str) -> str`**: Requests to migrate the caller's team to a new parent team in the active hierarchy. Migrations are arbitrated according to the configured migration policy (which defaults to requiring approvals from the Least Common Ancestor and parent team representatives using their own LLM clients), automatically enforce count limits, and dispatch inbox alerts to the affected parents.
 * **`create_doc_library(name: str, description: str, is_public: bool) -> str`**: Creates a new document library owned by the caller's team.
 * **`update_library_metadata(lib_id: str, description: Optional[str], is_public: Optional[bool]) -> str`**: Updates metadata or visibility of a library owned by the caller's team.
 * **`list_public_libraries() -> str`**: Lists all document libraries registered as publicly visible.

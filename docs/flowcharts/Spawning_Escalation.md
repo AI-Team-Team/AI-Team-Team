@@ -63,22 +63,22 @@ sequenceDiagram
 
 ## 3. Dynamic Lineage Migration Sequence
 
-This sequence diagram illustrates how an active Agent Team calls `request_migration` to reorganize the lineage hierarchy, arbitrated by the System Critic:
+This sequence diagram illustrates how an active Agent Team calls `request_migration` to reorganize the lineage hierarchy, arbitrated by the configured Migration Policy Strategy:
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant T as Migrating Team (AT-T)
     participant Manager as ATTManager
-    participant Critic as LLM Critic Client
+    participant Policy as Migration Policy Strategy
     participant P_curr as Old Parent Team (AT-Old)
     participant P_targ as New Parent Team (AT-New)
 
     T->>Manager: Call request_migration(target_parent_id='AT-New', rationale='...')
     Note over Manager: Verify migration limits & cycle checks
-    Manager->>Critic: Call generate() with arbitration prompt
-    Note over Critic: Arbitrate rationale and structure
-    Critic-->>Manager: Return approved=True JSON payload
+    Manager->>Policy: Call authorize_migration(team, target_parent, manager, rationale)
+    Note over Policy: Evaluate strategy (Permissive, AncestorApproval, LineagePath)
+    Policy-->>Manager: Return approved=True, reason='...'
     
     Note over Manager: Update parent-child pointers:<br/>P_curr.child_teams.remove(T)<br/>P_targ.child_teams.append(T)<br/>T._parent_team = P_targ
     

@@ -24,11 +24,7 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         
         self.db_path = os.path.join(self.tmpdir, "att_state.db")
         
-        # Setup mock critic client
-        self.mock_critic = MagicMock()
-        self.mock_critic.generate = AsyncMock(
-            return_value='{"approved": true, "reason": "Arbitration approved."}'
-        )
+
         
         # Setup mock client that will produce ReAct final answer
         self.mock_react_client = MagicMock()
@@ -39,7 +35,6 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_react_client)
         self.manager = ATTManager(
             root_ai=self.root_ai,
-            critic_client=self.mock_critic,
             db_path=self.db_path
         )
         self.manager.register_tools_context({"att_manager": self.manager})
@@ -143,9 +138,12 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         self.manager.config.enable_memory_compression = True
         self.manager.config.max_memory_turns = 4
 
-        self.mock_critic.generate = AsyncMock(
-            return_value="This is a summary of early task executions."
-        )
+        # Mock agent's own client to return the summary text when requested
+        async def mock_agent_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):
+            if "Summarize the preceding execution logs" in str(prompt):
+                return "This is a summary of early task executions."
+            return 'Thought: We are doing the task.\nFinal Answer: Task complete!'
+        self.mock_react_client.generate = mock_agent_generate
 
         agent = Agent(name="Compressed_Agent", role="Summarizer", llm_client=self.mock_react_client)
         
@@ -259,7 +257,6 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         new_root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_react_client)
         new_manager = ATTManager(
             root_ai=new_root_ai,
-            critic_client=self.mock_critic,
             db_path=self.db_path
         )
         new_manager.register_tools_context({"att_manager": new_manager})

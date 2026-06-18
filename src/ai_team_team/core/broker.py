@@ -27,7 +27,7 @@ class NegotiationBroker:
         self.logger.warning(f"Communication denied between {sender.team_id} and {recipient.team_id}. No active agreement exists.")
         return False
 
-    async def establish_peer_agreement(self, sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool:
+    async def establish_peer_agreement(self, sender: AgentTeam, recipient: AgentTeam, rationale: str, mode: str = None) -> bool:
         sender_parent = sender.parent_team or self.manager.find_parent_team(sender)
         recipient_parent = recipient.parent_team or self.manager.find_parent_team(recipient)
 
@@ -36,17 +36,15 @@ class NegotiationBroker:
             return False
 
         self.logger.info(f"Cross-lineage peer talk negotiation requested between {sender.team_id} and {recipient.team_id}.")
-        success = await self._run_parent_negotiation_loop(sender_parent, recipient_parent, mode)
+        from .policies import resolve_communication_policy
+        policy_name = getattr(self.manager.config, "communication_policy", "permissive")
+        if mode is not None:
+            policy_name = mode
+            
+        policy = resolve_communication_policy(policy_name)
+        success = await policy.authorize_peer_talk(sender, recipient, self.manager, rationale)
         if success:
             self.peer_talk_agreements.add((sender.team_id, recipient.team_id))
             self.manager._auto_save()
             return True
-        return False
-
-    async def _run_parent_negotiation_loop(self, p1: AgentTeam, p2: AgentTeam, mode: str) -> bool:
-        self.logger.info(f"Parents {p1.team_id} and {p2.team_id} are negotiating communication channel (mode: {mode})...")
-        if mode in {"proxied", "indirect", "rule_gated"}:
-            self.logger.info("Negotiation loop succeeded: communication contract established.")
-            return True
-        self.logger.warning(f"Negotiation loop rejected: mode '{mode}' is unsupported or unsafe.")
         return False

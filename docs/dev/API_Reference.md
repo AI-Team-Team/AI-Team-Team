@@ -47,7 +47,7 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
 * **Constructor**:
 
   ```python
-  manager = ATTManager(root_ai: Agent, critic_client: Optional[Any] = None, config: Optional[ATTConfig] = None)
+  manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path: Optional[str] = None)
   ```
 
 * **Methods**:
@@ -90,7 +90,9 @@ Configuration options for tuning the ATT multi-agent framework.
       llm_max_retries: int = 3,
       llm_retry_backoff_factor: float = 1.5,
       enable_memory_compression: bool = True,
-      max_memory_turns: int = 20
+      max_memory_turns: int = 20,
+      communication_policy: str = "permissive",
+      migration_policy: str = "ancestor_approval"
   )
   ```
 
@@ -101,6 +103,8 @@ Coordinates sibling and cross-lineage communication permissions.
 * **Methods**:
   * `negotiate_communication(sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool`
         Checks sibling rules on common parents or runs agreement debates between parent teams to negotiate tunnels.
+  * `establish_peer_agreement(sender: AgentTeam, recipient: AgentTeam, rationale: str, mode: Optional[str] = None) -> bool`
+        Validates cross-lineage communication according to the specified communication policy (or config default). Valid policies: `"permissive"`, `"rule_gated"`, `"proxied"`.
 
 ### `SupervisoryTeam`
 

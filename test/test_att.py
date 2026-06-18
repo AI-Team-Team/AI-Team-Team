@@ -20,7 +20,7 @@ class TestATT(unittest.IsolatedAsyncioTestCase):
         self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Dialogue approved."}')
         
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
-        self.manager = ATTManager(root_ai=self.root_ai, critic_client=self.mock_client)
+        self.manager = ATTManager(root_ai=self.root_ai)
 
     def test_agent_team_assertion_size(self):
         """Verify that an Agent Team (AT) must contain at least 3 members."""
@@ -311,7 +311,7 @@ class TestATT(unittest.IsolatedAsyncioTestCase):
     async def test_arbitrary_depth_limit(self):
         """Verify that configuring a larger depth limit works and triggers rejection only at that limit."""
         config = ATTConfig(max_delegation_depth=4)
-        manager = ATTManager(root_ai=self.root_ai, critic_client=self.mock_client, config=config)
+        manager = ATTManager(root_ai=self.root_ai, config=config)
         # Register tools context on manager to bind dispatch_subagent
         manager.register_tools_context({"att_manager": manager})
         
@@ -434,7 +434,7 @@ class TestATT(unittest.IsolatedAsyncioTestCase):
         specialist_b = [m for m in team.members if m.name == "Specialist_B"][0]
 
         self.assertEqual(specialist_a.llm_client, mock_custom_client)
-        self.assertEqual(specialist_b.llm_client, self.manager.critic_client)
+        self.assertEqual(specialist_b.llm_client, self.root_ai.llm_client)
 
     async def test_global_generator_handler_routing(self):
         """Verify model config registration, callback handler routing, and metadata in identity prompts."""
@@ -481,12 +481,11 @@ class TestATT(unittest.IsolatedAsyncioTestCase):
         self.assertIn("gemini-3.5-flash - A very impressive large model", generated_requests[0]["system"])
 
         # 5. Verify critic/supervisor routing fallback
-        self.manager.critic_client = None
         is_healthy, reason = await self.manager.supervisor.audit_team_dialog(team, "Dummy dialogue")
         self.assertTrue(is_healthy)
         self.assertEqual(reason, "Approved")
         self.assertEqual(len(generated_requests), 2)
-        self.assertEqual(generated_requests[1]["model"], "critic")
+        self.assertEqual(generated_requests[1]["model"], "default")
         self.assertTrue(generated_requests[1]["json"])
 
     async def test_dispatch_subagent_routing(self):

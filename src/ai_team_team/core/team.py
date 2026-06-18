@@ -206,20 +206,15 @@ class AgentTeam:
                     f"--- EXECUTION LOGS AND DISCUSSIONS END ---\n"
                 )
                 
-                # Retrieve critic client
-                critic_client = None
-                if manager:
-                    critic_client = manager.critic_client if manager.critic_client is not None else ManagerCriticClientAdapter(manager)
-                
-                if not critic_client:
-                    critic_client = agent.llm_client
+                # Use the agent's own LLM client to summarize its own memory thread
+                summarize_client = agent.llm_client
                 
                 retries = manager.config.llm_max_retries if manager else 3
                 backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
                 
                 try:
                     summary_text = await generate_with_retry(
-                        llm_client=critic_client,
+                        llm_client=summarize_client,
                         prompt=summary_prompt,
                         system_instruction="You are a precise summarization assistant.",
                         temperature=0.3,

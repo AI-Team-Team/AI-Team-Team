@@ -21,8 +21,8 @@ class HandlerClientAdapter:
             require_json=require_json
         )
 
-class ManagerCriticClientAdapter:
-    """Wraps the manager's critic client and global generator handler callback."""
+class ManagerDefaultClientAdapter:
+    """Wraps the manager's default global generator handler callback."""
     def __init__(self, manager: 'ATTManager'):
         self.manager = manager
 
@@ -33,19 +33,13 @@ class ManagerCriticClientAdapter:
         temperature: float = 0.3,
         require_json: bool = False
     ) -> str:
-        if self.manager.critic_client:
-            return await self.manager.critic_client.generate(
-                prompt=prompt,
-                system_instruction=system_instruction,
-                temperature=temperature,
-                require_json=require_json
-            )
         if self.manager.generator_handler:
             return await self.manager.generator_handler(
-                model_name="critic",
+                model_name="default",
                 prompt=prompt,
                 system_instruction=system_instruction,
                 temperature=temperature,
                 require_json=require_json
             )
-        raise ValueError("No critic client or generator handler configured on ATTManager.")
+        raise ValueError("No default client or generator handler configured on ATTManager.")
+

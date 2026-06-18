@@ -37,7 +37,7 @@ Many thanks to Gemini and GPT for their help!
 * **[Model Registry & Global Generator Callback](docs/user/Quickstart.md#7-model-registry-and-global-generator-callback)**: Maps dynamic agent roles to registered model configurations (containing metadata and descriptions), delegating all LLM invocation logic to a centralized global callback handler to keep the library keyless and lightweight.
 * **Bounded ReAct Loops**: Agents execute reasoning steps using standard ReAct (Thought/Action/Observation) protocols, supported by a safe literal argument parser.
 * **[Negotiation Broker](docs/Dynamic_Delegation.md#4-consolidated-autonomy-tools)**: Gates sibling and cross-lineage peer-to-peer communication through dynamic permission rules and broker contracts.
-* **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Allows active teams to dynamically request parent-hierarchy migrations, arbitrated by the System Critic with cycle checks and related team alerts.
+* **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Allows active teams to dynamically request parent-hierarchy migrations, arbitrated by modular migration policies with cycle checks and related team alerts.
 * **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects a structured ASCII indented tree map representing all active teams (displaying team purposes and progress in real-time) in the agent context.
 * **Tool Auditor Interception Hook**: Allows host applications to register pre-execution callback hooks to audit, approve, or reject specific tool calls (e.g. database safety query vetting).
 * **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A 3-AI Supervisory Team audits dialogue transcripts for logical deadlocks, circular reasoning, and anomalies, recursively escalating alerts up the ancestry lineage.
@@ -338,6 +338,8 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `llm_retry_backoff_factor` | `float` | `1.5` | The exponential backoff multiplier for retrying LLM calls. |
 | `enable_memory_compression` | `bool` | `True` | Whether to enable automatic dialogue compression/pruning of early conversation turns. |
 | `max_memory_turns` | `int` | `20` | The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns. |
+| `communication_policy` | `str` | `"permissive"` | The strategy used for inter-team communication gating. Options: `"permissive"`, `"rule_gated"`, `"proxied"`. |
+| `migration_policy` | `str` | `"ancestor_approval"` | The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`. |
 
 ### `GatedFileReader` Parameters
 

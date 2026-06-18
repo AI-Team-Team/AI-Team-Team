@@ -20,7 +20,7 @@ To prevent context window overflow and reduce API token consumption during long 
 * **Pruning Process**: When an agent's memory queue (`agent.messages`) exceeds `max_memory_turns + 2` turns:
   1. The initial instruction profile (index 0) is kept untouched.
   2. All intermediate messages (from index 1 to `len - max_memory_turns - 1`) are extracted and serialized.
-  3. The intermediate messages are sent to the Critic client with a summarization prompt: `"Summarize the preceding execution logs and discussions into a single cohesive paragraph of historical facts. Focus on what was completed."`
+  3. The intermediate messages are summarized by the agent's own LLM client (using its configured model alias) with a summarization prompt: `"Summarize the preceding execution logs and discussions into a single cohesive paragraph of historical facts. Focus on what was completed."`
   4. The intermediate messages are replaced by a single system message: `*** HISTORICAL SUMMARY ARCHIVE ***\n{summary}`.
   5. The latest `max_memory_turns` messages are retained fully as high-fidelity context.
 

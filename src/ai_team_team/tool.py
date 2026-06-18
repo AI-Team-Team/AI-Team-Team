@@ -238,8 +238,8 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         })
         return f"Message successfully delivered to team '{team_id}'."
 
-    async def negotiate_peer_talk(target_team_id: str, rationale: str) -> str:
-        """Requests parents to negotiate a cross-lineage communication channel with a target team. Arguments: target_team_id (str), rationale (str)"""
+    async def negotiate_peer_talk(target_team_id: str, rationale: str, mode: str = None) -> str:
+        """Requests parents to negotiate a cross-lineage communication channel with a target team. Arguments: target_team_id (str), rationale (str), mode (str)"""
         if not att_manager:
             return "Error: ATTManager not available."
         if target_team_id not in att_manager.teams:
@@ -260,7 +260,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
             
-        success = await att_manager.broker.establish_peer_agreement(actual_team, target)
+        success = await att_manager.broker.establish_peer_agreement(actual_team, target, rationale, mode)
         if success:
             return f"Success: Cross-lineage peer channel established with team '{target_team_id}'."
         else:
@@ -300,8 +300,8 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             from .core import HandlerClientAdapter
             client = HandlerClientAdapter(model_name, att_manager.generator_handler)
         else:
-            from .core import ManagerCriticClientAdapter
-            client = ManagerCriticClientAdapter(att_manager)
+            from .core import ManagerDefaultClientAdapter
+            client = ManagerDefaultClientAdapter(att_manager)
             
         new_agent = Agent(
             name=f"Dynamic_{role_name}",
@@ -462,8 +462,8 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                         from .core import HandlerClientAdapter
                         client = HandlerClientAdapter(model_name, att_manager.generator_handler)
                     else:
-                        from .core import ManagerCriticClientAdapter
-                        client = ManagerCriticClientAdapter(att_manager)
+                        from .core import ManagerDefaultClientAdapter
+                        client = ManagerDefaultClientAdapter(att_manager)
                         
                     new_agent = Agent(
                         name=f"Dynamic_{role_name}",

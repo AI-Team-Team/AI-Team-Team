@@ -16,13 +16,12 @@ from .broker import NegotiationBroker
 from .config import ATTConfig
 from .exceptions import ATTException
 from .utils import generate_with_retry
-from .adapters import ManagerCriticClientAdapter, HandlerClientAdapter
+from .adapters import ManagerDefaultClientAdapter, HandlerClientAdapter
 
 class ATTManager:
     """Master controller managing the overall ATT (AI Team Team) topology."""
-    def __init__(self, root_ai: Agent, critic_client: Optional[Any] = None, config: Optional[ATTConfig] = None, db_path: Optional[str] = None):
+    def __init__(self, root_ai: Agent, config: Optional[ATTConfig] = None, db_path: Optional[str] = None):
         self.root_ai = root_ai
-        self.critic_client = critic_client
         self.config = config or ATTConfig()
         self.db_path = db_path
         self.agents: Dict[str, Agent] = {root_ai.name: root_ai}
@@ -34,7 +33,7 @@ class ATTManager:
         self.generator_handler: Optional[Callable[..., str]] = None
         
         from ai_team_team.supervision import SupervisoryTeam
-        self.supervisor = SupervisoryTeam(root_ai, ManagerCriticClientAdapter(self), manager=self)
+        self.supervisor = SupervisoryTeam(root_ai, ManagerDefaultClientAdapter(self), manager=self)
         self.logger = logging.getLogger("ATTManager")
         self.tools_context: Dict[str, Any] = {}
         self.libraries: Dict[str, DocumentLibrary] = {}
@@ -141,15 +140,19 @@ class ATTManager:
                     break
 
         def get_agent_client_by_name(client_name: Optional[str]) -> Any:
-            critic_wrapper = ManagerCriticClientAdapter(self)
+            default_wrapper = ManagerDefaultClientAdapter(self)
             if client_name:
                 if client_name in self.llm_clients:
                     return self.llm_clients[client_name]
                 elif client_name in self.model_configs and self.generator_handler:
                     return HandlerClientAdapter(client_name, self.generator_handler)
                 else:
-                    self.logger.warning(f"Client '{client_name}' not found in registry. Falling back to default critic client.")
-            return self.critic_client if self.critic_client is not None else critic_wrapper
+                    self.logger.warning(f"Client '{client_name}' not found in registry. Falling back to default client.")
+            if "default" in self.llm_clients:
+                return self.llm_clients["default"]
+            if self.root_ai.llm_client:
+                return self.root_ai.llm_client
+            return default_wrapper
 
         def get_agent_client(role_name: str, agent_name: str) -> Any:
             client_name = None
@@ -336,37 +339,12 @@ class ATTManager:
         current_parent = team.parent_team
         current_parent_id = current_parent.team_id if current_parent else "Root AI"
         
-        arbitration_prompt = (
-            f"Arbitrate a request to reorganize the agent team hierarchy.\n\n"
-            f"Team requesting migration: {team.team_id}\n"
-            f"Current Purpose: {team.team_purpose}\n"
-            f"Current Parent Team: {current_parent_id} (Purpose: {current_parent.team_purpose if current_parent else 'Root Coordinator'})\n\n"
-            f"Target Parent Team: {target_parent.team_id}\n"
-            f"Target Parent Purpose: {target_parent.team_purpose}\n\n"
-            f"Migration Rationale provided by the team:\n\"{rationale}\"\n\n"
-            f"Please evaluate if this migration is logical, beneficial for task progress, and does not create redundant hierarchy.\n"
-            f"Output exactly a JSON payload:\n"
-            f"{{\n"
-            f"  \"approved\": true | false,\n"
-            f"  \"reason\": \"Reasoning for your arbitration decision...\"\n"
-            f"}}"
-        )
+        from .policies import resolve_migration_policy
+        policy_name = getattr(self.config, "migration_policy", "ancestor_approval")
+        policy = resolve_migration_policy(policy_name)
         
         try:
-            response = await generate_with_retry(
-                llm_client=self.critic_client,
-                prompt=arbitration_prompt,
-                system_instruction="You are a strict, objective Systems Architect Arbiter. Evaluate organizational restructuring proposals.",
-                temperature=0.2,
-                require_json=True,
-                retries=self.config.llm_max_retries,
-                backoff_factor=self.config.llm_retry_backoff_factor
-            )
-            if "```" in response:
-                response = response.replace("```json", "").replace("```", "").strip()
-            data = json.loads(response)
-            approved = bool(data.get("approved", False))
-            reason = str(data.get("reason", "No reason provided."))
+            approved, reason = await policy.authorize_migration(team, target_parent, self, rationale)
             
             if approved:
                 # 1. Update structural links
@@ -424,20 +402,27 @@ class ATTManager:
             
             raw_inbox_text = "\n".join(inbox_lines)
             threshold = self.config.inbox_summarize_threshold_chars
-            if len(raw_inbox_text) > threshold and self.critic_client:
-                self.logger.info("Inbox context too large, summarizing before injection...")
-                summary_prompt = f"Summarize the following system alerts and escalations concisely:\n\n{raw_inbox_text}"
-                try:
-                    raw_inbox_text = await generate_with_retry(
-                        llm_client=self.critic_client,
-                        prompt=summary_prompt,
-                        system_instruction="You are a strict system summarizer. Compress alerts while keeping critical facts and failures.",
-                        temperature=0.1,
-                        retries=self.config.llm_max_retries,
-                        backoff_factor=self.config.llm_retry_backoff_factor
-                    )
-                except Exception as e:
-                    self.logger.warning(f"Failed to summarize inbox: {e}")
+            if len(raw_inbox_text) > threshold:
+                summarize_client = None
+                if team.members and getattr(team.members[0], "llm_client", None):
+                    summarize_client = team.members[0].llm_client
+                elif self.root_ai and getattr(self.root_ai, "llm_client", None):
+                    summarize_client = self.root_ai.llm_client
+                
+                if summarize_client:
+                    self.logger.info("Inbox context too large, summarizing before injection...")
+                    summary_prompt = f"Summarize the following system alerts and escalations concisely:\n\n{raw_inbox_text}"
+                    try:
+                        raw_inbox_text = await generate_with_retry(
+                            llm_client=summarize_client,
+                            prompt=summary_prompt,
+                            system_instruction="You are a strict system summarizer. Compress alerts while keeping critical facts and failures.",
+                            temperature=0.1,
+                            retries=self.config.llm_max_retries,
+                            backoff_factor=self.config.llm_retry_backoff_factor
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Failed to summarize inbox: {e}")
                     
             inbox_context = (
                 f"\n\n### UNRESOLVED INBOX ALERTS & ESCALATIONS\n"
@@ -681,7 +666,7 @@ class ATTManager:
                         elif hasattr(agent.llm_client, "model_name") and not isinstance(agent.llm_client.model_name, Mock):
                             model_alias = str(agent.llm_client.model_name)
                         elif hasattr(agent.llm_client, "manager") and not isinstance(agent.llm_client.manager, Mock):
-                            model_alias = "critic"
+                            model_alias = "default"
                     
                     last_ctx_json = json.dumps(agent.last_context) if agent.last_context else None
                     conn.execute(
@@ -804,17 +789,19 @@ class ATTManager:
                 
                 # Helper function to restore LLM clients
                 def get_agent_client_by_name(client_name: Optional[str]) -> Any:
-                    critic_wrapper = ManagerCriticClientAdapter(self)
+                    default_wrapper = ManagerDefaultClientAdapter(self)
                     if client_name:
-                        if client_name in ("critic", "mock_client"):
-                            return self.critic_client if self.critic_client is not None else critic_wrapper
                         if client_name in self.llm_clients:
                             return self.llm_clients[client_name]
                         elif client_name in self.model_configs and self.generator_handler:
                             return HandlerClientAdapter(client_name, self.generator_handler)
                         else:
-                            self.logger.warning(f"Client '{client_name}' not found in registry during restore. Falling back to critic client.")
-                    return self.critic_client if self.critic_client is not None else critic_wrapper
+                            self.logger.warning(f"Client '{client_name}' not found in registry during restore. Falling back to default client.")
+                    if "default" in self.llm_clients:
+                        return self.llm_clients["default"]
+                    if self.root_ai.llm_client:
+                        return self.root_ai.llm_client
+                    return default_wrapper
 
                 # 1. Load Configs
                 config_row = conn.execute("SELECT config_value FROM manager_config WHERE config_key = 'att_config';").fetchone()
