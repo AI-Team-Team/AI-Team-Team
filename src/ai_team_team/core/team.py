@@ -376,6 +376,15 @@ class AgentTeam:
                                 if not args_str:
                                     return [], {}
 
+                                try:
+                                    parsed_vals = ast.literal_eval(f"({args_str})")
+                                    if isinstance(parsed_vals, tuple):
+                                        return list(parsed_vals), {}
+                                    else:
+                                        return [parsed_vals], {}
+                                except Exception:
+                                    pass
+
                                 chunks = []
                                 current_chunk = []
                                 in_single_quote = False
@@ -420,6 +429,107 @@ class AgentTeam:
                                     current_chunk.append(char)
 
                                 chunks.append("".join(current_chunk).strip())
+                                chunks = [c for c in chunks if c]
+
+                                merged_chunks = []
+                                for chunk in chunks:
+                                    has_eq = False
+                                    c_in_single_quote = False
+                                    c_in_double_quote = False
+                                    c_escape = False
+                                    c_paren = 0
+                                    c_bracket = 0
+                                    c_brace = 0
+                                    for idx, char in enumerate(chunk):
+                                        if c_escape:
+                                            c_escape = False
+                                            continue
+                                        if char == '\\':
+                                            c_escape = True
+                                            continue
+                                        if char == "'" and not c_in_double_quote:
+                                            c_in_single_quote = not c_in_single_quote
+                                        elif char == '"' and not c_in_single_quote:
+                                            c_in_double_quote = not c_in_double_quote
+
+                                        if not c_in_single_quote and not c_in_double_quote:
+                                            if char == '(':
+                                                c_paren += 1
+                                            elif char == ')':
+                                                c_paren = max(0, c_paren - 1)
+                                            elif char == '[':
+                                                c_bracket += 1
+                                            elif char == ']':
+                                                c_bracket = max(0, c_bracket - 1)
+                                            elif char == '{':
+                                                c_brace += 1
+                                            elif char == '}':
+                                                c_brace = max(0, c_brace - 1)
+                                            elif char == '=' and c_paren == 0 and c_bracket == 0 and c_brace == 0:
+                                                has_eq = True
+                                                break
+
+                                    if merged_chunks:
+                                        prev_chunk = merged_chunks[-1]
+                                        prev_has_eq = False
+                                        p_in_single_quote = False
+                                        p_in_double_quote = False
+                                        p_escape = False
+                                        p_paren = 0
+                                        p_bracket = 0
+                                        p_brace = 0
+                                        for idx, char in enumerate(prev_chunk):
+                                            if p_escape:
+                                                p_escape = False
+                                                continue
+                                            if char == '\\':
+                                                p_escape = True
+                                                continue
+                                            if char == "'" and not p_in_double_quote:
+                                                p_in_single_quote = not p_in_single_quote
+                                            elif char == '"' and not p_in_single_quote:
+                                                p_in_double_quote = not p_in_double_quote
+
+                                            if not p_in_single_quote and not p_in_double_quote:
+                                                if char == '(':
+                                                    p_paren += 1
+                                                elif char == ')':
+                                                    p_paren = max(0, p_paren - 1)
+                                                elif char == '[':
+                                                    p_bracket += 1
+                                                elif char == ']':
+                                                    p_bracket = max(0, p_bracket - 1)
+                                                elif char == '{':
+                                                    p_brace += 1
+                                                elif char == '}':
+                                                    p_brace = max(0, p_brace - 1)
+                                                elif char == '=' and p_paren == 0 and p_bracket == 0 and p_brace == 0:
+                                                    prev_has_eq = True
+                                                    break
+
+                                        if prev_has_eq and not has_eq:
+                                            merged_chunks[-1] = prev_chunk + ", " + chunk
+                                            continue
+
+                                        def is_simple_term(s):
+                                            s = s.strip()
+                                            if not s:
+                                                return True
+                                            try:
+                                                ast.literal_eval(s)
+                                                return True
+                                            except Exception:
+                                                pass
+                                            if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', s):
+                                                return True
+                                            return False
+
+                                        if not prev_has_eq and not has_eq:
+                                            if not is_simple_term(prev_chunk) and not is_simple_term(chunk):
+                                                merged_chunks[-1] = prev_chunk + ", " + chunk
+                                                continue
+
+                                    merged_chunks.append(chunk)
 
                                 def parse_val(val_str):
                                     val_str = val_str.strip()
@@ -441,7 +551,7 @@ class AgentTeam:
                                 args = []
                                 kwargs = {}
 
-                                for chunk in chunks:
+                                for chunk in merged_chunks:
                                     if not chunk:
                                         continue
                                     eq_idx = -1

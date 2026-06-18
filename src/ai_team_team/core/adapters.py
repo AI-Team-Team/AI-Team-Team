@@ -41,5 +41,12 @@ class ManagerDefaultClientAdapter:
                 temperature=temperature,
                 require_json=require_json
             )
+        if self.manager.root_ai and self.manager.root_ai.llm_client and self.manager.root_ai.llm_client is not self:
+            if not isinstance(self.manager.root_ai.llm_client, ManagerDefaultClientAdapter):
+                return await self.manager.root_ai.llm_client.generate(
+                    prompt=prompt,
+                    system_instruction=system_instruction,
+                    temperature=temperature,
+                    require_json=require_json
+                )
         raise ValueError("No default client or generator handler configured on ATTManager.")
-

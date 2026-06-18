@@ -160,5 +160,39 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
         self.assertEqual(received_kwargs, {"sql_command": "SELECT * FROM characters", "limit": 5})
 
+    async def test_unquoted_argument_parsing_with_commas(self):
+        """Verify that tool arguments containing commas inside unquoted strings (like SQL) are parsed correctly."""
+        received_args = []
+        received_kwargs = {}
+
+        def mock_tool(*args, **kwargs):
+            nonlocal received_args, received_kwargs
+            received_args = list(args)
+            received_kwargs = kwargs
+            return "Success"
+
+        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team.tools = {
+            "query_db": Tool("query_db", "Query DB", mock_tool)
+        }
+        agent = team.members[0]
+
+        # 1. Unquoted keyword argument with comma
+        self.mock_client.generate.side_effect = [
+            'Thought: Run tool.\nAction: query_db(sql_command=SELECT name, status FROM users, limit=10)',
+            'Final Answer: Done'
+        ]
+        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        self.assertEqual(received_kwargs, {"sql_command": "SELECT name, status FROM users", "limit": 10})
+
+        # 2. Unquoted positional argument with comma
+        received_args, received_kwargs = [], {}
+        self.mock_client.generate.side_effect = [
+            'Thought: Run tool.\nAction: query_db(SELECT name, status FROM users, 5)',
+            'Final Answer: Done'
+        ]
+        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        self.assertEqual(received_args, ["SELECT name, status FROM users", 5])
+
 if __name__ == "__main__":
     unittest.main()

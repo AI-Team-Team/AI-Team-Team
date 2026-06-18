@@ -231,9 +231,9 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             sender_parent = actual_team.parent_team or att_manager.find_parent_team(actual_team)
             recipient_parent = target.parent_team or att_manager.find_parent_team(target)
             if sender_parent == recipient_parent:
-                return f"Observation: Error: Permission Denied. Sibling talk is not authorized. You must call set_sibling_talk(child_id='{target.team_id}', allow=True) via your parent to request access."
+                return f"Error: Permission Denied. Sibling talk is not authorized. You must call set_sibling_talk(child_id='{target.team_id}', allow=True) via your parent to request access."
             else:
-                return f"Observation: Error: Permission Denied. Cross-lineage agreement does not exist. You must call negotiate_peer_talk(target_team_id='{target.team_id}', rationale='...') first to establish a tunnel."
+                return f"Error: Permission Denied. Cross-lineage agreement does not exist. You must call negotiate_peer_talk(target_team_id='{target.team_id}', rationale='...') first to establish a tunnel."
             
         sender_id = actual_team.team_id if actual_team else "Unknown"
         target.receive_message({

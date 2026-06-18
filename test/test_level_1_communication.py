@@ -153,7 +153,7 @@ class TestLevel1Communication(unittest.IsolatedAsyncioTestCase):
         # Since no agreement is established, trying to send a peer message from team_a to team_b (siblings under Root) should return sibling block error
         send_tool_a = team_a.tools["send_peer_message"]
         res_sibling = await send_tool_a(team_id=team_b.team_id, message="Test sibling")
-        expected_sibling = f"Observation: Error: Permission Denied. Sibling talk is not authorized. You must call set_sibling_talk(child_id='{team_b.team_id}', allow=True) via your parent to request access."
+        expected_sibling = f"Error: Permission Denied. Sibling talk is not authorized. You must call set_sibling_talk(child_id='{team_b.team_id}', allow=True) via your parent to request access."
         self.assertEqual(res_sibling, expected_sibling)
 
         # 2. Cross-lineage block: Spawn a Level 2 team under team_a (parent is team_a)
@@ -169,7 +169,7 @@ class TestLevel1Communication(unittest.IsolatedAsyncioTestCase):
         # Trying to send a peer message from team_a_1 to team_b (parent team_a != parent None) should return cross-lineage block error
         send_tool_a1 = team_a_1.tools["send_peer_message"]
         res_cross = await send_tool_a1(team_id=team_b.team_id, message="Test cross lineage")
-        expected_cross = f"Observation: Error: Permission Denied. Cross-lineage agreement does not exist. You must call negotiate_peer_talk(target_team_id='{team_b.team_id}', rationale='...') first to establish a tunnel."
+        expected_cross = f"Error: Permission Denied. Cross-lineage agreement does not exist. You must call negotiate_peer_talk(target_team_id='{team_b.team_id}', rationale='...') first to establish a tunnel."
         self.assertEqual(res_cross, expected_cross)
 
 if __name__ == "__main__":

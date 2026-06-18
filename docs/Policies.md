@@ -56,9 +56,9 @@ Inter-team communication is triggered when an agent in one team attempts to esta
 When a communication attempt via `send_peer_message` is blocked by a non-permissive communication policy (such as `proxied` or `rule_gated`), instead of raising an execution error, the tool returns a structured observation guiding the caller agent on how to request authorization:
 
 - **Sibling Block** (if sender parent matches target parent):
-  `"Observation: Error: Permission Denied. Sibling talk is not authorized. You must call set_sibling_talk(child_id='<target_team_id>', allow=True) via your parent to request access."`
+  `"Error: Permission Denied. Sibling talk is not authorized. You must call set_sibling_talk(child_id='<target_team_id>', allow=True) via your parent to request access."`
 - **Cross-Lineage Block** (if sender parent does not match target parent):
-  `"Observation: Error: Permission Denied. Cross-lineage agreement does not exist. You must call negotiate_peer_talk(target_team_id='<target_team_id>', rationale='...') first to establish a tunnel."`
+  `"Error: Permission Denied. Cross-lineage agreement does not exist. You must call negotiate_peer_talk(target_team_id='<target_team_id>', rationale='...') first to establish a tunnel."`
 
 This mechanism actively trains agents to dynamically adjust and call the correct permissions-resolution tools when encountering policy gates.
 
