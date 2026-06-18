@@ -817,7 +817,7 @@ class ATTManager:
                     team.team_progress = row.team_progress
                     team.chapter_num = row.chapter_num
                     team.migration_count = row.migration_count
-                    team.communication_rules = json.loads(row.communication_rules) if row.communication_rules else {}
+                    team.communication_rules = json.loads(row.communication_rules) if row.communication_rules else {"allow_sibling_talk": False, "rules": []}
                     team.status_map = json.loads(row.status_map) if row.status_map else {}
                     team.system_instructions = row.system_instructions
                     team.manager = self
