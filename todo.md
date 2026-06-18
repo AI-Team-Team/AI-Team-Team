@@ -9,6 +9,7 @@ Any resolved issues should not be stored in this document.
 ## Known Issues
 
 1. **Transcripts Token Overhead**: Passing full, multi-turn transcripts to the 3-AI Supervisory Team for consensus auditing increases token consumption on long debate sessions. Needs summary compression thresholds.
+2. **Database Deserialization KeyError**: During state recovery, if `row.communication_rules` is empty or null, it falls back to `{}` instead of the default structure `{"allow_sibling_talk": False, "rules": []}`, leading to a `KeyError` when appending rules.
 
 ## Future Plans
 

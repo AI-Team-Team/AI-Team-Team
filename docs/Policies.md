@@ -48,6 +48,7 @@ Inter-team communication is triggered when an agent in one team attempts to esta
 ### C. Proxied Policy (`"proxied"`)
 
 - **Behavior**: Instead of static rules, the parent team leaders of both the sender and recipient are consulted dynamically. The representatives evaluate the request details and rationale via their own **LLM client** and return a JSON approval (`{"approved": true|false, "reason": "..."}`).
+  - *Note*: If either team is a Level 1 team (direct descendant of the Root AI with no parent `AgentTeam`), the `Root_AI` is treated as its parent representative and queried for approval.
 - **When to Use**: For dynamic, self-organizing systems where communication channels must be justified and approved by supervisory AIs at runtime.
 
 ## 3. Migration & Reorganization Policies
@@ -65,6 +66,7 @@ Dynamic parent-hierarchy migrations are triggered when a team requests to move u
   1. The representative of the team's current parent.
   2. The representative of the proposed target parent.
   3. The Least Common Ancestor (LCA) team representative in the ancestry lineage.
+  - *Note*: If any of these parent levels resolves to `None` (representing the root coordination layer), the `Root_AI` represents that layer in the arbitration.
 - **Arbitration**: If any representative rejects the restructure via their LLM client, the migration fails and an alert is logged.
 - **When to Use**: Standard enterprise hierarchies where changes require consent from both parent domains and their common supervisor.
 

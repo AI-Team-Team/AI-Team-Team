@@ -15,9 +15,16 @@ from ai_team_team import ATTManager, Agent, ATTConfig
 class TestATTCommunication(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.mock_client = MagicMock()
-        self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Dialogue approved."}')
+        async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):
+            if require_json:
+                if "cross-lineage" in str(prompt) or "approved" in str(prompt):
+                    return '{"approved": true, "reason": "Proxied approved"}'
+                return '{"is_healthy": true, "reason": "Dialogue approved."}'
+            return 'Final Answer: Done'
+        self.mock_client.generate = mock_generate
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
-        self.manager = ATTManager(root_ai=self.root_ai)
+        config = ATTConfig(communication_policy="proxied")
+        self.manager = ATTManager(root_ai=self.root_ai, config=config)
 
     async def test_sibling_communication_negotiation(self):
         """Verify that sibling communication negotiation is managed by the parent team."""

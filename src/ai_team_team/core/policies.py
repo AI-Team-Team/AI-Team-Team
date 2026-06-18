@@ -156,7 +156,11 @@ class ProxiedCommunicationPolicy(BaseCommunicationPolicy):
         sender_parent = sender.parent_team
         recipient_parent = recipient.parent_team
         
-        parents = [p for p in [sender_parent, recipient_parent] if p is not None]
+        parents = []
+        for p in [sender_parent, recipient_parent]:
+            if p not in parents:
+                parents.append(p)
+
         for p in parents:
             rep = get_team_representative(p, manager)
             if not rep or not getattr(rep, "llm_client", None):
@@ -177,7 +181,7 @@ class ProxiedCommunicationPolicy(BaseCommunicationPolicy):
                 response = await generate_with_retry_fallback(
                     llm_client=rep.llm_client,
                     prompt=prompt,
-                    system_instruction=f"You are the representative agent ({rep.name}) of parent team {p.team_id}. Evaluate peer communication request.",
+                    system_instruction=f"You are the representative agent ({rep.name}) of parent team {p.team_id if p else 'Root'}. Evaluate peer communication request.",
                     manager=manager
                 )
                 if "```" in response:

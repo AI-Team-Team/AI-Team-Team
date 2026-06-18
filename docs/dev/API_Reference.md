@@ -100,11 +100,10 @@ Configuration options for tuning the ATT multi-agent framework.
 
 Coordinates sibling and cross-lineage communication permissions.
 
-* **Methods**:
-  * `negotiate_communication(sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool`
-        Checks sibling rules on common parents or runs agreement debates between parent teams to negotiate tunnels.
-  * `establish_peer_agreement(sender: AgentTeam, recipient: AgentTeam, rationale: str, mode: Optional[str] = None) -> bool`
-        Validates cross-lineage communication according to the specified communication policy (or config default). Valid policies: `"permissive"`, `"rule_gated"`, `"proxied"`.
+* `negotiate_communication(sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool`
+      Directly returns `True` if communication_policy is `"permissive"`. Otherwise, checks sibling rules on common parents or checks for active peer agreements.
+* `establish_peer_agreement(sender: AgentTeam, recipient: AgentTeam, rationale: str, mode: Optional[str] = None) -> bool`
+      Validates cross-lineage communication according to the specified communication policy (or config default). Valid policies: `"permissive"`, `"rule_gated"`, `"proxied"`. Allow `None` parents representing Root AI.
 
 ### `SupervisoryTeam`
 

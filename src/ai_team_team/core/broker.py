@@ -10,6 +10,10 @@ class NegotiationBroker:
         self.peer_talk_agreements = set() # Set of Tuple[str, str] (sender_id, recipient_id)
 
     async def negotiate_communication(self, sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool:
+        policy_name = getattr(self.manager.config, "communication_policy", "permissive")
+        if policy_name == "permissive":
+            return True
+
         sender_parent = sender.parent_team or self.manager.find_parent_team(sender)
         recipient_parent = recipient.parent_team or self.manager.find_parent_team(recipient)
 
@@ -30,10 +34,6 @@ class NegotiationBroker:
     async def establish_peer_agreement(self, sender: AgentTeam, recipient: AgentTeam, rationale: str, mode: str = None) -> bool:
         sender_parent = sender.parent_team or self.manager.find_parent_team(sender)
         recipient_parent = recipient.parent_team or self.manager.find_parent_team(recipient)
-
-        if not sender_parent or not recipient_parent:
-            self.logger.warning(f"Lineage incomplete. Cannot establish peer agreement between {sender.team_id} and {recipient.team_id}.")
-            return False
 
         self.logger.info(f"Cross-lineage peer talk negotiation requested between {sender.team_id} and {recipient.team_id}.")
         from .policies import resolve_communication_policy
