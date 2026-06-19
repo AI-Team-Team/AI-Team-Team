@@ -26,7 +26,9 @@ config = ATTConfig(
     enable_memory_compression: bool = True,
     max_memory_turns: int = 20,
     communication_policy: str = "permissive",
-    migration_policy: str = "ancestor_approval"
+    migration_policy: str = "ancestor_approval",
+    enable_emergency_wakeup: bool = True,
+    emergency_discussion_rounds: int = 1
 )
 ```
 
@@ -47,6 +49,8 @@ config = ATTConfig(
 * **`max_memory_turns`**: The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns (default: `20`).
 * **`communication_policy`**: The strategy used for inter-team communication gating. Options: `"permissive"`, `"rule_gated"`, `"proxied"`.
 * **`migration_policy`**: The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`.
+* **`enable_emergency_wakeup`**: Whether to trigger active wake-up discussion on idle parent teams upon receiving high-priority child anomalies (default: `True`).
+* **`emergency_discussion_rounds`**: The number of emergency discussion rounds executed when a team is woken up (default: `1`).
 
 ## 👤 `Agent`
 
@@ -137,6 +141,8 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
   Invoked when detailed transcripts or execution logs are appended. Formatted as: `(team_id, title, content, chapter_num)`.
 * **`on_team_migration: Optional[Callable[[str, Optional[str], str], None]]`**
   Invoked when a team successfully migrates to a new parent in the hierarchy. Formatted as: `(team_id, old_parent_id, new_parent_id)`.
+* **`on_emergency_escalation: Optional[Callable[[str, str, str], None]]`**
+  Invoked when a team receives a high-priority emergency alert (e.g. child failure or escalation). Formatted as: `(team_id, alert_type, alert_reason)`.
 
 ## 🛠️ `Tool`
 

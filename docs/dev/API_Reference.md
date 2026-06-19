@@ -104,7 +104,9 @@ Configuration options for tuning the ATT multi-agent framework.
       enable_memory_compression: bool = True,
       max_memory_turns: int = 20,
       communication_policy: str = "permissive",
-      migration_policy: str = "ancestor_approval"
+      migration_policy: str = "ancestor_approval",
+      enable_emergency_wakeup: bool = True,
+      emergency_discussion_rounds: int = 1
   )
   ```
 

@@ -64,6 +64,7 @@ class ATTManager:
         self.on_activity_added: Optional[Callable[[str, str, str], None]] = None
         self.on_log_append: Optional[Callable[[str, str, str, Optional[int]], None]] = None
         self.on_team_migration: Optional[Callable[[str, Optional[str], str], None]] = None
+        self.on_emergency_escalation: Optional[Callable[[str, str, str], None]] = None
 
         # Base preset configurations
         self.presets: Dict[str, dict] = {
@@ -407,124 +408,149 @@ class ATTManager:
     async def execute_team_discussion(self, team: AgentTeam, prompt: str, rounds: int = 2) -> str:
         """Executes a multi-agent debate session inside the AT, monitored by the Supervisor."""
         team.migration_count = 0
+        team.is_running = True
         self.logger.info(f"Executing discussion in team {team.team_id} (rounds={rounds})...")
         
-        inbox_context = ""
-        if team.message_inbox:
-            inbox_lines = []
-            for msg in team.message_inbox:
-                inbox_lines.append(f"- **From [{msg.get('from', 'Unknown')}]**: {msg.get('reason') or msg.get('objective') or str(msg)}")
-            
-            raw_inbox_text = "\n".join(inbox_lines)
-            threshold = self.config.inbox_summarize_threshold_chars
-            if len(raw_inbox_text) > threshold:
-                summarize_client = None
-                if team.members and getattr(team.members[0], "llm_client", None):
-                    summarize_client = team.members[0].llm_client
-                elif self.root_ai and getattr(self.root_ai, "llm_client", None):
-                    summarize_client = self.root_ai.llm_client
-                
-                if summarize_client:
-                    self.logger.info("Inbox context too large, summarizing before injection...")
-                    summary_prompt = f"Summarize the following system alerts and escalations concisely:\n\n{raw_inbox_text}"
-                    try:
-                        raw_inbox_text = await generate_with_retry(
-                            llm_client=summarize_client,
-                            prompt=summary_prompt,
-                            system_instruction="You are a strict system summarizer. Compress alerts while keeping critical facts and failures.",
-                            temperature=0.1,
-                            retries=self.config.llm_max_retries,
-                            backoff_factor=self.config.llm_retry_backoff_factor
-                        )
-                    except Exception as e:
-                        self.logger.warning(f"Failed to summarize inbox: {e}")
-                    
-            inbox_context = (
-                f"\n\n### UNRESOLVED INBOX ALERTS & ESCALATIONS\n"
-                f"Your team has received the following signals from your descendants or supervisor:\n"
-                f"{raw_inbox_text}\n"
-                f"Please address or incorporate these alerts into your decision-making."
-            )
-            team.message_inbox = []
-
         dialog_history = []
-        base_prompt = f"{prompt}{inbox_context}"
         last_round_answers = {}
         
-        for r in range(1, rounds + 1):
-            tasks = []
-            for agent in team.members:
-                if r == 1:
-                    round_prompt = base_prompt
-                else:
-                    other_answers = []
-                    for other_agent in team.members:
-                        if other_agent.name != agent.name:
-                            ans = last_round_answers.get((r - 1, other_agent.name), "No response.")
-                            other_answers.append(f"{other_agent.name} (Role: {other_agent.role}): {ans}")
+        try:
+            for r in range(1, rounds + 1):
+                # Consume inbox messages at the start of every round
+                inbox_context = ""
+                if team.message_inbox:
+                    inbox_lines = []
+                    for msg in team.message_inbox:
+                        inbox_lines.append(f"- **From [{msg.get('from', 'Unknown')}]**: {msg.get('reason') or msg.get('objective') or str(msg)}")
                     
-                    round_prompt = (
-                        f"Here is the discussion from Round {r - 1}:\n"
-                        + "\n".join(other_answers) + "\n\n"
-                        f"Please continue the discussion. Build on or challenge their arguments."
+                    raw_inbox_text = "\n".join(inbox_lines)
+                    threshold = self.config.inbox_summarize_threshold_chars
+                    if len(raw_inbox_text) > threshold:
+                        summarize_client = None
+                        if team.members and getattr(team.members[0], "llm_client", None):
+                            summarize_client = team.members[0].llm_client
+                        elif self.root_ai and getattr(self.root_ai, "llm_client", None):
+                            summarize_client = self.root_ai.llm_client
+                        
+                        if summarize_client:
+                            self.logger.info("Inbox context too large, summarizing before injection...")
+                            summary_prompt = f"Summarize the following system alerts and escalations concisely:\n\n{raw_inbox_text}"
+                            try:
+                                raw_inbox_text = await generate_with_retry(
+                                    llm_client=summarize_client,
+                                    prompt=summary_prompt,
+                                    system_instruction="You are a strict system summarizer. Compress alerts while keeping critical facts and failures.",
+                                    temperature=0.1,
+                                    retries=self.config.llm_max_retries,
+                                    backoff_factor=self.config.llm_retry_backoff_factor
+                                )
+                            except Exception as e:
+                                self.logger.warning(f"Failed to summarize inbox: {e}")
+                            
+                    inbox_context = (
+                        f"\n\n### UNRESOLVED INBOX ALERTS & ESCALATIONS\n"
+                        f"Your team has received the following signals from your descendants or supervisor:\n"
+                        f"{raw_inbox_text}\n"
+                        f"Please address or incorporate these alerts into your decision-making."
                     )
+                    team.message_inbox = []
 
-                async def _run_agent(ag=agent, pr=round_prompt):
-                    return await team.execute_react_step(
-                        agent=ag,
-                        prompt=pr,
-                        system_instruction=team.system_instructions,
-                        max_steps=self.config.react_max_steps,
-                        manager=self
-                    )
-                tasks.append(_run_agent())
+                tasks = []
+                for agent in team.members:
+                    if r == 1:
+                        round_prompt = f"{prompt}{inbox_context}"
+                    else:
+                        other_answers = []
+                        for other_agent in team.members:
+                            if other_agent.name != agent.name:
+                                ans = last_round_answers.get((r - 1, other_agent.name), "No response.")
+                                other_answers.append(f"{other_agent.name} (Role: {other_agent.role}): {ans}")
+                        
+                        round_prompt = (
+                            f"Here is the discussion from Round {r - 1}:\n"
+                            + "\n".join(other_answers) + "\n\n"
+                            f"Please continue the discussion. Build on or challenge their arguments."
+                            f"{inbox_context}"
+                        )
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+                    async def _run_agent(ag=agent, pr=round_prompt):
+                        return await team.execute_react_step(
+                            agent=ag,
+                            prompt=pr,
+                            system_instruction=team.system_instructions,
+                            max_steps=self.config.react_max_steps,
+                            manager=self
+                        )
+                    tasks.append(_run_agent())
 
-            for agent, result in zip(team.members, results):
-                if isinstance(result, ATTException):
-                    self.logger.error(f"Failed to execute discussion step due to ATT error: {result}")
-                    await self.supervisor.report_anomaly(team, f"LLM client invocation error: {result}", self)
-                    raise result
-                elif isinstance(result, Exception):
-                    self.logger.error(f"Agent {agent.name} encountered an error: {result}")
-                    ans = f"Error: {result}"
-                else:
-                    ans = str(result)
-                
-                last_round_answers[(r, agent.name)] = ans
-                dialog_history.append(f"{agent.name}: {ans}")
+                results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        transcript = "\n".join(dialog_history)
-        
-        # Run supervisory audit
-        is_healthy, reason = await self.supervisor.audit_team_dialog(team, transcript)
-        if not is_healthy:
-            await self.supervisor.report_anomaly(team, reason, self)
+                for agent, result in zip(team.members, results):
+                    if isinstance(result, ATTException):
+                        self.logger.error(f"Failed to execute discussion step due to ATT error: {result}")
+                        await self.supervisor.report_anomaly(team, f"LLM client invocation error: {result}", self)
+                        raise result
+                    elif isinstance(result, Exception):
+                        self.logger.error(f"Agent {agent.name} encountered an error: {result}")
+                        ans = f"Error: {result}"
+                    else:
+                        ans = str(result)
+                    
+                    last_round_answers[(r, agent.name)] = ans
+                    dialog_history.append(f"{agent.name}: {ans}")
+
+            transcript = "\n".join(dialog_history)
             
-        # Log debate transcript using logger callback
-        if self.on_log_append:
-            log_title = f"Synthesized Debate Transcript | {team.team_id} ({team.preset_name}) - Rounds: {rounds}"
-            log_content = (
-                f"TEAM_ID: {team.team_id}\n"
-                f"PRESET_NAME: {team.preset_name}\n"
-                f"PURPOSE: {team.team_purpose}\n"
-                f"PROMPT: {prompt}\n"
-                f"--- SYNTHESIZED TRANSCRIPT BEGIN ---\n"
-                f"{transcript}\n"
-                f"--- SYNTHESIZED TRANSCRIPT END ---\n"
-                f"AUDIT STATUS: {'Healthy' if is_healthy else 'Anomaly Detected'}\n"
-                f"AUDIT REASON: {reason}\n"
-            )
-            self.on_log_append(
-                team.team_id,
-                log_title,
-                log_content,
-                team.chapter_num
-            )
+            # Run supervisory audit
+            is_healthy, reason = await self.supervisor.audit_team_dialog(team, transcript)
+            if not is_healthy:
+                await self.supervisor.report_anomaly(team, reason, self)
+                
+            # Log debate transcript using logger callback
+            if self.on_log_append:
+                log_title = f"Synthesized Debate Transcript | {team.team_id} ({team.preset_name}) - Rounds: {rounds}"
+                log_content = (
+                    f"TEAM_ID: {team.team_id}\n"
+                    f"PRESET_NAME: {team.preset_name}\n"
+                    f"PURPOSE: {team.team_purpose}\n"
+                    f"PROMPT: {prompt}\n"
+                    f"--- SYNTHESIZED TRANSCRIPT BEGIN ---\n"
+                    f"{transcript}\n"
+                    f"--- SYNTHESIZED TRANSCRIPT END ---\n"
+                    f"AUDIT STATUS: {'Healthy' if is_healthy else 'Anomaly Detected'}\n"
+                    f"AUDIT REASON: {reason}\n"
+                )
+                self.on_log_append(
+                    team.team_id,
+                    log_title,
+                    log_content,
+                    team.chapter_num
+                )
 
-        self._auto_save()
-        return transcript
+            self._auto_save()
+            return transcript
+        finally:
+            team.is_running = False
+            # Check for left-over emergency messages in inbox
+            if team.message_inbox and getattr(self.config, "enable_emergency_wakeup", True):
+                emergency_msg = next((msg for msg in team.message_inbox if msg.get("type") in {"child_failure_escalation", "escalation_spawn"}), None)
+                if emergency_msg:
+                    self.logger.warning(f"Post-discussion emergency wakeup triggered for team {team.team_id}")
+                    try:
+                        asyncio.create_task(self.execute_emergency_discussion(team, emergency_msg))
+                    except RuntimeError:
+                        pass
+
+    async def execute_emergency_discussion(self, team: AgentTeam, alert: Dict[str, Any]) -> str:
+        """Executes an emergency discussion round to handle child failure or escalation."""
+        emergency_prompt = (
+            f"EMERGENCY MEETING: An anomaly or escalation was reported from your child team or supervisor.\n"
+            f"Alert details: {alert.get('reason') or alert.get('objective') or str(alert)}\n"
+            f"Please evaluate this issue and decide on corrective actions or escalate further."
+        )
+        rounds = getattr(self.config, "emergency_discussion_rounds", 1)
+        self.logger.warning(f"Starting emergency discussion on team {team.team_id} for {rounds} round(s)...")
+        return await self.execute_team_discussion(team, prompt=emergency_prompt, rounds=rounds)
 
     def _auto_save(self):
         """Triggers a snapshot save if a database path is configured."""

@@ -368,6 +368,12 @@ def my_migration_callback(team_id, old_parent_id, new_parent_id):
     print(f"Team {team_id} moved from {old_parent_id} to {new_parent_id}")
 
 manager.on_team_migration = my_migration_callback
+
+# Wire emergency escalation callback
+def my_emergency_callback(team_id, alert_type, alert_reason):
+    print(f"[EMERGENCY ALERT] Team {team_id} encountered {alert_type}: {alert_reason}")
+
+manager.on_emergency_escalation = my_emergency_callback
 ```
 
 ### 5. Spawn Team & Execute Discussion
@@ -427,6 +433,8 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `max_memory_turns` | `int` | `20` | The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns. |
 | `communication_policy` | `str` | `"permissive"` | The strategy used for inter-team communication gating. Options: `"permissive"`, `"rule_gated"`, `"proxied"`. |
 | `migration_policy` | `str` | `"ancestor_approval"` | The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`. |
+| `enable_emergency_wakeup` | `bool` | `True` | Whether to trigger active wake-up discussion on idle parent teams upon receiving high-priority child anomalies. |
+| `emergency_discussion_rounds` | `int` | `1` | The number of emergency discussion rounds executed when a team is woken up. |
 
 ### `GatedFileReader` Parameters
 
@@ -449,12 +457,6 @@ For visual flowcharts and sequencing diagrams detailing the runtime loops, gated
 * **[3-AI Supervisory Dialogue Audit & Escalation](docs/flowcharts/Supervisory_Team_Audit.md)**
 * **[SQLite Database Auto-Save & Recovery Pipeline](docs/flowcharts/State_Persistence.md)**
 * **[Lineage Migration Arbitration Sequence](docs/flowcharts/Lineage_Migration_Arbitration.md)**
-
-## 🧪 Developer Testing
-
-For guidelines on test structure and instructions on mocking multi-round sequential agent discussions, consult the developer guide:
-
-* **[Developer Testing & Mocking Guide](docs/dev/testing.md)**
 
 ## 📄 License
 

@@ -209,6 +209,12 @@ def migration_callback(team_id: str, old_parent_id: Optional[str], new_parent_id
     print(f"[MIGRATION] Team {team_id} moved from {old_parent_id} to {new_parent_id}")
 
 manager.on_team_migration = migration_callback
+
+# Register a callback to catch high-priority emergency alerts or parent escalations
+def emergency_callback(team_id: str, alert_type: str, alert_reason: str):
+    print(f"[EMERGENCY] Team {team_id} received {alert_type}: {alert_reason}")
+
+manager.on_emergency_escalation = emergency_callback
 ```
 
 ## 🤖 7. Model Registry & Global Generator Callback (Multi-Model Support)

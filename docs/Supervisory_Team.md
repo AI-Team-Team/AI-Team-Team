@@ -58,15 +58,15 @@ If the dialogue audit results in `is_healthy = False` (indicating a deadlock or 
                                    ▼
                    ┌───────────────────────────────┐
                    │ Audit Parent Team (AT)        │
-                   │ consumes alert in its next    │
-                   │ discussion turn autonomously  │
+                   │ wakes up or consumes alert    │
+                   │ on next round                 │
                    └───────────────────────────────┘
 ```
 
-1. **Direct Escalation**: The Supervisor resolves the direct parent team of the failed team.
-2. **Asynchronous Routing**: The Supervisor dispatches a failure alert (containing the anomaly reason and child team ID) directly into the parent team's `message_inbox`. It returns immediately, preventing synchronous blocking loops that cause API timeouts.
-3. **Context Consumption**: The parent team will consume this context in its next discussion turn, automatically summarizing the inbox if the cascade of errors exceeds the `inbox_summarize_threshold_chars` threshold.
-4. **Fallback Gating**: If no parent exists in the lineage tree, the Supervisor escalates a critical system alert directly to the **Level 0 Root AI**.
+ 1. **Direct Escalation**: The Supervisor resolves the direct parent team of the failed team.
+ 2. **Asynchronous Routing**: The Supervisor dispatches a failure alert (containing the anomaly reason and child team ID) directly into the parent team's `message_inbox`. It returns immediately, preventing synchronous blocking loops that cause API timeouts.
+ 3. **Context Consumption & Active Wake-up**: If the parent team is idle, this emergency alert automatically wakes up the parent team for a rapid emergency discussion session. If the parent team is already active, it will consume the alert at the start of the next round. If the cascade of errors exceeds the `inbox_summarize_threshold_chars` threshold, it will automatically summarize the inbox context.
+ 4. **Fallback Gating**: If no parent exists in the lineage tree, the Supervisor escalates a critical system alert directly to the **Level 0 Root AI**.
 
 > [!NOTE]
 > Anomaly escalations dynamically follow the current parent-child lineage tree links, even if the failed team has migrated to a different parent branch during discussion rounds.

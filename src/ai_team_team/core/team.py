@@ -36,6 +36,7 @@ class AgentTeam:
         self._parent_team: Optional['AgentTeam'] = None
         self.migration_count = 0
         self.doc_library: Optional[DocumentLibrary] = None
+        self.is_running = False
 
 
     @property
@@ -85,8 +86,30 @@ class AgentTeam:
     def receive_message(self, message: Dict[str, Any]):
         self.message_inbox.append(message)
         self.logger.info(f"Team {self.team_id} received message of type '{message.get('type')}' from '{message.get('from')}'")
-        if getattr(self, "manager", None):
-            self.manager._auto_save()
+        manager = getattr(self, "manager", None)
+        if manager:
+            # Check for high-priority alert types and trigger active wakeup if idle
+            if message.get("type") in {"child_failure_escalation", "escalation_spawn"}:
+                if not self.is_running and getattr(manager.config, "enable_emergency_wakeup", True):
+                    self.logger.warning(f"Active wakeup triggered for idle team {self.team_id}")
+                    try:
+                        asyncio.create_task(manager.execute_emergency_discussion(self, message))
+                    except RuntimeError:
+                        # In case no event loop is running (e.g. some synchronous test setup)
+                        pass
+                
+                # Check for callback hook
+                if getattr(manager, "on_emergency_escalation", None):
+                    try:
+                        manager.on_emergency_escalation(
+                            self.team_id,
+                            message.get("type"),
+                            message.get("reason") or message.get("objective") or str(message)
+                        )
+                    except Exception as e:
+                        self.logger.error(f"Error in on_emergency_escalation callback: {e}")
+            
+            manager._auto_save()
 
     async def execute_react_step(
         self,

@@ -18,7 +18,9 @@ class ATTConfig:
         enable_memory_compression: bool = True,
         max_memory_turns: int = 20,
         communication_policy: str = "permissive",
-        migration_policy: str = "ancestor_approval"
+        migration_policy: str = "ancestor_approval",
+        enable_emergency_wakeup: bool = True,
+        emergency_discussion_rounds: int = 1
     ):
         self.enable_dynamic_delegation = enable_dynamic_delegation
         self.max_delegation_depth = max_delegation_depth
@@ -35,3 +37,5 @@ class ATTConfig:
         self.max_memory_turns = max_memory_turns
         self.communication_policy = communication_policy
         self.migration_policy = migration_policy
+        self.enable_emergency_wakeup = enable_emergency_wakeup
+        self.emergency_discussion_rounds = emergency_discussion_rounds
