@@ -15,8 +15,7 @@ Please refer to the following documents for granular flow diagrams:
 4. **[Supervisory Team Audits & Escalations](Supervisory_Team_Audit.md)**: Diagrams the 3-AI Supervisory Team's dialogue auditing and the recursive parent-ancestor climb escalation process.
 5. **[State Persistence & Recovery](State_Persistence.md)**: Visualizes the SQLite-backed auto-saving event triggers and the manager's two-pass deserialization pipeline.
 6. **[Discussion & ReAct Execution Loop](Execution_Loop.md)**: Visualizes the master multi-round debate sequence and the granular agent turn ReAct execution step compilation.
-7. **[Database Schema ER Diagram](Database_Schema.md)**: Visualizes the relational tables, schemas, field types, and keys mapped out in the persistence SQLite engine.
-8. **[Lineage Migration Arbitration Sequence](Lineage_Migration_Arbitration.md)**: Diagrams the step-by-step Least Common Ancestor (LCA) resolution, representatives harvesting, and LLM arbitration rounds during team migrations.
+7. **[Lineage Migration Arbitration Sequence](Lineage_Migration_Arbitration.md)**: Diagrams the step-by-step Least Common Ancestor (LCA) resolution, representatives harvesting, and LLM arbitration rounds during team migrations.
 
 ## Unified High-Level Flow Overview
 

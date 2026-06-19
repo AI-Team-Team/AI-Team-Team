@@ -448,7 +448,6 @@ For visual flowcharts and sequencing diagrams detailing the runtime loops, gated
 * **[Negotiation Broker Sibling Gating Sequence](docs/flowcharts/Negotiation_Broker_Sibling_Routing.md)**
 * **[3-AI Supervisory Dialogue Audit & Escalation](docs/flowcharts/Supervisory_Team_Audit.md)**
 * **[SQLite Database Auto-Save & Recovery Pipeline](docs/flowcharts/State_Persistence.md)**
-* **[Database Schema ER Diagram](docs/flowcharts/Database_Schema.md)**
 * **[Lineage Migration Arbitration Sequence](docs/flowcharts/Lineage_Migration_Arbitration.md)**
 
 ## 🧪 Developer Testing
