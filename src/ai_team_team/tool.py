@@ -1,16 +1,173 @@
 import asyncio
 import inspect
 import logging
-from typing import Dict, Any, Optional, Callable, List, Tuple
+from typing import Dict, Any, Optional, Callable, List, Tuple, Union, Type, get_type_hints
 
 logger = logging.getLogger("ATT.Tools")
 
+def _type_to_schema_type(hint: Any) -> Dict[str, Any]:
+    import typing
+    origin = getattr(hint, "__origin__", None)
+    
+    if origin is typing.Union:
+        args = getattr(hint, "__args__", [])
+        non_none_args = [a for a in args if a is not type(None) and a is not None]
+        if not non_none_args:
+            return {"type": "null"}
+        if len(non_none_args) == 1:
+            return _type_to_schema_type(non_none_args[0])
+        else:
+            return {"anyOf": [_type_to_schema_type(a) for a in non_none_args]}
+            
+    if hint is int:
+        return {"type": "integer"}
+    elif hint is float:
+        return {"type": "number"}
+    elif hint is bool:
+        return {"type": "boolean"}
+    elif hint is str:
+        return {"type": "string"}
+    elif hint is list or origin is list:
+        args = getattr(hint, "__args__", [])
+        items_schema = {}
+        if args:
+            items_schema = _type_to_schema_type(args[0])
+        return {"type": "array", "items": items_schema}
+    elif hint is dict or origin is dict:
+        return {"type": "object"}
+    
+    # Handle nested TypedDicts
+    is_td = False
+    try:
+        from typing import is_typeddict as _is_td
+        is_td = _is_td(hint)
+    except ImportError:
+        pass
+    if not is_td:
+        is_td = isinstance(hint, type) and hasattr(hint, "__annotations__") and hasattr(hint, "__total__")
+    
+    if is_td:
+        return _schema_from_typeddict(hint, "")
+        
+    return {"type": "string"}
+
+def _schema_from_typeddict(tp: Any, description: str) -> Dict[str, Any]:
+    hints = get_type_hints(tp)
+    properties = {}
+    required = []
+    is_total = getattr(tp, "__total__", True)
+    
+    for name, hint in hints.items():
+        properties[name] = _type_to_schema_type(hint)
+        if is_total:
+            required.append(name)
+            
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "description": description
+    }
+
+def _schema_from_function(func: Callable[..., Any], description: str) -> Dict[str, Any]:
+    sig = inspect.signature(func)
+    type_hints = get_type_hints(func)
+    properties = {}
+    required = []
+    
+    for param_name, param in sig.parameters.items():
+        if param_name in ('self', 'cls'):
+            continue
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+            
+        param_type = type_hints.get(param_name, Any)
+        param_schema = _type_to_schema_type(param_type)
+        
+        if param.default is inspect.Parameter.empty:
+            required.append(param_name)
+        else:
+            if param.default is not None:
+                param_schema["default"] = param.default
+                
+        properties[param_name] = param_schema
+        
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "description": description
+    }
+
+def _schema_from_pydantic(model: Any, description: str) -> Dict[str, Any]:
+    if hasattr(model, "model_json_schema"):
+        schema = model.model_json_schema()
+    else:
+        schema = model.schema()
+    if "description" not in schema or not schema["description"]:
+        schema["description"] = description
+    return schema
+
+def _resolve_schema(func: Callable[..., Any], description: str, schema_source: Optional[Any] = None) -> Dict[str, Any]:
+    if isinstance(schema_source, dict):
+        return schema_source
+        
+    is_pydantic = False
+    try:
+        from pydantic import BaseModel
+        if isinstance(schema_source, type) and issubclass(schema_source, BaseModel):
+            is_pydantic = True
+    except ImportError:
+        pass
+        
+    if is_pydantic:
+        return _schema_from_pydantic(schema_source, description)
+        
+    is_td = False
+    try:
+        from typing import is_typeddict as _is_td
+        is_td = _is_td(schema_source)
+    except ImportError:
+        pass
+    if not is_td:
+        is_td = isinstance(schema_source, type) and hasattr(schema_source, "__annotations__") and hasattr(schema_source, "__total__")
+        
+    if is_td:
+        return _schema_from_typeddict(schema_source, description)
+        
+    return _schema_from_function(func, description)
+
 class Tool:
     """Encapsulates an AI tool with name, description, and execution logic."""
-    def __init__(self, name: str, description: str, func: Callable[..., Any]):
+    def __init__(
+        self,
+        name: Any = None,
+        description: Optional[str] = None,
+        func: Optional[Callable[..., Any]] = None,
+        schema: Optional[Any] = None
+    ):
+        # Resolve positional arguments vs keyword arguments
+        if callable(name):
+            func = name
+            name = getattr(func, "__name__", "custom_tool")
+            
+        if func is None:
+            raise ValueError("A callable function must be provided to create a Tool.")
+
+        if not name:
+            name = getattr(func, "__name__", "custom_tool")
+
+        if not description:
+            doc = getattr(func, "__doc__", None)
+            if doc:
+                description = doc.strip().split("\n")[0].strip()
+            else:
+                description = f"Execute function {name}"
+
         self.name = name
         self.description = description
         self.func = func
+        self.json_schema = _resolve_schema(func, description, schema)
 
     async def __call__(self, *args, **kwargs) -> str:
         try:

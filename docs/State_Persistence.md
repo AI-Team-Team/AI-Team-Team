@@ -75,9 +75,12 @@ erDiagram
     agent_messages {
         int id PK "Auto-incrementing Primary Key"
         string agent_name FK "Foreign Key referencing agents.name"
-        string role "Message role ('user', 'assistant', 'system')"
+        string role "Message role ('user', 'assistant', 'system', 'tool')"
         string content "Raw message content string"
         real created_at "Timestamp of message creation"
+        json tool_calls "Native JSON array of structured tool call details"
+        string tool_call_id "Optional matching tool call identifier"
+        string name "Optional name attribute (e.g. for role='tool')"
     }
     
     teams {
@@ -194,7 +197,7 @@ The system automatically captures snapshots by invoking `manager._auto_save()` o
 * Adding/removing members (`add_team_member`, `remove_team_member`)
 * Creating/negotiating voting proposals (`cast_vote`, `initiate_membership_vote`, etc.)
 * Reaching debate conclusions (`execute_team_discussion`)
-* Executing tools during ReAct loops (`execute_react_step`)
+* Executing reasoning steps and tools (`execute_reasoning_step`)
 * Direct writing/deleting file modifications inside libraries (`write_library_file`, `delete_library_file`)
 
 ### Recovery Workflow (`load_state`)

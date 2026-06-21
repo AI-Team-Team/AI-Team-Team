@@ -20,7 +20,9 @@ class ATTConfig:
         communication_policy: str = "permissive",
         migration_policy: str = "ancestor_approval",
         enable_emergency_wakeup: bool = True,
-        emergency_discussion_rounds: int = 1
+        emergency_discussion_rounds: int = 1,
+        tool_calling_mode: str = "auto",
+        max_tool_rounds: int = 5
     ):
         self.enable_dynamic_delegation = enable_dynamic_delegation
         self.max_delegation_depth = max_delegation_depth
@@ -39,3 +41,5 @@ class ATTConfig:
         self.migration_policy = migration_policy
         self.enable_emergency_wakeup = enable_emergency_wakeup
         self.emergency_discussion_rounds = emergency_discussion_rounds
+        self.tool_calling_mode = tool_calling_mode
+        self.max_tool_rounds = max_tool_rounds

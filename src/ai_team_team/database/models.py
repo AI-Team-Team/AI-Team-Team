@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Float, ForeignKey, Table, Column
+from sqlalchemy import String, Integer, Float, ForeignKey, Table, Column, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from typing import List, Optional
 
@@ -38,6 +38,9 @@ class AgentMessageModel(Base):
     role: Mapped[str] = mapped_column(String)
     content: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[float] = mapped_column(Float)
+    tool_calls: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    tool_call_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     agent: Mapped["AgentModel"] = relationship(back_populates="messages")
 

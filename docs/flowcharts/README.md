@@ -28,26 +28,34 @@ flowchart TD
     RootNode --> Spawning{"2. Spawn dynamic Agent Team (AT)?"}
     Spawning -- "Yes" --> SpawningCheck["Create AgentTeam (N >= 3)\nValidate member_configs / roles\nBind Centralized Tools context\nInstantiate default DocLib"]
     
-    SpawningCheck --> ToolCall{"3. Agent executes ReAct step?"}
+    SpawningCheck --> ToolCall{"3. Agent executes reasoning step?"}
     
-    ToolCall -- "Action: tool(args)" --> SafeParser["Parse args using ast.literal_eval"]
-    SafeParser --> ExecTool["Execute bound tool"]
+    ToolCall -- "execute_reasoning_step" --> StrategyCheck{"Supports native tool calling?"}
+    
+    StrategyCheck -- "Yes (Native Mode)" --> NativeStrategy["Native tool calling strategy:<br/>1. Fetch schemas from resolver<br/>2. generate(prompt, tools=schemas)<br/>3. asyncio.gather() parallel execution"]
+    StrategyCheck -- "No (Text ReAct Mode)" --> TextReAct["Text ReAct strategy:<br/>1. Thought-Action-Observation loop<br/>2. Parse XML tags or regex Actions<br/>3. Parse arguments via ast.literal_eval"]
+    
+    NativeStrategy --> ExecTool["Execute bound tool(s)<br/>(Intercepted by pre-execution ToolAuditor)"]
+    TextReAct --> ExecTool
     
     ToolCall -- "Library File Access" --> DocLibPermission{"Has READ/WRITE permission?"}
     DocLibPermission -- "No" --> Denied["Return Permission Denied"]
     DocLibPermission -- "Yes (Read)" --> GatedFileReader["GatedFileReader Gated Check"]
     DocLibPermission -- "Yes (Write/Delete)" --> ExecDoc["Modify library files"]
     
-    GatedFileReader -- "File exceeds 50KB and No Slice" --> Outline["Return File Outline Sample"]
-    GatedFileReader -- "Safe Size OR Window" --> Chunk["Return Paginated Lines Chunk"]
+    GatedFileReader -- "File exceeds 50KB and No range" --> Outline["Return Outline Warning (first 5 lines + metadata)"]
+    GatedFileReader -- "Safe Size OR Window" --> Chunk["Return line-numbered paginated chunk (max 100 lines)"]
     
     ToolCall -- "Peer Sibling Talk" --> NegotiationBroker["NegotiationBroker dispatch"]
-    NegotiationBroker -- "Sibling AT" --> SiblingRule{"Parent rules allow?"}
-    NegotiationBroker -- "Cross-Lineage AT" --> ParentNegotiate["Parents agreement debate"]
+    NegotiationBroker -- "Sibling AT" --> SiblingRule{"Parent rules allow_sibling_talk?"}
+    NegotiationBroker -- "Cross-Lineage AT" --> ParentNegotiate["Parents negotiate agreement via Policy:<br/>Permissive / RuleGated / Proxied"]
     
     ToolCall -- "Voting Actions" --> Voting{"Democratic Voting Process"}
-    Voting -- "Unanimous participation & >= 2/3 Agree" --> ExecVote["Update team membership (add/remove)"]
+    Voting -- "Unanimous participation & >= 2/3 Agree" --> ExecVote["Update team membership (add/remove member)<br/>Save to SQLite DB"]
     
-    ToolCall -- "Discussion finished" --> SupervisoryTeam["3-AI Supervisory Team audits dialogue logs"]
-    SupervisoryTeam -- "Anomaly found (is_healthy = False)" --> Escalate["Climb lineage up to find healthy parent\nRoute Failure Alert to Parent Inbox"]
+    ToolCall -- "Lineage Migration" --> MigrationCheck{"MigrationPolicy evaluation:<br/>Permissive / AncestorApproval / LineagePath"}
+    MigrationCheck -- "Approved (LCA representative debate)" --> MigrationExec["1. Restructure tree pointers<br/>2. Save to SQLite DB<br/>3. Inject Context Transition Notice"]
+    
+    ToolCall -- "Discussion finished" --> SupervisoryTeam["3-AI Supervisory Team (Integrity, Continuity, Deadlock) audits logs"]
+    SupervisoryTeam -- "Anomaly found (is_healthy = False)" --> Escalate["Climb lineage up to find healthy parent<br/>Route Failure Alert to Parent Inbox (triggers emergency wakeup)"]
 ```

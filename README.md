@@ -94,58 +94,88 @@ The master `ATTManager` coordinates the lifecycle, communications, and supervisi
 graph TD
     %% Coordinator Layer
     subgraph Coordinator ["ATT Coordinator Layer"]
-        Manager[ATTManager] <-->|Auto-Save / Restore| SQLite[(SQLite Database)]
+        Manager[ATTManager] <-->|Auto-Save & Restore state| SQLite[(SQLite Database)]
+        SQLite -.->|"AgentMessageModel (tool_calls, tool_call_id, name)"| SQLite
         Manager -->|Resolve Model Configs| ModelRegistry[Model Registry & Presets]
         ModelRegistry -->|Route Requests| Generator[Global Generator Handler]
-        Manager -->|Tracks Subscribed Callbacks| EventHooks[Event Callbacks: Status / Activity / Logs]
+        Manager -->|Tracks Subscribed Callbacks| EventHooks["Event Callbacks: on_status_change, on_activity_added, on_log_append, on_team_migration, on_emergency_escalation"]
     end
 
     %% Lineage Spawning
-    Root[Root Agent - Level 0] -->|create_agent_team| TeamA[Agent Team A - Level 1]
-    Root -->|create_agent_team| TeamB[Agent Team B - Level 1]
+    Root["Root Agent (Level 0)"] -->|"create_agent_team(creator)"| TeamA_Node["Agent Team A (Level 1)"]
+    Root -->|"create_agent_team(creator)"| TeamB["Agent Team B (Level 1)"]
     
     Manager -->|Manages Lineages| Root
     
     subgraph Lineage ["Hierarchical Team Lineage (Arbitrary Depth)"]
         subgraph TeamA_Node ["Agent Team A - Level 1 (N >= 3 Members)"]
             Agent_A1["Agent A1"] <-->|True Multi-Turn Memory| A1_Memory[(Agent Messages Buffer)]
-            A1_Memory -->|Turns > Max + 2| MemoryPruning[Memory Pruning / LLM Summarization]
+            A1_Memory -->|Turns > Max + 2| MemoryPruning["Memory Pruning & LLM Summarization"]
+            Agent_A1 -->|execute_reasoning_step| StrategySelector{Strategy Selector}
+            
+            %% Strategy routes
+            StrategySelector -->|"Config Mode / supports_native_tool_calling"| Strategy{Pluggable Reasoning Strategy}
+            Strategy -->|Text ReAct Strategy| TextReactStrategy["TextReactReasoningStrategy<br/>(Sequential Thought-Action-Observation)"]
+            Strategy -->|Native Strategy| NativeStrategy["NativeReasoningStrategy<br/>(Structured Parallel Tool Calling)"]
         end
         
-        TeamA_Node -->|dispatch_subagent\nmember_configs| SubTeamA1[Sub-Agent Team A.1 - Level 2]
-        SubTeamA1 -->|dispatch_subagent| SubTeamN[Sub-Agent Team N - Level N]
+        TeamA_Node -->|"dispatch_subagent(member_configs)"| SubTeamA1["Sub-Agent Team A.1 (Level 2)"]
+        SubTeamA1 -->|"dispatch_subagent(member_configs)"| SubTeamN["Sub-Agent Team N (Level N)"]
     end
 
     %% Tool Execution & Auditing Hook
     subgraph ToolExecution ["Tool Execution Gating"]
         ToolRegistry[Tool Registry: default & custom tools] -->|Intercepts & Vets| ToolAuditor[ToolAuditor Hook]
-        Agent_A1 -->|"Action: tool_name(args)"| ToolRegistry
+        ToolRegistry -->|Extract Schemas| SchemaResolver["Schema Resolver<br/>(Signature, Pydantic, TypedDict, Dict)"]
+        
+        %% Text ReAct Flow
+        TextReactStrategy -->|"1. Parse response for XML Action tags"| SafeASTParser["Safe AST Parser<br/>(ast.literal_eval arguments)"]
+        SafeASTParser -->|"2. Execute Action"| ToolRegistry
+        
+        %% Native Flow
+        NativeStrategy -->|Resolve schemas| SchemaResolver
+        NativeStrategy -->|"1. generate(prompt, tools=schemas)"| Generator
+        Generator -->|"2. returns LLMResponse(text, tool_calls)"| NativeStrategy
+        
+        NativeStrategy -->|3. Run ToolCalls concurrently| ParallelExecute["asyncio.gather parallel execution"]
+        ParallelExecute -->|4. execute| ToolRegistry
+        ToolRegistry -->|5. return ToolResult| ParallelExecute
+        ParallelExecute -->|6. Append ToolResult messages| A1_Memory
     end
     
     Manager -->|Registers Tools & Auditors| ToolRegistry
+    A1_Memory <-->|Save/Restore state| SQLite
 
     %% Document Library & Gated Reading
     subgraph DocStorage ["Gated Document Storage (DocLib)"]
-        GatedReader[GatedFileReader] -->|Size Filters / Outline Warnings / Paginated Chunking| DocLibA[(DocLib A)]
+        GatedReader["GatedFileReader"] -->|"Size Filters / Outline Warnings / Paginated Chunking"| DocLibA[(DocLib A)]
         GatedReader -->|Slices Context Lines| DocLibA1[(DocLib A.1)]
         GatedReader -->|Restricts Tokens| DocLibN[(DocLib N)]
-        GatedReader -->|Path ACL Segment Inheritance| DocLibB[(DocLib B)]
+        GatedReader -->|"Path ACL Segment Inheritance"| DocLibB[(DocLib B)]
+        
+        %% Outline Warnings & Chunking loops
+        GatedReader -.->|"Size > 50KB & No range: Outline Warning (first 5 lines)"| Agent_A1
+        Agent_A1 -.->|"Request slice: start_line, end_line (max 100 lines)"| GatedReader
     end
     
-    ToolRegistry -->|Built-in Lib Read/Write| GatedReader
+    ToolRegistry -->|"Built-in Lib Read/Write"| GatedReader
     
     TeamA_Node --- DocLibA
     SubTeamA1 --- DocLibA1
     SubTeamN --- DocLibN
     TeamB --- DocLibB
     
-    DocLibA1 -.->|Request Access / Grant READ-WRITE| DocLibB
+    DocLibA1 -.->|"Request Access / Grant READ-WRITE"| DocLibB
 
     %% Communication Permission Gating
     subgraph CommunicationGating ["P2P Communication Gating"]
-        Broker[NegotiationBroker] -->|Consults Strategy| CommPolicy[Communication Policy: Permissive / RuleGated / Proxied]
+        Broker[NegotiationBroker] -->|Consults Strategy| CommPolicy["Communication Policy:<br/>Permissive / RuleGated / Proxied"]
         CommPolicy -->|Evaluate Sibling Rules & Lineage Contracts| SubTeamN
-        CommPolicy -.->|Approve / Deny Tunnel| TeamB
+        CommPolicy -.->|"Approve / Deny Tunnel"| TeamB
+        
+        %% Sibling routing
+        Broker -.->|"Sibling: Check parent's allow_sibling_talk rule"| Broker
+        Agent_A1 -.->|"set_sibling_talk(child_id, allow)"| Broker
     end
     
     Manager -.->|Coordinates Tunnels| Broker
@@ -153,8 +183,12 @@ graph TD
 
     %% Lineage Reorganization & Context Transition
     subgraph LineageMigration ["Lineage Migration Arbitration"]
-        MigrationPolicy[Migration Policy: LCA Approval / Path Approval] -->|Tree Restructuring Pointers| Manager
-        MigrationPolicy -.->|Hires Shared Agent| TransitionNotice[Inject Context Transition Notice]
+        MigrationPolicy["Migration Policy:<br/>Permissive / AncestorApproval / LineagePath"] -->|"Tree Restructuring (Update Pointers)"| Manager
+        MigrationPolicy -.->|Hires Shared Agent| TransitionNotice["Context Transition Notice<br/>(Inject system warning update)"]
+        
+        %% LCA and Arbitration details
+        MigrationPolicy -->|Resolve LCA| LCAResolver["Least Common Ancestor (LCA) Resolver"]
+        MigrationPolicy -->|"LLM debate / vote"| LLMArbitration["LLM Representative Arbitration Loop<br/>(Harvest old/new/LCA parent reps)"]
     end
     
     SubTeamN -->|request_migration| MigrationPolicy
@@ -162,19 +196,36 @@ graph TD
     ToolRegistry -->|Migration Actions| MigrationPolicy
 
     %% Supervisory Dialogue Audits & Escalation
-    subgraph Supervision ["Lineage Supervision & Audit"]
-        Supervisor[3-AI SupervisoryTeam] -->|audit_team_dialog| TeamA_Node
-        Supervisor -->|report_anomaly escalation| ParentInbox[(Parent Team Inbox)]
+    subgraph Supervision ["Lineage Supervision & Emergency Wakeup"]
+        Supervisor["3-AI SupervisoryTeam"] -->|audit_team_dialog| TeamA_Node
+        
+        %% 3 Auditors split
+        Supervisor -->|Consensus analysis| IntegrityAuditor["Integrity Auditor (logic safety)"]
+        Supervisor -->|Consensus analysis| ContinuityAuditor["Continuity Auditor (progress)"]
+        Supervisor -->|Consensus analysis| DeadlockAuditor["Deadlock Auditor (loop detection)"]
+        
+        Supervisor -->|"report_anomaly escalation"| ParentInbox["Parent Team Inbox / Escalation Alert"]
         ParentInbox -->|Injected into Discussion| TeamA_Node
         Supervisor -->|Fallback Escalation| Root
+        
+        %% Emergency wakeup
+        ParentInbox -->|Message received & idle| WakeupGate{"enable_emergency_wakeup?"}
+        WakeupGate -- "Yes" --> EmergencyWakeup["execute_emergency_discussion<br/>(Runs emergency debate rounds)"]
     end
     
     Manager -.->|Orchestrates Audits| Supervisor
 
     %% Democratic Voting System
     subgraph TeamGovernance ["Democratic Team Governance"]
-        SubTeamA1 -->|initiate_membership_vote| Voting{Democratic Voting\nThreshold: >= 2/3}
-        Voting -->|Approved: add/remove member| SubTeamA1
+        SubTeamA1 -->|initiate_membership_vote| Voting["Democratic Voting<br/>Threshold: >= 2/3"]
+        Voting -->|Creates Proposal| VotingProposal["Voting Proposal<br/>(VP-xxxx in SQLite DB)"]
+        VotingProposal -->|cast_vote| Voting
+        
+        %% Anonymous voting
+        Voting -->|"public=False"| AnonymousBallot["Anonymous Ballot<br/>(Mask voter name as 'Anonymous Voter')"]
+        AnonymousBallot --> Voting
+        
+        Voting -->|"Approved: add/remove member"| SubTeamA1
     end
     
     ToolRegistry -->|Voting Actions| Voting
@@ -203,6 +254,20 @@ graph TD
     style ToolExecution fill:#fffde7,stroke:#fbc02d,stroke-width:2px;
     style ToolRegistry fill:#ffffff,stroke:#fbc02d,stroke-width:1px;
     style ToolAuditor fill:#ffffff,stroke:#fbc02d,stroke-width:1px;
+    style StrategySelector fill:#ffffff,stroke:#0288d1,stroke-width:1px;
+    style TextReactStrategy fill:#ffffff,stroke:#0288d1,stroke-width:1px;
+    style NativeStrategy fill:#ffffff,stroke:#0288d1,stroke-width:1px;
+    style SchemaResolver fill:#ffffff,stroke:#fbc02d,stroke-width:1px;
+    style ParallelExecute fill:#ffffff,stroke:#fbc02d,stroke-width:1px;
+    style SafeASTParser fill:#ffffff,stroke:#fbc02d,stroke-width:1px;
+    style IntegrityAuditor fill:#ffffff,stroke:#ffe0b2,stroke-width:1px;
+    style ContinuityAuditor fill:#ffffff,stroke:#ffe0b2,stroke-width:1px;
+    style DeadlockAuditor fill:#ffffff,stroke:#ffe0b2,stroke-width:1px;
+    style EmergencyWakeup fill:#ffffff,stroke:#ffe0b2,stroke-width:1px;
+    style VotingProposal fill:#ffffff,stroke:#ffebee,stroke-width:1px;
+    style AnonymousBallot fill:#ffffff,stroke:#ffebee,stroke-width:1px;
+    style LCAResolver fill:#ffffff,stroke:#ab47bc,stroke-width:1px;
+    style LLMArbitration fill:#ffffff,stroke:#ab47bc,stroke-width:1px;
 ```
 
 ## 🛠️ Getting Started
@@ -256,21 +321,27 @@ manager.register_generator_handler(my_handler)
 To integrate custom LLM backends (e.g., Google GenAI, OpenAI, Anthropic, or local inference engines), the supplied client must conform to the following signature:
 
 ```python
-from typing import Optional, Protocol
+from typing import Optional, Protocol, Union, List, Dict, Any
 
 class LLMClientProto(Protocol):
     async def generate(
         self,
-        prompt: str,
+        prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
-        require_json: bool = False,
-        temperature: float = 0.0,
-        **kwargs
-    ) -> str:
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.7,
+        require_json: bool = False
+    ) -> LLMResponse:
         """
-        Generates a text completion.
+        Generates a text completion or returns structured tool calls.
         When require_json=True is requested by SupervisoryTeam consensus audits,
         the model must return a valid, parsable JSON string.
+        """
+        ...
+
+    def supports_native_tool_calling(self) -> bool:
+        """
+        Returns True if the client/model configuration natively supports structured function calling.
         """
         ...
 ```
@@ -293,12 +364,15 @@ manager.register_preset(
 )
 
 # Register custom tools
+# The manager supports automatic name and description derivation:
+# 1. Automatic derivation from function name and docstring (recommended):
 def query_db(sql_command: str):
-    # App database retrieval logic here
+    """Run safe SQL commands directly on the DB. Arguments: sql_command (str)"""
     return "Query result..."
 
-# IMPORTANT: Always specify parameter names and types in the description
-# so that ReAct agents can parse and supply arguments correctly!
+manager.register_tool(query_db)
+
+# 2. Or explicit/manual registration:
 manager.register_tool(
     name="query_db",
     description="Run safe SQL commands directly on the DB. Arguments: sql_command (str)",

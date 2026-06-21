@@ -37,8 +37,10 @@ Represents a dynamic team of at least 3 agents ($N \ge 3$) executing discussions
 * **Methods**:
   * `launch_att(...) -> AgentTeam`: Allows the active team to recursively spawn a child team.
   * `receive_message(message: Dict[str, Any])`: Appends incoming signals or parent alerts to the team's inbox queue.
+  * `execute_reasoning_step(agent: Agent, prompt: str, system_instruction: str, max_steps: int = 5, manager: Optional[ATTManager] = None) -> str`
+        Routes reasoning step to either Native structured tool calling strategy or classic Text ReAct strategy. Executes concurrent/parallel tool calls when in Native mode.
   * `execute_react_step(agent: Agent, prompt: str, system_instruction: str, max_steps: int = 5, manager: Optional[ATTManager] = None) -> str`
-        Runs a Reason & Action (ReAct) loop, formatting active tools, executing audited calls, and yielding a `Final Answer`. Handles safe literal evaluations for string arguments containing commas.
+        Alias wrapper around `execute_reasoning_step` preserved for backward compatibility.
 
 ### `ATTManager`
 

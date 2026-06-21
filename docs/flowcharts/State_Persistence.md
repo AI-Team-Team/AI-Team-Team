@@ -14,7 +14,7 @@ flowchart TD
     EventType -- "Membership" --> Save2["Adding / removing team members\n(add/remove_team_member)"]
     EventType -- "Governance" --> Save3["Initiating proposals / voting\n(cast_vote, initiate_membership_vote)"]
     EventType -- "Debate" --> Save4["Reaching discussion conclusions\n(execute_team_discussion)"]
-    EventType -- "ReAct Step" --> Save5["Executing agent reasoning step\n(execute_react_step)"]
+    EventType -- "Reasoning Step" --> Save5["Executing agent reasoning step\n(execute_reasoning_step)"]
     EventType -- "Library Write" --> Save6["Modifying library files\n(write/delete_library_file)"]
     
     Save1 --> AutoSave["Invoke manager._auto_save()"]

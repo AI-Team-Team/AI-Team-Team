@@ -12,19 +12,33 @@ async def generate_with_retry(
     temperature: float = 0.3,
     require_json: bool = False,
     retries: int = 3,
-    backoff_factor: float = 1.5
-) -> str:
+    backoff_factor: float = 1.5,
+    tools: Optional[List[Dict[str, Any]]] = None,
+    return_response_obj: bool = False
+) -> Union[str, Any]:
     """Invokes LLM client generation with exponential backoff on transient errors."""
+    from .response import LLMResponse
     for attempt in range(1, retries + 1):
         try:
             if hasattr(llm_client, "generate"):
+                kwargs = {}
+                if tools is not None:
+                    try:
+                        import inspect
+                        sig = inspect.signature(llm_client.generate)
+                        if any(p.name == "tools" or p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                            kwargs["tools"] = tools
+                    except Exception:
+                        import unittest.mock
+                        if isinstance(llm_client, unittest.mock.NonCallableMock) or isinstance(llm_client.generate, unittest.mock.NonCallableMock):
+                            kwargs["tools"] = tools
                 response = await llm_client.generate(
                     prompt=prompt,
                     system_instruction=system_instruction,
                     temperature=temperature,
-                    require_json=require_json
+                    require_json=require_json,
+                    **kwargs
                 )
-                return response
             else:
                 # Fallback to direct callable
                 if asyncio.iscoroutinefunction(llm_client):
@@ -41,7 +55,12 @@ async def generate_with_retry(
                         temperature=temperature,
                         require_json=require_json
                     )
-                return response
+            
+            if isinstance(response, LLMResponse):
+                if return_response_obj:
+                    return response
+                return response.text if response.text is not None else ""
+            return response
         except Exception as e:
             err_msg = str(e)
             is_transient = any(

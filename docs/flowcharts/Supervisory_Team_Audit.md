@@ -10,7 +10,7 @@ This flowchart outlines the sequence executed on every dynamic debate turn or di
 flowchart TD
     Start["Call audit_team_dialog(team, transcript)"] --> FormulatePrompt["Assemble Audit Prompt containing\nthe multi-agent debate transcript"]
     
-    FormulatePrompt --> BatchCall["Run 3-AI Auditor consensus check\n(Single batch LLM JSON call)"]
+    FormulatePrompt --> BatchCall["Run 3-AI Auditor consensus check:\n1. Integrity Auditor (logic safety)\n2. Continuity Auditor (progress checks)\n3. Deadlock Auditor (circular loops)\n(Single batch LLM JSON call)"]
     
     BatchCall --> TryBlock{"Try LLM generation & JSON parse?"}
     
@@ -39,7 +39,14 @@ flowchart TD
     AuditParent --> ParentHealthy{"Parent is healthy?"}
     
     ParentHealthy -- "Yes" --> RouteAlert["Route failure alert payload to Parent inbox:\n- failed_team_id\n- reason\n- type: child_failure_escalation"]
-    RouteAlert --> ParentPrepend["Parent injects alert into its next active discussion prompt"]
+    RouteAlert --> TriggerCallback["Trigger on_emergency_escalation callback hook"]
+    
+    TriggerCallback --> WakeupGate{"Parent is idle and\nenable_emergency_wakeup == True?"}
+    
+    WakeupGate -- "Yes" --> EmergencyDiscussion["Spawn asynchronous task:\nexecute_emergency_discussion(parent, alert)\n(Runs emergency debate rounds)"]
+    WakeupGate -- "No" --> ParentPrepend["Parent injects alert into its next active discussion prompt"]
+    
+    EmergencyDiscussion --> End["Escalation resolved successfully"]
     ParentPrepend --> End["Escalation resolved successfully"]
     
     ParentHealthy -- "No" --> LogBrokenParent["Log parent failure\nAppend current_parent to failed_lineage\nSet failed_team = current_parent"]

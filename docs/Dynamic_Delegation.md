@@ -14,9 +14,17 @@ Both individual `Agent` instances and `AgentTeam` instances support dynamic spaw
 
 For a detailed step-by-step visual of the spawning control flow, see the [Dynamic Spawning & Tool Binding Flowchart](flowcharts/Spawning_Escalation.md#1-dynamic-spawning--tool-binding-flowchart) and the [Tools Context Registration & Team Spawning Sequence](flowcharts/Negotiation_Broker_Sibling_Routing.md#1-sequence-of-tools-context-registration-&-team-spawning).
 
-## 2. Bounded ReAct Execution Loop & Safe Parser
+## 2. Dual-Mode Bounded Reasoning Loops & Safe Parsers
 
-Agents in dynamic teams resolve tasks inside a structured **Reasoning & Action (ReAct)** loop. The loop alternates between `Thought`, `Action` (tool call), and `Observation` until a `Final Answer` is reached or the step limit is hit (default: 5).
+Agents in dynamic teams resolve tasks using a pluggable strategy loop based on configuration or client capabilities:
+
+### Reasoning Strategy Selection
+
+The ATT framework abstracts reasoning execution into distinct strategies to decouple reasoning from LLM provider details:
+
+1. **Text ReAct Mode (`"text_react"`)**: A classic **Reasoning & Action (ReAct)** loop. The loop alternates between `Thought`, `Action` (tool call), and `Observation` until a `Final Answer` is reached or the step limit is hit (default: 5).
+2. **Native Tool Calling Mode (`"native"`)**: A native structured tool execution loop. The framework gathers tool schemas (derived from functions, Pydantic, or TypedDict), registers them with the LLM, parses the returning native `tool_calls` payloads, executes all tool calls **concurrently in parallel** using `asyncio.gather`, and resumes the loop until the final answer text is generated or `max_tool_rounds` is reached.
+3. **Auto Mode (`"auto"`)**: Dynamically queries the client capability `agent.llm_client.supports_native_tool_calling() -> bool`. If supported, routes to Native Mode; otherwise, falls back to Text ReAct Mode.
 
 ### Prompt Sequence Protocol
 

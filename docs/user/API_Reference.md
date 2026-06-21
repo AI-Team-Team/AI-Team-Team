@@ -28,7 +28,9 @@ config = ATTConfig(
     communication_policy: str = "permissive",
     migration_policy: str = "ancestor_approval",
     enable_emergency_wakeup: bool = True,
-    emergency_discussion_rounds: int = 1
+    emergency_discussion_rounds: int = 1,
+    tool_calling_mode: str = "auto",
+    max_tool_rounds: int = 5
 )
 ```
 
@@ -51,6 +53,8 @@ config = ATTConfig(
 * **`migration_policy`**: The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`.
 * **`enable_emergency_wakeup`**: Whether to trigger active wake-up discussion on idle parent teams upon receiving high-priority child anomalies (default: `True`).
 * **`emergency_discussion_rounds`**: The number of emergency discussion rounds executed when a team is woken up (default: `1`).
+* **`tool_calling_mode`**: The strategy used for tool calling and reasoning steps. Options: `"text_react"`, `"native"`, `"auto"` (default: `"auto"`).
+* **`max_tool_rounds`**: The maximum reasoning loop steps allowed for the native strategy execution round (default: `5`).
 
 ## 👤 `Agent`
 
@@ -146,14 +150,22 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 
 ## 🛠️ `Tool`
 
-Encapsulates an AI tool with name, description, and execution logic.
+Encapsulates an AI tool with name, description, execution logic, and automated schema parsing.
 
 ### Constructor
 
 ```python
 from ai_team_team import Tool
 
-tool = Tool(name: str, description: str, func: Callable[..., Any])
+# 1. Custom defined name, description and function
+tool = Tool(name="weather", description="Query weather", func=dummy_tool)
+
+# 2. Pythonic shortcuts (automatically derives name from func.__name__ and description from func.__doc__)
+tool = Tool(dummy_tool)
+tool = Tool(func=dummy_tool)
+
+# 3. Explicit schema override (can be dict, Pydantic BaseModel, or TypedDict class)
+tool = Tool(func=dummy_tool, schema=WeatherArgs)
 ```
 
 ## 📁 `GatedFileReader`
@@ -231,19 +243,27 @@ from typing import Optional, Protocol
 class LLMClientProto(Protocol):
     async def generate(
         self,
-        prompt: str,
+        prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
-        temperature: float = 0.3,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.7,
         require_json: bool = False
-    ) -> str:
+    ) -> LLMResponse:
         """
-        Generates a text completion.
+        Generates a text completion or returns structured tool calls.
         
         Args:
-            prompt: The user query or discussion history.
+            prompt: The user query or discussion history (string or list of message dicts).
             system_instruction: Guidelines and context injected for the agent.
+            tools: Optional list of structured tool schemas.
             temperature: Sampling temperature.
             require_json: If True, the model MUST return a valid JSON string.
+        """
+        ...
+
+    def supports_native_tool_calling(self) -> bool:
+        """
+        Returns True if the client/model configuration natively supports structured function calling.
         """
         ...
 ```

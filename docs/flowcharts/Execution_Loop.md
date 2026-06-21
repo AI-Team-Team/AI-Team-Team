@@ -14,7 +14,7 @@ flowchart TD
     
     LoopRounds -- "Yes" --> MemberIteration["Iterate through each member (Agent) in team"]
     
-    MemberIteration --> RunAgentStep["Call manager.execute_react_step(agent, team, prompt)"]
+    MemberIteration --> RunAgentStep["Call team.execute_reasoning_step(agent, prompt)"]
     
     RunAgentStep --> NextMember{"All members finished turn?"}
     NextMember -- "No" --> MemberIteration
@@ -34,52 +34,67 @@ flowchart TD
     FinalizeState --> End["Return compiled debate transcript"]
 ```
 
-## 2. Granular Agent Turn & ReAct Step (`execute_react_step`)
+## 2. Granular Agent Turn & Reasoning Step (`execute_reasoning_step` / `execute_react_step`)
 
-This flowchart outlines the prompt compilation, ReAct reasoning loop, tool execution auditing, memory compression, and auto-saving performed during a single agent's execution turn:
+This flowchart outlines the prompt compilation, strategy routing (Text ReAct vs Native), reasoning execution loops, tool execution auditing, memory compression, and auto-saving performed during a single agent's execution turn:
 
 ```mermaid
 flowchart TD
-    StartStep["Call execute_react_step(agent, team, prompt)"] --> BuildContext["Compile Prompt Context:\n1. Get Identity Header\n2. Render Topology Tree map\n3. Format Active Voting Proposals\n4. Inject Global Expert Directory"]
+    StartStep["Call execute_reasoning_step(agent, team, prompt)"] --> TransitionCheck{"agent.last_context.get('team_id') != team.team_id?"}
     
+    TransitionCheck -- "Yes" --> InjectTransition["Inject Transition Notice system message into memory\n(Updates role, team purpose, and active preset details)"]
+    TransitionCheck -- "No" --> BuildContext["Compile Prompt Context:\n1. Get Identity Header\n2. Render Topology Tree map\n3. Format Active Voting Proposals\n4. Inject Global Expert Directory"]
+    
+    InjectTransition --> BuildContext
     BuildContext --> InboxAlerts["Check unread inbox alerts"]
     InboxAlerts --> InboxThreshold{"Inbox size > 1500 chars?"}
     
     InboxThreshold -- "Yes" --> SummarizeInbox["Use LLM client to summarize inbox\nInject summary into prompt"]
     InboxThreshold -- "No" --> InjectInbox["Inject raw inbox alerts into prompt"]
     
-    SummarizeInbox --> InitReAct["Initialize ReAct step counter = 1"]
-    InjectInbox --> InitReAct
+    SummarizeInbox --> RouteStrategy{"Check Config Mode & supports_native_tool_calling()"}
+    InjectInbox --> RouteStrategy
     
+    RouteStrategy -- "Text ReAct Mode" --> InitReAct["Initialize ReAct step counter = 1"]
+    RouteStrategy -- "Native Mode" --> InitNative["Initialize Native round counter = 1"]
+    
+    %% --- Text ReAct Strategy Flow ---
     InitReAct --> ReActLoop{"step <= react_max_steps?"}
-    
     ReActLoop -- "Yes" --> LLMCall["Invoke Agent.llm_client.generate()"]
-    
     LLMCall --> ParseAction["Parse response for actions (XML tags or Action: tool_name)"]
-    
     ParseAction --> ActionType{"Action found?"}
-    
-    ActionType -- "No (Final Answer)" --> SetFinalAnswer["Append Final Answer to transcript\nBreak ReAct Loop"]
-    
-    ActionType -- "Yes (Tool Call)" --> ToolAuditor{"Tool Auditor registered for tool?"}
-    
+    ActionType -- "No (Final Answer)" --> SetFinalAnswer["Append Final Answer to memory\nBreak Loop"]
+    ActionType -- "Yes (Tool Call)" --> SafeASTParse["Parse arguments using safe ast.literal_eval\n(Handles unquoted multiline strings & commas)"]
+    SafeASTParse --> ToolAuditor{"Tool Auditor registered for tool?"}
     ToolAuditor -- "Yes" --> RunAuditor["Invoke pre-execution auditor callback"]
     RunAuditor --> AuditorApprove{"Auditor approved?"}
-    
     AuditorApprove -- "No" --> BlockTool["Set observation = 'Blocked by auditor'\nAppend to memory"]
     AuditorApprove -- "Yes" --> RunTool["Execute Tool function\n(e.g., GatedFileReader, DocLib, P2P Message)"]
-    
     ToolAuditor -- "No" --> RunTool
-    
     RunTool --> SaveObservation["Append Thought, Action, and Observation to memory"]
     BlockTool --> NextReActStep["Increment step by 1"]
     SaveObservation --> NextReActStep
     NextReActStep --> ReActLoop
+    ReActLoop -- "No" --> CheckMemory
     
-    ReActLoop -- "No" --> CheckMemory["Check total memory turns"]
+    %% --- Native Strategy Flow ---
+    InitNative --> NativeLoop{"round <= max_tool_rounds?"}
+    NativeLoop -- "Yes" --> LLMNativeCall["Invoke Agent.llm_client.generate(tools=tool_schemas)"]
+    LLMNativeCall --> NativeResponse{"tool_calls returned?"}
+    
+    NativeResponse -- "Yes (Structured calls)" --> SaveToolCall["Save Assistant message with tool_calls (JSON) to DB"]
+    SaveToolCall --> ParallelExecute["Execute all tool calls concurrently via asyncio.gather()"]
+    ParallelExecute --> SaveToolResults["Save ToolResult messages to DB\n(tool_call_id, name, content)\nIncrement round counter"]
+    SaveToolResults --> NativeLoop
+    
+    NativeResponse -- "No (Text response)" --> SaveTextResponse["Save Assistant final text to memory\nBreak Loop"]
+    NativeLoop -- "No" --> CheckMemory
+    
+    %% --- Post Execution Flow ---
     SetFinalAnswer --> CheckMemory
+    SaveTextResponse --> CheckMemory
     
-    CheckMemory --> PruningGate{"Turns > max_memory_turns + 2?\n(Compression enabled)"}
+    CheckMemory["Check total memory turns"] --> PruningGate{"Turns > max_memory_turns + 2?\n(Compression enabled)"}
     
     PruningGate -- "Yes" --> SummarizeEarly["1. Extract early turns (excluding profile)\n2. Generate historical fact summary via LLM\n3. Replace early turns with Archive system prompt"]
     PruningGate -- "No" --> AutoSave["Invoke manager._auto_save() to SQLite"]

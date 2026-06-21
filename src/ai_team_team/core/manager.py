@@ -79,12 +79,19 @@ class ATTManager:
             }
         }
 
-    def register_tool(self, name: str, description: str, func: Callable[..., Any]):
+    def register_tool(
+        self,
+        name: Any = None,
+        description: Optional[str] = None,
+        func: Optional[Callable[..., Any]] = None,
+        schema: Optional[Any] = None
+    ):
         """Registers a custom utility tool to all teams."""
-        self.global_tools[name] = Tool(name, description, func)
+        tool = Tool(name, description, func, schema)
+        self.global_tools[tool.name] = tool
         # Bind to existing teams
         for team in self.teams.values():
-            team.tools[name] = self.global_tools[name]
+            team.tools[tool.name] = tool
 
     def register_tool_auditor(self, tool_name: str, auditor_func: Callable[..., Tuple[bool, str]]):
         """Registers an auditing hook executed before specific tool calls."""
@@ -161,7 +168,11 @@ class ATTManager:
                 if client_name in self.llm_clients:
                     return self.llm_clients[client_name]
                 elif client_name in self.model_configs and self.generator_handler:
-                    return HandlerClientAdapter(client_name, self.generator_handler)
+                    adapter = HandlerClientAdapter(client_name, self.generator_handler)
+                    config = self.model_configs.get(client_name)
+                    if config:
+                        adapter._supports_native = config.get("supports_native_tool_calling", False)
+                    return adapter
                 else:
                     self.logger.warning(f"Client '{client_name}' not found in registry. Falling back to default client.")
             if "default" in self.llm_clients:
@@ -474,7 +485,7 @@ class ATTManager:
                         )
 
                     async def _run_agent(ag=agent, pr=round_prompt):
-                        return await team.execute_react_step(
+                        return await team.execute_reasoning_step(
                             agent=ag,
                             prompt=pr,
                             system_instruction=team.system_instructions,
@@ -610,6 +621,9 @@ class ATTManager:
                             agent_name=agent.name,
                             role=msg.get("role", "user"),
                             content=msg.get("content", ""),
+                            tool_calls=msg.get("tool_calls"),
+                            tool_call_id=msg.get("tool_call_id"),
+                            name=msg.get("name"),
                             created_at=time.time() + idx * 0.001
                         )
                         session.add(msg_model)
@@ -744,7 +758,11 @@ class ATTManager:
                         if client_name in self.llm_clients:
                             return self.llm_clients[client_name]
                         elif client_name in self.model_configs and self.generator_handler:
-                            return HandlerClientAdapter(client_name, self.generator_handler)
+                            adapter = HandlerClientAdapter(client_name, self.generator_handler)
+                            config = self.model_configs.get(client_name)
+                            if config:
+                                adapter._supports_native = config.get("supports_native_tool_calling", False)
+                            return adapter
                         else:
                             self.logger.warning(f"Client '{client_name}' not found in registry during restore. Falling back to default client.")
                     if "default" in self.llm_clients:
@@ -777,7 +795,16 @@ class ATTManager:
                     agent.last_context = json.loads(row.last_context) if row.last_context else None
                     
                     # Restore agent messages ordered by created_at in the relationship definition
-                    agent.messages = [{"role": msg.role, "content": msg.content} for msg in row.messages]
+                    agent.messages = []
+                    for msg in row.messages:
+                        m_dict = {"role": msg.role, "content": msg.content}
+                        if msg.tool_calls is not None:
+                            m_dict["tool_calls"] = msg.tool_calls
+                        if msg.tool_call_id is not None:
+                            m_dict["tool_call_id"] = msg.tool_call_id
+                        if msg.name is not None:
+                            m_dict["name"] = msg.name
+                        agent.messages.append(m_dict)
                     
                     self.agents[agent.name] = agent
 

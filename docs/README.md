@@ -20,8 +20,9 @@ To understand specific systems in detail, please refer to the following document
 3. **[Supervisor Auditor Team](Supervisory_Team.md)**: Details the dynamic **3-AI Supervisory Team** (Integrity, Continuity, and Deadlock Auditors) which monitors dialogue transcripts for circular deadlocks and performs recursive lineage parent escalations.
 4. **[State Persistence & Multi-Turn Memory](State_Persistence.md)**: Explains the SQLite-backed state snapshotting structure, ER diagrams, recovery lifecycles, Multi-Turn agent memory switches, turn-based dialogue pruning, and expert directory injection.
 5. **[Policy-Based Governance & Rules](Policies.md)**: Details inter-team communication rules (permissive, rule-gated, proxied) and parent hierarchy migration strategy-policies (ancestor approval, lineage path).
-6. **[Developer Testing & Mocking Guide](dev/testing.md)**: Guidelines for writing unit tests and mocking sequence responses.
-7. **[Developer API Reference](dev/API_Reference.md)**: Reference listing system internals and execution logic.
+6. **[Dual-Mode Tool Calling & Pluggable Strategies](Tool_Calling_Strategies.md)**: Explains the Strategy pattern decoupling of reasoning loops, automated tool schema resolver (signature, Pydantic, TypedDict), parallel concurrent tool calls via gather, and SQLite message serialization.
+7. **[Developer Testing & Mocking Guide](dev/testing.md)**: Guidelines for writing unit tests and mocking sequence responses.
+8. **[Developer API Reference](dev/API_Reference.md)**: Reference listing system internals and execution logic.
 
 ## 📊 Visual Flowcharts Directory
 

@@ -47,7 +47,7 @@ sequenceDiagram
     participant Child1 as Child Team 1 (AT-Child1)
     participant Child2 as Child Team 2 (AT-Child2)
     
-    Parent->>Manager: Run execute_react_step()
+    Parent->>Manager: Run execute_reasoning_step()
     Note over Parent: LLM decides to authorize sibling talk
     Parent->>Manager: Call set_sibling_talk(child_id='AT-Child1', allow=True)
     Note over Manager: Verify if caller AT-Parent is the parent of AT-Child1
@@ -104,15 +104,16 @@ sequenceDiagram
     participant Manager as ATTManager
 
     A1->>T: Call initiate_membership_vote(action='add', target='QA', proposed_details={...})
-    Note over T: Create VP-xxxx proposal<br/>Set Agent 1 vote to 'Agree'
+    Note over T: Create VP-xxxx proposal<br/>Set Agent 1 vote to 'Agree'<br/>Trigger SQLite _auto_save()
     T-->>A1: Return Proposal ID (VP-xxxx)
 
     A2->>T: Call cast_vote(proposal_id='VP-xxxx', vote='Agree', public=False)
-    Note over T: Voter 2 vote is cast anonymously (masked as "Anonymous Voter")
+    Note over T: Voter 2 vote is cast anonymously (masked as "Anonymous Voter")<br/>Trigger SQLite _auto_save()
     T-->>A2: Success (1 voter remaining)
 
     A3->>T: Call cast_vote(proposal_id='VP-xxxx', vote='Agree')
     Note over T: All 3 active members have voted.<br/>Agree: 3/3 (100% >= 2/3)<br/>Execute action: spawn Dynamic_QA
     T->>Manager: Spawn new member (Dynamic_QA) and append to T.members
+    Note over T: Trigger SQLite _auto_save()
     T-->>A3: Success (Proposal approved and executed)
 ```
