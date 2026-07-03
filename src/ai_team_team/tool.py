@@ -610,6 +610,23 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
             if ratio >= (2 / 3):
                 prop["status"] = "approved"
+                
+                # Check if team is running (deferred execution)
+                if getattr(actual_team, "is_running", False):
+                    prop.setdefault("proposed_details", {})["executed"] = False
+                    if prop["action"] == "add":
+                        role_name = prop["target"]
+                        return f"Proposal '{proposal_id}' approved ({agree_count}/{total_members} Agree). Adding member '{role_name}' is deferred to the end of the current round."
+                    else:
+                        agent_name = prop["target"]
+                        min_size = att_manager.config.min_subagent_team_size
+                        if len(actual_team.members) <= min_size:
+                            prop["status"] = "rejected"
+                            return f"Proposal '{proposal_id}' failed execution. Removing '{agent_name}' would violate minimum team size constraints of {min_size} members. Proposal closed as rejected."
+                        return f"Proposal '{proposal_id}' approved ({agree_count}/{total_members} Agree). Removing member '{agent_name}' is deferred to the end of the current round."
+                
+                # Immediate execution (e.g. outside debate rounds, like in unit tests)
+                prop.setdefault("proposed_details", {})["executed"] = True
                 if prop["action"] == "add":
                     role_name = prop["target"]
                     p_details = prop["proposed_details"]

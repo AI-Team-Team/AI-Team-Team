@@ -466,13 +466,14 @@ class ATTManager:
                     )
                     team.message_inbox = []
 
+                round_members = list(team.members)
                 tasks = []
-                for agent in team.members:
+                for agent in round_members:
                     if r == 1:
                         round_prompt = f"{prompt}{inbox_context}"
                     else:
                         other_answers = []
-                        for other_agent in team.members:
+                        for other_agent in round_members:
                             if other_agent.name != agent.name:
                                 ans = last_round_answers.get((r - 1, other_agent.name), "No response.")
                                 other_answers.append(f"{other_agent.name} (Role: {other_agent.role}): {ans}")
@@ -496,7 +497,7 @@ class ATTManager:
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                for agent, result in zip(team.members, results):
+                for agent, result in zip(round_members, results):
                     if isinstance(result, ATTException):
                         self.logger.error(f"Failed to execute discussion step due to ATT error: {result}")
                         await self.supervisor.report_anomaly(team, f"LLM client invocation error: {result}", self)
@@ -509,6 +510,59 @@ class ATTManager:
                     
                     last_round_answers[(r, agent.name)] = ans
                     dialog_history.append(f"{agent.name}: {ans}")
+
+                # Apply any deferred approved voting proposals at the end of the round
+                if self.config.enable_membership_voting:
+                    for prop_id, prop in list(team.proposals.items()):
+                        if prop.get("status") == "approved" and not prop.setdefault("proposed_details", {}).get("executed", False):
+                            # Mark as executed in the proposal details to avoid executing multiple times
+                            prop["proposed_details"]["executed"] = True
+                            
+                            action = prop.get("action")
+                            target = prop.get("target")
+                            
+                            if action == "add":
+                                model_name = prop["proposed_details"].get("model")
+                                role_desc = prop["proposed_details"].get("role_description", "")
+                                sys_inst = prop["proposed_details"].get("system_instructions", "")
+                                
+                                client = None
+                                if model_name in self.llm_clients:
+                                    client = self.llm_clients[model_name]
+                                elif model_name in self.model_configs and self.generator_handler:
+                                    from .adapters import HandlerClientAdapter
+                                    client = HandlerClientAdapter(model_name, self.generator_handler)
+                                else:
+                                    client = ManagerDefaultClientAdapter(self)
+                                    
+                                new_agent = Agent(
+                                    name=f"Dynamic_{target}",
+                                    role=target,
+                                    llm_client=client,
+                                    role_description=role_desc,
+                                    system_instructions=sys_inst
+                                )
+                                team.members.append(new_agent)
+                                self.agents[new_agent.name] = new_agent
+                                self.logger.info(f"Deferred execution: Added member '{new_agent.name}' to team '{team.team_id}'.")
+                            elif action == "remove":
+                                min_size = self.config.min_subagent_team_size
+                                if len(team.members) <= min_size:
+                                    prop["status"] = "rejected"
+                                    self.logger.warning(f"Deferred execution: Removing '{target}' failed because it violates min team size of {min_size}. Status changed to rejected.")
+                                    continue
+                                
+                                target_agent = None
+                                for m in team.members:
+                                    if m.name == target:
+                                        target_agent = m
+                                        break
+                                if target_agent:
+                                    team.members.remove(target_agent)
+                                    self.logger.info(f"Deferred execution: Removed member '{target}' from team '{team.team_id}'.")
+                                else:
+                                    prop["status"] = "rejected"
+                                    self.logger.warning(f"Deferred execution: Member '{target}' not found. Status changed to rejected.")
 
             transcript = "\n".join(dialog_history)
             
@@ -812,6 +866,8 @@ class ATTManager:
                     root_ai_name = config_map["root_ai_name"]
                     if root_ai_name in self.agents:
                         self.root_ai = self.agents[root_ai_name]
+                        if hasattr(self, "supervisor") and self.supervisor:
+                            self.supervisor.root_ai = self.root_ai
 
                 # 3. Reconstruct Libraries
                 self.libraries.clear()

@@ -171,6 +171,43 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         self.assertIn("This is a summary of early task executions.", system_archives[0]["content"])
         self.assertEqual(agent.messages[0]["content"], "Initial System Instructions")
 
+    async def test_memory_compression_prevents_tool_splitting(self):
+        """Verify that memory compression slice does not split tool calls and responses."""
+        self.manager.config.enable_memory_compression = True
+        self.manager.config.max_memory_turns = 4
+
+        async def mock_agent_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):
+            if "Summarize the preceding execution logs" in str(prompt):
+                return "This is a summary of early task executions."
+            return 'Thought: We are doing the task.\nFinal Answer: Task complete!'
+        self.mock_react_client.generate = mock_agent_generate
+
+        agent = Agent(name="Compressed_Agent", role="Summarizer", llm_client=self.mock_react_client)
+        team = self.manager.create_agent_team(
+            creator=self.root_ai,
+            preset_name="generic",
+            team_purpose="Testing compression"
+        )
+        team.members.append(agent)
+
+        agent.messages = [
+            {"role": "system", "content": "Initial System Instructions"},
+            {"role": "user", "content": "Turn 1 request"},
+            {"role": "assistant", "content": "Turn 1 answer"},
+            {"role": "user", "content": "Turn 2 request"},
+            {"role": "assistant", "content": "Turn 2 answer", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "call_1", "name": "read_file", "content": "File content"},
+            {"role": "assistant", "content": "Turn 3 answer"},
+            {"role": "user", "content": "Turn 4 request"},
+        ]
+
+        await team.execute_react_step(agent, "Turn 5 request", "Sys instructions")
+
+        self.assertEqual(agent.messages[2]["role"], "assistant")
+        self.assertIn("tool_calls", agent.messages[2])
+        self.assertEqual(agent.messages[3]["role"], "tool")
+        self.assertEqual(agent.messages[3]["tool_call_id"], "call_1")
+
     async def test_global_expert_listing(self):
         """Verify that all global experts are injected into the agent's identity profile header."""
         expert_a = Agent(name="Expert_A", role="Database Analyst", role_description="Handles DB queries")
@@ -302,6 +339,24 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
             "Task complete!" in debate_result or "Arbitration approved." in debate_result,
             f"Debate result: {debate_result} did not contain expected mock outputs."
         )
+
+    async def test_supervisor_reference_sync_on_load_state(self):
+        """Verify that SupervisoryTeam.root_ai reference is updated to the newly loaded root_ai in load_state."""
+        self.manager.save_state()
+        self.assertTrue(os.path.exists(self.db_path))
+
+        temp_root_ai = Agent(name="Temp_Root_AI", role="Architect", llm_client=self.mock_react_client)
+        new_manager = ATTManager(
+            root_ai=temp_root_ai,
+            db_path=self.db_path
+        )
+        self.assertIs(new_manager.supervisor.root_ai, temp_root_ai)
+
+        new_manager.load_state(self.db_path)
+
+        self.assertIsNot(new_manager.supervisor.root_ai, temp_root_ai)
+        self.assertIs(new_manager.supervisor.root_ai, new_manager.root_ai)
+        self.assertEqual(new_manager.root_ai.name, "Root_AI")
 
 if __name__ == "__main__":
     unittest.main()

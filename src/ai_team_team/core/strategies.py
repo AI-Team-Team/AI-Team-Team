@@ -116,7 +116,12 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
 
             if enable_compression and len(agent.messages) > max_turns + 2:
                 first_msg = agent.messages[0]
-                intermediate_messages = agent.messages[1 : len(agent.messages) - max_turns]
+                
+                slice_idx = len(agent.messages) - max_turns
+                while slice_idx > 1 and agent.messages[slice_idx].get("role") in ("tool", "function"):
+                    slice_idx -= 1
+                
+                intermediate_messages = agent.messages[1 : slice_idx]
                 history_text_parts = []
                 for msg in intermediate_messages:
                     r = msg.get("role", "unknown").upper()
@@ -156,7 +161,7 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     "role": "system",
                     "content": f"*** HISTORICAL SUMMARY ARCHIVE ***\n{summary_text}"
                 }
-                latest_messages = agent.messages[len(agent.messages) - max_turns :]
+                latest_messages = agent.messages[slice_idx :]
                 agent.messages = [first_msg, archive_message] + latest_messages
 
             if getattr(team, "tools", None):
@@ -742,7 +747,12 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
 
             if enable_compression and len(agent.messages) > max_turns + 2:
                 first_msg = agent.messages[0]
-                intermediate_messages = agent.messages[1 : len(agent.messages) - max_turns]
+                
+                slice_idx = len(agent.messages) - max_turns
+                while slice_idx > 1 and agent.messages[slice_idx].get("role") in ("tool", "function"):
+                    slice_idx -= 1
+                
+                intermediate_messages = agent.messages[1 : slice_idx]
                 history_text_parts = []
                 for msg in intermediate_messages:
                     r = msg.get("role", "unknown").upper()
@@ -781,7 +791,7 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                     "role": "system",
                     "content": f"*** HISTORICAL SUMMARY ARCHIVE ***\n{summary_text}"
                 }
-                latest_messages = agent.messages[len(agent.messages) - max_turns :]
+                latest_messages = agent.messages[slice_idx :]
                 agent.messages = [first_msg, archive_message] + latest_messages
 
             # Prepare native schemas

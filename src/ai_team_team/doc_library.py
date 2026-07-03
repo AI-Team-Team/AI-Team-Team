@@ -93,6 +93,9 @@ class DocumentLibrary:
         # Replace backslashes to avoid bypasses on platforms (though OS is mac, standard code checks)
         clean_path = clean_path.replace("\\", "/")
         resolved = os.path.abspath(os.path.join(self.root_dir, clean_path))
-        if not resolved.startswith(self.root_dir):
+        try:
+            if os.path.commonpath([self.root_dir, resolved]) != self.root_dir:
+                raise PermissionError("Access denied: Path traversal attempted.")
+        except Exception:
             raise PermissionError("Access denied: Path traversal attempted.")
         return resolved

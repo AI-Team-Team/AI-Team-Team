@@ -172,5 +172,16 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
         self.assertIn("10: Line content", res_chunk)
         self.assertIn("15: Line content", res_chunk)
 
+    async def test_prefix_bypass_path_traversal_prevention(self):
+        """Verify that sibling prefix traversal (e.g. DL-AT-abc123_private) is blocked."""
+        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        lib = team.doc_library
+        
+        base_dir_name = os.path.basename(lib.root_dir)
+        traversal_path = f"../{base_dir_name}_hack/secrets.txt"
+        
+        with self.assertRaises(PermissionError):
+            lib._resolve_path(traversal_path)
+
 if __name__ == "__main__":
     unittest.main()

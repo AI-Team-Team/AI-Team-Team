@@ -186,5 +186,76 @@ class TestATTGovernance(unittest.IsolatedAsyncioTestCase):
         # Dynamic_Auditor should still be in the team
         self.assertIn(new_agent, team.members)
 
+    async def test_deferred_membership_voting_in_discussion(self):
+        """Verify that voting approval is deferred to the end of the round during active discussion."""
+        # Enable membership voting in config
+        config = ATTConfig(enable_membership_voting=True)
+        self.manager.config = config
+        self.manager.register_tools_context({"att_manager": self.manager})
+
+        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        agent1, agent2, agent3 = team.members
+
+        from ai_team_team.tool import get_default_tools
+
+        # Bind tools with caller_node = agent1
+        tools_agent1 = get_default_tools({"att_manager": self.manager}, agent1)
+        initiate_vote = tools_agent1["initiate_membership_vote"]
+
+        # Bind tools with caller_node = agent2
+        tools_agent2 = get_default_tools({"att_manager": self.manager}, agent2)
+        cast_vote_agent2 = tools_agent2["cast_vote"]
+
+        # Bind tools with caller_node = agent3
+        tools_agent3 = get_default_tools({"att_manager": self.manager}, agent3)
+        cast_vote_agent3 = tools_agent3["cast_vote"]
+
+        # Initiate vote to add a member
+        res_init = await initiate_vote(
+            action="add",
+            target="QA_Expert",
+            rationale="Need QA help",
+            initiator_type="individual",
+            proposed_details={
+                "model": "default",
+                "role_description": "Performs quality checks",
+                "system_instructions": "Check test suite thoroughly"
+            }
+        )
+        match = re.search(r"'(VP-[0-9a-fA-F]+)'", res_init)
+        proposal_id = match.group(1)
+
+        # Set team.is_running = True to simulate active discussion round
+        team.is_running = True
+
+        # Agent 2 votes Agree
+        await cast_vote_agent2(proposal_id=proposal_id, vote="Agree")
+        
+        # Agent 3 votes Agree (reaches 3/3 Agree, 2/3 threshold satisfied)
+        res_vote3 = await cast_vote_agent3(proposal_id=proposal_id, vote="Agree")
+        
+        # Verify that it is approved but the execution is deferred
+        self.assertIn("deferred", res_vote3)
+        proposal = team.proposals[proposal_id]
+        self.assertEqual(proposal["status"], "approved")
+        # Member should NOT be added yet (still 3 members)
+        self.assertEqual(len(team.members), 3)
+
+        # Mock generator client to return simple response
+        mock_responses = ["Final Answer: Dialogue resolved"]
+        async def mock_gen(model_name, prompt, system_instruction=None, temperature=0.3, require_json=False):
+            if require_json:
+                return '{"is_healthy": true, "reason": "Dialogue approved."}'
+            return mock_responses.pop(0) if mock_responses else "Final Answer: done"
+        self.manager.register_generator_handler(mock_gen)
+
+        # Now execute discussion round, which will trigger the end-of-round deferred updates
+        await self.manager.execute_team_discussion(team, prompt="Start debate", rounds=1)
+
+        # At the end of the round, the deferred execution must add the member
+        self.assertEqual(len(team.members), 4)
+        new_agent = [m for m in team.members if m.role == "QA_Expert"][0]
+        self.assertEqual(new_agent.name, "Dynamic_QA_Expert")
+
 if __name__ == "__main__":
     unittest.main()
