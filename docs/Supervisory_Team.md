@@ -14,13 +14,16 @@ The Supervisory Team is entirely non-participating; it does not contribute conte
 
 For a detailed control flow of dialogue auditing, see the [3-AI Dialogue Auditing Logic Flowchart](flowcharts/Supervisory_Team_Audit.md#1-3-ai-dialogue-auditing-logic-flowchart).
 
-## 2. Dialogue Health Auditing
+## 2. Dialogue Health Auditing (The 3-AI Audit Committee Debate)
 
-At the end of a team discussion, the Supervisory Team performs a batch audit of the transcript. It evaluates the debate for:
+At the end of a team discussion, the Supervisory Team performs a batch audit of the transcript. Instead of a single direct evaluation call, the Supervisory Team initiates a **non-recursive 2-round debate session** among its 3 specialized auditors.
 
-* **Deadlocks & Repetitions**: Sibling agents repeating the same logical claims without progressing.
-* **Role Violations**: Sibling agents stepping outside their assigned role profiles.
-* **Logical Mismatches**: Decisions that contradict known database states.
+### Dialogue Auditing Committee Flow
+
+1. **Context Compression**: If the target dialogue transcript is extremely long (exceeding 8,000 characters), it is summarized using a fast LLM context-compression prompt to minimize token window overhead while preserving core reasoning continuity and deadlock indicators.
+2. **Transient Committee AT**: The manager creates a transient `AgentTeam` with the 3 auditor agents as members. This team is temporary, stateless, and is not registered in the manager's active topology tree.
+3. **Audit Committee Debate**: The auditors debate the health of the target transcript for exactly 2 rounds. This debate runs with `skip_audit=True` to break the recursion loop at depth 1.
+4. **Consensus Synthesis**: The debate transcript is passed to a consensus synthesis prompt that extracts their combined consensus.
 
 ### Audit Output Format
 

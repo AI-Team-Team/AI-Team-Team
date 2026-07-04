@@ -118,3 +118,62 @@ parent_team.communication_rules["rules"] = [
     "allow_purpose:.*analyst.*"
 ]
 ```
+
+## 4. Token Budget & Failover Policies
+
+To ensure stability in long-running or high-overhead multi-agent environments, the ATT framework provides token budgeting circuit breakers and dynamic model failover strategies.
+
+### A. Token Budget Configuration
+
+Budgets are tracked at a session level in `ATTManager` and configured in `ATTConfig`:
+
+- `model_token_limits`: Dictionary mapping model registry aliases (e.g., `"default"`, `"gpt-5.5"`, `"claude-4.8"`) to their session token budget limits.
+- `model_tokenizer_configs`: Dictionary mapping model registry aliases to local tokenizer path names or HF hub repository strings to count prompt/response tokens using Hugging Face `tokenizers`.
+  - *Note*: If the tokenizer fails to load or runs offline, the system safely falls back to a character count BPE estimation (`len(text) // 4`) to prevent crash lockups.
+
+Before any API request is sent, a **pre-flight** token check calculates prompt tokens and raises `TokenLimitExceededError` if the budget is exhausted. After a successful API resolution, a **post-flight** token count updates the model's session usage.
+
+### B. Failover Routing Strategies
+
+When an agent's client hits a token limit, the framework catches the exception and resolves it via `failover_policy` in `ATTConfig`:
+
+1. **Auto-Fallback (`"auto"`)**
+   - **Behavior**: Automatically scans registered model clients, identifies the first alternative model that is under budget and supports the required tool calling mode, hot-swaps the agent's client, and retries the turn.
+2. **Parent-Representative Delegation (`"parent"`)**
+   - **Behavior**: To prevent deadlocks (which would occur if a child team suspended and waited for a blocked parent team's next round), the child team **synchronously queries the parent team's representative LLM** (e.g., its creator or leader) for a recommendation, parses the JSON response (`{"selected_model": "name"}`), hot-swaps the client, and retries.
+   - *Note*: If no parent team is resolved, it automatically falls back to `"auto"`.
+
+### C. System Callback Notification (`on_system_event`)
+
+When a failover or budget limit event occurs, the manager triggers a callback allowing host projects to receive structured JSON notifications to log alerts (e.g., via Slack or emails):
+
+```python
+def my_system_event_handler(event_type: str, details: dict):
+    print(f"System Alert [{event_type}]: {details}")
+
+manager.on_system_event = my_system_event_handler
+```
+
+### D. Code Example
+
+```python
+from ai_team_team import ATTManager, Agent, ATTConfig
+
+# 1. Define limits, tokenizers and policy
+config = ATTConfig(
+    model_token_limits={
+        "default": 10000,
+        "gpt-5.5": 50000,
+        "gemini-3.5": 100000
+    },
+    model_tokenizer_configs={
+        "default": "gpt2",
+        "gpt-5.5": "cl100k_base"
+    },
+    failover_policy="parent"  # Query parent for failover model decisions
+)
+
+# 2. Instantiate and run
+root_agent = Agent(name="Root_AI", role="Architect")
+manager = ATTManager(root_ai=root_agent, config=config)
+```

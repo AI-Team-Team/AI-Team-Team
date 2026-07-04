@@ -19,6 +19,7 @@ class LLMClientProto(Protocol):
         ...
 
 from .core import Agent, AgentTeam, ATTManager, ATTConfig, ATTException, LLMGenerationError
+from .core.exceptions import TokenLimitExceededError
 from .tool import Tool
 from .gated_reader import GatedFileReader
 from .doc_library import DocumentLibrary
@@ -33,6 +34,7 @@ __all__ = [
     "LLMClientProto",
     "ATTException",
     "LLMGenerationError",
+    "TokenLimitExceededError",
     "DocumentLibrary",
     "ToolCall",
     "ToolResult",

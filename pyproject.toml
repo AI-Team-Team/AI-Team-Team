@@ -19,6 +19,7 @@ classifiers = [
 ]
 dependencies = [
     "sqlalchemy>=2.0.0",
+    "tokenizers>=0.13.0",
 ]
 
 [project.optional-dependencies]

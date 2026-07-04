@@ -148,7 +148,8 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                         system_instruction="You are a precise summarization assistant.",
                         temperature=0.3,
                         retries=retries,
-                        backoff_factor=backoff
+                        backoff_factor=backoff,
+                        manager=manager
                     )
                     # Convert response to string if it's an LLMResponse (backward compatible safety check)
                     summary_text = summary_resp.text if isinstance(summary_resp, LLMResponse) else str(summary_resp)
@@ -228,7 +229,8 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                             system_instruction=react_system_instruction,
                             temperature=0.3,
                             retries=retries,
-                            backoff_factor=backoff
+                            backoff_factor=backoff,
+                            manager=manager
                         )
                         
                         response = resp_obj.text if isinstance(resp_obj, LLMResponse) else str(resp_obj)
@@ -610,7 +612,8 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                         system_instruction=full_system_instruction,
                         temperature=0.3,
                         retries=retries,
-                        backoff_factor=backoff
+                        backoff_factor=backoff,
+                        manager=manager
                     )
                     
                     response = resp_obj.text if isinstance(resp_obj, LLMResponse) else str(resp_obj)
@@ -779,7 +782,8 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                         system_instruction="You are a precise summarization assistant.",
                         temperature=0.3,
                         retries=retries,
-                        backoff_factor=backoff
+                        backoff_factor=backoff,
+                        manager=manager
                     )
                     summary_text = summary_resp.text if isinstance(summary_resp, LLMResponse) else str(summary_resp)
                     summary_text = summary_text.strip()
@@ -826,7 +830,8 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                     retries=retries,
                     backoff_factor=backoff,
                     tools=tool_schemas if tool_schemas else None,
-                    return_response_obj=True
+                    return_response_obj=True,
+                    manager=manager
                 )
 
                 if isinstance(response, str):

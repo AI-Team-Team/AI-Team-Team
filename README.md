@@ -37,6 +37,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Permits active teams to request parent-hierarchy migrations, arbitrated by modular strategies with loop/cycle detection and parent notification logs.
 * **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects an ASCII-drawn indented tree map of active teams (displaying purposes, status, and progress metrics in real-time) directly into the agent prompt context.
 * **[Global Expert Discovery](docs/State_Persistence.md)**: Automatically appends a directory of all active system experts (names, roles, and profiles) into the agent's identity context to facilitate peer discovery.
+* **[Resilient Failover Routing](docs/Policies.md#4-token-budget--failover-policies)**: Dynamically hot-swaps exhausted or failing model clients. Supports two routing strategies: `"auto"` (selects first candidate model under budget) and `"parent"` (synchronously delegates the choice to the parent representative LLM to prevent execution deadlocks).
 
 ### 🧠 ReAct Loops & Execution Engine
 
@@ -44,6 +45,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 * **Robust Argument Parser**: A safe literal lexical parser (`ast.literal_eval`) with multiline XML support, code block stripping, and a comma-merging heuristic to handle unquoted complex strings (like SQL queries).
 * **[Dialogue Memory Compression](docs/State_Persistence.md)**: Automates memory pruning by summarizing early conversation turns using the agent's LLM while preserving the latest high-fidelity messages.
 * **[Model Registry & Callbacks](docs/user/Quickstart.md#7-model-registry-and-global-generator-callback)**: Delegates all LLM generation logic to a single global callback handler (`generator_handler`), keeping the framework lightweight and vendor-independent.
+* **[Token Budget Circuit Breakers](docs/Policies.md#4-token-budget--failover-policies)**: Enforces session-wide token budget limits per model registry alias, pre-checking prompt tokens via Hugging Face `tokenizers` (with safe offline character fallback) to trigger circuit breakers before API call invocation.
 
 ### 🗳️ Governance & Inter-Team Communication
 

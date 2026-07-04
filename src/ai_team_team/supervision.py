@@ -40,7 +40,8 @@ class SupervisoryTeam:
                 system_instruction="You are a precise context compression assistant.",
                 temperature=0.1,
                 retries=retries,
-                backoff_factor=backoff
+                backoff_factor=backoff,
+                manager=self.manager
             )
             return summary
         except Exception as e:
@@ -114,7 +115,8 @@ class SupervisoryTeam:
                 temperature=0.2,
                 require_json=True,
                 retries=retries,
-                backoff_factor=backoff
+                backoff_factor=backoff,
+                manager=self.manager
             )
 
             if "```" in response:

@@ -14,7 +14,7 @@ from .agent import Agent
 from .team import AgentTeam
 from .broker import NegotiationBroker
 from .config import ATTConfig
-from .exceptions import ATTException
+from .exceptions import ATTException, TokenLimitExceededError
 from .utils import generate_with_retry
 from .adapters import ManagerDefaultClientAdapter, HandlerClientAdapter
 
@@ -43,6 +43,7 @@ class ATTManager:
         self.teams: Dict[str, AgentTeam] = {}
         self.broker = NegotiationBroker(self)
         self.llm_clients: Dict[str, Any] = {}
+        self.model_token_usage: Dict[str, int] = {}
         
         self.model_configs: Dict[str, Dict[str, Any]] = {}
         self.generator_handler: Optional[Callable[..., str]] = None
@@ -53,7 +54,7 @@ class ATTManager:
         self.tools_context: Dict[str, Any] = {}
         self.libraries: Dict[str, DocumentLibrary] = {}
         self.library_permissions: Dict[str, Dict[str, Dict[str, str]]] = {} # lib_id -> path -> team_id -> permission
-
+ 
         
         # Public Tool registries
         self.global_tools: Dict[str, Tool] = {}
@@ -65,6 +66,7 @@ class ATTManager:
         self.on_log_append: Optional[Callable[[str, str, str, Optional[int]], None]] = None
         self.on_team_migration: Optional[Callable[[str, Optional[str], str], None]] = None
         self.on_emergency_escalation: Optional[Callable[[str, str, str], None]] = None
+        self.on_system_event: Optional[Callable[[str, Dict[str, Any]], None]] = None
 
         # Base preset configurations
         self.presets: Dict[str, dict] = {
@@ -104,6 +106,178 @@ class ATTManager:
     def register_generator_handler(self, handler: Callable[..., str]):
         """Registers a global callback handler for generating text from a model alias."""
         self.generator_handler = handler
+
+    def count_tokens(self, text: str, model_alias: str) -> int:
+        """Counts tokens for the given text using tokenizers or falls back to len(text)//4."""
+        if not text:
+            return 0
+        
+        tokenizer_name_or_path = self.config.model_tokenizer_configs.get(model_alias)
+        if not tokenizer_name_or_path:
+            tokenizer_name_or_path = self.config.model_tokenizer_configs.get("default")
+            
+        if tokenizer_name_or_path:
+            try:
+                if not hasattr(self, "_tokenizer_cache"):
+                    self._tokenizer_cache = {}
+                
+                if tokenizer_name_or_path not in self._tokenizer_cache:
+                    from tokenizers import Tokenizer
+                    if tokenizer_name_or_path.endswith(".json") and os.path.exists(tokenizer_name_or_path):
+                        tokenizer = Tokenizer.from_file(tokenizer_name_or_path)
+                    else:
+                        tokenizer = Tokenizer.from_pretrained(tokenizer_name_or_path)
+                    self._tokenizer_cache[tokenizer_name_or_path] = tokenizer
+                
+                tokenizer = self._tokenizer_cache[tokenizer_name_or_path]
+                encoded = tokenizer.encode(text)
+                return len(encoded.ids)
+            except Exception as e:
+                self.logger.warning(f"Tokenizer error for {tokenizer_name_or_path}: {e}. Falling back to character-based heuristic.")
+        
+        return max(1, len(text) // 4)
+
+    def resolve_model_alias(self, llm_client: Any) -> str:
+        """Resolves the model alias name for a given LLM client wrapper/mock."""
+        import unittest.mock
+        if not isinstance(llm_client, unittest.mock.NonCallableMock):
+            if hasattr(llm_client, "model_name") and isinstance(getattr(llm_client, "model_name", None), str):
+                return llm_client.model_name
+        for name, client in self.llm_clients.items():
+            if client is llm_client:
+                return name
+        from .adapters import ManagerDefaultClientAdapter
+        if isinstance(llm_client, ManagerDefaultClientAdapter):
+            return "default"
+        return "default"
+
+    async def handle_failover(self, agent: Agent, team: AgentTeam, error: TokenLimitExceededError) -> bool:
+        """
+        Handles client failover for an agent when a token limit is reached.
+        Returns True if hot-swap succeeded and caller should retry.
+        """
+        old_model = self.resolve_model_alias(agent.llm_client)
+        policy = self.config.failover_policy
+        
+        parent_team = team.parent_team or self.find_parent_team(team)
+        if policy == "parent" and parent_team is None:
+            self.logger.warning(f"Parent failover policy requested but parent team not found. Falling back to 'auto'.")
+            policy = "auto"
+
+        candidates = []
+        for name in self.config.model_token_limits.keys():
+            if name == old_model:
+                continue
+            usage = self.model_token_usage.get(name, 0)
+            limit = self.config.model_token_limits[name]
+            if usage < limit:
+                candidates.append(name)
+        if "default" not in self.config.model_token_limits and "default" not in candidates:
+            candidates.append("default")
+
+        selected_model = None
+
+        if policy == "auto":
+            if candidates:
+                selected_model = candidates[0]
+            else:
+                self.logger.error(f"Failover failed: No candidate models with remaining budget found.")
+                return False
+                
+        elif policy == "parent":
+            from ai_team_team.core.policies import get_team_representative
+            parent_rep = get_team_representative(parent_team, self)
+            
+            if not parent_rep or not parent_rep.llm_client:
+                self.logger.warning("Parent representative client not available. Falling back to 'auto'.")
+                if candidates:
+                    selected_model = candidates[0]
+                else:
+                    return False
+            else:
+                prompt_candidates = ", ".join(candidates)
+                delegation_prompt = (
+                    f"Your child team {team.team_id} is running and has encountered a model failover. "
+                    f"Agent '{agent.name}' (role: {agent.role}) reached the token budget limit for Model '{old_model}'.\n"
+                    f"Please select a new model for Agent '{agent.name}' from the following available models:\n"
+                    f"[{prompt_candidates}]\n\n"
+                    f"Evaluate the task importance and budget, and output exactly a JSON payload:\n"
+                    f"{{\n"
+                    f"  \"selected_model\": \"<model_name>\"\n"
+                    f"}}"
+                )
+                
+                try:
+                    response_text = await generate_with_retry(
+                        llm_client=parent_rep.llm_client,
+                        prompt=delegation_prompt,
+                        system_instruction="You are a precise failover manager that selects target models. Respond in JSON.",
+                        temperature=0.1,
+                        require_json=True,
+                        manager=self
+                    )
+                    if "```" in response_text:
+                        response_text = response_text.replace("```json", "").replace("```", "").strip()
+                    data = json.loads(response_text)
+                    choice = data.get("selected_model")
+                    if choice in candidates:
+                        selected_model = choice
+                        self.logger.info(f"Parent team selected model '{selected_model}' for agent '{agent.name}'.")
+                    else:
+                        self.logger.warning(f"Parent team chose invalid model '{choice}'. Falling back to first available.")
+                        selected_model = candidates[0] if candidates else None
+                except Exception as ex:
+                    self.logger.error(f"Parent representation query failed: {ex}. Falling back to first available.")
+                    selected_model = candidates[0] if candidates else None
+
+        if not selected_model:
+            self.logger.error("No failover model selected.")
+            return False
+
+        new_client = None
+        if selected_model in self.llm_clients:
+            new_client = self.llm_clients[selected_model]
+        elif selected_model in self.model_configs and self.generator_handler:
+            new_client = HandlerClientAdapter(selected_model, self.generator_handler)
+            config = self.model_configs.get(selected_model)
+            if config:
+                new_client._supports_native = config.get("supports_native_tool_calling", False)
+        else:
+            new_client = ManagerDefaultClientAdapter(self)
+            
+        agent.llm_client = new_client
+        
+        agent_status = f"Failover: Switched to {selected_model}"
+        team.status_map[agent.name] = agent_status
+        if self.on_status_change:
+            self.on_status_change(agent.name, agent_status)
+
+        if self.on_log_append:
+            log_title = f"[SYSTEM ALERT] Model Failover Event | {agent.name}"
+            log_content = (
+                f"AGENT: {agent.name}\n"
+                f"ROLE: {agent.role}\n"
+                f"TEAM: {team.team_id}\n"
+                f"FAILOVER POLICY: {policy}\n"
+                f"ACTION: Switched client from Model '{old_model}' to Model '{selected_model}' due to budget exhaustion ({error})."
+            )
+            self.on_log_append(team.team_id, log_title, log_content, team.chapter_num)
+
+        if self.on_system_event:
+            try:
+                self.on_system_event("model_failover", {
+                    "agent_name": agent.name,
+                    "team_id": team.team_id,
+                    "old_model": old_model,
+                    "new_model": selected_model,
+                    "reason": str(error)
+                })
+            except Exception:
+                pass
+                
+        self.logger.warning(f"[FAILOVER SUCCESS] Switched Agent '{agent.name}' from Model '{old_model}' to Model '{selected_model}'. Retrying turn.")
+        return True
+
 
     def register_preset(self, name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]]):
         """Registers a custom dynamic committee preset."""
@@ -454,7 +628,8 @@ class ATTManager:
                                     system_instruction="You are a strict system summarizer. Compress alerts while keeping critical facts and failures.",
                                     temperature=0.1,
                                     retries=self.config.llm_max_retries,
-                                    backoff_factor=self.config.llm_retry_backoff_factor
+                                    backoff_factor=self.config.llm_retry_backoff_factor,
+                                    manager=self
                                 )
                             except Exception as e:
                                 self.logger.warning(f"Failed to summarize inbox: {e}")

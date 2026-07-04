@@ -21,7 +21,8 @@ async def generate_with_retry_fallback(
         temperature=0.2,
         require_json=True,
         retries=retries,
-        backoff_factor=backoff
+        backoff_factor=backoff,
+        manager=manager
     )
 
 def get_team_representative(team: Any, manager: Any) -> Any:
