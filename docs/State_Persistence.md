@@ -189,7 +189,11 @@ Stores file permissions ACLs and full file paths and content strings.
 
 ## 3. Serialization Lifecycle
 
-### Auto-Saving
+### Configurable Storage Path
+
+By default, data is saved relative to the configured workspace root to ensure predictable storage locations, regardless of where the Python process was launched. This is configured via `workspace_root` in `ATTConfig`. Document libraries automatically construct their absolute paths by joining `workspace_root` with `.att_doc_libs/<lib_id>`.
+
+### Auto-Saving & Incremental Upserts
 
 The system automatically captures snapshots by invoking `manager._auto_save()` on critical state modifications:
 
@@ -200,11 +204,17 @@ The system automatically captures snapshots by invoking `manager._auto_save()` o
 * Executing reasoning steps and tools (`execute_reasoning_step`)
 * Direct writing/deleting file modifications inside libraries (`write_library_file`, `delete_library_file`)
 
+**Incremental Upserts (O(1) updates):**
+To ensure high performance and prevent data fragmentation, the serialization engine uses **Explicit Query Upserts**. Rather than performing a destructive wipe (`DELETE FROM`) of the entire database, the engine queries the existing objects and incrementally updates their attributes in-place. Volatile collections like message logs and inboxes are isolated and re-inserted cleanly, ensuring constant-time updates for unchanged topology components.
+
+**Fail-Fast Safety:**
+Database writes are strict. If `save_state` encounters an integrity, disk, or lock error, the framework will immediately escalate to a `RuntimeError` and cleanly crash. This prevents "phantom processing" where agents continue burning API tokens while their thoughts fail to persist to disk.
+
 ### Recovery Workflow (`load_state`)
 
-1. **Config Restoration**: Restores parameters and binds `self.root_ai`.
+1. **Config Restoration**: Restores parameters and binds `self.root_ai` taking into account the defined `workspace_root`.
 2. **Agent Cache Rebuilding**: Recreates `Agent` instances, restores their `llm_client` adapter, and re-sequences their multi-turn `messages`.
-3. **Physical File Restoration**: Iterates through `doc_lib_files`, clears local `.att_doc_libs/<lib_id>` folders, and writes files back to disk.
+3. **Physical File Restoration**: Iterates through `doc_lib_files`, clears local `.att_doc_libs/<lib_id>` folders inside the workspace root, and writes files back to disk.
 4. **Topology Lineage Reconstruction**: Two-pass deserialization of the lineage hierarchy:
    * First pass: Instantiates teams, sets parameters, status maps, and sibling permissions.
    * Second pass: Hooks up dual-linked node references (`parent_team` and `child_teams`) and restores their `creator` object pointers.

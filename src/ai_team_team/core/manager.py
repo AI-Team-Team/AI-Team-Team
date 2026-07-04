@@ -55,9 +55,15 @@ class ATTManager:
         self.libraries: Dict[str, DocumentLibrary] = {}
         self.library_permissions: Dict[str, Dict[str, Dict[str, str]]] = {} # lib_id -> path -> team_id -> permission
  
-        
         # Public Tool registries
         self.global_tools: Dict[str, Tool] = {}
+        
+        # O(1) tracking structures
+        self._team_parent_map: Dict[str, str] = {}
+        
+        # Async tasks deferred bridging
+        import queue
+        self.deferred_emergency_tasks = queue.Queue()
         self.tool_auditors: Dict[str, Callable[..., Tuple[bool, str]]] = {}
         
         # Event callbacks
@@ -139,10 +145,9 @@ class ATTManager:
 
     def resolve_model_alias(self, llm_client: Any) -> str:
         """Resolves the model alias name for a given LLM client wrapper/mock."""
-        import unittest.mock
-        if not isinstance(llm_client, unittest.mock.NonCallableMock):
-            if hasattr(llm_client, "model_name") and isinstance(getattr(llm_client, "model_name", None), str):
-                return llm_client.model_name
+        model_name = getattr(llm_client, "model_name", None)
+        if isinstance(model_name, str):
+            return model_name
         for name, client in self.llm_clients.items():
             if client is llm_client:
                 return name
@@ -327,6 +332,9 @@ class ATTManager:
             team._parent_team = creator
         else:
             team._parent_team = self.find_parent_team(team)
+            
+        if team._parent_team:
+            self._team_parent_map[team.team_id] = team._parent_team.team_id
         
         if isinstance(creator, AgentTeam):
             team.chapter_num = creator.chapter_num
@@ -426,6 +434,7 @@ class ATTManager:
         lib_id = f"DL-{team.team_id}"
         lib_name = f"{team.team_id} Built-in Library"
         lib_desc = f"Default document library for team {team.team_id}."
+        
         lib = DocumentLibrary(
             lib_id=lib_id,
             name=lib_name,
@@ -458,18 +467,27 @@ class ATTManager:
         if target._parent_team is not None:
             return target._parent_team
 
+        # Fast O(1) hash map lookup
+        parent_id = self._team_parent_map.get(target.team_id)
+        if parent_id and parent_id in self.teams:
+            target._parent_team = self.teams[parent_id]
+            return target._parent_team
+
+        # Fallback for dynamic creators during bootstrap
         if isinstance(target.creator, AgentTeam):
             target._parent_team = target.creator
+            self._team_parent_map[target.team_id] = target.creator.team_id
             return target.creator
+            
+        if hasattr(target.creator, "name"):
+            # Creator is an Agent
+            parent = self.get_agent_team(target.creator)
+            print(f"DEBUG find_parent_team: target={target.team_id}, creator={target.creator.name}, parent={parent.team_id if parent else None}")
+            if parent:
+                target._parent_team = parent
+                self._team_parent_map[target.team_id] = parent.team_id
+                return parent
 
-        # Only as a fallback if not cached, find and memoize
-        creator = target.creator
-        if isinstance(creator, Agent):
-            for team in self.teams.values():
-                if creator in team.members:
-                    target._parent_team = team
-                    return team
-        
         return None
         
     def get_agent_team(self, agent: Agent) -> Optional[AgentTeam]:
@@ -571,6 +589,7 @@ class ATTManager:
                 
                 target_parent.add_child_team(team)
                 team._parent_team = target_parent
+                self._team_parent_map[team.team_id] = target_parent.team_id
                 team.migration_count = current_count + 1
                 
                 # 2. Dispatch notifications
@@ -798,7 +817,19 @@ class ATTManager:
                     try:
                         asyncio.create_task(self.execute_emergency_discussion(team, emergency_msg))
                     except RuntimeError as e:
-                        self.logger.critical(f"Failed to dispatch post-discussion emergency wakeup: No running event loop. {e}")
+                        self.logger.critical(f"No event loop running for emergency wakeup. Falling back to deferred message queue. {e}")
+                        self.deferred_emergency_tasks.put_nowait(self.execute_emergency_discussion(team, emergency_msg))
+
+    async def flush_deferred_tasks(self):
+        """Flushes and executes any deferred asyncio tasks (e.g., from emergency wakeups triggered outside event loops)."""
+        import asyncio
+        while not self.deferred_emergency_tasks.empty():
+            coro = self.deferred_emergency_tasks.get_nowait()
+            try:
+                asyncio.create_task(coro)
+            except RuntimeError as e:
+                self.logger.error(f"Cannot flush deferred tasks without a running event loop: {e}")
+                break
 
     async def execute_emergency_discussion(self, team: AgentTeam, alert: Dict[str, Any]) -> str:
         """Executes an emergency discussion round to handle child failure or escalation."""
@@ -825,13 +856,18 @@ class ATTManager:
         try:
             from sqlalchemy import text
             with get_session(target_path, disable_fks=True) as session:
-                # 1. Clear volatile collections to avoid expensive ORM diffs, but keep topology tables intact
-                tables = [
-                    "doc_lib_files", "library_permissions", "broker_agreements",
-                    "team_proposals", "team_inbox", "agent_messages"
-                ]
-                for t in tables:
-                    session.execute(text(f"DELETE FROM {t};"))
+                # 1. Clear volatile collections selectively (Garbage collection of orphaned rows)
+                active_agent_names = list(self.agents.keys()) if self.agents else ["__NONE__"]
+                session.query(AgentMessageModel).filter(AgentMessageModel.agent_name.notin_(active_agent_names)).delete(synchronize_session=False)
+                
+                active_team_ids = list(self.teams.keys()) if self.teams else ["__NONE__"]
+                session.query(TeamInboxModel).filter(TeamInboxModel.team_id.notin_(active_team_ids)).delete(synchronize_session=False)
+                session.query(TeamProposalModel).filter(TeamProposalModel.team_id.notin_(active_team_ids)).delete(synchronize_session=False)
+                session.query(BrokerAgreementModel).filter(BrokerAgreementModel.sender_team_id.notin_(active_team_ids)).delete(synchronize_session=False)
+                
+                active_lib_ids = list(self.libraries.keys()) if self.libraries else ["__NONE__"]
+                session.query(LibraryPermissionModel).filter(LibraryPermissionModel.lib_id.notin_(active_lib_ids)).delete(synchronize_session=False)
+                session.query(DocLibFileModel).filter(DocLibFileModel.lib_id.notin_(active_lib_ids)).delete(synchronize_session=False)
 
                 # 2. Save Configs
                 session.execute(text("DELETE FROM manager_config;"))
@@ -862,6 +898,7 @@ class ATTManager:
                     agent_model.model_alias = model_alias
                     agent_model.last_context = last_ctx_json
                     
+                    session.query(AgentMessageModel).filter_by(agent_name=agent.name).delete(synchronize_session=False)
                     for idx, msg in enumerate(agent.messages):
                         msg_model = AgentMessageModel(
                             agent_name=agent.name,
@@ -914,6 +951,7 @@ class ATTManager:
                     # Save team members via relationship
                     team_model.members = [agent_models_map[m.name] for m in team.members if m.name in agent_models_map]
 
+                    session.query(TeamInboxModel).filter_by(team_id=team.team_id).delete(synchronize_session=False)
                     for idx, msg in enumerate(team.message_inbox):
                         sender = msg.get("from", "Unknown")
                         msg_type = msg.get("type", "Unknown")
@@ -927,6 +965,7 @@ class ATTManager:
                         )
                         session.add(inbox_model)
 
+                    session.query(TeamProposalModel).filter_by(team_id=team.team_id).delete(synchronize_session=False)
                     for prop_id, prop in team.proposals.items():
                         proposal_model = TeamProposalModel(
                             proposal_id=prop_id,
@@ -948,7 +987,7 @@ class ATTManager:
                         sender_team_id=sender_id,
                         recipient_team_id=recipient_id
                     )
-                    session.add(agreement_model)
+                    session.merge(agreement_model)
 
                 # 6. Save Libraries and Permissions
                 for lib_id, lib in self.libraries.items():
@@ -962,6 +1001,7 @@ class ATTManager:
                     lib_model.description = lib.description
                     lib_model.is_public_visible = 1 if lib.is_public_visible else 0
                     
+                    session.query(DocLibFileModel).filter_by(lib_id=lib.lib_id).delete(synchronize_session=False)
                     if os.path.exists(lib.root_dir):
                         for root, dirs, files in os.walk(lib.root_dir):
                             for file in files:
@@ -993,7 +1033,17 @@ class ATTManager:
             self.logger.info(f"Successfully saved state to SQLite database: {target_path}")
         except Exception as e:
             self.logger.critical(f"CRITICAL ERROR saving state to SQLite database at {target_path}: {e}")
-            raise RuntimeError(f"State persistence failed: {e}") from e
+            if getattr(self.config, "strict_state_persistence", True):
+                raise RuntimeError(f"State persistence failed: {e}") from e
+            else:
+                root_team = next((t for t in self.teams.values() if t.parent_team is None), None)
+                if root_team:
+                    import asyncio
+                    coro = self.supervisor.report_anomaly(root_team, f"State persistence failed: {e}. Agents may lose memory on restart.", self)
+                    try:
+                        asyncio.get_running_loop().create_task(coro)
+                    except RuntimeError:
+                        self.deferred_emergency_tasks.put_nowait(coro)
 
     def load_state(self, db_path: str):
         """Loads and reconstructs the entire manager topology, configs, and agent states from SQLite using SQLAlchemy ORM."""

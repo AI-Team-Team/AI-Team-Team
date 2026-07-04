@@ -14,6 +14,13 @@ from ai_team_team import ATTManager, Agent, ATTConfig
 
 class TestATTCommunication(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        import tempfile, os, shutil
+        self._test_old_cwd = os.getcwd()
+        self._test_tmpdir = tempfile.mkdtemp(prefix="att_test_")
+        os.chdir(self._test_tmpdir)
+        self.addCleanup(os.chdir, self._test_old_cwd)
+        self.addCleanup(shutil.rmtree, self._test_tmpdir, ignore_errors=True)
+
         self.mock_client = MagicMock()
         async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):
             if require_json:

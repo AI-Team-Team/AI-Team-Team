@@ -22,6 +22,14 @@ except ImportError:
     HAS_PYDANTIC = False
 
 class TestDualModeToolCalling(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        import tempfile, os, shutil
+        self._test_old_cwd = os.getcwd()
+        self._test_tmpdir = tempfile.mkdtemp(prefix="att_test_")
+        os.chdir(self._test_tmpdir)
+        self.addCleanup(os.chdir, self._test_old_cwd)
+        self.addCleanup(shutil.rmtree, self._test_tmpdir, ignore_errors=True)
+
     async def test_schema_auto_generation_signature(self):
         """Verify tool schema auto-generation using python signature inspection."""
         def dummy_tool(city: str, limit: int = 3) -> str:

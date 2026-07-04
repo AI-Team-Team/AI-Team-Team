@@ -26,7 +26,8 @@ class ATTConfig:
         max_tool_rounds: int = 5,
         model_token_limits: Optional[Dict[str, int]] = None,
         model_tokenizer_configs: Optional[Dict[str, str]] = None,
-        failover_policy: str = "auto"
+        failover_policy: str = "auto",
+        strict_state_persistence: bool = True
     ):
         self.enable_dynamic_delegation = enable_dynamic_delegation
         self.max_delegation_depth = max_delegation_depth
@@ -40,7 +41,9 @@ class ATTConfig:
         self.llm_max_retries = llm_max_retries
         self.llm_retry_backoff_factor = llm_retry_backoff_factor
         self.enable_memory_compression = enable_memory_compression
-        self.workspace_root = workspace_root
+        import os
+        self.workspace_root = os.path.expanduser(workspace_root)
+        self.strict_state_persistence = strict_state_persistence
         self.max_memory_turns = max_memory_turns
         self.communication_policy = communication_policy
         self.migration_policy = migration_policy

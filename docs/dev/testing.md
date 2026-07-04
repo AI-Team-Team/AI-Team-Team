@@ -1,133 +1,92 @@
-# Testing Guide
+# 🛠️ AI-Team-Team Test Suite Development Guide
 
-This guide provides an overview of the testing system in the `ai-team-team` project, including instructions on how to execute tests, structure test suites, and mock LLM clients properly.
+The `AI-Team-Team` project has an extensive suite of `unittest` test cases to ensure framework stability. When modifying or contributing to the framework, ensure all existing tests pass and appropriate coverage is added for new features.
 
-## 1. Testing Philosophy & Constraints
+## 1. Running Tests
 
-* **Standard Python `unittest` Only**: The framework standardizes on the standard library's `unittest` library. Do not introduce external test dependencies or configurations.
-* **Virtual Environment Context**: Run tests using the Python interpreter from the local virtual environment.
-* **Isolated Environments**: Tests that write files or logs must operate inside isolated temporary directories (e.g., using `tempfile.mkdtemp`), cleaning up resources in `tearDown()`.
-
-## 2. Running Tests
-
-### Discover and Run All Tests
-
-To discover and run all tests under the `test/` directory, execute the following command from the root of `AI-Team-Team`:
+The test suite is located in the `test/` directory. You can run all tests using standard standard module discovery from the project root:
 
 ```bash
 ./venv/bin/python -m unittest discover -s test
 ```
 
-## 3. Best Practices for Writing Tests
+For individual test files:
 
-### Prepending `src/` to `sys.path`
+```bash
+./venv/bin/python -m unittest test/test_state_persistence.py
+```
 
-Every test file must correctly configure the path structure at the very top of the file before importing source code to prevent `ModuleNotFoundError`:
+## 2. Asynchronous Execution
+
+Because the `ATTManager` utilizes standard python `asyncio` routines for core reasoning steps and message handling, the entire test suite must execute asynchronously.
+
+All core tests MUST inherit from `unittest.IsolatedAsyncioTestCase` rather than `unittest.TestCase`.
 
 ```python
-import os
+import unittest
+
+class TestFeature(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        # Async initializations
+        pass
+        
+    async def test_something_async(self):
+        await self.manager.process_message()
+```
+
+## 3. Pathing and Imports
+
+Be mindful of python's module path resolution. Always ensure `sys.path` is pre-pended with the `src` directory before attempting relative framework imports in a test file:
+
+```python
 import sys
+import os
 
 CURRENT_DIR = os.path.dirname(__file__)
-ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
+ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
 SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 ```
 
-## 4. Mocking LLM Responses
+## 4. Test Isolation (Sandbox Environments)
 
-Since the framework uses the centralized global generator callback handler, the recommended way to mock LLM responses for unit and integration testing is to register a mock handler callback on the `ATTManager`.
+Because `ATTManager` and `DocumentLibrary` dynamically generate directories (e.g. `.att_doc_libs`, `DL-AT-xxx`) and persist SQLite databases, **you must ensure tests run in an isolated sandbox** to prevent polluting the project root.
+
+To achieve this, inject a temporary directory sandbox into the `setUp()` method of every test class. This guarantees that `workspace_root` (which defaults to the current working directory) points to an ephemeral folder that is cleanly destroyed after the test.
+
+```python
+    def setUp(self):
+        import tempfile, os, shutil
+        self._test_old_cwd = os.getcwd()
+        self._test_tmpdir = tempfile.mkdtemp(prefix="att_test_")
+        
+        # Lock CWD into the isolated temp directory
+        os.chdir(self._test_tmpdir)
+        
+        # Ensure cleanup runs after tearDown()
+        self.addCleanup(os.chdir, self._test_old_cwd)
+        self.addCleanup(shutil.rmtree, self._test_tmpdir, ignore_errors=True)
+        
+        # Initialize your manager now (workspace_root will default to CWD which is tmpdir)
+        # self.manager = ATTManager(...)
+```
+
+## 5. Mocking LLM Responses
+
+Since production code is strictly forbidden from importing `unittest.mock` or containing test-specific conditional branches (Issue 9 compliance), you **must** mock LLM responses by registering a mock handler callback on the `ATTManager` or passing a compliant `LLMClientAdapter`.
+
+Do **NOT** attempt to pass raw `MagicMock` or `AsyncMock` objects expecting the framework to automatically handle them via `isinstance` checks.
 
 ### A. Register a Mock Handler Callback
 
-Map sequential responses or custom behaviors inside a mock handler function:
-
 ```python
-# A list of sequential debate or task responses
-mock_responses = [
-    "Thought: Let's run a tool call.\nAction: query_db(SELECT * FROM users)",
-    "Final Answer: Success!"
-]
-
-def mock_generator_handler(model_name, prompt, system_instruction=None, temperature=0.3, require_json=False):
-    if require_json:
-        # Return valid JSON for SupervisoryTeam consensus audits
-        return '{"is_healthy": true, "reason": "Dialogue approved."}'
-    
-    # Pop next response from queue
-    return mock_responses.pop(0) if mock_responses else "Final Answer: Done"
-
-manager.register_generator_handler(mock_generator_handler)
-```
-
-### B. Prefix Agent Responses with `"Final Answer: "`
-
-To ensure that the ReAct loop terminates immediately during tests without iterating through the maximum steps, ensure your mock agent responses prefix the final result with `"Final Answer: "`.
-
-### C. Mocking Multi-Round Debate Sequences
-
-When testing complex multi-agent debates or committees running across multiple rounds, use the `model_name` parameter inside the generator handler callback to differentiate between the agent role configurations:
-
-```python
-def test_committee_debate_flow(self):
-    mock_debate_turns = [
-        "Final Answer: Sibling A argues logic consistency.",
-        "Final Answer: Sibling B proposes scene progression details.",
-        "Final Answer: Sibling C arbitrates and outputs the final draft."
-    ]
-
-    def mock_handler(model_name, prompt, system_instruction=None, temperature=0.3, require_json=False):
-        if require_json:
-            return '{"is_healthy": true, "reason": "Dialogue is healthy."}'
-        return mock_debate_turns.pop(0) if mock_debate_turns else "Final Answer: ok"
-
-    self.att_manager.register_generator_handler(mock_handler)
-    
-    # Execute the team debate
-    transcript = self.att_manager.execute_team_discussion(self.my_team, prompt="Start task...", rounds=1)
-    self.assertIn("Sibling C arbitrates", transcript)
-```
-
-### D. Mocking ReAct Execution (`tool_calling_mode="react"`)
-
-When testing the `TextReactReasoningStrategy` with `unittest.mock.AsyncMock` or `MagicMock` acting as an `llm_client` (e.g., in `test_react_tools.py`), the mock object dynamically evaluates `True` for all `hasattr` checks.
-
-Because `ATTManager` uses a `hasattr` check for `supports_native_tool_calling()` to route agents, passing a raw mock client with the default `tool_calling_mode="auto"` will inadvertently trigger the `NativeReasoningStrategy`.
-
-To properly test ReAct execution in this codebase, tests **must** explicitly configure the `ATTConfig` to force the ReAct mode:
-
-```python
-from ai_team_team.core.config import ATTConfig
-
-# Force Text React mode instead of 'auto' capability checking
-config = ATTConfig(tool_calling_mode="react")
-manager = ATTManager(root_ai=my_agent, config=config)
-```
-
-### E. Mocking Native Tool Execution (`tool_calling_mode="native"`)
-
-For tests verifying the `NativeReasoningStrategy` (as seen in `test_dual_mode.py`), the mock client's `generate` method **must** return an `LLMResponse` containing structured `ToolCall` objects, rather than plain text strings.
-
-```python
-from ai_team_team.core.response import LLMResponse, ToolCall
-
-def test_native_tool_calling(self):
-    mock_responses = [
-        LLMResponse(
-            text="I will look up the user details.",
-            tool_calls=[
-                ToolCall(call_id="call_123", name="query_db", arguments={"sql": "SELECT * FROM users"})
-            ]
-        ),
-        LLMResponse(text="Final Answer: The user exists.")
-    ]
-
-    async def mock_native_handler(*args, **kwargs):
-        return mock_responses.pop(0) if mock_responses else LLMResponse(text="Final Answer: ok")
-
-    self.mock_client.generate = mock_native_handler
-    
-    # Execute native step
-    result = await self.att_manager.execute_reasoning_step(self.my_agent, prompt="Find user", system_instruction="")
+        # Ensure callback handlers are attached
+        self.manager.register_tools_context({"att_manager": self.manager})
+        
+        # Provide deterministic LLM mock strings
+        async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):
+            return '{"thought": "test", "commands": []}'
+            
+        self.manager.generator_handler = mock_generate
 ```
