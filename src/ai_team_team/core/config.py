@@ -16,6 +16,7 @@ class ATTConfig:
         llm_max_retries: int = 3,
         llm_retry_backoff_factor: float = 1.5,
         enable_memory_compression: bool = True,
+        workspace_root: str = ".",
         max_memory_turns: int = 20,
         communication_policy: str = "permissive",
         migration_policy: str = "ancestor_approval",
@@ -39,6 +40,7 @@ class ATTConfig:
         self.llm_max_retries = llm_max_retries
         self.llm_retry_backoff_factor = llm_retry_backoff_factor
         self.enable_memory_compression = enable_memory_compression
+        self.workspace_root = workspace_root
         self.max_memory_turns = max_memory_turns
         self.communication_policy = communication_policy
         self.migration_policy = migration_policy

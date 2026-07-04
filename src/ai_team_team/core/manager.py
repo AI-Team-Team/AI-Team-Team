@@ -431,7 +431,8 @@ class ATTManager:
             name=lib_name,
             owner_team_id=team.team_id,
             description=lib_desc,
-            is_public_visible=is_public_visible
+            is_public_visible=is_public_visible,
+            root_dir=self.config.workspace_root
         )
         self.libraries[lib_id] = lib
         team.doc_library = lib
@@ -454,15 +455,32 @@ class ATTManager:
         return team
 
     def find_parent_team(self, target: AgentTeam) -> Optional[AgentTeam]:
-        for team in self.teams.values():
-            if target in team.child_teams:
-                return team
-        
+        if target._parent_team is not None:
+            return target._parent_team
+
+        if isinstance(target.creator, AgentTeam):
+            target._parent_team = target.creator
+            return target.creator
+
+        # Only as a fallback if not cached, find and memoize
         creator = target.creator
         if isinstance(creator, Agent):
             for team in self.teams.values():
                 if creator in team.members:
+                    target._parent_team = team
                     return team
+        
+        return None
+        
+    def get_agent_team(self, agent: Agent) -> Optional[AgentTeam]:
+        if hasattr(agent, '_parent_team') and agent._parent_team is not None:
+            return agent._parent_team
+            
+        for team in self.teams.values():
+            if agent in team.members:
+                agent._parent_team = team
+                return team
+                
         return None
         
     def check_library_access(self, team_id: str, lib_id: str, path: str, required_permission: str) -> bool:
@@ -779,8 +797,8 @@ class ATTManager:
                     self.logger.warning(f"Post-discussion emergency wakeup triggered for team {team.team_id}")
                     try:
                         asyncio.create_task(self.execute_emergency_discussion(team, emergency_msg))
-                    except RuntimeError:
-                        pass
+                    except RuntimeError as e:
+                        self.logger.critical(f"Failed to dispatch post-discussion emergency wakeup: No running event loop. {e}")
 
     async def execute_emergency_discussion(self, team: AgentTeam, alert: Dict[str, Any]) -> str:
         """Executes an emergency discussion round to handle child failure or escalation."""
@@ -807,15 +825,16 @@ class ATTManager:
         try:
             from sqlalchemy import text
             with get_session(target_path, disable_fks=True) as session:
-                # 1. Clear Existing Data
+                # 1. Clear volatile collections to avoid expensive ORM diffs, but keep topology tables intact
                 tables = [
-                    "doc_lib_files", "library_permissions", "libraries", "broker_agreements",
-                    "team_proposals", "team_inbox", "team_members", "teams", "agent_messages", "agents", "manager_config"
+                    "doc_lib_files", "library_permissions", "broker_agreements",
+                    "team_proposals", "team_inbox", "agent_messages"
                 ]
                 for t in tables:
                     session.execute(text(f"DELETE FROM {t};"))
 
                 # 2. Save Configs
+                session.execute(text("DELETE FROM manager_config;"))
                 att_config_data = json.dumps(self.config.__dict__)
                 session.add(ManagerConfigModel(config_key="att_config", config_value=att_config_data))
                 if self.root_ai:
@@ -832,17 +851,17 @@ class ATTManager:
                             model_alias = "default"
 
                     last_ctx_json = json.dumps(agent.last_context) if agent.last_context else None
-                    agent_model = AgentModel(
-                        name=agent.name,
-                        role=agent.role,
-                        role_description=getattr(agent, "role_description", ""),
-                        system_instructions=getattr(agent, "system_instructions", ""),
-                        model_alias=model_alias,
-                        last_context=last_ctx_json
-                    )
-                    session.add(agent_model)
-                    agent_models_map[agent.name] = agent_model
-
+                    agent_model = session.query(AgentModel).filter_by(name=agent.name).first()
+                    if not agent_model:
+                        agent_model = AgentModel(name=agent.name)
+                        session.add(agent_model)
+                        
+                    agent_model.role = agent.role
+                    agent_model.role_description = getattr(agent, "role_description", "")
+                    agent_model.system_instructions = getattr(agent, "system_instructions", "")
+                    agent_model.model_alias = model_alias
+                    agent_model.last_context = last_ctx_json
+                    
                     for idx, msg in enumerate(agent.messages):
                         msg_model = AgentMessageModel(
                             agent_name=agent.name,
@@ -854,6 +873,8 @@ class ATTManager:
                             created_at=time.time() + idx * 0.001
                         )
                         session.add(msg_model)
+                    
+                    agent_models_map[agent.name] = agent_model
 
                 # 4. Save Teams
                 for team in self.teams.values():
@@ -872,22 +893,23 @@ class ATTManager:
                     comm_rules_json = json.dumps(team.communication_rules)
                     status_map_json = json.dumps(team.status_map)
                     
-                    team_model = TeamModel(
-                        team_id=team.team_id,
-                        preset_name=team.preset_name,
-                        team_purpose=team.team_purpose,
-                        team_progress=team.team_progress,
-                        depth=team.depth,
-                        chapter_num=team.chapter_num,
-                        parent_team_id=parent_id,
-                        migration_count=team.migration_count,
-                        creator_type=creator_type,
-                        creator_id=creator_id,
-                        communication_rules=comm_rules_json,
-                        status_map=status_map_json,
-                        system_instructions=getattr(team, "system_instructions", "")
-                    )
-                    session.add(team_model)
+                    team_model = session.query(TeamModel).filter_by(team_id=team.team_id).first()
+                    if not team_model:
+                        team_model = TeamModel(team_id=team.team_id)
+                        session.add(team_model)
+                        
+                    team_model.preset_name = team.preset_name
+                    team_model.team_purpose = team.team_purpose
+                    team_model.team_progress = team.team_progress
+                    team_model.depth = team.depth
+                    team_model.chapter_num = team.chapter_num
+                    team_model.parent_team_id = parent_id
+                    team_model.migration_count = team.migration_count
+                    team_model.creator_type = creator_type
+                    team_model.creator_id = creator_id
+                    team_model.communication_rules = comm_rules_json
+                    team_model.status_map = status_map_json
+                    team_model.system_instructions = getattr(team, "system_instructions", "")
 
                     # Save team members via relationship
                     team_model.members = [agent_models_map[m.name] for m in team.members if m.name in agent_models_map]
@@ -930,15 +952,16 @@ class ATTManager:
 
                 # 6. Save Libraries and Permissions
                 for lib_id, lib in self.libraries.items():
-                    lib_model = LibraryModel(
-                        lib_id=lib.lib_id,
-                        name=lib.name,
-                        owner_team_id=lib.owner_team_id,
-                        description=lib.description,
-                        is_public_visible=1 if lib.is_public_visible else 0
-                    )
-                    session.add(lib_model)
-
+                    lib_model = session.query(LibraryModel).filter_by(lib_id=lib.lib_id).first()
+                    if not lib_model:
+                        lib_model = LibraryModel(lib_id=lib.lib_id)
+                        session.add(lib_model)
+                        
+                    lib_model.name = lib.name
+                    lib_model.owner_team_id = lib.owner_team_id
+                    lib_model.description = lib.description
+                    lib_model.is_public_visible = 1 if lib.is_public_visible else 0
+                    
                     if os.path.exists(lib.root_dir):
                         for root, dirs, files in os.walk(lib.root_dir):
                             for file in files:
@@ -969,7 +992,8 @@ class ATTManager:
 
             self.logger.info(f"Successfully saved state to SQLite database: {target_path}")
         except Exception as e:
-            self.logger.error(f"Error saving state to SQLite database at {target_path}: {e}")
+            self.logger.critical(f"CRITICAL ERROR saving state to SQLite database at {target_path}: {e}")
+            raise RuntimeError(f"State persistence failed: {e}") from e
 
     def load_state(self, db_path: str):
         """Loads and reconstructs the entire manager topology, configs, and agent states from SQLite using SQLAlchemy ORM."""
@@ -1051,7 +1075,8 @@ class ATTManager:
                         name=row.name,
                         owner_team_id=row.owner_team_id,
                         description=row.description,
-                        is_public_visible=bool(row.is_public_visible)
+                        is_public_visible=bool(row.is_public_visible),
+                        root_dir=self.config.workspace_root
                     )
                     # Clear local directory before restoring
                     import shutil

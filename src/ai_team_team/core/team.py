@@ -94,9 +94,9 @@ class AgentTeam:
                     self.logger.warning(f"Active wakeup triggered for idle team {self.team_id}")
                     try:
                         asyncio.create_task(manager.execute_emergency_discussion(self, message))
-                    except RuntimeError:
+                    except RuntimeError as e:
                         # In case no event loop is running (e.g. some synchronous test setup)
-                        pass
+                        self.logger.critical(f"Failed to dispatch emergency wakeup: No running event loop. {e}")
                 
                 # Check for callback hook
                 if getattr(manager, "on_emergency_escalation", None):

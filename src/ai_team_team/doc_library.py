@@ -20,10 +20,10 @@ class DocumentLibrary:
         
         # Locate the files under a managed directory
         if root_dir is None:
-            self.root_dir = os.path.abspath(os.path.join(".att_doc_libs", lib_id))
+            base_dir = ".att_doc_libs"
         else:
-            self.root_dir = os.path.abspath(os.path.join(root_dir, lib_id))
-            
+            base_dir = os.path.join(root_dir, ".att_doc_libs")
+        self.root_dir = os.path.abspath(os.path.join(base_dir, lib_id))            
         os.makedirs(self.root_dir, exist_ok=True)
         self.gated_reader = GatedFileReader()
 

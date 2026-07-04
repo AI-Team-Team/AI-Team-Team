@@ -189,9 +189,7 @@ def _resolve_actual_team(caller_node: Any, att_manager: Any) -> Any:
     if isinstance(caller_node, AgentTeam):
         return caller_node
     elif isinstance(caller_node, Agent):
-        for team in att_manager.teams.values():
-            if caller_node in team.members:
-                return team
+        return att_manager.get_agent_team(caller_node)
     return None
 
 def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, Tool]:
@@ -664,15 +662,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not att_manager:
             return "Error: ATTManager not available."
         
-        from .core import Agent, AgentTeam
-        caller_team = None
-        if isinstance(caller_node, AgentTeam):
-            caller_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    caller_team = team
-                    break
+        caller_team = _resolve_actual_team(caller_node, att_manager)
         if not caller_team:
             return "Error: Could not resolve the active AgentTeam."
             
@@ -697,15 +687,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return f"Error: Document library '{lib_id}' not found."
             
         lib = att_manager.libraries[lib_id]
-        from .core import Agent, AgentTeam
-        caller_team = None
-        if isinstance(caller_node, AgentTeam):
-            caller_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    caller_team = team
-                    break
+        caller_team = _resolve_actual_team(caller_node, att_manager)
         if not caller_team or lib.owner_team_id != caller_team.team_id:
             return f"Error: Permission denied. Your team does not own library '{lib_id}'."
             
@@ -739,15 +721,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return "Error: Permission must be 'READ' or 'WRITE'."
             
         lib = att_manager.libraries[lib_id]
-        from .core import Agent, AgentTeam
-        caller_team = None
-        if isinstance(caller_node, AgentTeam):
-            caller_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    caller_team = team
-                    break
+        caller_team = _resolve_actual_team(caller_node, att_manager)
         if not caller_team or lib.owner_team_id != caller_team.team_id:
             return f"Error: Permission denied. Your team does not own library '{lib_id}'."
             
@@ -768,15 +742,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return f"Error: Document library '{lib_id}' not found."
             
         lib = att_manager.libraries[lib_id]
-        from .core import Agent, AgentTeam
-        caller_team = None
-        if isinstance(caller_node, AgentTeam):
-            caller_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    caller_team = team
-                    break
+        caller_team = _resolve_actual_team(caller_node, att_manager)
         if not caller_team or lib.owner_team_id != caller_team.team_id:
             return f"Error: Permission denied. Your team does not own library '{lib_id}'."
             
@@ -794,15 +760,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if lib_id not in att_manager.libraries:
             return f"Error: Document library '{lib_id}' not found."
             
-        from .core import Agent, AgentTeam
-        caller_team = None
-        if isinstance(caller_node, AgentTeam):
-            caller_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    caller_team = team
-                    break
+        caller_team = _resolve_actual_team(caller_node, att_manager)
         if not caller_team:
             return "Error: Could not resolve the active AgentTeam."
             
@@ -823,15 +781,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if lib_id not in att_manager.libraries:
             return f"Error: Document library '{lib_id}' not found."
             
-        from .core import Agent, AgentTeam
-        caller_team = None
-        if isinstance(caller_node, AgentTeam):
-            caller_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    caller_team = team
-                    break
+        caller_team = _resolve_actual_team(caller_node, att_manager)
         if not caller_team:
             return "Error: Could not resolve the active AgentTeam."
             
@@ -851,15 +801,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if lib_id not in att_manager.libraries:
             return f"Error: Document library '{lib_id}' not found."
             
-        from .core import Agent, AgentTeam
-        caller_team = None
-        if isinstance(caller_node, AgentTeam):
-            caller_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    caller_team = team
-                    break
+        caller_team = _resolve_actual_team(caller_node, att_manager)
         if not caller_team:
             return "Error: Could not resolve the active AgentTeam."
             
@@ -879,15 +821,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if lib_id not in att_manager.libraries:
             return f"Error: Document library '{lib_id}' not found."
             
-        from .core import Agent, AgentTeam
-        caller_team = None
-        if isinstance(caller_node, AgentTeam):
-            caller_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    caller_team = team
-                    break
+        caller_team = _resolve_actual_team(caller_node, att_manager)
         if not caller_team:
             return "Error: Could not resolve the active AgentTeam."
             
