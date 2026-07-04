@@ -17,7 +17,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         self.mock_client = MagicMock()
         self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Approved"}')
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
-        self.config = ATTConfig(llm_max_retries=2, llm_retry_backoff_factor=0.01) # fast retry for test
+        self.config = ATTConfig(llm_max_retries=2, llm_retry_backoff_factor=0.01, tool_calling_mode="react") # fast retry for test
         self.manager = ATTManager(root_ai=self.root_ai, config=self.config)
 
     async def test_lexical_argument_parsing_with_commas(self):
@@ -76,7 +76,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         flaky = FlakyClient()
         agent = Agent(name="FlakyAgent", role="Test", llm_client=flaky)
         self.root_ai.llm_client = flaky
-        config = ATTConfig(llm_max_retries=3, llm_retry_backoff_factor=0.01)
+        config = ATTConfig(llm_max_retries=3, llm_retry_backoff_factor=0.01, tool_calling_mode="react")
         manager = ATTManager(root_ai=self.root_ai, config=config)
         team = manager.create_agent_team(creator=self.root_ai, member_count=3)
         
@@ -179,7 +179,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
 
         # 1. Unquoted keyword argument with comma
         self.mock_client.generate.side_effect = [
-            'Thought: Run tool.\nAction: query_db(sql_command=SELECT name, status FROM users, limit=10)',
+            'Thought: Run tool.\nAction: query_db(sql_command="SELECT name, status FROM users", limit=10)',
             'Final Answer: Done'
         ]
         await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
@@ -188,7 +188,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         # 2. Unquoted positional argument with comma
         received_args, received_kwargs = [], {}
         self.mock_client.generate.side_effect = [
-            'Thought: Run tool.\nAction: query_db(SELECT name, status FROM users, 5)',
+            'Thought: Run tool.\nAction: query_db("SELECT name, status FROM users", 5)',
             'Final Answer: Done'
         ]
         await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)

@@ -12,6 +12,166 @@ from ai_team_team.core.response import ToolCall, ToolResult, LLMResponse
 from ai_team_team.core.exceptions import ATTException
 from ai_team_team.core.utils import generate_with_retry
 
+async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: Any) -> str:
+    """Prepares the agent context, memory compression, transition notice, and returns the identity header."""
+    team.status_map[agent.name] = "Thinking..."
+    if manager and manager.on_status_change:
+        manager.on_status_change(agent.name, "Thinking...")
+
+    peer_context = ""
+    if manager:
+        peer_context = f"\n### ACTIVE AGENT TEAMS TOPOLOGY (Global Map)\n{manager.render_topology_tree()}\n"
+
+    max_depth = manager.config.max_delegation_depth if manager else 2
+    min_size = manager.config.min_subagent_team_size if manager else 3
+
+    all_models = {}
+    if manager:
+        for k, v in manager.model_configs.items():
+            all_models[k] = v.get("ai_note", "No description")
+        for k in manager.llm_clients.keys():
+            if k not in all_models:
+                all_models[k] = "No description"
+
+    model_options = "\n".join([f"  - {k}: {note}" for k, note in all_models.items()])
+    role_desc_str = f"- **Role Description**: {agent.role_description}\n" if getattr(agent, "role_description", "") else ""
+    experts_str = ""
+    if manager:
+        experts_lines = []
+        for name, exp_agent in sorted(manager.agents.items()):
+            role_desc = getattr(exp_agent, "role_description", "") or "No description"
+            experts_lines.append(f"  - **{name}** ({exp_agent.role}): {role_desc}")
+        if experts_lines:
+            experts_str = f"## GLOBAL EXPERTS AVAILABLE FOR HIRE\n" + "\n".join(experts_lines) + "\n\n"
+
+    identity_header = (
+        f"## AGENT IDENTITY PROFILE\n"
+        f"- **Role Name**: {agent.role}\n"
+        f"{role_desc_str}"
+        f"- **Agent Name**: {agent.name}\n"
+        f"- **Parent Team**: {team.team_id} (Preset: {team.preset_name})\n"
+        f"- **Team Purpose**: {team.team_purpose}\n"
+        f"- **Current Objective**: Cooperate in team tasks.\n"
+        f"- **AT Delegation Depth**: {team.depth} / {max_depth}\n"
+        f"{peer_context}"
+        f"{experts_str}"
+        f"### AUTONOMY RULES\n"
+        f"1. You can dynamically spawn child ATs using the `dispatch_subagent` tool to solve sub-problems.\n"
+        f"2. You MUST NOT spawn child ATs if your Delegation Depth is already at the maximum ({max_depth}). If you need help at max depth, use `delegate_escalation` to ask your parent.\n"
+        f"3. A valid AT MUST have at least {min_size} members.\n"
+        f"4. You can dynamically request to migrate your team to a different parent team in the topology using the `request_migration` tool if it helps in task routing.\n"
+        f"5. When creating an AT, you can assign models based on task complexity. Available models:\n"
+        f"{model_options}\n"
+    )
+
+    current_context = {
+        "team_id": team.team_id,
+        "preset_name": team.preset_name,
+        "team_purpose": team.team_purpose,
+        "role": agent.role,
+        "role_description": getattr(agent, "role_description", ""),
+        "system_instructions": getattr(agent, "system_instructions", ""),
+        "tools": sorted(list(team.tools.keys())) if getattr(team, "tools", None) else []
+    }
+    if agent.last_context and agent.last_context.get("team_id") != team.team_id:
+        notice = (
+            f"*** TRANSITION NOTICE: ACTIVE TEAM UPDATE ***\n"
+            f"You have transitioned to work with another team group:\n"
+            f"- Active Team: {team.team_id} (Preset: {team.preset_name})\n"
+            f"- Team Purpose: {team.team_purpose}\n"
+            f"- Your Assigned Role: {agent.role}\n"
+            f"Please continue your work and cooperate in this team based on your prior memory."
+        )
+        agent.messages.append({"role": "system", "content": notice})
+    agent.last_context = current_context
+
+    agent.messages.append({"role": "user", "content": prompt})
+
+    enable_compression = manager.config.enable_memory_compression if manager else True
+    max_turns = manager.config.max_memory_turns if manager else 20
+
+    if enable_compression and len(agent.messages) > max_turns + 2:
+        first_msg = agent.messages[0]
+        
+        slice_idx = len(agent.messages) - max_turns
+        while slice_idx > 1 and agent.messages[slice_idx].get("role") in ("tool", "function"):
+            slice_idx -= 1
+        
+        intermediate_messages = agent.messages[1 : slice_idx]
+        history_text_parts = []
+        for msg in intermediate_messages:
+            r = msg.get("role", "unknown").upper()
+            c = msg.get("content", "")
+            history_text_parts.append(f"{r}: {c}")
+        history_text = "\n".join(history_text_parts)
+        
+        summary_prompt = (
+            f"Summarize the preceding execution logs and discussions into a single cohesive paragraph of historical facts. "
+            f"Focus on what was completed.\n\n"
+            f"--- EXECUTION LOGS AND DISCUSSIONS BEGIN ---\n"
+            f"{history_text}\n"
+            f"--- EXECUTION LOGS AND DISCUSSIONS END ---\n"
+        )
+        
+        summarize_client = agent.llm_client
+        retries = manager.config.llm_max_retries if manager else 3
+        backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
+        
+        try:
+            summary_resp = await generate_with_retry(
+                llm_client=summarize_client,
+                prompt=summary_prompt,
+                system_instruction="You are a precise summarization assistant.",
+                temperature=0.3,
+                retries=retries,
+                backoff_factor=backoff,
+                manager=manager
+            )
+            summary_text = summary_resp.text if isinstance(summary_resp, LLMResponse) else str(summary_resp)
+            summary_text = summary_text.strip()
+        except Exception as e:
+            team.logger.warning(f"Memory compression summarization failed: {e}. Using a generic fallback summary.")
+            summary_text = "Early execution history compressed due to context limits."
+        
+        archive_message = {
+            "role": "system",
+            "content": f"*** HISTORICAL SUMMARY ARCHIVE ***\n{summary_text}"
+        }
+        latest_messages = agent.messages[slice_idx :]
+        agent.messages = [first_msg, archive_message] + latest_messages
+
+    return identity_header
+
+def parse_tool_args(args_str: str) -> Tuple[List[Any], Dict[str, Any]]:
+    """Robustly parse string arguments into Python args and kwargs using AST."""
+    if not args_str or not args_str.strip():
+        return [], {}
+    try:
+        tree = ast.parse(f"dummy_func({args_str})", mode='eval')
+        call = tree.body
+        
+        args = []
+        for arg in call.args:
+            args.append(ast.literal_eval(arg))
+            
+        kwargs = {}
+        for kw in call.keywords:
+            kwargs[kw.arg] = ast.literal_eval(kw.value)
+            
+        return args, kwargs
+    except Exception as e:
+        # Fallback for LLM string hallucinations
+        try:
+            parsed_vals = ast.literal_eval(f"({args_str})")
+            if isinstance(parsed_vals, tuple):
+                return list(parsed_vals), {}
+            else:
+                return [parsed_vals], {}
+        except Exception:
+            pass
+        return [args_str.strip()], {}
+
+
 class BaseReasoningStrategy(metaclass=abc.ABCMeta):
     """Abstract base class representing a reasoning strategy for an agent turn."""
     @abc.abstractmethod
@@ -37,133 +197,8 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
         max_steps: int,
         manager: Any
     ) -> str:
-        team.status_map[agent.name] = "Thinking..."
-        if manager and manager.on_status_change:
-            manager.on_status_change(agent.name, "Thinking...")
-
-        peer_context = ""
-        if manager:
-            peer_context = f"\n### ACTIVE AGENT TEAMS TOPOLOGY (Global Map)\n{manager.render_topology_tree()}\n"
-
-        max_depth = manager.config.max_delegation_depth if manager else 2
-        min_size = manager.config.min_subagent_team_size if manager else 3
-
-        all_models = {}
-        if manager:
-            for k, v in manager.model_configs.items():
-                all_models[k] = v.get("ai_note", "No description")
-            for k in manager.llm_clients.keys():
-                if k not in all_models:
-                    all_models[k] = "No description"
-
-        model_options = "\n".join([f"  - {k}: {note}" for k, note in all_models.items()])
-        role_desc_str = f"- **Role Description**: {agent.role_description}\n" if getattr(agent, "role_description", "") else ""
-        experts_str = ""
-        if manager:
-            experts_lines = []
-            for name, exp_agent in sorted(manager.agents.items()):
-                role_desc = getattr(exp_agent, "role_description", "") or "No description"
-                experts_lines.append(f"  - **{name}** ({exp_agent.role}): {role_desc}")
-            if experts_lines:
-                experts_str = f"## GLOBAL EXPERTS AVAILABLE FOR HIRE\n" + "\n".join(experts_lines) + "\n\n"
-
-        identity_header = (
-            f"## AGENT IDENTITY PROFILE\n"
-            f"- **Role Name**: {agent.role}\n"
-            f"{role_desc_str}"
-            f"- **Agent Name**: {agent.name}\n"
-            f"- **Parent Team**: {team.team_id} (Preset: {team.preset_name})\n"
-            f"- **Team Purpose**: {team.team_purpose}\n"
-            f"- **Current Objective**: Cooperate in team tasks.\n"
-            f"- **AT Delegation Depth**: {team.depth} / {max_depth}\n"
-            f"{peer_context}"
-            f"{experts_str}"
-            f"### AUTONOMY RULES\n"
-            f"1. You can dynamically spawn child ATs using the `dispatch_subagent` tool to solve sub-problems.\n"
-            f"2. You MUST NOT spawn child ATs if your Delegation Depth is already at the maximum ({max_depth}). If you need help at max depth, use `delegate_escalation` to ask your parent.\n"
-            f"3. A valid AT MUST have at least {min_size} members.\n"
-            f"4. You can dynamically request to migrate your team to a different parent team in the topology using the `request_migration` tool if it helps in task routing.\n"
-            f"5. When creating an AT, you can assign models based on task complexity. Available models:\n"
-            f"{model_options}\n"
-        )
-
         try:
-            current_context = {
-                "team_id": team.team_id,
-                "preset_name": team.preset_name,
-                "team_purpose": team.team_purpose,
-                "role": agent.role,
-                "role_description": getattr(agent, "role_description", ""),
-                "system_instructions": getattr(agent, "system_instructions", ""),
-                "tools": sorted(list(team.tools.keys())) if getattr(team, "tools", None) else []
-            }
-            if agent.last_context and agent.last_context.get("team_id") != team.team_id:
-                notice = (
-                    f"*** TRANSITION NOTICE: ACTIVE TEAM UPDATE ***\n"
-                    f"You have transitioned to work with another team group:\n"
-                    f"- Active Team: {team.team_id} (Preset: {team.preset_name})\n"
-                    f"- Team Purpose: {team.team_purpose}\n"
-                    f"- Your Assigned Role: {agent.role}\n"
-                    f"Please continue your work and cooperate in this team based on your prior memory."
-                )
-                agent.messages.append({"role": "system", "content": notice})
-            agent.last_context = current_context
-
-            agent.messages.append({"role": "user", "content": prompt})
-
-            enable_compression = manager.config.enable_memory_compression if manager else True
-            max_turns = manager.config.max_memory_turns if manager else 20
-
-            if enable_compression and len(agent.messages) > max_turns + 2:
-                first_msg = agent.messages[0]
-                
-                slice_idx = len(agent.messages) - max_turns
-                while slice_idx > 1 and agent.messages[slice_idx].get("role") in ("tool", "function"):
-                    slice_idx -= 1
-                
-                intermediate_messages = agent.messages[1 : slice_idx]
-                history_text_parts = []
-                for msg in intermediate_messages:
-                    r = msg.get("role", "unknown").upper()
-                    c = msg.get("content", "")
-                    history_text_parts.append(f"{r}: {c}")
-                history_text = "\n".join(history_text_parts)
-                
-                summary_prompt = (
-                    f"Summarize the preceding execution logs and discussions into a single cohesive paragraph of historical facts. "
-                    f"Focus on what was completed.\n\n"
-                    f"--- EXECUTION LOGS AND DISCUSSIONS BEGIN ---\n"
-                    f"{history_text}\n"
-                    f"--- EXECUTION LOGS AND DISCUSSIONS END ---\n"
-                )
-                
-                summarize_client = agent.llm_client
-                retries = manager.config.llm_max_retries if manager else 3
-                backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
-                
-                try:
-                    summary_resp = await generate_with_retry(
-                        llm_client=summarize_client,
-                        prompt=summary_prompt,
-                        system_instruction="You are a precise summarization assistant.",
-                        temperature=0.3,
-                        retries=retries,
-                        backoff_factor=backoff,
-                        manager=manager
-                    )
-                    # Convert response to string if it's an LLMResponse (backward compatible safety check)
-                    summary_text = summary_resp.text if isinstance(summary_resp, LLMResponse) else str(summary_resp)
-                    summary_text = summary_text.strip()
-                except Exception as e:
-                    team.logger.warning(f"Memory compression summarization failed: {e}. Using a generic fallback summary.")
-                    summary_text = "Early execution history compressed due to context limits."
-                
-                archive_message = {
-                    "role": "system",
-                    "content": f"*** HISTORICAL SUMMARY ARCHIVE ***\n{summary_text}"
-                }
-                latest_messages = agent.messages[slice_idx :]
-                agent.messages = [first_msg, archive_message] + latest_messages
+            identity_header = await _prepare_agent_context(team, agent, prompt, manager)
 
             if getattr(team, "tools", None):
                 tools_desc = []
@@ -296,236 +331,7 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                 tool_args_str = react_match.group(2).strip()
 
                         if tool_name is not None:
-                            def parse_args(args_str):
-                                if not args_str:
-                                    return [], {}
-                                try:
-                                    parsed_vals = ast.literal_eval(f"({args_str})")
-                                    if isinstance(parsed_vals, tuple):
-                                        return list(parsed_vals), {}
-                                    else:
-                                        return [parsed_vals], {}
-                                except Exception:
-                                    pass
-
-                                chunks = []
-                                current_chunk = []
-                                in_single_quote = False
-                                in_double_quote = False
-                                escape = False
-                                paren_depth = 0
-                                bracket_depth = 0
-                                brace_depth = 0
-
-                                for char in args_str:
-                                    if escape:
-                                        escape = False
-                                        current_chunk.append(char)
-                                        continue
-                                    if char == '\\':
-                                        escape = True
-                                        current_chunk.append(char)
-                                        continue
-                                    if char == "'" and not in_double_quote:
-                                        in_single_quote = not in_single_quote
-                                    elif char == '"' and not in_single_quote:
-                                        in_double_quote = not in_double_quote
-
-                                    if not in_single_quote and not in_double_quote:
-                                        if char == '(':
-                                            paren_depth += 1
-                                        elif char == ')':
-                                            paren_depth = max(0, paren_depth - 1)
-                                        elif char == '[':
-                                            bracket_depth += 1
-                                        elif char == ']':
-                                            bracket_depth = max(0, bracket_depth - 1)
-                                        elif char == '{':
-                                            brace_depth += 1
-                                        elif char == '}':
-                                            brace_depth = max(0, brace_depth - 1)
-                                        elif char == ',' and paren_depth == 0 and bracket_depth == 0 and brace_depth == 0:
-                                            chunks.append("".join(current_chunk).strip())
-                                            current_chunk = []
-                                            continue
-
-                                    current_chunk.append(char)
-
-                                chunks.append("".join(current_chunk).strip())
-                                chunks = [c for c in chunks if c]
-
-                                merged_chunks = []
-                                for chunk in chunks:
-                                    has_eq = False
-                                    c_in_single_quote = False
-                                    c_in_double_quote = False
-                                    c_escape = False
-                                    c_paren = 0
-                                    c_bracket = 0
-                                    c_brace = 0
-                                    for idx, char in enumerate(chunk):
-                                        if c_escape:
-                                            c_escape = False
-                                            continue
-                                        if char == '\\':
-                                            c_escape = True
-                                            continue
-                                        if char == "'" and not c_in_double_quote:
-                                            c_in_single_quote = not c_in_single_quote
-                                        elif char == '"' and not c_in_single_quote:
-                                            c_in_double_quote = not c_in_double_quote
-
-                                        if not c_in_single_quote and not c_in_double_quote:
-                                            if char == '(':
-                                                c_paren += 1
-                                            elif char == ')':
-                                                c_paren = max(0, c_paren - 1)
-                                            elif char == '[':
-                                                c_bracket += 1
-                                            elif char == ']':
-                                                c_bracket = max(0, c_bracket - 1)
-                                            elif char == '{':
-                                                c_brace += 1
-                                            elif char == '}':
-                                                c_brace = max(0, c_brace - 1)
-                                            elif char == '=' and c_paren == 0 and c_bracket == 0 and c_brace == 0:
-                                                has_eq = True
-                                                break
-
-                                    if merged_chunks:
-                                        prev_chunk = merged_chunks[-1]
-                                        prev_has_eq = False
-                                        p_in_single_quote = False
-                                        p_in_double_quote = False
-                                        p_escape = False
-                                        p_paren = 0
-                                        p_bracket = 0
-                                        p_brace = 0
-                                        for idx, char in enumerate(prev_chunk):
-                                            if p_escape:
-                                                p_escape = False
-                                                continue
-                                            if char == '\\':
-                                                p_escape = True
-                                                continue
-                                            if char == "'" and not p_in_double_quote:
-                                                p_in_single_quote = not p_in_single_quote
-                                            elif char == '"' and not p_in_single_quote:
-                                                p_in_double_quote = not p_in_double_quote
-
-                                            if not p_in_single_quote and not p_in_double_quote:
-                                                if char == '(':
-                                                    p_paren += 1
-                                                elif char == ')':
-                                                    p_paren = max(0, p_paren - 1)
-                                                elif char == '[':
-                                                    p_bracket += 1
-                                                elif char == ']':
-                                                    p_bracket = max(0, p_bracket - 1)
-                                                elif char == '{':
-                                                    p_brace += 1
-                                                elif char == '}':
-                                                    p_brace = max(0, p_brace - 1)
-                                                elif char == '=' and p_paren == 0 and p_bracket == 0 and p_brace == 0:
-                                                    prev_has_eq = True
-                                                    break
-
-                                        if prev_has_eq and not has_eq:
-                                            merged_chunks[-1] = prev_chunk + ", " + chunk
-                                            continue
-
-                                        def is_simple_term(s):
-                                            s = s.strip()
-                                            if not s:
-                                                return True
-                                            try:
-                                                ast.literal_eval(s)
-                                                return True
-                                            except Exception:
-                                                pass
-                                            if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', s):
-                                                return True
-                                            return False
-
-                                        if not prev_has_eq and not has_eq:
-                                            if not is_simple_term(prev_chunk) and not is_simple_term(chunk):
-                                                merged_chunks[-1] = prev_chunk + ", " + chunk
-                                                continue
-
-                                    merged_chunks.append(chunk)
-
-                                def parse_val(val_str):
-                                    val_str = val_str.strip()
-                                    if not val_str:
-                                        return ""
-                                    try:
-                                        return ast.literal_eval(val_str)
-                                    except Exception:
-                                        if (val_str.startswith("'") and val_str.endswith("'")) or (val_str.startswith('"') and val_str.endswith('"')):
-                                            return val_str[1:-1]
-                                        if val_str.lower() == "true":
-                                            return True
-                                        if val_str.lower() == "false":
-                                            return False
-                                        if val_str.lower() == "none":
-                                            return None
-                                        return val_str
-
-                                args = []
-                                kwargs = {}
-
-                                for chunk in merged_chunks:
-                                    if not chunk:
-                                        continue
-                                    eq_idx = -1
-                                    c_in_single_quote = False
-                                    c_in_double_quote = False
-                                    c_escape = False
-                                    c_paren = 0
-                                    c_bracket = 0
-                                    c_brace = 0
-
-                                    for idx, char in enumerate(chunk):
-                                        if c_escape:
-                                            c_escape = False
-                                            continue
-                                        if char == '\\':
-                                            c_escape = True
-                                            continue
-                                        if char == "'" and not c_in_double_quote:
-                                            c_in_single_quote = not c_in_single_quote
-                                        elif char == '"' and not c_in_single_quote:
-                                            c_in_double_quote = not c_in_double_quote
-
-                                        if not c_in_single_quote and not c_in_double_quote:
-                                            if char == '(':
-                                                c_paren += 1
-                                            elif char == ')':
-                                                c_paren = max(0, c_paren - 1)
-                                            elif char == '[':
-                                                c_bracket += 1
-                                            elif char == ']':
-                                                c_bracket = max(0, c_bracket - 1)
-                                            elif char == '{':
-                                                c_brace += 1
-                                            elif char == '}':
-                                                c_brace = max(0, c_brace - 1)
-                                            elif char == '=' and c_paren == 0 and c_bracket == 0 and c_brace == 0:
-                                                eq_idx = idx
-                                                break
-
-                                    if eq_idx != -1:
-                                        k = chunk[:eq_idx].strip()
-                                        if (k.startswith("'") and k.endswith("'")) or (k.startswith('"') and k.endswith('"')):
-                                            k = k[1:-1]
-                                        v_str = chunk[eq_idx+1:].strip()
-                                        kwargs[k] = parse_val(v_str)
-                                    else:
-                                        args.append(parse_val(chunk))
-
-                                return args, kwargs
-
-                            args, kwargs = parse_args(tool_args_str)
+                            args, kwargs = parse_tool_args(tool_args_str)
 
                             if tool_name in team.tools:
                                 tool_obj = team.tools[tool_name]
@@ -671,132 +477,8 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
         max_steps: int,
         manager: Any
     ) -> str:
-        team.status_map[agent.name] = "Thinking..."
-        if manager and manager.on_status_change:
-            manager.on_status_change(agent.name, "Thinking...")
-
-        peer_context = ""
-        if manager:
-            peer_context = f"\n### ACTIVE AGENT TEAMS TOPOLOGY (Global Map)\n{manager.render_topology_tree()}\n"
-
-        max_depth = manager.config.max_delegation_depth if manager else 2
-        min_size = manager.config.min_subagent_team_size if manager else 3
-
-        all_models = {}
-        if manager:
-            for k, v in manager.model_configs.items():
-                all_models[k] = v.get("ai_note", "No description")
-            for k in manager.llm_clients.keys():
-                if k not in all_models:
-                    all_models[k] = "No description"
-
-        model_options = "\n".join([f"  - {k}: {note}" for k, note in all_models.items()])
-        role_desc_str = f"- **Role Description**: {agent.role_description}\n" if getattr(agent, "role_description", "") else ""
-        experts_str = ""
-        if manager:
-            experts_lines = []
-            for name, exp_agent in sorted(manager.agents.items()):
-                role_desc = getattr(exp_agent, "role_description", "") or "No description"
-                experts_lines.append(f"  - **{name}** ({exp_agent.role}): {role_desc}")
-            if experts_lines:
-                experts_str = f"## GLOBAL EXPERTS AVAILABLE FOR HIRE\n" + "\n".join(experts_lines) + "\n\n"
-
-        identity_header = (
-            f"## AGENT IDENTITY PROFILE\n"
-            f"- **Role Name**: {agent.role}\n"
-            f"{role_desc_str}"
-            f"- **Agent Name**: {agent.name}\n"
-            f"- **Parent Team**: {team.team_id} (Preset: {team.preset_name})\n"
-            f"- **Team Purpose**: {team.team_purpose}\n"
-            f"- **Current Objective**: Cooperate in team tasks.\n"
-            f"- **AT Delegation Depth**: {team.depth} / {max_depth}\n"
-            f"{peer_context}"
-            f"{experts_str}"
-            f"### AUTONOMY RULES\n"
-            f"1. You can dynamically spawn child ATs using the `dispatch_subagent` tool to solve sub-problems.\n"
-            f"2. You MUST NOT spawn child ATs if your Delegation Depth is already at the maximum ({max_depth}). If you need help at max depth, use `delegate_escalation` to ask your parent.\n"
-            f"3. A valid AT MUST have at least {min_size} members.\n"
-            f"4. You can dynamically request to migrate your team to a different parent team in the topology using the `request_migration` tool if it helps in task routing.\n"
-            f"5. When creating an AT, you can assign models based on task complexity. Available models:\n"
-            f"{model_options}\n"
-        )
-
         try:
-            current_context = {
-                "team_id": team.team_id,
-                "preset_name": team.preset_name,
-                "team_purpose": team.team_purpose,
-                "role": agent.role,
-                "role_description": getattr(agent, "role_description", ""),
-                "system_instructions": getattr(agent, "system_instructions", ""),
-                "tools": sorted(list(team.tools.keys())) if getattr(team, "tools", None) else []
-            }
-            if agent.last_context and agent.last_context.get("team_id") != team.team_id:
-                notice = (
-                    f"*** TRANSITION NOTICE: ACTIVE TEAM UPDATE ***\n"
-                    f"You have transitioned to work with another team group:\n"
-                    f"- Active Team: {team.team_id} (Preset: {team.preset_name})\n"
-                    f"- Team Purpose: {team.team_purpose}\n"
-                    f"- Your Assigned Role: {agent.role}\n"
-                    f"Please continue your work and cooperate in this team based on your prior memory."
-                )
-                agent.messages.append({"role": "system", "content": notice})
-            agent.last_context = current_context
-
-            agent.messages.append({"role": "user", "content": prompt})
-
-            enable_compression = manager.config.enable_memory_compression if manager else True
-            max_turns = manager.config.max_memory_turns if manager else 20
-
-            if enable_compression and len(agent.messages) > max_turns + 2:
-                first_msg = agent.messages[0]
-                
-                slice_idx = len(agent.messages) - max_turns
-                while slice_idx > 1 and agent.messages[slice_idx].get("role") in ("tool", "function"):
-                    slice_idx -= 1
-                
-                intermediate_messages = agent.messages[1 : slice_idx]
-                history_text_parts = []
-                for msg in intermediate_messages:
-                    r = msg.get("role", "unknown").upper()
-                    c = msg.get("content", "")
-                    history_text_parts.append(f"{r}: {c}")
-                history_text = "\n".join(history_text_parts)
-                
-                summary_prompt = (
-                    f"Summarize the preceding execution logs and discussions into a single cohesive paragraph of historical facts. "
-                    f"Focus on what was completed.\n\n"
-                    f"--- EXECUTION LOGS AND DISCUSSIONS BEGIN ---\n"
-                    f"{history_text}\n"
-                    f"--- EXECUTION LOGS AND DISCUSSIONS END ---\n"
-                )
-                
-                summarize_client = agent.llm_client
-                retries = manager.config.llm_max_retries if manager else 3
-                backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
-                
-                try:
-                    summary_resp = await generate_with_retry(
-                        llm_client=summarize_client,
-                        prompt=summary_prompt,
-                        system_instruction="You are a precise summarization assistant.",
-                        temperature=0.3,
-                        retries=retries,
-                        backoff_factor=backoff,
-                        manager=manager
-                    )
-                    summary_text = summary_resp.text if isinstance(summary_resp, LLMResponse) else str(summary_resp)
-                    summary_text = summary_text.strip()
-                except Exception as e:
-                    team.logger.warning(f"Memory compression summarization failed: {e}. Using a generic fallback summary.")
-                    summary_text = "Early execution history compressed due to context limits."
-                
-                archive_message = {
-                    "role": "system",
-                    "content": f"*** HISTORICAL SUMMARY ARCHIVE ***\n{summary_text}"
-                }
-                latest_messages = agent.messages[slice_idx :]
-                agent.messages = [first_msg, archive_message] + latest_messages
+            identity_header = await _prepare_agent_context(team, agent, prompt, manager)
 
             # Prepare native schemas
             tool_schemas = []

@@ -59,9 +59,7 @@ async def generate_with_retry(
                         if any(p.name == "tools" or p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
                             kwargs["tools"] = tools
                     except Exception:
-                        import unittest.mock
-                        if isinstance(llm_client, unittest.mock.NonCallableMock) or isinstance(llm_client.generate, unittest.mock.NonCallableMock):
-                            kwargs["tools"] = tools
+                        pass
                 response = await llm_client.generate(
                     prompt=prompt,
                     system_instruction=system_instruction,
@@ -97,7 +95,7 @@ async def generate_with_retry(
                     response_text = response.text
                 
                 response_tokens = manager.count_tokens(response_text, resolved_alias)
-                manager.model_token_usage[resolved_alias] = current_usage + prompt_tokens + response_tokens
+                manager.model_token_usage[resolved_alias] = manager.model_token_usage.get(resolved_alias, 0) + prompt_tokens + response_tokens
 
             if isinstance(response, LLMResponse):
                 if return_response_obj:

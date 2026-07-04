@@ -371,11 +371,9 @@ class ATTManager:
                     members.append(agent)
                 elif isinstance(config, dict) and config.get("hire_agent") in self.agents:
                     agent = self.agents[config["hire_agent"]]
-                    agent.role = role_name
                     members.append(agent)
                 elif isinstance(config, dict) and config.get("model") in self.agents:
                     agent = self.agents[config["model"]]
-                    agent.role = role_name
                     members.append(agent)
                 else:
                     model_alias = config.get("model")
@@ -828,12 +826,9 @@ class ATTManager:
                 for agent in self.agents.values():
                     model_alias = None
                     if agent.llm_client:
-                        from unittest.mock import Mock
-                        if isinstance(agent.llm_client, Mock):
-                            model_alias = "mock_client"
-                        elif hasattr(agent.llm_client, "model_name") and not isinstance(agent.llm_client.model_name, Mock):
+                        if hasattr(agent.llm_client, "model_name"):
                             model_alias = str(agent.llm_client.model_name)
-                        elif hasattr(agent.llm_client, "manager") and not isinstance(agent.llm_client.manager, Mock):
+                        elif hasattr(agent.llm_client, "manager"):
                             model_alias = "default"
 
                     last_ctx_json = json.dumps(agent.last_context) if agent.last_context else None

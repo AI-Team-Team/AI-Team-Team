@@ -183,6 +183,17 @@ class Tool:
             logger.error(f"Error executing tool '{self.name}': {e}")
             return f"Error executing tool '{self.name}': {e}"
 
+
+def _resolve_actual_team(caller_node: Any, att_manager: Any) -> Any:
+    from .core import Agent, AgentTeam
+    if isinstance(caller_node, AgentTeam):
+        return caller_node
+    elif isinstance(caller_node, Agent):
+        for team in att_manager.teams.values():
+            if caller_node in team.members:
+                return team
+    return None
+
 def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, Tool]:
     """
     Centralized factory that registers and returns the default set of generic autonomy tools.
@@ -211,14 +222,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return "Error: Dynamic Subagent Delegation is disabled in configuration."
         
         from .core import Agent, AgentTeam
-        actual_team = None
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
         
         current_depth = actual_team.depth if actual_team else 1
         max_depth = config.max_delegation_depth
@@ -265,15 +269,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not att_manager:
             return "Error: ATTManager not available in tools context."
         
-        from .core import Agent, AgentTeam
-        actual_team = None
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
         
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam for the caller."
@@ -304,15 +300,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         child = att_manager.teams[child_id]
         
-        from .core import Agent, AgentTeam
-        actual_team = None
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
                     
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam for the caller."
@@ -326,15 +314,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
 
     async def update_team_purpose(new_purpose: str) -> str:
         """Updates the purpose string of the caller's team. Arguments: new_purpose (str)"""
-        from .core import Agent, AgentTeam
-        actual_team = None
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
         
@@ -344,15 +324,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
 
     async def update_team_status(purpose: str, progress: str) -> str:
         """Updates the purpose and progress string of the caller's team. Arguments: purpose (str), progress (str)"""
-        from .core import Agent, AgentTeam
-        actual_team = None
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
         
@@ -369,15 +341,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         target = att_manager.teams[team_id]
         
-        from .core import Agent, AgentTeam
-        actual_team = None
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
                     
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
@@ -409,15 +373,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         target = att_manager.teams[target_team_id]
         
-        from .core import Agent, AgentTeam
-        actual_team = None
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
                     
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
@@ -437,15 +393,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         child = att_manager.teams[team_id]
         
-        from .core import Agent, AgentTeam
-        actual_team = None
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
                     
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
@@ -473,6 +421,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             system_instructions=system_instructions
         )
         child.members.append(new_agent)
+        att_manager.agents[new_agent.name] = new_agent
         return f"Successfully added new member '{new_agent.name}' (Role: {role_name}) to team '{team_id}'."
 
     async def remove_team_member(team_id: str, agent_name: str) -> str:
@@ -484,15 +433,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         child = att_manager.teams[team_id]
         
-        from .core import Agent, AgentTeam
-        actual_team = None
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
                     
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
@@ -528,16 +469,8 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return "Error: Membership voting is disabled."
             
         from .core import Agent, AgentTeam
-        actual_team = None
-        caller_agent_name = "Unknown"
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            caller_agent_name = caller_node.name
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
+        caller_agent_name = getattr(caller_node, 'name', "Unknown")
                     
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
@@ -572,17 +505,8 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not att_manager or not att_manager.config.enable_membership_voting:
             return "Error: Membership voting is disabled."
             
-        from .core import Agent, AgentTeam
-        actual_team = None
-        caller_agent_name = "Unknown"
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            caller_agent_name = caller_node.name
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
+        caller_agent_name = getattr(caller_node, 'name', "Unknown")
                     
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
@@ -644,6 +568,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                         from .core import ManagerDefaultClientAdapter
                         client = ManagerDefaultClientAdapter(att_manager)
                         
+                    from .core import Agent
                     new_agent = Agent(
                         name=f"Dynamic_{role_name}",
                         role=role_name,
@@ -652,6 +577,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                         system_instructions=sys_inst
                     )
                     actual_team.members.append(new_agent)
+                    att_manager.agents[new_agent.name] = new_agent
                     return f"Proposal '{proposal_id}' approved ({agree_count}/{total_members} Agree). Added new member '{new_agent.name}' to the team!"
                 else:
                     agent_name = prop["target"]
@@ -682,17 +608,8 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not att_manager or not att_manager.config.enable_membership_voting:
             return "Error: Membership voting is disabled."
             
-        from .core import Agent, AgentTeam
-        actual_team = None
-        caller_agent_name = "Unknown"
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            caller_agent_name = caller_node.name
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
+        caller_agent_name = getattr(caller_node, 'name', "Unknown")
                     
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
@@ -716,15 +633,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not att_manager:
             return "Error: ATTManager not available."
             
-        from .core import Agent, AgentTeam
-        actual_team = None
-        if isinstance(caller_node, AgentTeam):
-            actual_team = caller_node
-        elif isinstance(caller_node, Agent):
-            for team in att_manager.teams.values():
-                if caller_node in team.members:
-                    actual_team = team
-                    break
+        actual_team = _resolve_actual_team(caller_node, att_manager)
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
             

@@ -8,8 +8,10 @@ class Agent:
         self.llm_client = llm_client
         self.role_description = role_description
         self.system_instructions = system_instructions
+        import asyncio
         self.messages: List[Dict[str, str]] = []
         self.last_context: Optional[Dict[str, Any]] = None
+        self.lock = asyncio.Lock()
 
     def launch_att(
         self,

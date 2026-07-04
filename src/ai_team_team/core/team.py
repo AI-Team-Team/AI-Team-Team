@@ -126,62 +126,60 @@ class AgentTeam:
 
         from .exceptions import TokenLimitExceededError
 
-        while True:
-            try:
-                # Support backward compatibility with legacy tests that mock execute_react_step
-                import unittest.mock
-                is_mocked = isinstance(getattr(self, "execute_react_step", None), unittest.mock.NonCallableMock)
-                is_overridden = False
+        max_failovers = len(manager.config.model_token_limits) if manager and getattr(manager, 'config', None) else 3
+        failover_attempts = 0
+
+        async with agent.lock:
+            while True:
                 try:
-                    if hasattr(self, "execute_react_step") and self.execute_react_step.__func__ is not AgentTeam.execute_react_step:
+                    # Check if subclass overrides execute_react_step (for legacy support)
+                    is_overridden = False
+                    try:
+                        if hasattr(self, "execute_react_step") and self.execute_react_step.__func__ is not AgentTeam.execute_react_step:
+                            is_overridden = True
+                    except AttributeError:
                         is_overridden = True
-                except AttributeError:
-                    is_overridden = True
-                if is_mocked or is_overridden:
-                    return await self.execute_react_step(
+                    if is_overridden:
+                        return await self.execute_react_step(
+                            agent=agent,
+                            prompt=prompt,
+                            system_instruction=system_instruction,
+                            max_steps=max_steps,
+                            manager=manager
+                        )
+
+                    from .strategies import TextReactReasoningStrategy, NativeReasoningStrategy
+
+                    mode = manager.config.tool_calling_mode if manager else "auto"
+                    if mode == "auto":
+                        is_native = False
+                        if hasattr(agent.llm_client, "supports_native_tool_calling"):
+                            is_native = bool(agent.llm_client.supports_native_tool_calling())
+                        
+                        if is_native:
+                            strategy = NativeReasoningStrategy()
+                        else:
+                            strategy = TextReactReasoningStrategy()
+                    elif mode == "native":
+                        strategy = NativeReasoningStrategy()
+                    else:
+                        strategy = TextReactReasoningStrategy()
+
+                    return await strategy.execute(
+                        team=self,
                         agent=agent,
                         prompt=prompt,
                         system_instruction=system_instruction,
                         max_steps=max_steps,
                         manager=manager
                     )
-
-                from .strategies import TextReactReasoningStrategy, NativeReasoningStrategy
-
-                mode = manager.config.tool_calling_mode if manager else "auto"
-                if mode == "auto":
-                    is_native = False
-                    if hasattr(agent.llm_client, "supports_native_tool_calling"):
-                        val = agent.llm_client.supports_native_tool_calling()
-                        import unittest.mock
-                        if isinstance(val, unittest.mock.NonCallableMock):
-                            is_native = False
-                        else:
-                            is_native = bool(val)
-                    
-                    if is_native:
-                        strategy = NativeReasoningStrategy()
-                    else:
-                        strategy = TextReactReasoningStrategy()
-                elif mode == "native":
-                    strategy = NativeReasoningStrategy()
-                else:
-                    strategy = TextReactReasoningStrategy()
-
-                return await strategy.execute(
-                    team=self,
-                    agent=agent,
-                    prompt=prompt,
-                    system_instruction=system_instruction,
-                    max_steps=max_steps,
-                    manager=manager
-                )
-            except TokenLimitExceededError as e:
-                if manager:
-                    swapped = await manager.handle_failover(agent, self, e)
-                    if swapped:
-                        continue
-                raise e
+                except TokenLimitExceededError as e:
+                    if manager and failover_attempts < max_failovers:
+                        swapped = await manager.handle_failover(agent, self, e)
+                        if swapped:
+                            failover_attempts += 1
+                            continue
+                    raise e
 
     async def execute_react_step(
         self,

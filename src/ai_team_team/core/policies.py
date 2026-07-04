@@ -192,7 +192,8 @@ class ProxiedCommunicationPolicy(BaseCommunicationPolicy):
                     logger.info(f"Peer talk between {sender.team_id} and {recipient.team_id} rejected by parent representative {rep.name}")
                     return False
             except Exception as e:
-                logger.warning(f"Error querying peer talk approval from representative {rep.name}: {e}. Defaulting to approved.")
+                logger.warning(f"Error querying peer talk approval from representative {rep.name}: {e}. Defaulting to rejected.")
+                return False
         return True
 
 # Migration Policy Implementations
@@ -269,7 +270,8 @@ class AncestorApprovalMigrationPolicy(BaseMigrationPolicy):
                 if not approved:
                     return False, f"Rejected by representative {rep.name} of team {t.team_id if t else 'Root'}: {reason}"
             except Exception as e:
-                logger.warning(f"Error querying migration approval from representative {rep.name}: {e}. Defaulting to approved.")
+                logger.warning(f"Error querying migration approval from representative {rep.name}: {e}. Defaulting to rejected.")
+                return False, f"Arbitration failed due to error: {e}"
         return True, "Approved by ancestor approval policy."
 
 class LineagePathMigrationPolicy(BaseMigrationPolicy):
@@ -332,7 +334,8 @@ class LineagePathMigrationPolicy(BaseMigrationPolicy):
                 if not approved:
                     return False, f"Rejected by representative {rep.name} of team {t.team_id if t else 'Root'}: {reason}"
             except Exception as e:
-                logger.warning(f"Error querying migration approval from representative {rep.name}: {e}. Defaulting to approved.")
+                logger.warning(f"Error querying migration approval from representative {rep.name}: {e}. Defaulting to rejected.")
+                return False, f"Arbitration failed due to error: {e}"
         return True, "Approved by lineage path policy."
 
 # Policy resolution helpers

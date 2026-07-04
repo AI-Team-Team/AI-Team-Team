@@ -88,3 +88,46 @@ def test_committee_debate_flow(self):
     transcript = self.att_manager.execute_team_discussion(self.my_team, prompt="Start task...", rounds=1)
     self.assertIn("Sibling C arbitrates", transcript)
 ```
+
+### D. Mocking ReAct Execution (`tool_calling_mode="react"`)
+
+When testing the `TextReactReasoningStrategy` with `unittest.mock.AsyncMock` or `MagicMock` acting as an `llm_client` (e.g., in `test_react_tools.py`), the mock object dynamically evaluates `True` for all `hasattr` checks.
+
+Because `ATTManager` uses a `hasattr` check for `supports_native_tool_calling()` to route agents, passing a raw mock client with the default `tool_calling_mode="auto"` will inadvertently trigger the `NativeReasoningStrategy`.
+
+To properly test ReAct execution in this codebase, tests **must** explicitly configure the `ATTConfig` to force the ReAct mode:
+
+```python
+from ai_team_team.core.config import ATTConfig
+
+# Force Text React mode instead of 'auto' capability checking
+config = ATTConfig(tool_calling_mode="react")
+manager = ATTManager(root_ai=my_agent, config=config)
+```
+
+### E. Mocking Native Tool Execution (`tool_calling_mode="native"`)
+
+For tests verifying the `NativeReasoningStrategy` (as seen in `test_dual_mode.py`), the mock client's `generate` method **must** return an `LLMResponse` containing structured `ToolCall` objects, rather than plain text strings.
+
+```python
+from ai_team_team.core.response import LLMResponse, ToolCall
+
+def test_native_tool_calling(self):
+    mock_responses = [
+        LLMResponse(
+            text="I will look up the user details.",
+            tool_calls=[
+                ToolCall(call_id="call_123", name="query_db", arguments={"sql": "SELECT * FROM users"})
+            ]
+        ),
+        LLMResponse(text="Final Answer: The user exists.")
+    ]
+
+    async def mock_native_handler(*args, **kwargs):
+        return mock_responses.pop(0) if mock_responses else LLMResponse(text="Final Answer: ok")
+
+    self.mock_client.generate = mock_native_handler
+    
+    # Execute native step
+    result = await self.att_manager.execute_reasoning_step(self.my_agent, prompt="Find user", system_instruction="")
+```

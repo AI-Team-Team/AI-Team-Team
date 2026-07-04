@@ -75,11 +75,7 @@ class ManagerDefaultClientAdapter:
         if self.manager.root_ai and self.manager.root_ai.llm_client and self.manager.root_ai.llm_client is not self:
             if hasattr(self.manager.root_ai.llm_client, "supports_native_tool_calling"):
                 try:
-                    val = self.manager.root_ai.llm_client.supports_native_tool_calling()
-                    import unittest.mock
-                    if isinstance(val, unittest.mock.NonCallableMock):
-                        return False
-                    return bool(val)
+                    return bool(self.manager.root_ai.llm_client.supports_native_tool_calling())
                 except Exception:
                     pass
         return False

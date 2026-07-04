@@ -18,7 +18,8 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
         self.mock_client = MagicMock()
         self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Dialogue approved."}')
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
-        self.manager = ATTManager(root_ai=self.root_ai)
+        self.config = ATTConfig(tool_calling_mode="react")
+        self.manager = ATTManager(root_ai=self.root_ai, config=self.config)
 
     async def test_tool_auditor_approval(self):
         """Verify the Tool Auditor registration and interception hook."""
@@ -39,7 +40,7 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
         team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
         # Configure LLM Client side-effects
         self.mock_client.generate.side_effect = [
-            "Thought: Let's run query.\nAction: query_db(SELECT * FROM secrets)",
+            "Thought: Let's run query.\nAction: query_db('SELECT * FROM secrets')",
             "Thought: Got output.\nFinal Answer: Done!"
         ]
 
@@ -56,7 +57,7 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
         self.manager.register_tool_auditor("query_db", approve_auditor)
 
         self.mock_client.generate.side_effect = [
-            "Thought: Let's run query.\nAction: query_db(SELECT * FROM characters)",
+            "Thought: Let's run query.\nAction: query_db('SELECT * FROM characters')",
             "Thought: Got output.\nFinal Answer: Done!"
         ]
 
@@ -88,7 +89,7 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
 
         # Test 1: Reject case
         self.mock_client.generate.side_effect = [
-            "Thought: Let's run query.\nAction: query_db_async(SELECT * FROM secrets)",
+            "Thought: Let's run query.\nAction: query_db_async('SELECT * FROM secrets')",
             "Thought: Got output.\nFinal Answer: Done!"
         ]
         final_answer = await team.execute_react_step(agent, "Query secrets", "System instructions", max_steps=2, manager=self.manager)
@@ -98,7 +99,7 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
         # Test 2: Approve case
         dummy_tool_called = False
         self.mock_client.generate.side_effect = [
-            "Thought: Let's run query.\nAction: query_db_async(SELECT * FROM characters)",
+            "Thought: Let's run query.\nAction: query_db_async('SELECT * FROM characters')",
             "Thought: Got output.\nFinal Answer: Done!"
         ]
         final_answer = await team.execute_react_step(agent, "Query characters", "System instructions", max_steps=2, manager=self.manager)
