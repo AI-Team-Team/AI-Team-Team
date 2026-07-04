@@ -86,5 +86,73 @@ class TestATTSupervision(unittest.IsolatedAsyncioTestCase):
         # Logs should have been appended with team ID and chapter num
         self.assertTrue(any(l[0] == team.team_id and l[3] == 100 for l in logs))
 
+    async def test_supervisory_audit_committee_debate_success(self):
+        """Verify that a healthy audit debate resolves successfully using the 3-AI committee."""
+        mock_responses = [
+            "Thought: Integrity check.\nFinal Answer: Integrity seems healthy.",
+            "Thought: Continuity check.\nFinal Answer: Logical flow is good.",
+            "Thought: Deadlock check.\nFinal Answer: No deadlocks found.",
+            "Thought: R2 Integrity.\nFinal Answer: Still sound.",
+            "Thought: R2 Continuity.\nFinal Answer: Cohesive.",
+            "Thought: R2 Deadlock.\nFinal Answer: Free of deadlock.",
+            '{"is_healthy": true, "reason": "Committee consensus is healthy."}'
+        ]
+        
+        async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False, **kwargs):
+            return mock_responses.pop(0) if mock_responses else "Final Answer: done"
+            
+        self.mock_client.generate = mock_generate
+        
+        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        is_healthy, reason = await self.manager.supervisor.audit_team_dialog(team, "Some debate transcript")
+        
+        self.assertTrue(is_healthy)
+        self.assertEqual(reason, "Committee consensus is healthy.")
+
+    async def test_supervisory_audit_exception_fallback(self):
+        """Verify that audit_team_dialog fallback is triggered on LLM exception, returning is_healthy=True."""
+        async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False, **kwargs):
+            raise Exception("API Connection Timeout")
+        self.mock_client.generate = mock_generate
+        
+        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        is_healthy, reason = await self.manager.supervisor.audit_team_dialog(team, "Some debate transcript")
+        
+        self.assertTrue(is_healthy)
+        self.assertIn("Audit failed", reason)
+        self.assertIn("API Connection Timeout", reason)
+
+    async def test_supervisory_audit_transcript_compression(self):
+        """Verify that a large transcript (>8000 chars) triggers compression."""
+        large_transcript = "Dialogue turn content.\n" * 500
+        
+        mock_responses = [
+            "Compressed Summary of large transcript",
+            "Thought: Integrity check.\nFinal Answer: Integrity seems healthy.",
+            "Thought: Continuity check.\nFinal Answer: Logical flow is good.",
+            "Thought: Deadlock check.\nFinal Answer: No deadlocks found.",
+            "Thought: R2 Integrity.\nFinal Answer: Still sound.",
+            "Thought: R2 Continuity.\nFinal Answer: Cohesive.",
+            "Thought: R2 Deadlock.\nFinal Answer: Free of deadlock.",
+            '{"is_healthy": false, "reason": "Committee agreed there is a deadlock."}'
+        ]
+        
+        captured_compression_prompt = None
+        async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False, **kwargs):
+            nonlocal captured_compression_prompt
+            if "Summarize the following multi-agent conversation transcript" in str(prompt):
+                captured_compression_prompt = prompt
+            return mock_responses.pop(0) if mock_responses else "Final Answer: done"
+            
+        self.mock_client.generate = mock_generate
+        
+        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        is_healthy, reason = await self.manager.supervisor.audit_team_dialog(team, large_transcript)
+        
+        self.assertIsNotNone(captured_compression_prompt)
+        self.assertIn("Summarize the following", captured_compression_prompt)
+        self.assertFalse(is_healthy)
+        self.assertEqual(reason, "Committee agreed there is a deadlock.")
+
 if __name__ == "__main__":
     unittest.main()

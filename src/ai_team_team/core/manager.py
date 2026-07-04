@@ -416,14 +416,15 @@ class ATTManager:
             self.logger.error(f"Migration arbitration error: {e}")
             return False, f"Arbitration error: {e}"
 
-    async def execute_team_discussion(self, team: AgentTeam, prompt: str, rounds: int = 2) -> str:
+    async def execute_team_discussion(self, team: AgentTeam, prompt: str, rounds: int = 2, skip_audit: bool = False) -> str:
         """Executes a multi-agent debate session inside the AT, monitored by the Supervisor."""
         team.migration_count = 0
         team.is_running = True
-        self.logger.info(f"Executing discussion in team {team.team_id} (rounds={rounds})...")
+        self.logger.info(f"Executing discussion in team {team.team_id} (rounds={rounds}, skip_audit={skip_audit})...")
         
         dialog_history = []
         last_round_answers = {}
+        is_healthy, reason = True, "Audit skipped."
         
         try:
             for r in range(1, rounds + 1):
@@ -500,7 +501,8 @@ class ATTManager:
                 for agent, result in zip(round_members, results):
                     if isinstance(result, ATTException):
                         self.logger.error(f"Failed to execute discussion step due to ATT error: {result}")
-                        await self.supervisor.report_anomaly(team, f"LLM client invocation error: {result}", self)
+                        if not skip_audit:
+                            await self.supervisor.report_anomaly(team, f"LLM client invocation error: {result}", self)
                         raise result
                     elif isinstance(result, Exception):
                         self.logger.error(f"Agent {agent.name} encountered an error: {result}")
@@ -567,9 +569,10 @@ class ATTManager:
             transcript = "\n".join(dialog_history)
             
             # Run supervisory audit
-            is_healthy, reason = await self.supervisor.audit_team_dialog(team, transcript)
-            if not is_healthy:
-                await self.supervisor.report_anomaly(team, reason, self)
+            if not skip_audit:
+                is_healthy, reason = await self.supervisor.audit_team_dialog(team, transcript)
+                if not is_healthy:
+                    await self.supervisor.report_anomaly(team, reason, self)
                 
             # Log debate transcript using logger callback
             if self.on_log_append:

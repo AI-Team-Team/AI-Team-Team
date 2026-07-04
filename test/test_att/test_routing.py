@@ -92,9 +92,9 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
         is_healthy, reason = await self.manager.supervisor.audit_team_dialog(team, "Dummy dialogue")
         self.assertTrue(is_healthy)
         self.assertEqual(reason, "Approved")
-        self.assertEqual(len(generated_requests), 2)
-        self.assertEqual(generated_requests[1]["model"], "default")
-        self.assertTrue(generated_requests[1]["json"])
+        self.assertEqual(len(generated_requests), 8) # Updated from 2 to 8 due to 3-AI committee debate (6 turns + 1 consensus)
+        self.assertEqual(generated_requests[7]["model"], "default")
+        self.assertTrue(generated_requests[7]["json"])
 
     async def test_dispatch_subagent_routing(self):
         """Verify that dispatch_subagent correctly propagates roles_and_models to dynamic child teams using configuration routing."""
