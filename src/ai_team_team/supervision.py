@@ -53,6 +53,8 @@ class SupervisoryTeam:
         Evaluates dialogue transcript efficiency inside an AT using a 3-AI debate committee.
         Returns (is_healthy, reason).
         """
+        for auditor in self.auditors:
+            auditor.messages.clear()
         try:
             # 1. Compress transcript if too long
             working_transcript = await self._compress_transcript(dialog_transcript, self.llm_client)

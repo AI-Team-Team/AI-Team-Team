@@ -20,6 +20,8 @@ class NegotiationBroker:
         if sender_parent and recipient_parent and sender_parent.team_id == recipient_parent.team_id:
             parent = sender_parent
             allow = parent.communication_rules.get("allow_sibling_talk", False)
+            if not allow:
+                allow = sender.communication_rules.get("allow_sibling_talk", False)
             self.logger.info(f"Sibling negotiation between {sender.team_id} and {recipient.team_id}: Parent {parent.team_id} decision={allow}")
             return allow
 

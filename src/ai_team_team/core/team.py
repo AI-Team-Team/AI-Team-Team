@@ -135,12 +135,11 @@ class AgentTeam:
             while True:
                 try:
                     # Check if subclass overrides execute_react_step (for legacy support)
-                    is_overridden = False
-                    try:
-                        if hasattr(self, "execute_react_step") and self.execute_react_step.__func__ is not AgentTeam.execute_react_step:
-                            is_overridden = True
-                    except AttributeError:
-                        is_overridden = True
+                    is_react_default = (
+                        hasattr(self, "execute_react_step") and 
+                        getattr(self.execute_react_step, "__func__", None) is AgentTeam.execute_react_step
+                    )
+                    is_overridden = not is_react_default
                     if is_overridden:
                         return await self.execute_react_step(
                             agent=agent,

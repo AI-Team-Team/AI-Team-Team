@@ -867,6 +867,8 @@ class ATTManager:
                 
                 active_lib_ids = list(self.libraries.keys()) if self.libraries else ["__NONE__"]
                 session.query(LibraryPermissionModel).filter(LibraryPermissionModel.lib_id.notin_(active_lib_ids)).delete(synchronize_session=False)
+                if active_lib_ids and active_lib_ids != ["__NONE__"]:
+                    session.query(LibraryPermissionModel).filter(LibraryPermissionModel.lib_id.in_(active_lib_ids)).delete(synchronize_session=False)
                 session.query(DocLibFileModel).filter(DocLibFileModel.lib_id.notin_(active_lib_ids)).delete(synchronize_session=False)
 
                 # 2. Save Configs
