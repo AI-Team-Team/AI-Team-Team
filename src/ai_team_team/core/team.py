@@ -179,6 +179,8 @@ class AgentTeam:
                         swapped = await manager.handle_failover(agent, self, e)
                         if swapped:
                             failover_attempts += 1
+                            if agent.messages and agent.messages[-1].get("role") == "user":
+                                agent.messages.pop()
                             continue
                     raise e
 

@@ -21,7 +21,7 @@ class HandlerClientAdapter:
         self,
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List[Any]] = None,
         temperature: float = 0.3,
         require_json: bool = False
     ) -> LLMResponse:
@@ -84,7 +84,7 @@ class ManagerDefaultClientAdapter:
         self,
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List[Any]] = None,
         temperature: float = 0.3,
         require_json: bool = False
     ) -> LLMResponse:
@@ -101,9 +101,8 @@ class ManagerDefaultClientAdapter:
                 require_json=require_json
             )
 
-        if self.manager.root_ai and self.manager.root_ai.llm_client and self.manager.root_ai.llm_client is not self:
-            if not isinstance(self.manager.root_ai.llm_client, ManagerDefaultClientAdapter):
-                return await self.manager.root_ai.llm_client.generate(
+        if self.manager.root_ai and self.manager.root_ai.llm_client and type(self.manager.root_ai.llm_client) is not ManagerDefaultClientAdapter:
+            return await self.manager.root_ai.llm_client.generate(
                     prompt=prompt,
                     system_instruction=system_instruction,
                     tools=tools,

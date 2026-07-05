@@ -482,7 +482,6 @@ class ATTManager:
         if hasattr(target.creator, "name"):
             # Creator is an Agent
             parent = self.get_agent_team(target.creator)
-            print(f"DEBUG find_parent_team: target={target.team_id}, creator={target.creator.name}, parent={parent.team_id if parent else None}")
             if parent:
                 target._parent_team = parent
                 self._team_parent_map[target.team_id] = parent.team_id
@@ -552,15 +551,16 @@ class ATTManager:
             if team.parent_team is None:
                 level_1_teams.append(team)
                 
-        def traverse(team, depth=1):
+        def traverse(team, depth=1, is_last=True):
             indent = "  " * depth
-            prefix = "└── " if depth > 1 else "├── "
+            prefix = "└── " if is_last else "├── "
             lines.append(f"{indent}{prefix}{team.team_id} (Purpose: {team.team_purpose} | Progress: {team.team_progress}) [Level {team.depth}]")
-            for child in team.child_teams:
-                traverse(child, depth + 1)
+            children = team.child_teams
+            for i, child in enumerate(children):
+                traverse(child, depth + 1, is_last=(i == len(children) - 1))
                 
-        for t in level_1_teams:
-            traverse(t, 1)
+        for i, t in enumerate(level_1_teams):
+            traverse(t, 1, is_last=(i == len(level_1_teams) - 1))
             
         return "\n".join(lines)
 
@@ -635,6 +635,7 @@ class ATTManager:
         last_round_answers = {}
         is_healthy, reason = True, "Audit skipped."
         
+        self._suppress_auto_save = True
         try:
             for r in range(1, rounds + 1):
                 # Consume inbox messages at the start of every round
@@ -808,6 +809,8 @@ class ATTManager:
             self._auto_save()
             return transcript
         finally:
+            self._suppress_auto_save = False
+            self._auto_save()
             team.is_running = False
             # Check for left-over emergency messages in inbox
             if team.message_inbox and getattr(self.config, "enable_emergency_wakeup", True):
@@ -844,7 +847,7 @@ class ATTManager:
 
     def _auto_save(self):
         """Triggers a snapshot save if a database path is configured."""
-        if self.db_path:
+        if self.db_path and not getattr(self, "_suppress_auto_save", False):
             self.save_state()
 
     def save_state(self, db_path: Optional[str] = None):

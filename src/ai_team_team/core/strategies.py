@@ -85,8 +85,6 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
         agent.messages.append({"role": "system", "content": notice})
     agent.last_context = current_context
 
-    agent.messages.append({"role": "user", "content": prompt})
-
     enable_compression = manager.config.enable_memory_compression if manager else True
     max_turns = manager.config.max_memory_turns if manager else 20
 
@@ -140,6 +138,7 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
         latest_messages = agent.messages[slice_idx :]
         agent.messages = [first_msg, archive_message] + latest_messages
 
+    agent.messages.append({"role": "user", "content": prompt})
     return identity_header
 
 def parse_tool_args(args_str: str) -> Tuple[List[Any], Dict[str, Any]]:
@@ -480,11 +479,10 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
         try:
             identity_header = await _prepare_agent_context(team, agent, prompt, manager)
 
-            # Prepare native schemas
-            tool_schemas = []
+            # Prepare native tools
+            native_tools = []
             if getattr(team, "tools", None):
-                for tool in team.tools.values():
-                    tool_schemas.append(tool.json_schema)
+                native_tools = list(team.tools.values())
 
             agent_sys_inst = f"### YOUR INDIVIDUAL MISSION\n{agent.system_instructions}\n\n" if getattr(agent, "system_instructions", "") else ""
             native_system_instruction = (
@@ -511,7 +509,7 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                     require_json=False,
                     retries=retries,
                     backoff_factor=backoff,
-                    tools=tool_schemas if tool_schemas else None,
+                    tools=native_tools if native_tools else None,
                     return_response_obj=True,
                     manager=manager
                 )

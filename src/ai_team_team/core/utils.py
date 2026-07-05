@@ -106,10 +106,11 @@ async def generate_with_retry(
             if isinstance(e, TokenLimitExceededError):
                 raise e
             err_msg = str(e)
-            is_transient = any(
+            is_permanent = any(
                 term in err_msg.lower()
-                for term in ["rate limit", "timeout", "503", "500", "transient", "overloaded"]
+                for term in ["invalid api key", "unauthorized", "not found"]
             )
+            is_transient = not is_permanent
             
             if attempt == retries or not is_transient:
                 logger.error(f"LLM generation failed permanently on attempt {attempt}: {e}")
