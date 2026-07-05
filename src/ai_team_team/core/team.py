@@ -1,10 +1,6 @@
 import uuid
 import asyncio
 import logging
-import json
-import re
-import ast
-import inspect
 from typing import List, Dict, Optional, Tuple, Any, Union
 from ai_team_team.tool import Tool
 from ai_team_team.doc_library import DocumentLibrary
@@ -37,6 +33,15 @@ class AgentTeam:
         self.migration_count = 0
         self.doc_library: Optional[DocumentLibrary] = None
         self.is_running = False
+        self._cached_depth: Optional[int] = None
+        self._state_lock: Optional[asyncio.Lock] = None
+
+    @property
+    def state_lock(self):
+        import asyncio
+        if self._state_lock is None:
+            self._state_lock = asyncio.Lock()
+        return self._state_lock
 
 
     @property
@@ -49,8 +54,17 @@ class AgentTeam:
 
     @property
     def depth(self) -> int:
-        parent = self.parent_team
-        return (parent.depth + 1) if parent else 1
+        if self._cached_depth is not None:
+            return self._cached_depth
+        
+        d = 1
+        curr = self.parent_team
+        while curr is not None:
+            d += 1
+            curr = curr.parent_team
+            
+        self._cached_depth = d
+        return d
 
     def add_child_team(self, child: 'AgentTeam'):
         self.child_teams.append(child)

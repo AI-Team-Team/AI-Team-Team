@@ -8,10 +8,16 @@ class Agent:
         self.llm_client = llm_client
         self.role_description = role_description
         self.system_instructions = system_instructions
-        import asyncio
         self.messages: List[Dict[str, str]] = []
         self.last_context: Optional[Dict[str, Any]] = None
-        self.lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
+
+    @property
+    def lock(self):
+        import asyncio
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     def launch_att(
         self,

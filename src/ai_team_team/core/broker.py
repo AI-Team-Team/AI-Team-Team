@@ -26,8 +26,7 @@ class NegotiationBroker:
             return allow
 
         # Check for negotiated cross-lineage peer agreement
-        pair = (sender.team_id, recipient.team_id)
-        if pair in self.peer_talk_agreements:
+        if (sender.team_id, recipient.team_id) in self.peer_talk_agreements or (recipient.team_id, sender.team_id) in self.peer_talk_agreements:
             return True
 
         self.logger.warning(f"Communication denied between {sender.team_id} and {recipient.team_id}. No active agreement exists.")

@@ -495,7 +495,8 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if initiator_type == "individual" and caller_agent_name != "Unknown":
             proposal["votes"][caller_agent_name] = {"vote": "Agree", "public": True, "rationale": "Initiated proposal."}
             
-        actual_team.proposals[vp_id] = proposal
+        async with actual_team.state_lock:
+            actual_team.proposals[vp_id] = proposal
         return f"Vote proposal '{vp_id}' successfully initiated. Other members must vote using 'cast_vote'."
 
     async def cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str:
@@ -509,17 +510,18 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
             
-        if proposal_id not in actual_team.proposals:
-            return f"Error: Proposal '{proposal_id}' not found."
-            
-        prop = actual_team.proposals[proposal_id]
-        if prop.get("status") != "active":
-            return f"Error: Proposal '{proposal_id}' is already closed with status '{prop.get('status')}'."
-            
-        if vote not in {"Agree", "Disagree", "Abstain"}:
-            return "Error: Vote must be 'Agree', 'Disagree', or 'Abstain'."
-            
-        prop["votes"][caller_agent_name] = {
+        async with actual_team.state_lock:
+            if proposal_id not in actual_team.proposals:
+                return f"Error: Proposal '{proposal_id}' not found."
+                
+            prop = actual_team.proposals[proposal_id]
+            if prop.get("status") != "active":
+                return f"Error: Proposal '{proposal_id}' is already closed with status '{prop.get('status')}'."
+                
+            if vote not in {"Agree", "Disagree", "Abstain"}:
+                return "Error: Vote must be 'Agree', 'Disagree', or 'Abstain'."
+                
+            prop["votes"][caller_agent_name] = {
             "vote": vote,
             "public": bool(public),
             "rationale": rationale
@@ -612,18 +614,20 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
             
-        if proposal_id not in actual_team.proposals:
-            return f"Error: Proposal '{proposal_id}' not found."
+        async with actual_team.state_lock:
+            if proposal_id not in actual_team.proposals:
+                return f"Error: Proposal '{proposal_id}' not found."
+                
+            prop = actual_team.proposals[proposal_id]
+            if prop.get("status") != "active":
+                return f"Error: Proposal '{proposal_id}' is already closed."
+                
+            initiator_name = prop.get("initiator_name")
+            if prop.get("initiator_type") == "individual" and initiator_name != caller_agent_name:
+                return f"Error: Only the initiator '{initiator_name}' can retract this proposal."
+                
+            prop["status"] = "retracted"
             
-        prop = actual_team.proposals[proposal_id]
-        if prop.get("status") != "active":
-            return f"Error: Proposal '{proposal_id}' is already closed."
-            
-        initiator_name = prop.get("initiator_name")
-        if prop.get("initiator_type") == "individual" and initiator_name != caller_agent_name:
-            return f"Error: Only the initiator '{initiator_name}' can retract this proposal."
-            
-        prop["status"] = "retracted"
         return f"Successfully retracted proposal '{proposal_id}'."
 
     async def request_migration(target_parent_id: str, rationale: str) -> str:
