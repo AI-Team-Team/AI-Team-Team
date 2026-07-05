@@ -39,6 +39,7 @@ class MyLLMClient:
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
+        tools: Optional[List[Any]] = None,
         temperature: float = 0.3,
         require_json: bool = False,
         **kwargs
@@ -49,6 +50,7 @@ class MyLLMClient:
         Args:
             prompt: The user query or discussion history.
             system_instruction: Guidelines and context injected for the agent.
+            tools: Optional list of native `Tool` instances. Adapters MUST parse these into their provider's schema manually.
             temperature: Sampling temperature.
             require_json: If True, you MUST return a valid JSON string (used by the 3-AI Supervisory Team).
         """
@@ -84,6 +86,7 @@ async def my_generator_handler(
     model_name: str,
     prompt: str,
     system_instruction: Optional[str] = None,
+    tools: Optional[List[Any]] = None,
     temperature: float = 0.3,
     require_json: bool = False
 ) -> str:
@@ -245,6 +248,7 @@ async def my_generator_handler(
     model_name: str,
     prompt: str,
     system_instruction: Optional[str] = None,
+    tools: Optional[List[Any]] = None,
     temperature: float = 0.3,
     require_json: bool = False
 ) -> str:
@@ -253,12 +257,12 @@ async def my_generator_handler(
     real_name = config.get("model_name") if config else model_name
 
     if real_name == "gemini-3.5-flash":
-        return await call_gemini_sdk(prompt, system_instruction, temperature, require_json)
+        return await call_gemini_sdk(prompt, system_instruction, tools, temperature, require_json)
     elif real_name == "gpt-5.5":
-        return await call_openai_sdk(prompt, system_instruction, temperature, require_json)
+        return await call_openai_sdk(prompt, system_instruction, tools, temperature, require_json)
     
     # Fallback default model
-    return await call_default_sdk(prompt, system_instruction, require_json)
+    return await call_default_sdk(prompt, system_instruction, tools, require_json)
 
 manager.register_generator_handler(my_generator_handler)
 ```

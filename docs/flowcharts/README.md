@@ -10,12 +10,11 @@ This directory contains detailed technical flowcharts and Mermaid sequencing dia
 Please refer to the following documents for granular flow diagrams:
 
 1. **[Spawning, Escalation & Migration](Spawning_Escalation.md)**: Details the recursive `AgentTeam` lineages (Level 0 Root AI spawning Level 1 ATs, which recursively spawn deeper sub-teams of Level $N$), closed-loop parent escalation alerts, and LLM-arbitrated parent migrations.
-2. **[Gated Paginator Reading](Gated_Reading.md)**: Visualizes the context protection pre-filters, outline warnings, paginated chunk slicing, and the segment-based DocLib ACL path permission resolution.
-3. **[Negotiation Broker & Sibling Routing](Negotiation_Broker_Sibling_Routing.md)**: Sequences the dynamic P2P sibling and cross-lineage communication permissions negotiated by the `NegotiationBroker`.
-4. **[Supervisory Team Audits & Escalations](Supervisory_Team_Audit.md)**: Diagrams the 3-AI Supervisory Team's dialogue auditing and the recursive parent-ancestor climb escalation process.
-5. **[State Persistence & Recovery](State_Persistence.md)**: Visualizes the SQLite-backed auto-saving event triggers and the manager's two-pass deserialization pipeline.
-6. **[Discussion & ReAct Execution Loop](Execution_Loop.md)**: Visualizes the master multi-round debate sequence and the granular agent turn ReAct execution step compilation.
-7. **[Lineage Migration Arbitration Sequence](Lineage_Migration_Arbitration.md)**: Diagrams the step-by-step Least Common Ancestor (LCA) resolution, representatives harvesting, and LLM arbitration rounds during team migrations.
+2. **[Gated FileReader Size Limits](Gated_Reading.md)**: Visualizes the `read_file` token-protection logic, showing the "Outline View" structural fallback and dynamic line slicing triggers for massive files.
+3. **[Tooling & Execution Engines](Tooling_and_Execution.md)**: Combines the `ToolAuditor` execution interception sequence with the master multi-round debate ReAct loop (shielded by I/O suppression contexts) and parallel tool execution gathering.
+4. **[State Persistence & Recovery](State_Persistence.md)**: Visualizes the SQLite-backed auto-saving event triggers, ephemeral state cascading deletions, and the manager's two-pass deserialization pipeline with $O(1)$ constant-time caching.
+5. **[Lineage Tree Mutations](Lineage_Tree_Mutations.md)**: Consolidates the control flows governing dynamic sub-team spawning, sibling talk broker negotiation, and the deeply audited lineage migration LLM arbitration rounds.
+6. **[Supervision & Emergencies](Supervision_and_Emergencies.md)**: Maps the 3-AI Supervisory transcript audit loop, the recursive parent escalation tree, and the preemptive `enable_emergency_wakeup` task switching.
 
 ## Unified High-Level Flow Overview
 
@@ -32,7 +31,7 @@ flowchart TD
     
     ToolCall -- "execute_reasoning_step" --> StrategyCheck{"Supports native tool calling?"}
     
-    StrategyCheck -- "Yes (Native Mode)" --> NativeStrategy["Native tool calling strategy:<br/>1. Fetch schemas from resolver<br/>2. generate(prompt, tools=schemas)<br/>3. asyncio.gather() parallel execution"]
+    StrategyCheck -- "Yes (Native Mode)" --> NativeStrategy["Thorough Abstraction Paradigm:<br/>1. Fetch native List[Tool] objects<br/>2. generate(prompt, tools=native_tools)<br/>3. asyncio.gather() parallel execution"]
     StrategyCheck -- "No (Text ReAct Mode)" --> TextReAct["Text ReAct strategy:<br/>1. Thought-Action-Observation loop<br/>2. Parse XML tags or regex Actions<br/>3. Parse arguments via ast.literal_eval"]
     
     NativeStrategy --> ExecTool["Execute bound tool(s)<br/>(Intercepted by pre-execution ToolAuditor)"]

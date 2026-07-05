@@ -85,8 +85,29 @@ Do **NOT** attempt to pass raw `MagicMock` or `AsyncMock` objects expecting the 
         self.manager.register_tools_context({"att_manager": self.manager})
         
         # Provide deterministic LLM mock strings
-        async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):
+        async def mock_generate(prompt, system_instruction=None, tools=None, temperature=0.3, require_json=False):
             return '{"thought": "test", "commands": []}'
             
         self.manager.generator_handler = mock_generate
+```
+
+## 6. Concurrency & I/O Shielding Mocks
+
+When writing tests that evaluate `AgentTeam` mutations (like adding members or modifying proposals), you must ensure that your test logic respects the async `team.state_lock` and the `manager._suppress_auto_save()` context manager.
+
+To test these protected blocks without triggering actual DB hits or risking deadlocks in the test loop:
+
+```python
+        # 1. Mock the context manager correctly
+        from contextlib import contextmanager
+        
+        @contextmanager
+        def mock_suppress():
+            yield
+            
+        self.manager._suppress_auto_save = mock_suppress
+        
+        # 2. Acquire the lock explicitly during direct async mutation tests
+        async with team.state_lock:
+            team.proposals["VP-123"] = {"status": "active"}
 ```

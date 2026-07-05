@@ -17,12 +17,13 @@ To understand specific systems in detail, please refer to the following document
 
 1. **[Hierarchical Dynamic Delegation](Dynamic_Delegation.md)**: Explains the recursive `Agent` and `AgentTeam` lineages (Level 0 Root AI spawning Level 1 ATs, which recursively spawn deeper sub-teams of Level $N$), ReAct execution loops with safe literal evaluation, and the lineage escalation channels.
 2. **[Gated Context Protection & File Reading](Gated_Reading.md)**: Details the size-aware `GatedFileReader`, Outline Warning fallbacks, paginated line chunking, and the built-in collaborative `DocumentLibrary` (DocLib) storage system.
-3. **[Supervisor Auditor Team](Supervisory_Team.md)**: Details the dynamic **3-AI Supervisory Team** (Integrity, Continuity, and Deadlock Auditors) which monitors dialogue transcripts for circular deadlocks and performs recursive lineage parent escalations.
-4. **[State Persistence & Multi-Turn Memory](State_Persistence.md)**: Explains the SQLite-backed state snapshotting structure, ER diagrams, recovery lifecycles, Multi-Turn agent memory switches, turn-based dialogue pruning, and expert directory injection.
-5. **[Policy-Based Governance & Rules](Policies.md)**: Details inter-team communication rules (permissive, rule-gated, proxied) and parent hierarchy migration strategy-policies (ancestor approval, lineage path).
-6. **[Dual-Mode Tool Calling & Pluggable Strategies](Tool_Calling_Strategies.md)**: Explains the Strategy pattern decoupling of reasoning loops, automated tool schema resolver (signature, Pydantic, TypedDict), parallel concurrent tool calls via gather, and SQLite message serialization.
-7. **[Developer Testing & Mocking Guide](dev/testing.md)**: Guidelines for writing unit tests and mocking sequence responses.
-8. **[Developer API Reference](dev/API_Reference.md)**: Reference listing system internals and execution logic.
+3. **[Supervisor Auditor Team](Supervisory_Team.md)**: Details the dynamic **3-AI Supervisory Team** (Integrity, Continuity, and Deadlock Auditors) which monitors dialogue transcripts with explicit `messages.clear()` memory isolation to prevent OOM errors, and performs recursive lineage parent escalations.
+4. **[State Persistence & Multi-Turn Memory](State_Persistence.md)**: Explains the SQLite-backed state snapshotting structure, ER diagrams, recovery lifecycles with $O(1)$ constant-time depth caching, Multi-Turn agent memory switches, turn-based dialogue pruning, and expert directory injection.
+5. **[Team Governance & Communication Policies](Team_Governance.md)**: Details the communication inbox protocols, the `NegotiationBroker`, rule-gated cross-lineage permissions, lineage migration policies, token budget failover strategies, and the preemptive `asyncio` event-driven interruptions triggered by child team failures.
+6. **[Tool Execution & Development System](Tool_System.md)**: Explains the native tool-calling loop, Thorough Abstraction schema extraction, concurrent parallel executions, tool registration, and `ToolAuditor` pre-execution hooks.
+7. **[Core Objects Model](Core_Objects_Model.md)**: A deep-dive architectural data dictionary defining the internal memory mechanics and states of `ATTManager`, `AgentTeam`, and `Agent`.
+8. **[Developer Testing & Mocking Guide](dev/testing.md)**: Guidelines for writing unit tests and mocking sequence responses.
+9. **[Developer API Reference](dev/API_Reference.md)**: Reference listing system internals and execution logic.
 
 ## 📊 Visual Flowcharts Directory
 
