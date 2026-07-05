@@ -128,21 +128,20 @@ graph TD
     %% Tool Execution & Auditing Hook
     subgraph ToolExecution ["Tool Execution Gating"]
         ToolRegistry[Tool Registry: default & custom tools] -->|Intercepts & Vets| ToolAuditor[ToolAuditor Hook]
-        ToolRegistry -->|Extract Schemas| SchemaResolver["Schema Resolver<br/>(Signature, Pydantic, TypedDict, Dict)"]
         
         %% Text ReAct Flow
         TextReactStrategy -->|"1. Parse response for XML Action tags"| SafeASTParser["Safe AST Parser<br/>(ast.literal_eval arguments)"]
         SafeASTParser -->|"2. Execute Action"| ToolRegistry
         
         %% Native Flow
-        NativeStrategy -->|Resolve schemas| SchemaResolver
-        NativeStrategy -->|"1. generate(prompt, tools=schemas)"| Generator
-        Generator -->|"2. returns LLMResponse(text, tool_calls)"| NativeStrategy
+        NativeStrategy -->|"1. Fetch native Tool objects"| ThoroughAbstraction["Thorough Abstraction Paradigm"]
+        ThoroughAbstraction -->|"2. generate(prompt, tools=List[Tool])"| Generator
+        Generator -->|"3. returns LLMResponse(text, tool_calls)"| NativeStrategy
         
-        NativeStrategy -->|3. Run ToolCalls concurrently| ParallelExecute["asyncio.gather parallel execution"]
-        ParallelExecute -->|4. execute| ToolRegistry
-        ToolRegistry -->|5. return ToolResult| ParallelExecute
-        ParallelExecute -->|6. Append ToolResult messages| A1_Memory
+        NativeStrategy -->|4. Run ToolCalls concurrently| ParallelExecute["asyncio.gather parallel execution"]
+        ParallelExecute -->|5. execute| ToolRegistry
+        ToolRegistry -->|6. return ToolResult| ParallelExecute
+        ParallelExecute -->|7. Append ToolResult messages| A1_Memory
     end
     
     Manager -->|Registers Tools & Auditors| ToolRegistry

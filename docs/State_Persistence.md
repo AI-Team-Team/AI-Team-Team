@@ -204,8 +204,19 @@ The system automatically captures snapshots by invoking `manager._auto_save()` o
 * Executing reasoning steps and tools (`execute_reasoning_step`)
 * Direct writing/deleting file modifications inside libraries (`write_library_file`, `delete_library_file`)
 
+### I/O Suppression via Context Managers
+
+While atomic tools trigger immediate `_auto_save()` calls, sustained routines like `execute_team_discussion` employ an architectural **I/O Suppression Context Manager** (`manager._suppress_auto_save`).
+
+* During active team discussions, all intermediate auto-save hooks triggered by internal agent reasoning loops are intercepted and suppressed.
+* This explicitly shields the disk from excessive, high-frequency SQLite write bottlenecks.
+* A single, comprehensive batch save is naturally performed when the context manager block (the discussion round) safely concludes.
+
 **Incremental Upserts (O(1) updates):**
-To ensure high performance and prevent data fragmentation, the serialization engine uses **Explicit Query Upserts**. Rather than performing a destructive wipe (`DELETE FROM`) of the entire database, the engine queries the existing objects and incrementally updates their attributes in-place. Volatile collections like message logs and inboxes are isolated and re-inserted cleanly, ensuring constant-time updates for unchanged topology components.
+To ensure high performance and prevent data fragmentation, the serialization engine uses **Explicit Query Upserts**. Rather than performing a destructive wipe (`DELETE FROM`) of the entire database, the engine queries the existing objects and incrementally updates their attributes in-place.
+
+**Ephemeral State Cleanup & Integrity:**
+To prevent SQLite `IntegrityError` (duplicate keys) and "phantom" data restoration, highly volatile collections (such as `LibraryPermissionModel` and `TeamInboxModel`) undergo a strict cascading deletion phase during serialization. Before writing new records, the engine explicitly deletes existing rows bound to the active topology components, guaranteeing clean, collision-free insertions without orphaned state.
 
 **Fail-Fast Safety:**
 Database writes are strict. If `save_state` encounters an integrity, disk, or lock error, the framework will immediately escalate to a `RuntimeError` and cleanly crash. This prevents "phantom processing" where agents continue burning API tokens while their thoughts fail to persist to disk.
@@ -216,7 +227,7 @@ Database writes are strict. If `save_state` encounters an integrity, disk, or lo
 2. **Agent Cache Rebuilding**: Recreates `Agent` instances, restores their `llm_client` adapter, and re-sequences their multi-turn `messages`.
 3. **Physical File Restoration**: Iterates through `doc_lib_files`, clears local `.att_doc_libs/<lib_id>` folders inside the workspace root, and writes files back to disk.
 4. **Topology Lineage Reconstruction**: Two-pass deserialization of the lineage hierarchy:
-   * First pass: Instantiates teams, sets parameters, status maps, and sibling permissions.
+   * First pass: Instantiates teams, sets parameters, status maps, and sibling permissions. It also hydrates the $O(1)$ cached `depth` directly from the database column, bypassing expensive recursive tree traversals on heavily nested topologies.
    * Second pass: Hooks up dual-linked node references (`parent_team` and `child_teams`) and restores their `creator` object pointers.
 5. **Tool & Library Binding**: Binds permissions, restores member arrays, links built-in libraries, and registers system tools.
 6. **Agreements & Inboxes**: Hydrates active proposals, unresolved inboxes, and negotiated broker agreements.

@@ -10,7 +10,8 @@ This flowchart sequences the multi-round cooperative debate process executed whe
 flowchart TD
     Start["Call manager.execute_team_discussion(team, prompt, rounds)"] --> Init["1. Setup transcript logs\n2. Initialize discussion round = 1"]
     
-    Init --> LoopRounds{"round <= total_rounds?"}
+    Init --> SuppressIOGate["with manager._suppress_auto_save():\n(Blocks high-frequency SQLite writes)"]
+    SuppressIOGate --> LoopRounds{"round <= total_rounds?"}
     
     LoopRounds -- "Yes" --> MemberIteration["Iterate through each member (Agent) in team"]
     
@@ -61,7 +62,13 @@ flowchart TD
     %% --- Text ReAct Strategy Flow ---
     InitReAct --> ReActLoop{"step <= react_max_steps?"}
     ReActLoop -- "Yes" --> LLMCall["Invoke Agent.llm_client.generate()"]
-    LLMCall --> ParseAction["Parse response for actions (XML tags or Action: tool_name)"]
+    
+    LLMCall --> CatchFailover{"Token Limit Hit?"}
+    CatchFailover -- "Yes" --> FailoverPop["messages.pop()\nPurge duplicated user prompt"]
+    FailoverPop --> ModelSwap["Hot-swap client via Failover Policy"]
+    ModelSwap --> LLMCall
+    
+    CatchFailover -- "No" --> ParseAction["Parse response for actions (XML tags or Action: tool_name)"]
     ParseAction --> ActionType{"Action found?"}
     ActionType -- "No (Final Answer)" --> SetFinalAnswer["Append Final Answer to memory\nBreak Loop"]
     ActionType -- "Yes (Tool Call)" --> SafeASTParse["Parse arguments using safe ast.literal_eval\n(Handles unquoted multiline strings & commas)"]
@@ -79,8 +86,15 @@ flowchart TD
     
     %% --- Native Strategy Flow ---
     InitNative --> NativeLoop{"round <= max_tool_rounds?"}
-    NativeLoop -- "Yes" --> LLMNativeCall["Invoke Agent.llm_client.generate(tools=tool_schemas)"]
-    LLMNativeCall --> NativeResponse{"tool_calls returned?"}
+    NativeLoop -- "Yes" --> FetchTools["Thorough Abstraction:\nFetch native Tool objects"]
+    FetchTools --> LLMNativeCall["Invoke Agent.llm_client.generate(tools=native_tools)"]
+    
+    LLMNativeCall --> CatchNativeFailover{"Token Limit Hit?"}
+    CatchNativeFailover -- "Yes" --> FailoverNativePop["messages.pop()\nPurge duplicated user prompt"]
+    FailoverNativePop --> ModelNativeSwap["Hot-swap client via Failover Policy"]
+    ModelNativeSwap --> LLMNativeCall
+    
+    CatchNativeFailover -- "No" --> NativeResponse{"tool_calls returned?"}
     
     NativeResponse -- "Yes (Structured calls)" --> SaveToolCall["Save Assistant message with tool_calls (JSON) to DB"]
     SaveToolCall --> ParallelExecute["Execute all tool calls concurrently via asyncio.gather()"]

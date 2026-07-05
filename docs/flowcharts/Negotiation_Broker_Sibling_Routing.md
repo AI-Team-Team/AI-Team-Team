@@ -32,11 +32,11 @@ This flowchart outlines the gating logic executed inside `NegotiationBroker.nego
 flowchart TD
     %% negotiate_communication flow
     Start1["Call negotiate_communication(sender, recipient)"] --> SiblingCheck{"sender_parent == recipient_parent?\n(Sibling Team Check)"}
-    SiblingCheck -- "Yes" --> ParentSiblingTalk{"Parent rules set\nallow_sibling_talk == True?"}
+    SiblingCheck -- "Yes" --> ParentSiblingTalk{"Evaluates shared parent's rules:\nallow_sibling_talk == True?"}
     ParentSiblingTalk -- "Yes" --> ApproveSibling["Return True"]
     ParentSiblingTalk -- "No" --> DenySibling["Return False"]
     
-    SiblingCheck -- "No" --> AgreementCheck{"(sender_id, recipient_id) in\npeer_talk_agreements?"}
+    SiblingCheck -- "No" --> AgreementCheck{"Symmetric Bidirectional Lookup:\n(sender_id, recipient_id) OR (recipient_id, sender_id)\nin peer_talk_agreements?"}
     AgreementCheck -- "Yes" --> ApproveSibling
     AgreementCheck -- "No" --> DenySibling
 

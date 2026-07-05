@@ -22,7 +22,7 @@ At the end of a team discussion, the Supervisory Team performs a batch audit of 
 
 1. **Context Compression**: If the target dialogue transcript is extremely long (exceeding 8,000 characters), it is summarized using a fast LLM context-compression prompt to minimize token window overhead while preserving core reasoning continuity and deadlock indicators.
 2. **Transient Committee AT**: The manager creates a transient `AgentTeam` with the 3 auditor agents as members. This team is temporary, stateless, and is not registered in the manager's active topology tree.
-3. **Audit Committee Debate**: The auditors debate the health of the target transcript for exactly 2 rounds. This debate runs with `skip_audit=True` to break the recursion loop at depth 1.
+3. **Audit Committee Debate & Memory Isolation**: The auditors debate the health of the target transcript for exactly 2 rounds. This debate runs with `skip_audit=True` to break the recursion loop at depth 1. Architecturally, all supervisory agents perform a mandatory `messages.clear()` operation immediately prior to injecting the audit prompt. This hard memory boundary ensures that infinite, long-running server sessions never leak memory or breach token limits.
 4. **Consensus Synthesis**: The debate transcript is passed to a consensus synthesis prompt that extracts their combined consensus.
 
 ### Audit Output Format

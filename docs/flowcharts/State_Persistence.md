@@ -24,7 +24,7 @@ flowchart TD
     Save5 --> AutoSave
     Save6 --> AutoSave
     
-    AutoSave --> SerializeORM["1. Begin database transaction\n2. Map models (AgentModel, TeamModel, etc.)\n3. Commit serialization changes to SQLite"]
+    AutoSave --> SerializeORM["1. Begin database transaction\n2. Map models (AgentModel, TeamModel, etc.)\n3. Execute Ephemeral State Cascading Deletion\n(e.g., LibraryPermissionModel)\n4. Commit serialization changes to SQLite"]
     SerializeORM --> End["State snapshot saved successfully"]
 ```
 
@@ -42,7 +42,7 @@ flowchart TD
     
     Step2Agents --> Step3DocLib["Phase 3: Physical File Restoration\n- Clear local folder .att_doc_libs/<lib_id>\n- Write DB blobs back to local directories"]
     
-    Step3DocLib --> Step4Lineage1["Phase 4: Two-Pass Lineage Reconstruction\n(Pass 1: Node Instantiation)\n- Recreate AgentTeam instances\n- Restore status maps, inboxes, and proposals"]
+    Step3DocLib --> Step4Lineage1["Phase 4: Two-Pass Lineage Reconstruction\n(Pass 1: Node Instantiation)\n- Recreate AgentTeam instances\n- Restore status maps, inboxes, and proposals\n- Hydrate O(1) cached team depth directly from DB"]
     
     Step4Lineage1 --> Step5Lineage2["Phase 4: (Pass 2: Pointer Resolution)\n- Resolve parent_team / child_teams tree references\n- Hook up creator agent / team object pointers"]
     

@@ -57,8 +57,10 @@ When a communication attempt via `send_peer_message` is blocked by a non-permiss
 
 - **Sibling Block** (if sender parent matches target parent):
   `"Error: Permission Denied. Sibling talk is not authorized. You must call set_sibling_talk(child_id='<target_team_id>', allow=True) via your parent to request access."`
+  *Architectural Note*: Sibling authorization rigorously evaluates the rules of the *shared parent team*. This design intrinsically prevents routing mismatches where a child attempts to override its own access control.
 - **Cross-Lineage Block** (if sender parent does not match target parent):
   `"Error: Permission Denied. Cross-lineage agreement does not exist. You must call negotiate_peer_talk(target_team_id='<target_team_id>', rationale='...') first to establish a tunnel."`
+  *Architectural Note*: Cross-lineage tunnels utilize a **Bi-directional Agreement Lookup**. The `NegotiationBroker` checks both `(Sender, Recipient)` and `(Recipient, Sender)` symmetrically. This resilient lookup guarantees that tunnels remain active and accessible regardless of which side initiated the database agreement.
 
 This mechanism actively trains agents to dynamically adjust and call the correct permissions-resolution tools when encountering policy gates.
 

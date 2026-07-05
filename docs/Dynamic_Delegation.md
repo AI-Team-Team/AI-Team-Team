@@ -39,6 +39,8 @@ The ATT framework abstracts reasoning execution into distinct strategies to deco
    Final Answer: Timeline conflict found: Iris is dead, contradiction exists.
    ```
 
+   * **Failover Prompt Protection**: If an agent hits a token limit during the strategy generation phase, the failover loop actively intercepts the retry phase. To prevent the latest user prompt from being repeatedly stuffed into the context queue during a model swap, the loop safely pops the orphaned prompt (`messages.pop()`) before retrying.
+
 2. **Robust Action & Safe Argument Parser**:
    To ensure high parsing resilience under varying LLM temperatures or when using smaller models, the ReAct parser supports multiple action parsing strategies:
    * **Alternative XML Tag Format**: The parser natively extracts actions structured as XML tags, e.g. `<action name="tool_name">arguments</action>`. If the arguments inside the XML block are wrapped in Markdown code fences (e.g., ` ```python ... ``` `), the parser automatically strips them.
@@ -105,3 +107,4 @@ To ensure team autonomy and collaborative membership management, the ATT framewo
 * **Unanimous Participation**: The vote remains active and pending in the team's context. A proposal is only resolved and evaluated once **all** active members of the team have explicitly cast their vote (`"Agree"`, `"Disagree"`, or `"Abstain"`).
 * **Consensus Gate**: If all members have voted, the framework calculates the ratio of `"Agree"` votes. A **$\ge 2/3$ majority** of total members is required to approve the proposal. Approved proposals execute their action (creating/appending the new agent or deleting the target agent); if the team is actively running a debate session, the execution is deferred to the end of the current round to prevent message list and execution state misalignment. Rejected proposals are closed without modification.
 * **Anonymous Voting (Public vs. Private Ballots)**: The `cast_vote` tool accepts an optional `public: bool` parameter (default: `True`). Setting `public=False` enforces voter anonymity: the voter's identity is masked as `"Anonymous Voter"` in the active membership votes queue injected into the team's prompt context, while still allowing the system to verify that all distinct members have voted.
+* **Concurrency Safety (State Locking)**: All democratic voting actions (`initiate`, `cast_vote`, `retract`) mutate the shared `team.proposals` structure. To guarantee memory safety during parallel `asyncio.gather` tool executions (Native Mode), the `AgentTeam` utilizes a lazy-initialized `state_lock` (`asyncio.Lock`). Every structural mutation to the team's proposal queue is strictly wrapped in this asynchronous mutex, preventing race conditions.

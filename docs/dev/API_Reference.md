@@ -33,7 +33,8 @@ Represents a dynamic team of at least 3 agents ($N \ge 3$) executing discussions
 
 * **Properties**:
   * `parent_team -> Optional[AgentTeam]`: Resolves the parent team in the lineage tree.
-  * `depth -> int`: Returns the lineage depth of the team (Level 1, Level 2, ..., Level $N$).
+  * `depth -> int`: Returns the lineage depth of the team (Level 1, Level 2). It is memoized and hydrates in $O(1)$ constant time from SQLite.
+  * `state_lock -> asyncio.Lock`: Asynchronous mutex safeguarding proposal structural mutations during parallel Native tool executions.
 * **Methods**:
   * `launch_att(...) -> AgentTeam`: Allows the active team to recursively spawn a child team.
   * `receive_message(message: Dict[str, Any])`: Appends incoming signals or parent alerts to the team's inbox queue.
@@ -67,8 +68,10 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
     Registers an auditing hook callback that intercepts specific tool calls before execution.
   * `register_tools_context(context: Dict[str, Any])`
     Registers system resources context (databases, file readers) and automatically binds coordination tools to all teams.
-  * `create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None) -> AgentTeam`
+  * `create_agent_team(...) -> AgentTeam`
     Spawns a new team of size $N \ge 3$, establishes parent-child lineages, and binds generic/custom tools.
+  * `_suppress_auto_save() -> ContextManager`
+    Context manager that shields SQLite from high-frequency serialization writes during intensive team discussions.
   * `execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`
     Executes a multi-agent debate session, automatically injecting unresolved inbox alerts, and running supervisory transcript audits.
   * `find_parent_team(target: AgentTeam) -> Optional[AgentTeam]`

@@ -8,7 +8,8 @@ This flowchart outlines the sequence executed on every dynamic debate turn or di
 
 ```mermaid
 flowchart TD
-    Start["Call audit_team_dialog(team, transcript)"] --> FormulatePrompt["Assemble Audit Prompt containing\nthe multi-agent debate transcript"]
+    Start["Call audit_team_dialog(team, transcript)"] --> MemoryBarrier["Hard Memory Isolation:\nagent.messages.clear()\n(Prevents OOM during infinite audits)"]
+    MemoryBarrier --> FormulatePrompt["Assemble Audit Prompt containing\nthe multi-agent debate transcript"]
     
     FormulatePrompt --> BatchCall["Run 3-AI Auditor consensus check:\n1. Integrity Auditor (logic safety)\n2. Continuity Auditor (progress checks)\n3. Deadlock Auditor (circular loops)\n(Single batch LLM JSON call)"]
     

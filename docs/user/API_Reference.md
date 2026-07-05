@@ -245,7 +245,7 @@ class LLMClientProto(Protocol):
         self,
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List[Any]] = None,
         temperature: float = 0.7,
         require_json: bool = False
     ) -> LLMResponse:
@@ -255,7 +255,7 @@ class LLMClientProto(Protocol):
         Args:
             prompt: The user query or discussion history (string or list of message dicts).
             system_instruction: Guidelines and context injected for the agent.
-            tools: Optional list of structured tool schemas.
+            tools: Optional list of native `Tool` objects (Thorough Abstraction) to be resolved by the adapter.
             temperature: Sampling temperature.
             require_json: If True, the model MUST return a valid JSON string.
         """
