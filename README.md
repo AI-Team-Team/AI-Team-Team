@@ -37,21 +37,21 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Permits active teams to request parent-hierarchy migrations, arbitrated by modular strategies with loop/cycle detection and parent notification logs.
 * **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects an ASCII-drawn indented tree map of active teams (displaying purposes, status, and progress metrics in real-time) directly into the agent prompt context.
 * **[Global Expert Discovery](docs/State_Persistence.md)**: Automatically appends a directory of all active system experts (names, roles, and profiles) into the agent's identity context to facilitate peer discovery.
-* **[Resilient Failover Routing](docs/Policies.md#4-token-budget--failover-policies)**: Dynamically hot-swaps exhausted or failing model clients. Supports two routing strategies: `"auto"` (selects first candidate model under budget) and `"parent"` (synchronously delegates the choice to the parent representative LLM to prevent execution deadlocks).
+* **[Resilient Failover Routing](docs/Team_Governance.md#5-token-budget--failover-policies)**: Dynamically hot-swaps exhausted or failing model clients. Supports two routing strategies: `"auto"` (selects first candidate model under budget) and `"parent"` (synchronously delegates the choice to the parent representative LLM to prevent execution deadlocks).
 
 ### 🧠 ReAct Loops & Execution Engine
 
 * **Bounded ReAct Loops**: Executes standard Thought/Action/Observation reasoning cycles, capped by max steps to prevent runaway API tokens.
 * **Robust Argument Parser**: A safe literal lexical parser (`ast.literal_eval`) with multiline XML support, code block stripping, and a comma-merging heuristic to handle unquoted complex strings (like SQL queries).
-* **[Dialogue Memory Compression](docs/State_Persistence.md)**: Automates memory pruning by summarizing early conversation turns using the agent's LLM while preserving the latest high-fidelity messages.
-* **[Model Registry & Callbacks](docs/user/Quickstart.md#7-model-registry-and-global-generator-callback)**: Delegates all LLM generation logic to a single global callback handler (`generator_handler`), keeping the framework lightweight and vendor-independent.
-* **[Token Budget Circuit Breakers](docs/Policies.md#4-token-budget--failover-policies)**: Enforces session-wide token budget limits per model registry alias, pre-checking prompt tokens via Hugging Face `tokenizers` (with safe offline character fallback) to trigger circuit breakers before API call invocation.
+* **[O(1) Memory Compression](docs/State_Persistence.md)**: Automates memory pruning by extracting early conversation turns, calling the agent's LLM to generate a `*** HISTORICAL SUMMARY ARCHIVE ***`, and splicing it back to prevent Out-Of-Memory (OOM) failures.
+* **[LLM Adapter Architecture](docs/Tool_System.md)**: Unifies sync, async, and streaming LLM payloads from various providers (Google, OpenAI, Anthropic) into standard `LLMResponse` and `ToolCall` formats via the `ManagerDefaultClientAdapter`.
+* **[Token Budget Circuit Breakers](docs/Team_Governance.md#5-token-budget--failover-policies)**: Enforces session-wide token budget limits per model registry alias, pre-checking prompt tokens via Hugging Face `tokenizers` (with safe offline character fallback) to trigger circuit breakers before API call invocation.
 
 ### 🗳️ Governance & Inter-Team Communication
 
 * **[Democratic Voting System](docs/Dynamic_Delegation.md#5-team-governance-&-democratic-voting-system)**: Features an asynchronous voting pipeline to add or remove members, requiring unanimous participation and a $\ge 2/3$ agreement majority.
 * **Anonymous Voting**: Enforces voter anonymity via `cast_vote(..., public=False)` which masks voter names as `"Anonymous Voter"` in the team prompt context.
-* **[Negotiation Broker](docs/Dynamic_Delegation.md#4-consolidated-autonomy-tools)**: Regulates P2P messaging and agreement tunnels through dynamic parent rules (allowing regex purpose/lineage checks) or interactive LLM leader proxies.
+* **[Proxied Negotiation Broker](docs/Team_Governance.md)**: Regulates P2P messaging and cross-lineage tunnels. The `"proxied"` policy identifies Representative Agents (Team Leaders) of both the Sender and Recipient parents, orchestrating parallel LLM evaluations to jointly authorize secure Peer-to-Peer messaging.
 
 ### 🔒 Context Protection & Safety Gates
 
@@ -61,8 +61,8 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 
 ### 💾 Persistence & Diagnostics
 
-* **[SQLite State Snapshots](docs/State_Persistence.md)**: Automatically serializes topologies, lineages, memory logs, DocLib files, and active voting proposals to SQLite on state changes, enabling 100% crash-recovery.
-* **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A non-participating 3-AI Supervisory Team (Integrity, Continuity, Deadlock) reviews round transcripts, recursively escalating anomalies up the tree lineage.
+* **[SQLite State Snapshots](docs/State_Persistence.md)**: Automatically serializes topologies, lineages, memory logs, DocLib files, and active voting proposals to SQLite on state changes, enabling 100% crash-recovery. Uses $O(1)$ cascading `notin_` queries to garbage-collect orphaned messages.
+* **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A non-participating 3-AI Supervisory Team executes parallel LLM evaluations (Integrity Auditor, Continuity Auditor, Deadlock Auditor) to review round transcripts, recursively escalating anomalies up the tree lineage.
 * **Decoupled Dashboards**: Exposes clear runtime callback event hooks (`on_status_change`, `on_activity_added`, `on_log_append`) to update console UIs without codebase pollution.
 
 ## 📦 Installation
@@ -97,7 +97,7 @@ graph TD
     %% Coordinator Layer
     subgraph Coordinator ["ATT Coordinator Layer"]
         Manager[ATTManager] <-->|Auto-Save & Restore state| SQLite[(SQLite Database)]
-        SQLite -.->|"AgentMessageModel (tool_calls, tool_call_id, name)"| SQLite
+        SQLite -.->|"O(1) Cascading notin_ Garbage Collection"| SQLite
         Manager -->|Resolve Model Configs| ModelRegistry[Model Registry & Presets]
         ModelRegistry -->|Route Requests| Generator[Global Generator Handler]
         Manager -->|Tracks Subscribed Callbacks| EventHooks["Event Callbacks: on_status_change, on_activity_added, on_log_append, on_team_migration, on_emergency_escalation"]
@@ -112,11 +112,11 @@ graph TD
     subgraph Lineage ["Hierarchical Team Lineage (Arbitrary Depth)"]
         subgraph TeamA_Node ["Agent Team A - Level 1 (N >= 3 Members)"]
             Agent_A1["Agent A1"] <-->|True Multi-Turn Memory| A1_Memory[(Agent Messages Buffer)]
-            A1_Memory -->|Turns > Max + 2| MemoryPruning["Memory Pruning & LLM Summarization"]
+            A1_Memory -->|Turns > Max + 2| MemoryPruning["Memory Pruning & LLM Summarization<br/>(Preserves latest context bounds)"]
             Agent_A1 -->|execute_reasoning_step| StrategySelector{Strategy Selector}
             
             %% Strategy routes
-            StrategySelector -->|"Config Mode / supports_native_tool_calling"| Strategy{Pluggable Reasoning Strategy}
+            StrategySelector -->|"Config Mode: 'auto' / supports_native_tool_calling"| Strategy{Pluggable Reasoning Strategy}
             Strategy -->|Text ReAct Strategy| TextReactStrategy["TextReactReasoningStrategy<br/>(Sequential Thought-Action-Observation)"]
             Strategy -->|Native Strategy| NativeStrategy["NativeReasoningStrategy<br/>(Structured Parallel Tool Calling)"]
         end
@@ -174,8 +174,8 @@ graph TD
         CommPolicy -->|Evaluate Sibling Rules & Lineage Contracts| SubTeamN
         CommPolicy -.->|"Approve / Deny Tunnel"| TeamB
         
-        %% Sibling routing
-        Broker -.->|"Sibling: Check parent's allow_sibling_talk rule"| Broker
+        %% Proxied flow
+        Broker -.->|"Proxied: LLM evaluations by both Parent Reps"| Broker
         Agent_A1 -.->|"set_sibling_talk(child_id, allow)"| Broker
     end
     
@@ -211,7 +211,7 @@ graph TD
         
         %% Emergency wakeup
         ParentInbox -->|Message received & idle| WakeupGate{"enable_emergency_wakeup?"}
-        WakeupGate -- "Yes" --> EmergencyWakeup["execute_emergency_discussion<br/>(Runs emergency debate rounds)"]
+        WakeupGate -- "Yes" --> EmergencyWakeup["execute_emergency_discussion<br/>(Reads deferred ParentInbox alerts & triggers debate)"]
     end
     
     Manager -.->|Orchestrates Audits| Supervisor
@@ -277,7 +277,7 @@ graph TD
 
 ```python
 from typing import Union, List, Dict, Optional
-from ai_team_team import ATTManager, Agent, ATTConfig, GatedFileReader
+from ai_team_team import ATTManager, Agent, ATTConfig
 
 # 1. Configure the framework
 config = ATTConfig(
@@ -285,7 +285,12 @@ config = ATTConfig(
     max_delegation_depth=2,
     min_subagent_team_size=3,
     subagent_discussion_rounds=2,
-    react_max_steps=5
+    react_max_steps=5,
+    enable_memory_compression=True,       # Extends max tokens via O(1) multi-turn summarization
+    failover_policy="auto",               # Automatically hot-swaps LLM client on TokenLimitError
+    enable_emergency_wakeup=True,         # Enables deferred inbox processing for emergencies
+    tool_calling_mode="auto",             # Auto-detects Pluggable Reasoning Strategy (Native or TextReAct)
+    strict_state_persistence=True         # Enables ORM cascading garbage collection
 )
 
 # 2. Setup Root Agent (client is dynamically resolved if omitted)
@@ -324,6 +329,10 @@ To integrate custom LLM backends (e.g., Google GenAI, OpenAI, Anthropic, or loca
 ```python
 from typing import Optional, Protocol, Union, List, Dict, Any
 
+class LLMResponse:
+    text: str
+    tool_calls: Optional[List[Dict[str, Any]]]
+
 class LLMClientProto(Protocol):
     async def generate(
         self,
@@ -336,7 +345,7 @@ class LLMClientProto(Protocol):
         """
         Generates a text completion or returns structured tool calls.
         When require_json=True is requested by SupervisoryTeam consensus audits,
-        the model must return a valid, parsable JSON string.
+        the model must return a valid, parsable JSON string via the LLMResponse.text property.
         """
         ...
 
@@ -458,7 +467,8 @@ manager.on_emergency_escalation = my_emergency_callback
 team = manager.create_agent_team(
     creator=root_agent,
     member_count=3,
-    preset_name="analysts"
+    preset_name="analysts",
+    team_purpose="Audit the system logic mapping for project A."
 )
 
 # Run cooperative multi-round debate
@@ -480,9 +490,45 @@ tree_representation = manager.render_topology_tree()
 print(tree_representation)
 # Outputs:
 # - [Root AI: Root_AI] (Level 0)
-#   ├── AT-abc123 (Purpose: Spec Review) [Level 1]
+#   ├── AT-abc123 (Purpose: Audit the system logic mapping for project A.) [Level 1]
 #   │    └── AT-def456 (Purpose: Security Check) [Level 2]
 #   └── AT-xyz789 (Purpose: Docs Generation) [Level 1]
+```
+
+### 7. Rule-Gated P2P Communication
+
+When using `config.communication_policy = "rule_gated"`, you can explicitly define regex-based routing rules allowing teams to open P2P tunnels based on target ID, parent ID, or regex purpose matching:
+
+```python
+# 1. Enable Rule-Gated Policy
+config = ATTConfig(communication_policy="rule_gated")
+
+# 2. Assign Regex/ACL Rules to a Team
+team.communication_rules = {
+    "allow_sibling_talk": False,
+    "rules": [
+        "allow_purpose:^Audit.*",  # Allow messaging any team whose purpose starts with "Audit"
+        "allow_team:AT-def456",    # Directly allow messaging a specific Team ID
+        "allow_parent:AT-xyz789"   # Allow messaging any team spawned by Parent AT-xyz789
+    ]
+}
+```
+
+### 8. Native Strategy (Structured Tool Calling)
+
+By default, ATT uses `tool_calling_mode="auto"`, which falls back to Text-ReAct XML parsing. If your LLM supports native JSON schema function calling (e.g., OpenAI `tools` array), you can force Native parallel execution:
+
+```python
+# 1. Force native structured tool calling
+config.tool_calling_mode = "native"
+
+# 2. Ensure your model is registered as supporting native tools
+manager.register_model("gpt-4o", {
+    "supports_native_tool_calling": True
+})
+
+# Under the hood, ManagerDefaultClientAdapter will route tools as JSON schemas
+# and execute returned ToolCalls concurrently via asyncio.gather.
 ```
 
 ## ⚙️ Advanced Configuration
@@ -510,6 +556,11 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `migration_policy` | `str` | `"ancestor_approval"` | The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`. |
 | `enable_emergency_wakeup` | `bool` | `True` | Whether to trigger active wake-up discussion on idle parent teams upon receiving high-priority child anomalies. |
 | `emergency_discussion_rounds` | `int` | `1` | The number of emergency discussion rounds executed when a team is woken up. |
+| `tool_calling_mode` | `str` | `"auto"` | Strategy for invoking tools. `"native"`, `"react"`, or `"auto"`. |
+| `max_tool_rounds` | `int` | `5` | Max depth of native parallel tool calls during a reasoning step. |
+| `model_token_limits` | `dict` | `None` | Mapping of model aliases to their token budget limits (used for failover routing). |
+| `failover_policy` | `str` | `"auto"` | Fallback strategy on token exhaustion: `"auto"` (next available) or `"parent"` (LLM debate proxy). |
+| `strict_state_persistence` | `bool` | `True` | Enforcement of $O(1)$ cascading ORM deletions for unreferenced messages and artifacts. |
 
 ### `GatedFileReader` Parameters
 
@@ -525,13 +576,11 @@ Configure file reading gates to safeguard the prompt context from massive logs o
 For visual flowcharts and sequencing diagrams detailing the runtime loops, gated checks, and state serialization flows, refer to:
 
 * **[ATT Autonomy Suite Flowcharts Index](docs/flowcharts/README.md)**
-* **[Discussion & ReAct Execution Loop](docs/flowcharts/Execution_Loop.md)**
+* **[Tooling & Execution (Adapters, ReAct, Memory Compression)](docs/flowcharts/Tooling_and_Execution.md)**
+* **[State Persistence (SQLite Recovery & ORM Deletions)](docs/flowcharts/State_Persistence.md)**
+* **[Lineage Tree Mutations (Spawning, Voting, Proxied Negotiation)](docs/flowcharts/Lineage_Tree_Mutations.md)**
+* **[Supervision & Emergencies (3-AI Audits, Emergency Wakeup)](docs/flowcharts/Supervision_and_Emergencies.md)**
 * **[Gated Paginator Reading & DocLib ACL Traversal](docs/flowcharts/Gated_Reading.md)**
-* **[Spawning, Voting, & Migration Sequence](docs/flowcharts/Spawning_Escalation.md)**
-* **[Negotiation Broker Sibling Gating Sequence](docs/flowcharts/Negotiation_Broker_Sibling_Routing.md)**
-* **[3-AI Supervisory Dialogue Audit & Escalation](docs/flowcharts/Supervisory_Team_Audit.md)**
-* **[SQLite Database Auto-Save & Recovery Pipeline](docs/flowcharts/State_Persistence.md)**
-* **[Lineage Migration Arbitration Sequence](docs/flowcharts/Lineage_Migration_Arbitration.md)**
 
 ## 📄 License
 
