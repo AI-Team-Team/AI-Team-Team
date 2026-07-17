@@ -24,6 +24,7 @@ class ATTConfig:
         emergency_discussion_rounds: int = 1,
         tool_calling_mode: str = "auto",
         max_tool_rounds: int = 5,
+        max_tool_retries: int = 3,
         model_token_limits: Optional[Dict[str, int]] = None,
         model_tokenizer_configs: Optional[Dict[str, str]] = None,
         failover_policy: str = "auto",
@@ -51,6 +52,7 @@ class ATTConfig:
         self.emergency_discussion_rounds = emergency_discussion_rounds
         self.tool_calling_mode = tool_calling_mode
         self.max_tool_rounds = max_tool_rounds
+        self.max_tool_retries = max_tool_retries
         self.model_token_limits = model_token_limits or {}
         self.model_tokenizer_configs = model_tokenizer_configs or {}
         self.failover_policy = failover_policy

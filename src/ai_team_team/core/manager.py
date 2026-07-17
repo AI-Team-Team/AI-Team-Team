@@ -346,7 +346,7 @@ class ATTManager:
 
         def get_agent_client_by_name(client_name: Optional[str]) -> Any:
             default_wrapper = ManagerDefaultClientAdapter(self)
-            if client_name:
+            if client_name and client_name != "default":
                 if client_name in self.llm_clients:
                     return self.llm_clients[client_name]
                 elif client_name in self.model_configs and self.generator_handler:
@@ -356,7 +356,8 @@ class ATTManager:
                         adapter._supports_native = config.get("supports_native_tool_calling", False)
                     return adapter
                 else:
-                    self.logger.warning(f"Client '{client_name}' not found in registry. Falling back to default client.")
+                    available = list(self.model_configs.keys()) + list(self.llm_clients.keys())
+                    raise ValueError(f"Model '{client_name}' is not registered. Available models are: {available}.")
             if "default" in self.llm_clients:
                 return self.llm_clients["default"]
             if self.root_ai.llm_client:
@@ -740,11 +741,14 @@ class ATTManager:
                                 sys_inst = prop["proposed_details"].get("system_instructions", "")
                                 
                                 client = None
-                                if model_name in self.llm_clients:
-                                    client = self.llm_clients[model_name]
-                                elif model_name in self.model_configs and self.generator_handler:
-                                    from .adapters import HandlerClientAdapter
-                                    client = HandlerClientAdapter(model_name, self.generator_handler)
+                                if model_name and model_name != "default":
+                                    if model_name in self.llm_clients:
+                                        client = self.llm_clients[model_name]
+                                    elif model_name in self.model_configs and self.generator_handler:
+                                        from .adapters import HandlerClientAdapter
+                                        client = HandlerClientAdapter(model_name, self.generator_handler)
+                                    else:
+                                        raise ValueError(f"Model '{model_name}' is not registered.")
                                 else:
                                     client = ManagerDefaultClientAdapter(self)
                                     

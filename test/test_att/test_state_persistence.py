@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, AsyncMock
 
 # Setup paths
 CURRENT_DIR = os.path.dirname(__file__)
-ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
+ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
 SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
@@ -37,6 +37,7 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
             root_ai=self.root_ai,
             db_path=self.db_path
         )
+        self.manager.llm_clients["critic"] = self.mock_react_client
         self.manager.register_tools_context({"att_manager": self.manager})
 
     def tearDown(self):

@@ -234,6 +234,15 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             member_count = len(member_configs)
             if member_count < min_size:
                 return f"Error: A valid Agent Team MUST have at least {min_size} members. Please define at least {min_size} roles in member_configs to spawn this team."
+            
+            # Validate model names
+            for r_name, r_conf in member_configs.items():
+                if isinstance(r_conf, dict):
+                    model_alias = r_conf.get("model")
+                    if model_alias and model_alias != "default":
+                        if model_alias not in att_manager.llm_clients and model_alias not in att_manager.model_configs:
+                            available = list(att_manager.model_configs.keys()) + list(att_manager.llm_clients.keys())
+                            return f"Error: Model '{model_alias}' is not registered. Available models are: {available}."
         else:
             member_count = min_size
 
@@ -402,11 +411,15 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         from .core import Agent
         client = None
-        if model_name in att_manager.llm_clients:
-            client = att_manager.llm_clients[model_name]
-        elif model_name in att_manager.model_configs and att_manager.generator_handler:
-            from .core import HandlerClientAdapter
-            client = HandlerClientAdapter(model_name, att_manager.generator_handler)
+        if model_name and model_name != "default":
+            if model_name in att_manager.llm_clients:
+                client = att_manager.llm_clients[model_name]
+            elif model_name in att_manager.model_configs and att_manager.generator_handler:
+                from .core import HandlerClientAdapter
+                client = HandlerClientAdapter(model_name, att_manager.generator_handler)
+            else:
+                available = list(att_manager.model_configs.keys()) + list(att_manager.llm_clients.keys())
+                return f"Error: Model '{model_name}' is not registered. Available models are: {available}."
         else:
             from .core import ManagerDefaultClientAdapter
             client = ManagerDefaultClientAdapter(att_manager)
@@ -466,6 +479,13 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not att_manager or not att_manager.config.enable_membership_voting:
             return "Error: Membership voting is disabled."
             
+        if action == "add" and proposed_details:
+            model_name = proposed_details.get("model")
+            if model_name and model_name != "default":
+                if model_name not in att_manager.llm_clients and model_name not in att_manager.model_configs:
+                    available = list(att_manager.model_configs.keys()) + list(att_manager.llm_clients.keys())
+                    return f"Error: Model '{model_name}' is not registered. Available models are: {available}."
+
         from .core import Agent, AgentTeam
         actual_team = _resolve_actual_team(caller_node, att_manager)
         caller_agent_name = getattr(caller_node, 'name', "Unknown")
@@ -559,11 +579,14 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                     sys_inst = p_details.get("system_instructions", "")
                     
                     client = None
-                    if model_name in att_manager.llm_clients:
-                        client = att_manager.llm_clients[model_name]
-                    elif model_name in att_manager.model_configs and att_manager.generator_handler:
-                        from .core import HandlerClientAdapter
-                        client = HandlerClientAdapter(model_name, att_manager.generator_handler)
+                    if model_name and model_name != "default":
+                        if model_name in att_manager.llm_clients:
+                            client = att_manager.llm_clients[model_name]
+                        elif model_name in att_manager.model_configs and att_manager.generator_handler:
+                            from .core import HandlerClientAdapter
+                            client = HandlerClientAdapter(model_name, att_manager.generator_handler)
+                        else:
+                            raise ValueError(f"Model '{model_name}' is not registered.")
                     else:
                         from .core import ManagerDefaultClientAdapter
                         client = ManagerDefaultClientAdapter(att_manager)

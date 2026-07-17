@@ -248,6 +248,7 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     f"Final Answer: <your final answer here>"
                 )
 
+                tool_retry_count = 0
                 for step in range(max_steps):
                     try:
                         team.status_map[agent.name] = f"Thinking (Step {step+1}/{max_steps})..."
@@ -386,6 +387,12 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                     team.chapter_num
                                 )
 
+                            if observation.startswith("Error:") or observation.startswith("Error "):
+                                tool_retry_count += 1
+                                max_retries = manager.config.max_tool_retries if manager else 3
+                                if tool_retry_count >= max_retries:
+                                    raise ATTException(f"Tool execution failed {tool_retry_count} times in this step. Maximum tool retries ({max_retries}) exceeded. Last error: {observation}")
+
                             agent.messages.append({"role": "user", "content": f"Observation: {observation}"})
                         else:
                             if step == max_steps - 1:
@@ -477,6 +484,7 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
         manager: Any
     ) -> str:
         try:
+            tool_retry_count = 0
             identity_header = await _prepare_agent_context(team, agent, prompt, manager)
 
             # Prepare native tools
@@ -568,6 +576,17 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                                 team.chapter_num
                             )
                     
+                    has_error = False
+                    for tr in results:
+                        if tr.content.startswith("Error:") or tr.content.startswith("Error "):
+                            has_error = True
+                            tool_retry_count += 1
+                    
+                    if has_error:
+                        max_retries = manager.config.max_tool_retries if manager else 3
+                        if tool_retry_count >= max_retries:
+                            raise ATTException(f"Tool execution failed {tool_retry_count} times in this step. Maximum tool retries ({max_retries}) exceeded.")
+
                     if manager:
                         manager._auto_save()
                 else:
