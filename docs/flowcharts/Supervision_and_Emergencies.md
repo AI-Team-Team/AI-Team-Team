@@ -38,19 +38,15 @@ flowchart TD
 
 ## 2. Parent-Ancestor Escalation Tree
 
-This flowchart visualizes the recursive lineage climbing checks executed by `SupervisoryTeam.report_anomaly` to resolve failures or report alerts:
+This flowchart visualizes the direct parent escalation checks executed by `SupervisoryTeam.report_anomaly` to route failure alerts:
 
 ```mermaid
 flowchart TD
-    StartClimb["Initialize failed_team, failed_lineage = [failed_team]"] --> ResolveParent["Get current_parent\n(Traverse parent_team or find_parent_team)"]
+    StartClimb["Start anomaly escalation for failed_team"] --> ResolveParent["Get current_parent\n(Traverse parent_team or find_parent_team)"]
     
     ResolveParent --> ParentExists{"current_parent exists?"}
     
-    ParentExists -- "Yes" --> AuditParent["Audit the parent team itself:\naudit_team_dialog(current_parent, 'escalation')"]
-    
-    AuditParent --> ParentHealthy{"Parent is healthy?"}
-    
-    ParentHealthy -- "Yes" --> RouteAlert["Route failure alert payload to Parent inbox:\n- failed_team_id\n- reason\n- type: child_failure_escalation"]
+    ParentExists -- "Yes" --> RouteAlert["Route failure alert payload to Parent inbox:\n- failed_team_id\n- reason\n- type: child_failure_escalation"]
     RouteAlert --> TriggerCallback["Trigger on_emergency_escalation callback hook"]
     
     TriggerCallback --> WakeupGate{"Parent is idle and\nenable_emergency_wakeup == True?"}
@@ -58,13 +54,10 @@ flowchart TD
     WakeupGate -- "Yes" --> EmergencyDiscussion["Spawn asynchronous task:\nexecute_emergency_discussion(parent, alert)\n(Runs emergency debate rounds)"]
     WakeupGate -- "No" --> ParentPrepend["Parent injects alert into its next active discussion prompt"]
     
-    EmergencyDiscussion --> End["Escalation resolved successfully"]
-    ParentPrepend --> End["Escalation resolved successfully"]
+    EmergencyDiscussion --> End["Escalation alert routed successfully"]
+    ParentPrepend --> End["Escalation alert routed successfully"]
     
-    ParentHealthy -- "No" --> LogBrokenParent["Log parent failure\nAppend current_parent to failed_lineage\nSet failed_team = current_parent"]
-    LogBrokenParent --> ResolveParent
-    
-    ParentExists -- "No (Ancestry Tree Collapsed)" --> AlertRootAI["Escalate critical warning directly to Root AI Level 0"]
+    ParentExists -- "No (No Parent / Root level)" --> AlertRootAI["Escalate critical warning directly to Root AI Level 0"]
     AlertRootAI --> RootAlert["Display Critical Warning log\n(Root AI handles architectural correction)"]
     RootAlert --> End
 ```
