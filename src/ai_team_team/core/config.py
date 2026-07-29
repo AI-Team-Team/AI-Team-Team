@@ -2,6 +2,37 @@ from typing import Dict, Optional
 
 class ATTConfig:
     """Configuration class for adjusting ATT debate parameters and execution depth gates."""
+
+    _CHOICES = {
+        "communication_policy": {
+            "permissive",
+            "rule_gated",
+            "proxied",
+        },
+        "migration_policy": {
+            "permissive",
+            "ancestor_approval",
+            "lineage_path",
+        },
+        "failover_policy": {"auto", "parent", "none"},
+        "tool_calling_mode": {
+            "auto",
+            "native",
+            "react",
+            "text_react",
+        },
+        "audit_unknown_escalation_mode": {"wake", "queue"},
+    }
+
+    def __setattr__(self, name: str, value: object) -> None:
+        choices = self._CHOICES.get(name)
+        if choices is not None and value not in choices:
+            choice_text = ", ".join(sorted(choices))
+            raise ValueError(
+                f"Invalid {name}={value!r}. Expected one of: {choice_text}."
+            )
+        super().__setattr__(name, value)
+
     def __init__(
         self,
         enable_dynamic_delegation: bool = True,
@@ -28,8 +59,32 @@ class ATTConfig:
         model_token_limits: Optional[Dict[str, int]] = None,
         model_tokenizer_configs: Optional[Dict[str, str]] = None,
         failover_policy: str = "auto",
-        strict_state_persistence: bool = True
+        strict_state_persistence: bool = True,
+        audit_unknown_escalation_mode: str = "wake"
     ):
+        policy_values = {
+            "communication_policy": communication_policy,
+            "migration_policy": migration_policy,
+            "failover_policy": failover_policy,
+            "tool_calling_mode": tool_calling_mode,
+            "audit_unknown_escalation_mode": (
+                audit_unknown_escalation_mode
+            ),
+        }
+        for field_name, value in policy_values.items():
+            choices = self._CHOICES[field_name]
+            if value not in choices:
+                choice_text = ", ".join(sorted(choices))
+                raise ValueError(
+                    f"Invalid {field_name}={value!r}. Expected one of: {choice_text}."
+                )
+        if min_subagent_team_size < 3:
+            raise ValueError("min_subagent_team_size must be at least 3.")
+        if max_delegation_depth < 1:
+            raise ValueError("max_delegation_depth must be at least 1.")
+        if max_memory_turns < 1:
+            raise ValueError("max_memory_turns must be at least 1.")
+
         self.enable_dynamic_delegation = enable_dynamic_delegation
         self.max_delegation_depth = max_delegation_depth
         self.min_subagent_team_size = min_subagent_team_size
@@ -56,3 +111,4 @@ class ATTConfig:
         self.model_token_limits = model_token_limits or {}
         self.model_tokenizer_configs = model_tokenizer_configs or {}
         self.failover_policy = failover_policy
+        self.audit_unknown_escalation_mode = audit_unknown_escalation_mode

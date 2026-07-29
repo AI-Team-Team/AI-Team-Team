@@ -81,10 +81,7 @@ Do **NOT** attempt to pass raw `MagicMock` or `AsyncMock` objects expecting the 
 ### A. Register a Mock Handler Callback
 
 ```python
-        # Ensure callback handlers are attached
-        self.manager.register_tools_context({"att_manager": self.manager})
-        
-        # Provide deterministic LLM mock strings
+        # ATT installs its reserved manager context automatically.
         async def mock_generate(prompt, system_instruction=None, tools=None, temperature=0.3, require_json=False):
             return '{"thought": "test", "commands": []}'
             
@@ -93,21 +90,20 @@ Do **NOT** attempt to pass raw `MagicMock` or `AsyncMock` objects expecting the 
 
 ## 6. Concurrency & I/O Shielding Mocks
 
-When writing tests that evaluate `AgentTeam` mutations (like adding members or modifying proposals), you must ensure that your test logic respects the async `team.state_lock` and the `manager._suppress_auto_save()` context manager.
+When writing tests that evaluate `AgentTeam` mutations, respect
+`team.state_lock` and the task-local `manager.suppress_auto_save()` context.
 
 To test these protected blocks without triggering actual DB hits or risking deadlocks in the test loop:
 
 ```python
-        # 1. Mock the context manager correctly
-        from contextlib import contextmanager
-        
-        @contextmanager
-        def mock_suppress():
-            yield
-            
-        self.manager._suppress_auto_save = mock_suppress
-        
-        # 2. Acquire the lock explicitly during direct async mutation tests
-        async with team.state_lock:
-            team.proposals["VP-123"] = {"status": "active"}
+        async with self.manager.suppress_auto_save():
+            async with team.state_lock:
+                team.proposals["VP-123"] = {"status": "active"}
+            self.manager._auto_save(teams={team.team_id})
 ```
+
+Persistence tests must await `save_state`, `load_state`, `flush_state`, and
+`close`. Use `asyncTearDown` or `async with ATTManager(...)` so writer threads
+and SQLite engines are released. Successful LLM mocks must accept the
+arguments used by their selected mode; a mock is native-capable only when
+`supports_native_tool_calling()` returns the literal boolean `True`.

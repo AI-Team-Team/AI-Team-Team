@@ -1,9 +1,11 @@
 import asyncio
-import sqlite3
+import contextvars
 import os
 import logging
 import json
 import time
+import threading
+from contextlib import asynccontextmanager
 from typing import List, Dict, Optional, Tuple, Any, Callable
 
 from ai_team_team.doc_library import DocumentLibrary
@@ -14,23 +16,13 @@ from .agent import Agent
 from .team import AgentTeam
 from .broker import NegotiationBroker
 from .config import ATTConfig
-from .exceptions import ATTException, TokenLimitExceededError
+from .exceptions import ATTException, TokenLimitExceededError, StateRestoreError
 from .utils import generate_with_retry
 from .adapters import ManagerDefaultClientAdapter, HandlerClientAdapter
 
-from ai_team_team.database.session import get_session
-from ai_team_team.database.models import (
-    Base,
-    ManagerConfigModel,
-    AgentModel,
-    AgentMessageModel,
-    TeamModel,
-    TeamInboxModel,
-    TeamProposalModel,
-    BrokerAgreementModel,
-    LibraryModel,
-    LibraryPermissionModel,
-    DocLibFileModel
+from ai_team_team.database.persistence import (
+    PersistenceCoordinator,
+    STATE_SCHEMA_VERSION,
 )
 
 class ATTManager:
@@ -51,15 +43,31 @@ class ATTManager:
         from ai_team_team.supervision import SupervisoryTeam
         self.supervisor = SupervisoryTeam(root_ai, ManagerDefaultClientAdapter(self), manager=self)
         self.logger = logging.getLogger("ATTManager")
-        self.tools_context: Dict[str, Any] = {}
+        self.tools_context: Dict[str, Any] = {"att_manager": self}
         self.libraries: Dict[str, DocumentLibrary] = {}
         self.library_permissions: Dict[str, Dict[str, Dict[str, str]]] = {} # lib_id -> path -> team_id -> permission
+        self._library_files: Dict[str, Dict[str, str]] = {}
  
         # Public Tool registries
         self.global_tools: Dict[str, Tool] = {}
         
         # O(1) tracking structures
         self._team_parent_map: Dict[str, str] = {}
+        self._topology_lock = threading.RLock()
+        self._snapshot_lock = threading.RLock()
+        self._persistence = PersistenceCoordinator()
+        self._persistence_batch: contextvars.ContextVar[Optional[Dict[str, Any]]] = (
+            contextvars.ContextVar(
+                f"att_persistence_batch_{id(self)}", default=None
+            )
+        )
+        self._active_tool_agent: contextvars.ContextVar[Optional[Agent]] = (
+            contextvars.ContextVar(
+                f"att_active_tool_agent_{id(self)}", default=None
+            )
+        )
+        self._unknown_audit_wakeups: set[str] = set()
+        self._emergency_tasks: set[asyncio.Task[Any]] = set()
         
         # Async tasks deferred bridging
         import queue
@@ -87,6 +95,518 @@ class ATTManager:
             }
         }
 
+    async def __aenter__(self) -> "ATTManager":
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        await self.close()
+
+    @staticmethod
+    def _new_dirty_state(full: bool = False) -> Dict[str, Any]:
+        return {
+            "full": full,
+            "configs": full,
+            "agents": set(),
+            "teams": set(),
+            "inboxes": set(),
+            "proposals": set(),
+            "agreements": full,
+            "libraries": set(),
+            "permissions": set(),
+            "file_changes": {},
+        }
+
+    @staticmethod
+    def _merge_dirty_state(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        target["full"] = target["full"] or source["full"]
+        target["configs"] = target["configs"] or source["configs"]
+        target["agreements"] = target["agreements"] or source["agreements"]
+        for key in (
+            "agents",
+            "teams",
+            "inboxes",
+            "proposals",
+            "libraries",
+            "permissions",
+        ):
+            target[key].update(source[key])
+        for lib_id, changes in source["file_changes"].items():
+            target["file_changes"].setdefault(lib_id, {}).update(changes)
+
+    @asynccontextmanager
+    async def suppress_auto_save(self):
+        """Batches auto-save deltas across nested and concurrent child tasks."""
+        parent_batch = self._persistence_batch.get()
+        is_root = parent_batch is None
+        token = None
+        if is_root:
+            parent_batch = self._new_dirty_state()
+            token = self._persistence_batch.set(parent_batch)
+        try:
+            yield
+        finally:
+            if is_root:
+                self._persistence_batch.reset(token)
+                if self.db_path and self._dirty_state_has_changes(parent_batch):
+                    self._submit_dirty_state(parent_batch)
+
+    @staticmethod
+    def _dirty_state_has_changes(dirty: Dict[str, Any]) -> bool:
+        return bool(
+            dirty["full"]
+            or dirty["configs"]
+            or dirty["agreements"]
+            or dirty["agents"]
+            or dirty["teams"]
+            or dirty["inboxes"]
+            or dirty["proposals"]
+            or dirty["libraries"]
+            or dirty["permissions"]
+            or dirty["file_changes"]
+        )
+
+    def _auto_save(
+        self,
+        *,
+        configs: bool = False,
+        agents: Optional[set[str]] = None,
+        teams: Optional[set[str]] = None,
+        inboxes: Optional[set[str]] = None,
+        proposals: Optional[set[str]] = None,
+        agreements: bool = False,
+        libraries: Optional[set[str]] = None,
+        permissions: Optional[set[str]] = None,
+        file_changes: Optional[
+            Dict[str, Dict[str, Optional[str]]]
+        ] = None,
+        full: bool = False,
+    ) -> None:
+        """Records an immutable incremental state delta for the single writer."""
+        if not self.db_path:
+            return
+        dirty = self._new_dirty_state(full=full)
+        dirty["configs"] = configs or full
+        dirty["agreements"] = agreements or full
+        dirty["agents"].update(agents or set())
+        dirty["teams"].update(teams or set())
+        dirty["inboxes"].update(inboxes or set())
+        dirty["proposals"].update(proposals or set())
+        dirty["libraries"].update(libraries or set())
+        dirty["permissions"].update(permissions or set())
+        for lib_id, changes in (file_changes or {}).items():
+            dirty["file_changes"].setdefault(lib_id, {}).update(changes)
+
+        if not self._dirty_state_has_changes(dirty):
+            return
+        batch = self._persistence_batch.get()
+        if batch is not None:
+            self._merge_dirty_state(batch, dirty)
+            return
+        self._submit_dirty_state(dirty)
+
+    def _submit_dirty_state(self, dirty: Dict[str, Any]) -> None:
+        with self._snapshot_lock:
+            snapshot = self._capture_state_snapshot(dirty)
+            self._persistence.submit(self.db_path, snapshot)
+
+    async def save_state(
+        self, path: Optional[str] = None, full: bool = True
+    ) -> None:
+        """Persists state asynchronously and waits for the write to commit."""
+        target_path = path or self.db_path
+        if not target_path:
+            return
+        await self.flush_state()
+        dirty = self._new_dirty_state(full=full)
+        if not full:
+            dirty["configs"] = True
+        with self._snapshot_lock:
+            snapshot = self._capture_state_snapshot(dirty)
+            future = self._persistence.submit(target_path, snapshot)
+        await asyncio.wrap_future(future)
+
+    async def flush_state(self) -> None:
+        """Waits until every queued state delta has committed."""
+        await self._persistence.flush()
+
+    async def close(self) -> None:
+        """Flushes state and releases the persistence worker and engines."""
+        active_tasks = tuple(
+            task
+            for task in self._emergency_tasks
+            if not task.done() and task is not asyncio.current_task()
+        )
+        if active_tasks:
+            await asyncio.gather(*active_tasks, return_exceptions=True)
+        await self._persistence.close()
+
+    async def load_state(self, path: str) -> None:
+        """Restores a versioned state snapshot without blocking the event loop."""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"State database file '{path}' not found.")
+        state = await self._persistence.read(path)
+        await self._apply_state_snapshot(state)
+        self.db_path = path
+
+    def _capture_state_snapshot(self, dirty: Dict[str, Any]) -> Dict[str, Any]:
+        full = dirty["full"]
+        now = time.time()
+        configs = None
+        if full or dirty["configs"]:
+            configs = {
+                "schema_version": STATE_SCHEMA_VERSION,
+                "att_config": json.dumps(self.config.__dict__),
+                "root_ai_name": self.root_ai.name,
+                "model_configs": json.dumps(self.model_configs),
+                "presets": json.dumps(self.presets),
+                "model_token_usage": json.dumps(self.model_token_usage),
+            }
+
+        agent_names = set(self.agents) if full else set(dirty["agents"])
+        agents = []
+        for name in sorted(agent_names):
+            agent = self.agents.get(name)
+            if agent is None:
+                continue
+            model_alias = self.resolve_model_alias(agent.llm_client)
+            agents.append(
+                {
+                    "name": agent.name,
+                    "role": agent.role,
+                    "role_description": getattr(
+                        agent, "role_description", ""
+                    ),
+                    "system_instructions": getattr(
+                        agent, "system_instructions", ""
+                    ),
+                    "model_alias": model_alias,
+                    "last_context": (
+                        json.dumps(agent.last_context)
+                        if agent.last_context
+                        else None
+                    ),
+                    "messages": json.loads(json.dumps(agent.messages)),
+                    "message_timestamp": now,
+                }
+            )
+
+        team_ids = set(self.teams) if full else set(dirty["teams"])
+        teams = []
+        for team_id in sorted(team_ids):
+            team = self.teams.get(team_id)
+            if team is None:
+                continue
+            creator_type = None
+            creator_id = None
+            if isinstance(team.creator, Agent):
+                creator_type = "agent"
+                creator_id = team.creator.name
+            elif isinstance(team.creator, AgentTeam):
+                creator_type = "team"
+                creator_id = team.creator.team_id
+            teams.append(
+                {
+                    "team_id": team.team_id,
+                    "preset_name": team.preset_name,
+                    "team_purpose": team.team_purpose,
+                    "team_progress": team.team_progress,
+                    "depth": team.depth,
+                    "chapter_num": team.chapter_num,
+                    "parent_team_id": (
+                        team.parent_team.team_id if team.parent_team else None
+                    ),
+                    "migration_count": team.migration_count,
+                    "creator_type": creator_type,
+                    "creator_id": creator_id,
+                    "communication_rules": json.dumps(
+                        team.communication_rules
+                    ),
+                    "status_map": json.dumps(team.status_snapshot()),
+                    "system_instructions": getattr(
+                        team, "system_instructions", ""
+                    ),
+                    "members": [member.name for member in team.members],
+                    "message_timestamp": now,
+                }
+            )
+
+        inbox_ids = set(self.teams) if full else set(dirty["inboxes"])
+        inboxes = {}
+        for team_id in sorted(inbox_ids):
+            team = self.teams.get(team_id)
+            if team is None:
+                continue
+            with team.inbox_lock:
+                messages = json.loads(json.dumps(team.message_inbox))
+            inboxes[team_id] = {
+                "messages": messages,
+                "message_timestamp": now,
+            }
+        proposal_ids = (
+            set(self.teams) if full else set(dirty["proposals"])
+        )
+        proposals = {
+            team_id: [
+                {
+                    "proposal_id": proposal_id,
+                    **json.loads(json.dumps(proposal)),
+                }
+                for proposal_id, proposal in self.teams[
+                    team_id
+                ].proposals.items()
+            ]
+            for team_id in sorted(proposal_ids)
+            if team_id in self.teams
+        }
+
+        library_ids = (
+            set(self.libraries) if full else set(dirty["libraries"])
+        )
+        libraries = []
+        for lib_id in sorted(library_ids):
+            library = self.libraries.get(lib_id)
+            if library is None:
+                continue
+            libraries.append(
+                {
+                    "lib_id": library.lib_id,
+                    "name": library.name,
+                    "owner_team_id": library.owner_team_id,
+                    "description": library.description,
+                    "is_public_visible": library.is_public_visible,
+                }
+            )
+
+        permission_ids = (
+            set(self.libraries) if full else set(dirty["permissions"])
+        )
+        permissions = {
+            lib_id: json.loads(
+                json.dumps(self.library_permissions.get(lib_id, {}))
+            )
+            for lib_id in permission_ids
+        }
+
+        file_changes = {
+            lib_id: dict(changes)
+            for lib_id, changes in dirty["file_changes"].items()
+        }
+        if full:
+            for lib_id in self.libraries:
+                file_changes[lib_id] = dict(
+                    self._library_files.get(lib_id, {})
+                )
+
+        return {
+            "full": full,
+            "configs": configs,
+            "agents": agents,
+            "teams": teams,
+            "inboxes": inboxes,
+            "proposals": proposals,
+            "agreements": (
+                [list(pair) for pair in sorted(self.broker.peer_talk_agreements)]
+                if full or dirty["agreements"]
+                else None
+            ),
+            "libraries": libraries,
+            "permissions": permissions,
+            "file_changes": file_changes,
+        }
+
+    async def _apply_state_snapshot(self, state: Dict[str, Any]) -> None:
+        configs = state["configs"]
+        config_data = json.loads(configs["att_config"])
+        self.config = ATTConfig(**config_data)
+        self.model_configs = json.loads(configs.get("model_configs", "{}"))
+        self.presets = json.loads(configs.get("presets", "{}"))
+        self.model_token_usage = json.loads(
+            configs.get("model_token_usage", "{}")
+        )
+
+        required_aliases = {
+            row["model_alias"]
+            for row in state["agents"]
+            if row.get("model_alias") not in (None, "default")
+        }
+        missing_aliases = sorted(
+            alias
+            for alias in required_aliases
+            if alias not in self.llm_clients and not self.generator_handler
+        )
+        if missing_aliases:
+            raise StateRestoreError(
+                "Missing runtime bindings for model aliases: "
+                + ", ".join(missing_aliases)
+            )
+
+        runtime_root_client = self.root_ai.llm_client
+        self.agents.clear()
+        for row in state["agents"]:
+            alias = row.get("model_alias")
+            if alias in self.llm_clients:
+                client = self.llm_clients[alias]
+            elif alias not in (None, "default") and self.generator_handler:
+                client = HandlerClientAdapter(alias, self.generator_handler)
+                client._supports_native = self.model_configs.get(
+                    alias, {}
+                ).get("supports_native_tool_calling", False)
+            elif "default" in self.llm_clients:
+                client = self.llm_clients["default"]
+            elif runtime_root_client:
+                client = runtime_root_client
+            elif self.generator_handler:
+                client = ManagerDefaultClientAdapter(self)
+            else:
+                raise StateRestoreError(
+                    f"No runtime binding is available for agent {row['name']!r}."
+                )
+            agent = Agent(
+                name=row["name"],
+                role=row["role"],
+                llm_client=client,
+                role_description=row["role_description"] or "",
+                system_instructions=row["system_instructions"] or "",
+            )
+            agent.last_context = (
+                json.loads(row["last_context"])
+                if row["last_context"]
+                else None
+            )
+            agent.messages = []
+            for message in row["messages"]:
+                restored = {
+                    key: value
+                    for key, value in message.items()
+                    if value is not None
+                }
+                agent.messages.append(restored)
+            self.agents[agent.name] = agent
+
+        root_name = configs["root_ai_name"]
+        if root_name not in self.agents:
+            raise StateRestoreError(
+                f"Persisted root agent {root_name!r} was not found."
+            )
+        self.root_ai = self.agents[root_name]
+        self.supervisor.root_ai = self.root_ai
+
+        self.libraries.clear()
+        self._library_files.clear()
+        for row in state["libraries"]:
+            library = self._new_document_library(
+                lib_id=row["lib_id"],
+                name=row["name"],
+                owner_team_id=row["owner_team_id"],
+                description=row["description"] or "",
+                is_public_visible=row["is_public_visible"],
+            )
+            await asyncio.to_thread(
+                library.replace_all_files, row["files"]
+            )
+            self.libraries[library.lib_id] = library
+            self._library_files[library.lib_id] = dict(row["files"])
+        self.library_permissions = state["permissions"]
+
+        self.teams.clear()
+        self._team_parent_map.clear()
+        team_map: Dict[str, AgentTeam] = {}
+        for row in state["teams"]:
+            creator = (
+                self.agents.get(row["creator_id"])
+                if row["creator_type"] == "agent"
+                else None
+            )
+            team = AgentTeam(
+                creator=creator,
+                preset_name=row["preset_name"],
+                team_purpose=row["team_purpose"],
+            )
+            team.team_id = row["team_id"]
+            team.logger = logging.getLogger(f"AgentTeam:{team.team_id}")
+            team.team_progress = row["team_progress"]
+            team.chapter_num = row["chapter_num"]
+            team.migration_count = row["migration_count"] or 0
+            team.communication_rules = json.loads(
+                row["communication_rules"] or "{}"
+            )
+            team.status_map = json.loads(row["status_map"] or "{}")
+            team.system_instructions = row["system_instructions"] or ""
+            team._cached_depth = row["depth"]
+            team.manager = self
+            team.message_inbox = row["inbox"]
+            team.proposals = {
+                proposal["proposal_id"]: {
+                    key: value
+                    for key, value in proposal.items()
+                    if key != "proposal_id"
+                }
+                for proposal in row["proposals"]
+            }
+            team.members = [
+                self.agents[name]
+                for name in row["members"]
+                if name in self.agents
+            ]
+            team_map[team.team_id] = team
+
+        for row in state["teams"]:
+            team = team_map[row["team_id"]]
+            parent_id = row["parent_team_id"]
+            if parent_id:
+                parent = team_map[parent_id]
+                team._parent_team = parent
+                parent.child_teams.append(team)
+                self._team_parent_map[team.team_id] = parent_id
+            if row["creator_type"] == "team":
+                team.creator = team_map.get(row["creator_id"])
+        self.teams = team_map
+
+        from ai_team_team.tool import get_default_tools
+
+        for team in self.teams.values():
+            team.doc_library = self.libraries.get(f"DL-{team.team_id}")
+            team.tools = get_default_tools(self.tools_context, team)
+            team.tools.update(self.global_tools)
+
+        self.broker.peer_talk_agreements = set(
+            tuple(pair) for pair in state["agreements"]
+        )
+
+    def _new_document_library(
+        self,
+        *,
+        lib_id: str,
+        name: str,
+        owner_team_id: str,
+        description: str,
+        is_public_visible: bool,
+    ) -> DocumentLibrary:
+        self._library_files.setdefault(lib_id, {})
+        return DocumentLibrary(
+            lib_id=lib_id,
+            name=name,
+            owner_team_id=owner_team_id,
+            description=description,
+            is_public_visible=is_public_visible,
+            root_dir=self.config.workspace_root,
+            on_change=self._on_library_change,
+        )
+
+    def _on_library_change(
+        self, lib_id: str, path: str, content: Optional[str]
+    ) -> None:
+        with self._snapshot_lock:
+            files = self._library_files.setdefault(lib_id, {})
+            if content is None:
+                files.pop(path, None)
+            else:
+                files[path] = content
+            self._auto_save(
+                libraries={lib_id},
+                file_changes={lib_id: {path: content}},
+            )
+
     def register_tool(
         self,
         name: Any = None,
@@ -108,6 +628,7 @@ class ATTManager:
     def register_model(self, name: str, config: Dict[str, Any]):
         """Registers a unified model configuration (e.g. metadata, type, ai_note)."""
         self.model_configs[name] = config
+        self._auto_save(configs=True)
 
     def register_generator_handler(self, handler: Callable[..., str]):
         """Registers a global callback handler for generating text from a model alias."""
@@ -253,7 +774,7 @@ class ATTManager:
         agent.llm_client = new_client
         
         agent_status = f"Failover: Switched to {selected_model}"
-        team.status_map[agent.name] = agent_status
+        team.set_status(agent.name, agent_status)
         if self.on_status_change:
             self.on_status_change(agent.name, agent_status)
 
@@ -291,13 +812,17 @@ class ATTManager:
             "system_instructions": system_instructions,
             "roles": roles
         }
+        self._auto_save(configs=True)
 
     def get_preset(self, name: str) -> dict:
         return self.presets.get(name, self.presets["generic"])
 
     def register_tools_context(self, context: Dict[str, Any]):
         """Registers system dependencies/resources context for binding tools to AIs."""
-        self.tools_context.update(context)
+        safe_context = dict(context)
+        safe_context.pop("att_manager", None)
+        self.tools_context.update(safe_context)
+        self.tools_context["att_manager"] = self
         from ai_team_team.tool import get_default_tools
         # Bind generic tools to existing teams
         for team in self.teams.values():
@@ -305,7 +830,47 @@ class ATTManager:
             # Also bind globally registered tools
             team.tools.update(self.global_tools)
 
+    def unique_agent_name(self, base_name: str, team: AgentTeam) -> str:
+        """Returns a registry-safe agent name for a team."""
+        if base_name not in self.agents:
+            return base_name
+        suffix = team.team_id.split("-", 1)[-1]
+        candidate = f"{base_name}_{suffix}"
+        counter = 2
+        while candidate in self.agents:
+            candidate = f"{base_name}_{suffix}_{counter}"
+            counter += 1
+        return candidate
+
     def create_agent_team(
+        self,
+        creator: Any,
+        member_count: int = 3,
+        roles_and_presets: List[Tuple[str, str]] = None,
+        preset_name: str = "custom",
+        system_instructions: str = "",
+        team_purpose: str = "Unspecified team purpose",
+        roles_and_models: Optional[Dict[str, str]] = None,
+        member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        is_public_visible: bool = False,
+        initial_docs: Optional[Dict[str, str]] = None
+    ) -> AgentTeam:
+        """Creates a team while holding the topology mutation lock."""
+        with self._topology_lock:
+            return self._create_agent_team(
+                creator=creator,
+                member_count=member_count,
+                roles_and_presets=roles_and_presets,
+                preset_name=preset_name,
+                system_instructions=system_instructions,
+                team_purpose=team_purpose,
+                roles_and_models=roles_and_models,
+                member_configs=member_configs,
+                is_public_visible=is_public_visible,
+                initial_docs=initial_docs,
+            )
+
+    def _create_agent_team(
         self,
         creator: Any,
         member_count: int = 3,
@@ -401,16 +966,18 @@ class ATTManager:
                     members.append(agent)
         elif roles_and_presets:
             for name, role in roles_and_presets:
-                agent = Agent(name=name, role=role, llm_client=get_agent_client(role, name))
-                self.agents[name] = agent
+                agent_name = self.unique_agent_name(name, team)
+                agent = Agent(name=agent_name, role=role, llm_client=get_agent_client(role, name))
+                self.agents[agent_name] = agent
                 members.append(agent)
         else:
             preset = self.get_preset(preset_name)
             roles = preset.get("roles", [])
             if len(roles) >= member_count:
                 for name, role in roles[:member_count]:
-                    agent = Agent(name=name, role=role, llm_client=get_agent_client(role, name))
-                    self.agents[name] = agent
+                    agent_name = self.unique_agent_name(name, team)
+                    agent = Agent(name=agent_name, role=role, llm_client=get_agent_client(role, name))
+                    self.agents[agent_name] = agent
                     members.append(agent)
             else:
                 for i in range(member_count):
@@ -436,13 +1003,12 @@ class ATTManager:
         lib_name = f"{team.team_id} Built-in Library"
         lib_desc = f"Default document library for team {team.team_id}."
         
-        lib = DocumentLibrary(
+        lib = self._new_document_library(
             lib_id=lib_id,
             name=lib_name,
             owner_team_id=team.team_id,
             description=lib_desc,
             is_public_visible=is_public_visible,
-            root_dir=self.config.workspace_root
         )
         self.libraries[lib_id] = lib
         team.doc_library = lib
@@ -461,7 +1027,14 @@ class ATTManager:
                 parent_t.add_child_team(team)
             
         self.logger.info(f"Successfully spawned Agent Team {team.team_id} (N={len(members)}, Preset: {preset_name}) spawned by {creator.name if hasattr(creator, 'name') else creator.team_id}")
-        self._auto_save()
+        self._auto_save(
+            configs=True,
+            agents={self.root_ai.name}
+            | {member.name for member in members},
+            teams={team.team_id}
+            | ({team.parent_team.team_id} if team.parent_team else set()),
+            libraries={lib_id},
+        )
         return team
 
     def find_parent_team(self, target: AgentTeam) -> Optional[AgentTeam]:
@@ -508,6 +1081,10 @@ class ATTManager:
         """
         if lib_id not in self.libraries:
             return False
+        try:
+            clean_path = self.normalize_library_path(path)
+        except PermissionError:
+            return False
         lib = self.libraries[lib_id]
         if lib.owner_team_id == team_id:
             return True
@@ -517,7 +1094,6 @@ class ATTManager:
             return False
             
         # Find prefix/parent path matches.
-        clean_path = "/" + path.strip("/").replace("\\", "/")
         if clean_path == "/":
             parts = ["/"]
         else:
@@ -541,6 +1117,16 @@ class ATTManager:
                         if perm == "WRITE":
                             return True
         return False
+
+    @staticmethod
+    def normalize_library_path(path: str) -> str:
+        """Returns one canonical virtual ACL path or raises on traversal."""
+        if not isinstance(path, str) or not path.strip():
+            raise PermissionError(
+                "Access denied: Empty library paths are not allowed."
+            )
+        normalized = DocumentLibrary._normalize_path(path, allow_root=True)
+        return "/" if not normalized else f"/{normalized}"
 
 
     def render_topology_tree(self) -> str:
@@ -583,15 +1169,31 @@ class ATTManager:
             approved, reason = await policy.authorize_migration(team, target_parent, self, rationale)
             
             if approved:
-                # 1. Update structural links
-                if current_parent:
-                    if team in current_parent.child_teams:
+                with self._topology_lock:
+                    current_parent = team.parent_team
+                    current_count = team.migration_count
+                    if current_count >= limit:
+                        return False, (
+                            "Rejected: Migration limit was reached while "
+                            "authorization was pending."
+                        )
+
+                    cursor = target_parent
+                    while cursor is not None:
+                        if cursor is team:
+                            return False, (
+                                "Rejected: Target parent became a descendant "
+                                "while authorization was pending."
+                            )
+                        cursor = cursor.parent_team
+
+                    if current_parent and team in current_parent.child_teams:
                         current_parent.child_teams.remove(team)
-                
-                target_parent.add_child_team(team)
-                team._parent_team = target_parent
-                self._team_parent_map[team.team_id] = target_parent.team_id
-                team.migration_count = current_count + 1
+                    target_parent.add_child_team(team)
+                    team._parent_team = target_parent
+                    self._team_parent_map[team.team_id] = target_parent.team_id
+                    team.migration_count = current_count + 1
+                    team.invalidate_depth_cache(recursive=True)
                 
                 # 2. Dispatch notifications
                 if current_parent:
@@ -616,7 +1218,20 @@ class ATTManager:
                     self.on_team_migration(team.team_id, current_parent_id if current_parent else None, target_parent.team_id)
                 
                 self.logger.info(f"Migration of team {team.team_id} to parent {target_parent.team_id} approved. Reason: {reason}")
-                self._auto_save()
+                affected_team_ids = {
+                    team.team_id,
+                    target_parent.team_id,
+                }
+                if current_parent:
+                    affected_team_ids.add(current_parent.team_id)
+
+                def collect_descendants(node: AgentTeam) -> None:
+                    for child in node.child_teams:
+                        affected_team_ids.add(child.team_id)
+                        collect_descendants(child)
+
+                collect_descendants(team)
+                self._auto_save(teams=affected_team_ids)
                 return True, f"Approved: {reason}"
             else:
                 self.logger.info(f"Migration of team {team.team_id} to parent {target_parent.team_id} rejected. Reason: {reason}")
@@ -626,24 +1241,147 @@ class ATTManager:
             self.logger.error(f"Migration arbitration error: {e}")
             return False, f"Arbitration error: {e}"
 
-    async def execute_team_discussion(self, team: AgentTeam, prompt: str, rounds: int = 2, skip_audit: bool = False) -> str:
+    async def _apply_deferred_membership_changes(
+        self, team: AgentTeam
+    ) -> None:
+        """Applies each approved membership proposal at most once."""
+        changed_agents: set[str] = set()
+        changed = False
+        membership_changed = False
+        async with team.state_lock:
+            for proposal in team.proposals.values():
+                details = proposal.setdefault("proposed_details", {})
+                if (
+                    proposal.get("status") != "approved"
+                    or details.get("executed") is True
+                ):
+                    continue
+
+                details["executed"] = True
+                changed = True
+                action = proposal.get("action")
+                target = proposal.get("target")
+                if action == "add":
+                    model_name = details.get("model")
+                    if model_name and model_name != "default":
+                        if model_name in self.llm_clients:
+                            client = self.llm_clients[model_name]
+                        elif (
+                            model_name in self.model_configs
+                            and self.generator_handler
+                        ):
+                            client = HandlerClientAdapter(
+                                model_name, self.generator_handler
+                            )
+                        else:
+                            proposal["status"] = "rejected"
+                            self.logger.warning(
+                                "Deferred membership add rejected: model "
+                                "%r is unavailable.",
+                                model_name,
+                            )
+                            continue
+                    else:
+                        client = ManagerDefaultClientAdapter(self)
+
+                    new_agent = Agent(
+                        name=self.unique_agent_name(
+                            f"Dynamic_{target}", team
+                        ),
+                        role=target,
+                        llm_client=client,
+                        role_description=details.get(
+                            "role_description", ""
+                        ),
+                        system_instructions=details.get(
+                            "system_instructions", ""
+                        ),
+                    )
+                    if any(
+                        member.name == new_agent.name
+                        for member in team.members
+                    ):
+                        proposal["status"] = "rejected"
+                        continue
+                    team.members.append(new_agent)
+                    self.agents[new_agent.name] = new_agent
+                    changed_agents.add(new_agent.name)
+                    membership_changed = True
+                    self.logger.info(
+                        "Deferred execution added member %s to team %s.",
+                        new_agent.name,
+                        team.team_id,
+                    )
+                elif action == "remove":
+                    if (
+                        len(team.members)
+                        <= self.config.min_subagent_team_size
+                    ):
+                        proposal["status"] = "rejected"
+                        continue
+                    target_agent = next(
+                        (
+                            member
+                            for member in team.members
+                            if member.name == target
+                        ),
+                        None,
+                    )
+                    if target_agent is None:
+                        proposal["status"] = "rejected"
+                        continue
+                    team.members.remove(target_agent)
+                    membership_changed = True
+                    self.logger.info(
+                        "Deferred execution removed member %s from team %s.",
+                        target,
+                        team.team_id,
+                    )
+                else:
+                    proposal["status"] = "rejected"
+
+        if changed:
+            self._auto_save(
+                agents=changed_agents,
+                teams=(
+                    {team.team_id} if membership_changed else set()
+                ),
+                proposals={team.team_id},
+            )
+
+    async def execute_team_discussion(
+        self,
+        team: AgentTeam,
+        prompt: str,
+        rounds: int = 2,
+        skip_audit: bool = False,
+    ) -> str:
         """Executes a multi-agent debate session inside the AT, monitored by the Supervisor."""
-        team.migration_count = 0
+        with self._topology_lock:
+            team.migration_count = 0
         team.is_running = True
         self.logger.info(f"Executing discussion in team {team.team_id} (rounds={rounds}, skip_audit={skip_audit})...")
         
         dialog_history = []
         last_round_answers = {}
-        is_healthy, reason = True, "Audit skipped."
+        from ai_team_team.supervision import AuditResult, AuditStatus
+
+        audit_result = AuditResult(
+            status=AuditStatus.HEALTHY,
+            reason="Audit skipped.",
+        )
         
-        self._suppress_auto_save = True
+        auto_save_context = self.suppress_auto_save()
+        await auto_save_context.__aenter__()
         try:
             for r in range(1, rounds + 1):
-                # Consume inbox messages at the start of every round
                 inbox_context = ""
-                if team.message_inbox:
+                with team.inbox_lock:
+                    pending_inbox = team.message_inbox
+                    team.message_inbox = []
+                if pending_inbox:
                     inbox_lines = []
-                    for msg in team.message_inbox:
+                    for msg in pending_inbox:
                         inbox_lines.append(f"- **From [{msg.get('from', 'Unknown')}]**: {msg.get('reason') or msg.get('objective') or str(msg)}")
                     
                     raw_inbox_text = "\n".join(inbox_lines)
@@ -677,7 +1415,7 @@ class ATTManager:
                         f"{raw_inbox_text}\n"
                         f"Please address or incorporate these alerts into your decision-making."
                     )
-                    team.message_inbox = []
+                    self._auto_save(inboxes={team.team_id})
 
                 round_members = list(team.members)
                 tasks = []
@@ -725,69 +1463,33 @@ class ATTManager:
                     last_round_answers[(r, agent.name)] = ans
                     dialog_history.append(f"{agent.name}: {ans}")
 
-                # Apply any deferred approved voting proposals at the end of the round
                 if self.config.enable_membership_voting:
-                    for prop_id, prop in list(team.proposals.items()):
-                        if prop.get("status") == "approved" and not prop.setdefault("proposed_details", {}).get("executed", False):
-                            # Mark as executed in the proposal details to avoid executing multiple times
-                            prop["proposed_details"]["executed"] = True
-                            
-                            action = prop.get("action")
-                            target = prop.get("target")
-                            
-                            if action == "add":
-                                model_name = prop["proposed_details"].get("model")
-                                role_desc = prop["proposed_details"].get("role_description", "")
-                                sys_inst = prop["proposed_details"].get("system_instructions", "")
-                                
-                                client = None
-                                if model_name and model_name != "default":
-                                    if model_name in self.llm_clients:
-                                        client = self.llm_clients[model_name]
-                                    elif model_name in self.model_configs and self.generator_handler:
-                                        from .adapters import HandlerClientAdapter
-                                        client = HandlerClientAdapter(model_name, self.generator_handler)
-                                    else:
-                                        raise ValueError(f"Model '{model_name}' is not registered.")
-                                else:
-                                    client = ManagerDefaultClientAdapter(self)
-                                    
-                                new_agent = Agent(
-                                    name=f"Dynamic_{target}",
-                                    role=target,
-                                    llm_client=client,
-                                    role_description=role_desc,
-                                    system_instructions=sys_inst
-                                )
-                                team.members.append(new_agent)
-                                self.agents[new_agent.name] = new_agent
-                                self.logger.info(f"Deferred execution: Added member '{new_agent.name}' to team '{team.team_id}'.")
-                            elif action == "remove":
-                                min_size = self.config.min_subagent_team_size
-                                if len(team.members) <= min_size:
-                                    prop["status"] = "rejected"
-                                    self.logger.warning(f"Deferred execution: Removing '{target}' failed because it violates min team size of {min_size}. Status changed to rejected.")
-                                    continue
-                                
-                                target_agent = None
-                                for m in team.members:
-                                    if m.name == target:
-                                        target_agent = m
-                                        break
-                                if target_agent:
-                                    team.members.remove(target_agent)
-                                    self.logger.info(f"Deferred execution: Removed member '{target}' from team '{team.team_id}'.")
-                                else:
-                                    prop["status"] = "rejected"
-                                    self.logger.warning(f"Deferred execution: Member '{target}' not found. Status changed to rejected.")
+                    await self._apply_deferred_membership_changes(team)
 
             transcript = "\n".join(dialog_history)
             
             # Run supervisory audit
             if not skip_audit:
-                is_healthy, reason = await self.supervisor.audit_team_dialog(team, transcript)
-                if not is_healthy:
-                    await self.supervisor.report_anomaly(team, reason, self)
+                audit_result = await self.supervisor.audit_team_dialog(
+                    team, transcript
+                )
+                if audit_result.status is AuditStatus.UNHEALTHY:
+                    await self.supervisor.report_anomaly(
+                        team, audit_result.reason, self
+                    )
+                elif audit_result.status is AuditStatus.UNKNOWN:
+                    if self.on_system_event:
+                        self.on_system_event(
+                            "audit_unknown",
+                            {
+                                "team_id": team.team_id,
+                                "reason": audit_result.reason,
+                                "cause": audit_result.cause,
+                            },
+                        )
+                    await self.supervisor.report_unknown(
+                        team, audit_result, self
+                    )
                 
             # Log debate transcript using logger callback
             if self.on_log_append:
@@ -800,8 +1502,8 @@ class ATTManager:
                     f"--- SYNTHESIZED TRANSCRIPT BEGIN ---\n"
                     f"{transcript}\n"
                     f"--- SYNTHESIZED TRANSCRIPT END ---\n"
-                    f"AUDIT STATUS: {'Healthy' if is_healthy else 'Anomaly Detected'}\n"
-                    f"AUDIT REASON: {reason}\n"
+                    f"AUDIT STATUS: {audit_result.status.value}\n"
+                    f"AUDIT REASON: {audit_result.reason}\n"
                 )
                 self.on_log_append(
                     team.team_id,
@@ -810,35 +1512,119 @@ class ATTManager:
                     team.chapter_num
                 )
 
-            self._auto_save()
+            self._auto_save(
+                agents={agent.name for agent in team.members},
+                teams={team.team_id},
+            )
             return transcript
         finally:
-            self._suppress_auto_save = False
-            self._auto_save()
+            await auto_save_context.__aexit__(None, None, None)
             team.is_running = False
-            # Check for left-over emergency messages in inbox
-            if team.message_inbox and getattr(self.config, "enable_emergency_wakeup", True):
-                emergency_msg = next((msg for msg in team.message_inbox if msg.get("type") in {"child_failure_escalation", "escalation_spawn"}), None)
+            if team.message_inbox and self.config.enable_emergency_wakeup:
+                wake_types = {
+                    "child_failure_escalation",
+                    "escalation_spawn",
+                }
+                if self.config.audit_unknown_escalation_mode == "wake":
+                    wake_types.add("audit_unknown_escalation")
+                emergency_msg = next(
+                    (
+                        msg
+                        for msg in team.message_inbox
+                        if msg.get("type") in wake_types
+                    ),
+                    None,
+                )
                 if emergency_msg:
-                    self.logger.warning(f"Post-discussion emergency wakeup triggered for team {team.team_id}")
-                    try:
-                        asyncio.create_task(self.execute_emergency_discussion(team, emergency_msg))
-                    except RuntimeError as e:
-                        self.logger.critical(f"No event loop running for emergency wakeup. Falling back to deferred message queue. {e}")
-                        self.deferred_emergency_tasks.put_nowait(self.execute_emergency_discussion(team, emergency_msg))
+                    self.schedule_emergency_wakeup(
+                        team,
+                        emergency_msg,
+                        skip_audit=(
+                            emergency_msg.get("type")
+                            == "audit_unknown_escalation"
+                        ),
+                    )
 
     async def flush_deferred_tasks(self):
-        """Flushes and executes any deferred asyncio tasks (e.g., from emergency wakeups triggered outside event loops)."""
-        import asyncio
+        """Schedules deferred emergency call specifications."""
         while not self.deferred_emergency_tasks.empty():
-            coro = self.deferred_emergency_tasks.get_nowait()
-            try:
-                asyncio.create_task(coro)
-            except RuntimeError as e:
-                self.logger.error(f"Cannot flush deferred tasks without a running event loop: {e}")
-                break
+            team, alert, skip_audit = (
+                self.deferred_emergency_tasks.get_nowait()
+            )
+            self.schedule_emergency_wakeup(
+                team, alert, skip_audit=skip_audit
+            )
 
-    async def execute_emergency_discussion(self, team: AgentTeam, alert: Dict[str, Any]) -> str:
+    def schedule_emergency_wakeup(
+        self,
+        team: AgentTeam,
+        alert: Dict[str, Any],
+        *,
+        skip_audit: bool = False,
+    ) -> None:
+        """Schedules an emergency discussion and deduplicates audit outages."""
+        dedupe_key = None
+        if alert.get("type") == "audit_unknown_escalation":
+            dedupe_key = self._unknown_audit_wakeup_key(team, alert)
+            if dedupe_key in self._unknown_audit_wakeups:
+                return
+            self._unknown_audit_wakeups.add(dedupe_key)
+
+        async def run() -> None:
+            try:
+                await self.execute_emergency_discussion(
+                    team, alert, skip_audit=skip_audit
+                )
+            finally:
+                if dedupe_key is not None:
+                    self._unknown_audit_wakeups.discard(dedupe_key)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            if dedupe_key is not None:
+                self._unknown_audit_wakeups.discard(dedupe_key)
+            self.deferred_emergency_tasks.put_nowait(
+                (team, dict(alert), skip_audit)
+            )
+            self.logger.info(
+                "Queued emergency wakeup for team %s until an event loop "
+                "is available.",
+                team.team_id,
+            )
+        else:
+            task = loop.create_task(run())
+            self._emergency_tasks.add(task)
+            task.add_done_callback(self._emergency_tasks.discard)
+
+    @staticmethod
+    def _unknown_audit_wakeup_key(
+        team: AgentTeam, alert: Dict[str, Any]
+    ) -> str:
+        return json.dumps(
+            {
+                "team_id": team.team_id,
+                "failed_team_id": alert.get("failed_team_id"),
+                "reason": alert.get("reason"),
+                "cause": alert.get("cause"),
+            },
+            sort_keys=True,
+        )
+
+    def is_unknown_audit_wakeup_active(
+        self, team: AgentTeam, alert: Dict[str, Any]
+    ) -> bool:
+        """Returns whether an identical UNKNOWN wakeup is already active."""
+        key = self._unknown_audit_wakeup_key(team, alert)
+        return key in self._unknown_audit_wakeups
+
+    async def execute_emergency_discussion(
+        self,
+        team: AgentTeam,
+        alert: Dict[str, Any],
+        *,
+        skip_audit: bool = False,
+    ) -> str:
         """Executes an emergency discussion round to handle child failure or escalation."""
         emergency_prompt = (
             f"EMERGENCY MEETING: An anomaly or escalation was reported from your child team or supervisor.\n"
@@ -847,415 +1633,9 @@ class ATTManager:
         )
         rounds = getattr(self.config, "emergency_discussion_rounds", 1)
         self.logger.warning(f"Starting emergency discussion on team {team.team_id} for {rounds} round(s)...")
-        return await self.execute_team_discussion(team, prompt=emergency_prompt, rounds=rounds)
-
-    def _auto_save(self):
-        """Triggers a snapshot save if a database path is configured."""
-        if self.db_path and not getattr(self, "_suppress_auto_save", False):
-            self.save_state()
-
-    def save_state(self, db_path: Optional[str] = None):
-        """Serializes the entire manager topology, agents, teams, libraries, etc. to SQLite using SQLAlchemy ORM."""
-        target_path = db_path or self.db_path
-        if not target_path:
-            return
-
-        try:
-            from sqlalchemy import text
-            with get_session(target_path, disable_fks=True) as session:
-                # 1. Clear volatile collections selectively (Garbage collection of orphaned rows)
-                active_agent_names = list(self.agents.keys()) if self.agents else ["__NONE__"]
-                session.query(AgentMessageModel).filter(AgentMessageModel.agent_name.notin_(active_agent_names)).delete(synchronize_session=False)
-                
-                active_team_ids = list(self.teams.keys()) if self.teams else ["__NONE__"]
-                session.query(TeamInboxModel).filter(TeamInboxModel.team_id.notin_(active_team_ids)).delete(synchronize_session=False)
-                session.query(TeamProposalModel).filter(TeamProposalModel.team_id.notin_(active_team_ids)).delete(synchronize_session=False)
-                session.query(BrokerAgreementModel).filter(BrokerAgreementModel.sender_team_id.notin_(active_team_ids)).delete(synchronize_session=False)
-                
-                active_lib_ids = list(self.libraries.keys()) if self.libraries else ["__NONE__"]
-                session.query(LibraryPermissionModel).filter(LibraryPermissionModel.lib_id.notin_(active_lib_ids)).delete(synchronize_session=False)
-                if active_lib_ids and active_lib_ids != ["__NONE__"]:
-                    session.query(LibraryPermissionModel).filter(LibraryPermissionModel.lib_id.in_(active_lib_ids)).delete(synchronize_session=False)
-                session.query(DocLibFileModel).filter(DocLibFileModel.lib_id.notin_(active_lib_ids)).delete(synchronize_session=False)
-
-                # 2. Save Configs
-                session.execute(text("DELETE FROM manager_config;"))
-                att_config_data = json.dumps(self.config.__dict__)
-                session.add(ManagerConfigModel(config_key="att_config", config_value=att_config_data))
-                if self.root_ai:
-                    session.add(ManagerConfigModel(config_key="root_ai_name", config_value=self.root_ai.name))
-
-                # 3. Save Agents
-                agent_models_map = {}
-                for agent in self.agents.values():
-                    model_alias = None
-                    if agent.llm_client:
-                        if hasattr(agent.llm_client, "model_name"):
-                            model_alias = str(agent.llm_client.model_name)
-                        elif hasattr(agent.llm_client, "manager"):
-                            model_alias = "default"
-
-                    last_ctx_json = json.dumps(agent.last_context) if agent.last_context else None
-                    agent_model = session.query(AgentModel).filter_by(name=agent.name).first()
-                    if not agent_model:
-                        agent_model = AgentModel(name=agent.name)
-                        session.add(agent_model)
-                        
-                    agent_model.role = agent.role
-                    agent_model.role_description = getattr(agent, "role_description", "")
-                    agent_model.system_instructions = getattr(agent, "system_instructions", "")
-                    agent_model.model_alias = model_alias
-                    agent_model.last_context = last_ctx_json
-                    
-                    session.query(AgentMessageModel).filter_by(agent_name=agent.name).delete(synchronize_session=False)
-                    for idx, msg in enumerate(agent.messages):
-                        msg_model = AgentMessageModel(
-                            agent_name=agent.name,
-                            role=msg.get("role", "user"),
-                            content=msg.get("content", ""),
-                            tool_calls=msg.get("tool_calls"),
-                            tool_call_id=msg.get("tool_call_id"),
-                            name=msg.get("name"),
-                            created_at=time.time() + idx * 0.001
-                        )
-                        session.add(msg_model)
-                    
-                    agent_models_map[agent.name] = agent_model
-
-                # 4. Save Teams
-                for team in self.teams.values():
-                    parent_id = team.parent_team.team_id if team.parent_team else None
-                    
-                    creator_type = None
-                    creator_id = None
-                    if team.creator:
-                        if hasattr(team.creator, "name"):
-                            creator_type = "agent"
-                            creator_id = team.creator.name
-                        elif hasattr(team.creator, "team_id"):
-                            creator_type = "team"
-                            creator_id = team.creator.team_id
-                            
-                    comm_rules_json = json.dumps(team.communication_rules)
-                    status_map_json = json.dumps(team.status_map)
-                    
-                    team_model = session.query(TeamModel).filter_by(team_id=team.team_id).first()
-                    if not team_model:
-                        team_model = TeamModel(team_id=team.team_id)
-                        session.add(team_model)
-                        
-                    team_model.preset_name = team.preset_name
-                    team_model.team_purpose = team.team_purpose
-                    team_model.team_progress = team.team_progress
-                    team_model.depth = team.depth
-                    team_model.chapter_num = team.chapter_num
-                    team_model.parent_team_id = parent_id
-                    team_model.migration_count = team.migration_count
-                    team_model.creator_type = creator_type
-                    team_model.creator_id = creator_id
-                    team_model.communication_rules = comm_rules_json
-                    team_model.status_map = status_map_json
-                    team_model.system_instructions = getattr(team, "system_instructions", "")
-
-                    # Save team members via relationship
-                    team_model.members = [agent_models_map[m.name] for m in team.members if m.name in agent_models_map]
-
-                    session.query(TeamInboxModel).filter_by(team_id=team.team_id).delete(synchronize_session=False)
-                    for idx, msg in enumerate(team.message_inbox):
-                        sender = msg.get("from", "Unknown")
-                        msg_type = msg.get("type", "Unknown")
-                        payload = json.dumps(msg)
-                        inbox_model = TeamInboxModel(
-                            team_id=team.team_id,
-                            sender=sender,
-                            msg_type=msg_type,
-                            payload=payload,
-                            created_at=time.time() + idx * 0.001
-                        )
-                        session.add(inbox_model)
-
-                    session.query(TeamProposalModel).filter_by(team_id=team.team_id).delete(synchronize_session=False)
-                    for prop_id, prop in team.proposals.items():
-                        proposal_model = TeamProposalModel(
-                            proposal_id=prop_id,
-                            team_id=team.team_id,
-                            action=prop.get("action"),
-                            target=prop.get("target"),
-                            initiator_type=prop.get("initiator_type"),
-                            initiator_name=prop.get("initiator_name"),
-                            rationale=prop.get("rationale"),
-                            proposed_details=json.dumps(prop.get("proposed_details", {})),
-                            votes=json.dumps(prop.get("votes", {})),
-                            status=prop.get("status")
-                        )
-                        session.add(proposal_model)
-
-                # 5. Save Broker agreements
-                for sender_id, recipient_id in self.broker.peer_talk_agreements:
-                    agreement_model = BrokerAgreementModel(
-                        sender_team_id=sender_id,
-                        recipient_team_id=recipient_id
-                    )
-                    session.merge(agreement_model)
-
-                # 6. Save Libraries and Permissions
-                for lib_id, lib in self.libraries.items():
-                    lib_model = session.query(LibraryModel).filter_by(lib_id=lib.lib_id).first()
-                    if not lib_model:
-                        lib_model = LibraryModel(lib_id=lib.lib_id)
-                        session.add(lib_model)
-                        
-                    lib_model.name = lib.name
-                    lib_model.owner_team_id = lib.owner_team_id
-                    lib_model.description = lib.description
-                    lib_model.is_public_visible = 1 if lib.is_public_visible else 0
-                    
-                    session.query(DocLibFileModel).filter_by(lib_id=lib.lib_id).delete(synchronize_session=False)
-                    if os.path.exists(lib.root_dir):
-                        for root, dirs, files in os.walk(lib.root_dir):
-                            for file in files:
-                                full_path = os.path.join(root, file)
-                                rel_path = os.path.relpath(full_path, lib.root_dir)
-                                try:
-                                    with open(full_path, "r", encoding="utf-8") as f:
-                                        content = f.read()
-                                    file_model = DocLibFileModel(
-                                        lib_id=lib.lib_id,
-                                        path=rel_path,
-                                        content=content
-                                    )
-                                    session.add(file_model)
-                                except Exception as e:
-                                    self.logger.warning(f"Failed to read/serialize file {full_path}: {e}")
-
-                for lib_id, paths_map in self.library_permissions.items():
-                    for path, teams_map in paths_map.items():
-                        for team_id, permission in teams_map.items():
-                            perm_model = LibraryPermissionModel(
-                                lib_id=lib_id,
-                                path=path,
-                                team_id=team_id,
-                                permission=permission
-                            )
-                            session.add(perm_model)
-
-            self.logger.info(f"Successfully saved state to SQLite database: {target_path}")
-        except Exception as e:
-            self.logger.critical(f"CRITICAL ERROR saving state to SQLite database at {target_path}: {e}")
-            if getattr(self.config, "strict_state_persistence", True):
-                raise RuntimeError(f"State persistence failed: {e}") from e
-            else:
-                root_team = next((t for t in self.teams.values() if t.parent_team is None), None)
-                if root_team:
-                    import asyncio
-                    coro = self.supervisor.report_anomaly(root_team, f"State persistence failed: {e}. Agents may lose memory on restart.", self)
-                    try:
-                        asyncio.get_running_loop().create_task(coro)
-                    except RuntimeError:
-                        self.deferred_emergency_tasks.put_nowait(coro)
-
-    def load_state(self, db_path: str):
-        """Loads and reconstructs the entire manager topology, configs, and agent states from SQLite using SQLAlchemy ORM."""
-        if not os.path.exists(db_path):
-            raise FileNotFoundError(f"State database file '{db_path}' not found.")
-
-        try:
-            with get_session(db_path) as session:
-                # Helper function to restore LLM clients
-                def get_agent_client_by_name(client_name: Optional[str]) -> Any:
-                    default_wrapper = ManagerDefaultClientAdapter(self)
-                    if client_name:
-                        if client_name in self.llm_clients:
-                            return self.llm_clients[client_name]
-                        elif client_name in self.model_configs and self.generator_handler:
-                            adapter = HandlerClientAdapter(client_name, self.generator_handler)
-                            config = self.model_configs.get(client_name)
-                            if config:
-                                adapter._supports_native = config.get("supports_native_tool_calling", False)
-                            return adapter
-                        else:
-                            self.logger.warning(f"Client '{client_name}' not found in registry during restore. Falling back to default client.")
-                    if "default" in self.llm_clients:
-                        return self.llm_clients["default"]
-                    if self.root_ai.llm_client:
-                        return self.root_ai.llm_client
-                    return default_wrapper
-
-                # 1. Load Configs
-                config_rows = session.query(ManagerConfigModel).all()
-                config_map = {row.config_key: row.config_value for row in config_rows}
-                
-                if "att_config" in config_map:
-                    config_data = json.loads(config_map["att_config"])
-                    for k, v in config_data.items():
-                        setattr(self.config, k, v)
-                
-                # 2. Reconstruct Agents
-                self.agents.clear()
-                agent_rows = session.query(AgentModel).all()
-                for row in agent_rows:
-                    client = get_agent_client_by_name(row.model_alias)
-                    agent = Agent(
-                        name=row.name,
-                        role=row.role,
-                        llm_client=client,
-                        role_description=row.role_description,
-                        system_instructions=row.system_instructions
-                    )
-                    agent.last_context = json.loads(row.last_context) if row.last_context else None
-                    
-                    # Restore agent messages ordered by created_at in the relationship definition
-                    agent.messages = []
-                    for msg in row.messages:
-                        m_dict = {"role": msg.role, "content": msg.content}
-                        if msg.tool_calls is not None:
-                            m_dict["tool_calls"] = msg.tool_calls
-                        if msg.tool_call_id is not None:
-                            m_dict["tool_call_id"] = msg.tool_call_id
-                        if msg.name is not None:
-                            m_dict["name"] = msg.name
-                        agent.messages.append(m_dict)
-                    
-                    self.agents[agent.name] = agent
-
-                if "root_ai_name" in config_map:
-                    root_ai_name = config_map["root_ai_name"]
-                    if root_ai_name in self.agents:
-                        self.root_ai = self.agents[root_ai_name]
-                        if hasattr(self, "supervisor") and self.supervisor:
-                            self.supervisor.root_ai = self.root_ai
-
-                # 3. Reconstruct Libraries
-                self.libraries.clear()
-                library_rows = session.query(LibraryModel).all()
-                for row in library_rows:
-                    lib = DocumentLibrary(
-                        lib_id=row.lib_id,
-                        name=row.name,
-                        owner_team_id=row.owner_team_id,
-                        description=row.description,
-                        is_public_visible=bool(row.is_public_visible),
-                        root_dir=self.config.workspace_root
-                    )
-                    # Clear local directory before restoring
-                    import shutil
-                    shutil.rmtree(lib.root_dir, ignore_errors=True)
-                    os.makedirs(lib.root_dir, exist_ok=True)
-                    self.libraries[lib.lib_id] = lib
-
-                files_rows = session.query(DocLibFileModel).all()
-                for row in files_rows:
-                    lib_id = row.lib_id
-                    if lib_id in self.libraries:
-                        self.libraries[lib_id].write_file(row.path, row.content)
-
-                # Restore library permissions
-                self.library_permissions.clear()
-                perms_rows = session.query(LibraryPermissionModel).all()
-                for row in perms_rows:
-                    lib_id = row.lib_id
-                    path = row.path
-                    team_id = row.team_id
-                    perm = row.permission
-                    if lib_id not in self.library_permissions:
-                        self.library_permissions[lib_id] = {}
-                    if path not in self.library_permissions[lib_id]:
-                        self.library_permissions[lib_id][path] = {}
-                    self.library_permissions[lib_id][path][team_id] = perm
-
-                # 4. Reconstruct Teams
-                self.teams.clear()
-                teams_rows = session.query(TeamModel).all()
-                team_map = {}
-                
-                # First pass: Instantiate teams without resolving parent/children references (since some might not be instantiated yet)
-                for row in teams_rows:
-                    creator_type = row.creator_type
-                    creator_id = row.creator_id
-                    
-                    creator = None
-                    if creator_type == "agent":
-                        creator = self.agents.get(creator_id)
-                    
-                    team = AgentTeam(creator=creator, preset_name=row.preset_name, team_purpose=row.team_purpose)
-                    team.team_id = row.team_id
-                    team.logger = logging.getLogger(f"AgentTeam:{team.team_id}")
-                    team.team_progress = row.team_progress
-                    team.chapter_num = row.chapter_num
-                    team.migration_count = row.migration_count
-                    team.communication_rules = json.loads(row.communication_rules) if row.communication_rules else {"allow_sibling_talk": False, "rules": []}
-                    team.status_map = json.loads(row.status_map) if row.status_map else {}
-                    team.system_instructions = row.system_instructions
-                    team._cached_depth = getattr(row, "depth", None)
-                    team.manager = self
-                    team_map[team.team_id] = team
-
-                # Second pass: Resolve hierarchy & team creator references
-                for row in teams_rows:
-                    team_id = row.team_id
-                    team = team_map[team_id]
-                    
-                    parent_team_id = row.parent_team_id
-                    if parent_team_id:
-                        parent_team = team_map.get(parent_team_id)
-                        team._parent_team = parent_team
-                        if team not in parent_team.child_teams:
-                            parent_team.child_teams.append(team)
-                            
-                    if row.creator_type == "team" and row.creator_id:
-                        team.creator = team_map.get(row.creator_id)
-
-                self.teams = team_map
-
-                # 5. Populate Team Members
-                for row in teams_rows:
-                    t_id = row.team_id
-                    if t_id in self.teams:
-                        for member_row in row.members:
-                            if member_row.name in self.agents:
-                                self.teams[t_id].members.append(self.agents[member_row.name])
-
-                # 6. Associate Built-in DocLibs & Re-bind Tools to Teams
-                from ai_team_team.tool import get_default_tools
-                for team in self.teams.values():
-                    team.doc_library = self.libraries.get(f"DL-{team.team_id}")
-                    # Re-bind tools
-                    team.tools.clear()
-                    team.tools.update(get_default_tools(self.tools_context, team))
-                    team.tools.update(self.global_tools)
-
-                # 7. Restore Team Inboxes
-                for row in teams_rows:
-                    t_id = row.team_id
-                    if t_id in self.teams:
-                        for inbox_row in row.inbox:
-                            msg = json.loads(inbox_row.payload)
-                            self.teams[t_id].message_inbox.append(msg)
-
-                # 8. Restore Proposals
-                for row in teams_rows:
-                    t_id = row.team_id
-                    if t_id in self.teams:
-                        for prop_row in row.proposals:
-                            prop_id = prop_row.proposal_id
-                            self.teams[t_id].proposals[prop_id] = {
-                                "action": prop_row.action,
-                                "target": prop_row.target,
-                                "initiator_type": prop_row.initiator_type,
-                                "initiator_name": prop_row.initiator_name,
-                                "rationale": prop_row.rationale,
-                                "proposed_details": json.loads(prop_row.proposed_details) if prop_row.proposed_details else {},
-                                "votes": json.loads(prop_row.votes) if prop_row.votes else {},
-                                "status": prop_row.status
-                            }
-
-                # 9. Restore Broker peer agreements
-                self.broker.peer_talk_agreements.clear()
-                agreements_rows = session.query(BrokerAgreementModel).all()
-                for row in agreements_rows:
-                    self.broker.peer_talk_agreements.add((row.sender_team_id, row.recipient_team_id))
-
-            self.logger.info(f"Successfully loaded state from SQLite database: {db_path}")
-        except Exception as e:
-            self.logger.error(f"Error loading state from SQLite database {db_path}: {e}")
-            raise e
+        return await self.execute_team_discussion(
+            team,
+            prompt=emergency_prompt,
+            rounds=rounds,
+            skip_audit=skip_audit,
+        )

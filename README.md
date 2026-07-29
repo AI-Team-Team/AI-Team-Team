@@ -37,13 +37,13 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Permits active teams to request parent-hierarchy migrations, arbitrated by modular strategies with loop/cycle detection and parent notification logs.
 * **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects an ASCII-drawn indented tree map of active teams (displaying purposes, status, and progress metrics in real-time) directly into the agent prompt context.
 * **[Global Expert Discovery](docs/State_Persistence.md)**: Automatically appends a directory of all active system experts (names, roles, and profiles) into the agent's identity context to facilitate peer discovery.
-* **[Resilient Failover Routing](docs/Team_Governance.md#5-token-budget--failover-policies)**: Dynamically hot-swaps exhausted or failing model clients. Supports two routing strategies: `"auto"` (selects first candidate model under budget) and `"parent"` (synchronously delegates the choice to the parent representative LLM to prevent execution deadlocks).
+* **[Resilient Failover Routing](docs/Team_Governance.md#5-token-budget--failover-policies)**: Dynamically hot-swaps exhausted or failing model clients. Supports `"auto"` selection and asynchronous `"parent"` representative selection.
 
 ### 🧠 ReAct Loops & Execution Engine
 
 * **Bounded ReAct Loops**: Executes standard Thought/Action/Observation reasoning cycles, capped by max steps to prevent runaway API tokens.
 * **Robust Argument Parser**: A safe literal lexical parser (`ast.literal_eval`) with multiline XML support, code block stripping, and a comma-merging heuristic to handle unquoted complex strings (like SQL queries).
-* **[O(1) Memory Compression](docs/State_Persistence.md)**: Automates memory pruning by extracting early conversation turns, calling the agent's LLM to generate a `*** HISTORICAL SUMMARY ARCHIVE ***`, and splicing it back to prevent Out-Of-Memory (OOM) failures.
+* **[Bounded Memory Compression](docs/State_Persistence.md)**: Automates memory pruning by extracting early conversation turns, calling the agent's LLM to generate a `*** HISTORICAL SUMMARY ARCHIVE ***`, and retaining a bounded high-fidelity window.
 * **[LLM Adapter Architecture](docs/Tool_System.md)**: Unifies sync, async, and streaming LLM payloads from various providers (Google, OpenAI, Anthropic) into standard `LLMResponse` and `ToolCall` formats via the `ManagerDefaultClientAdapter`.
 * **[Token Budget Circuit Breakers](docs/Team_Governance.md#5-token-budget--failover-policies)**: Enforces session-wide token budget limits per model registry alias, pre-checking prompt tokens via Hugging Face `tokenizers` (with safe offline character fallback) to trigger circuit breakers before API call invocation.
 
@@ -61,7 +61,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 
 ### 💾 Persistence & Diagnostics
 
-* **[SQLite State Snapshots](docs/State_Persistence.md)**: Automatically serializes topologies, lineages, memory logs, DocLib files, and active voting proposals to SQLite on state changes, enabling 100% crash-recovery. Uses $O(1)$ cascading `notin_` queries to garbage-collect orphaned messages.
+* **[Asynchronous SQLite Persistence](docs/State_Persistence.md)**: Serializes changed topology, memory, DocLib, ACL, and governance records through an incremental single-writer queue, with explicit flush and restore validation.
 * **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A non-participating 3-AI Supervisory Team executes parallel LLM evaluations (Integrity Auditor, Continuity Auditor, Deadlock Auditor) to review round transcripts, recursively escalating anomalies up the tree lineage.
 * **Decoupled Dashboards**: Exposes clear runtime callback event hooks (`on_status_change`, `on_activity_added`, `on_log_append`) to update console UIs without codebase pollution.
 
@@ -97,7 +97,7 @@ graph TD
     %% Coordinator Layer
     subgraph Coordinator ["ATT Coordinator Layer"]
         Manager[ATTManager] <-->|Auto-Save & Restore state| SQLite[(SQLite Database)]
-        SQLite -.->|"O(1) Cascading notin_ Garbage Collection"| SQLite
+        SQLite -.->|"Versioned incremental transactions"| SQLite
         Manager -->|Resolve Model Configs| ModelRegistry[Model Registry & Presets]
         ModelRegistry -->|Route Requests| Generator[Global Generator Handler]
         Manager -->|Tracks Subscribed Callbacks| EventHooks["Event Callbacks: on_status_change, on_activity_added, on_log_append, on_team_migration, on_emergency_escalation"]
@@ -286,11 +286,12 @@ config = ATTConfig(
     min_subagent_team_size=3,
     subagent_discussion_rounds=2,
     react_max_steps=5,
-    enable_memory_compression=True,       # Extends max tokens via O(1) multi-turn summarization
+    enable_memory_compression=True,       # Retains a bounded recent-message window
     failover_policy="auto",               # Automatically hot-swaps LLM client on TokenLimitError
     enable_emergency_wakeup=True,         # Enables deferred inbox processing for emergencies
     tool_calling_mode="auto",             # Auto-detects Pluggable Reasoning Strategy (Native or TextReAct)
-    strict_state_persistence=True         # Enables ORM cascading garbage collection
+    strict_state_persistence=True,
+    audit_unknown_escalation_mode="wake" # Or "queue"
 )
 
 # 2. Setup Root Agent (client is dynamically resolved if omitted)
@@ -300,13 +301,7 @@ root_agent = Agent(name="Root_AI", role="Architect")
 # All actions, tool calls, and debates will auto-save to this file
 manager = ATTManager(root_ai=root_agent, config=config, db_path="att_state.db")
 
-# 4. (Optional) Resume from a previous session, or manually save snapshot
-# if os.path.exists("att_state.db"):
-#     manager.load_state("att_state.db")
-#
-# manager.save_state("att_backup.db")  # Manually save a backup state snapshot
-
-# 5. Register a global generator callback handler
+# 4. Register a global generator callback handler before loading state
 # All LLM invocation logic is delegated here, keeping the framework keyless and SDK-independent
 async def my_handler(
     model_name: str,
@@ -318,6 +313,15 @@ async def my_handler(
     # 1. Inspect model_name to call the correct provider/SDK
     # 2. If require_json=True is requested, return valid JSON string
     return "Final Answer: Processed successfully."
+
+manager.register_generator_handler(my_handler)
+
+# 5. Persistence APIs are asynchronous
+# if os.path.exists("att_state.db"):
+#     await manager.load_state("att_state.db")
+# await manager.save_state("att_backup.db")
+# await manager.flush_state()
+# await manager.close()
 
 manager.register_generator_handler(my_handler)
 ```
@@ -560,7 +564,8 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `max_tool_rounds` | `int` | `5` | Max depth of native parallel tool calls during a reasoning step. |
 | `model_token_limits` | `dict` | `None` | Mapping of model aliases to their token budget limits (used for failover routing). |
 | `failover_policy` | `str` | `"auto"` | Fallback strategy on token exhaustion: `"auto"` (next available) or `"parent"` (LLM debate proxy). |
-| `strict_state_persistence` | `bool` | `True` | Enforcement of $O(1)$ cascading ORM deletions for unreferenced messages and artifacts. |
+| `strict_state_persistence` | `bool` | `True` | Enables strict propagation of persistence errors. |
+| `audit_unknown_escalation_mode` | `str` | `"wake"` | Handling for indeterminate audits: immediately `"wake"` the parent or only `"queue"` the alert. |
 
 ### `GatedFileReader` Parameters
 

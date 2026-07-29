@@ -1,6 +1,7 @@
 import uuid
 import asyncio
 import logging
+import threading
 from typing import List, Dict, Optional, Tuple, Any, Union
 from ai_team_team.tool import Tool
 from ai_team_team.doc_library import DocumentLibrary
@@ -35,6 +36,8 @@ class AgentTeam:
         self.is_running = False
         self._cached_depth: Optional[int] = None
         self._state_lock: Optional[asyncio.Lock] = None
+        self._status_lock = threading.RLock()
+        self._inbox_lock = threading.RLock()
 
     @property
     def state_lock(self):
@@ -67,7 +70,30 @@ class AgentTeam:
         return d
 
     def add_child_team(self, child: 'AgentTeam'):
-        self.child_teams.append(child)
+        if child not in self.child_teams:
+            self.child_teams.append(child)
+
+    def invalidate_depth_cache(self, recursive: bool = True) -> None:
+        """Clears cached depth for this team and optionally all descendants."""
+        self._cached_depth = None
+        if recursive:
+            for child in self.child_teams:
+                child.invalidate_depth_cache(recursive=True)
+
+    def set_status(self, agent_name: str, status: str) -> None:
+        """Updates display-only status under a lightweight synchronous lock."""
+        with self._status_lock:
+            self.status_map[agent_name] = status
+
+    def status_snapshot(self) -> Dict[str, str]:
+        """Returns a consistent copy of display-only status."""
+        with self._status_lock:
+            return dict(self.status_map)
+
+    @property
+    def inbox_lock(self) -> threading.RLock:
+        """Returns the short-lived lock protecting inbox handoff."""
+        return self._inbox_lock
 
     def launch_att(
         self,
@@ -98,34 +124,48 @@ class AgentTeam:
 
 
     def receive_message(self, message: Dict[str, Any]):
-        self.message_inbox.append(message)
-        self.logger.info(f"Team {self.team_id} received message of type '{message.get('type')}' from '{message.get('from')}'")
         manager = getattr(self, "manager", None)
+        if (
+            manager
+            and message.get("type") == "audit_unknown_escalation"
+            and manager.is_unknown_audit_wakeup_active(self, message)
+        ):
+            return
+        with self._inbox_lock:
+            self.message_inbox.append(message)
+        self.logger.info(f"Team {self.team_id} received message of type '{message.get('type')}' from '{message.get('from')}'")
         if manager:
-            # Check for high-priority alert types and trigger active wakeup if idle
-            if message.get("type") in {"child_failure_escalation", "escalation_spawn"}:
-                if not self.is_running and getattr(manager.config, "enable_emergency_wakeup", True):
-                    self.logger.warning(f"Active wakeup triggered for idle team {self.team_id}")
-                    try:
-                        asyncio.create_task(manager.execute_emergency_discussion(self, message))
-                    except RuntimeError as e:
-                        # In case no event loop is running (e.g. some synchronous test setup)
-                        self.logger.critical(f"No event loop running for emergency wakeup. Falling back to deferred message queue. {e}")
-                        if hasattr(manager, "deferred_emergency_tasks"):
-                            manager.deferred_emergency_tasks.put_nowait(manager.execute_emergency_discussion(self, message))
-                
-                # Check for callback hook
+            message_type = message.get("type")
+            should_wake = message_type in {
+                "child_failure_escalation",
+                "escalation_spawn",
+            }
+            skip_audit = False
+            if message_type == "audit_unknown_escalation":
+                should_wake = (
+                    manager.config.audit_unknown_escalation_mode == "wake"
+                )
+                skip_audit = True
+
+            if should_wake:
+                if (
+                    not self.is_running
+                    and manager.config.enable_emergency_wakeup
+                ):
+                    manager.schedule_emergency_wakeup(
+                        self, message, skip_audit=skip_audit
+                    )
                 if getattr(manager, "on_emergency_escalation", None):
                     try:
                         manager.on_emergency_escalation(
                             self.team_id,
-                            message.get("type"),
+                            message_type,
                             message.get("reason") or message.get("objective") or str(message)
                         )
                     except Exception as e:
                         self.logger.error(f"Error in on_emergency_escalation callback: {e}")
             
-            manager._auto_save()
+            manager._auto_save(inboxes={self.team_id})
 
     async def execute_reasoning_step(
         self,
@@ -169,7 +209,10 @@ class AgentTeam:
                     if mode == "auto":
                         is_native = False
                         if hasattr(agent.llm_client, "supports_native_tool_calling"):
-                            is_native = bool(agent.llm_client.supports_native_tool_calling())
+                            is_native = (
+                                agent.llm_client
+                                .supports_native_tool_calling() is True
+                            )
                         
                         if is_native:
                             strategy = NativeReasoningStrategy()

@@ -9,3 +9,7 @@ class LLMGenerationError(ATTException):
 class TokenLimitExceededError(ATTException):
     """Raised when a model exceeds its allocated session token budget."""
     pass
+
+class StateRestoreError(ATTException):
+    """Raised when persisted state cannot be restored safely."""
+    pass

@@ -346,7 +346,12 @@ def resolve_communication_policy(policy_name: str) -> BaseCommunicationPolicy:
         "rule_gated": RuleGatedCommunicationPolicy(),
         "proxied": ProxiedCommunicationPolicy()
     }
-    return policies.get(policy_name.lower(), PermissiveCommunicationPolicy())
+    try:
+        return policies[policy_name.lower()]
+    except (AttributeError, KeyError) as exc:
+        raise ValueError(
+            f"Unknown communication policy: {policy_name!r}."
+        ) from exc
 
 def resolve_migration_policy(policy_name: str) -> BaseMigrationPolicy:
     policies = {
@@ -354,4 +359,9 @@ def resolve_migration_policy(policy_name: str) -> BaseMigrationPolicy:
         "ancestor_approval": AncestorApprovalMigrationPolicy(),
         "lineage_path": LineagePathMigrationPolicy()
     }
-    return policies.get(policy_name.lower(), AncestorApprovalMigrationPolicy())
+    try:
+        return policies[policy_name.lower()]
+    except (AttributeError, KeyError) as exc:
+        raise ValueError(
+            f"Unknown migration policy: {policy_name!r}."
+        ) from exc

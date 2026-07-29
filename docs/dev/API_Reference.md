@@ -33,7 +33,7 @@ Represents a dynamic team of at least 3 agents ($N \ge 3$) executing discussions
 
 * **Properties**:
   * `parent_team -> Optional[AgentTeam]`: Resolves the parent team in the lineage tree.
-  * `depth -> int`: Returns the lineage depth of the team (Level 1, Level 2). It is memoized and hydrates in $O(1)$ constant time from SQLite.
+  * `depth -> int`: Returns memoized lineage depth. A migration recursively invalidates this cache for the moved team and every descendant.
   * `state_lock -> asyncio.Lock`: Asynchronous mutex safeguarding proposal structural mutations during parallel Native tool executions.
 * **Methods**:
   * `launch_att(...) -> AgentTeam`: Allows the active team to recursively spawn a child team.
@@ -67,11 +67,11 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
   * `register_tool_auditor(tool_name: str, auditor_func: Callable[..., Tuple[bool, str]])`
     Registers an auditing hook callback that intercepts specific tool calls before execution.
   * `register_tools_context(context: Dict[str, Any])`
-    Registers system resources context (databases, file readers) and automatically binds coordination tools to all teams.
+    Registers additional runtime resources and rebinds coordination tools. The reserved `att_manager` reference is installed automatically and cannot be overwritten.
   * `create_agent_team(...) -> AgentTeam`
     Spawns a new team of size $N \ge 3$, establishes parent-child lineages, and binds generic/custom tools.
-  * `_suppress_auto_save() -> ContextManager`
-    Context manager that shields SQLite from high-frequency serialization writes during intensive team discussions.
+  * `suppress_auto_save() -> AsyncContextManager`
+    Nested, task-local batching context that merges dirty deltas and submits one write when the outer scope exits.
   * `execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`
     Executes a multi-agent debate session, automatically injecting unresolved inbox alerts, and running supervisory transcript audits.
   * `find_parent_team(target: AgentTeam) -> Optional[AgentTeam]`
@@ -82,10 +82,14 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
     Renders the active lineage tree map in ASCII format.
   * `negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`
     Arbitrates dynamic team reorganizations and updates parental references.
-  * `save_state(db_path: Optional[str] = None)`
-    Serializes all manager topologies, configs, lineages, agent conversation queues, proposals, agreements, and Document Libraries into SQLite.
-  * `load_state(db_path: str)`
-    Deserializes and hydrates the entire ATTManager registry state from SQLite database snapshots.
+  * `await save_state(path: Optional[str] = None, full: bool = True)`
+    Queues and waits for a full snapshot, or a configuration delta when `full=False`.
+  * `await load_state(path: str)`
+    Restores a versioned snapshot after validating every persisted model alias has a runtime binding.
+  * `await flush_state()`
+    Waits for all queued incremental commits.
+  * `await close()`
+    Flushes writes and closes the single writer, engines, and sessions.
 
 ### `ATTConfig`
 
@@ -111,7 +115,8 @@ Configuration options for tuning the ATT multi-agent framework.
       communication_policy: str = "permissive",
       migration_policy: str = "ancestor_approval",
       enable_emergency_wakeup: bool = True,
-      emergency_discussion_rounds: int = 1
+      emergency_discussion_rounds: int = 1,
+      audit_unknown_escalation_mode: str = "wake"
   )
   ```
 
@@ -129,8 +134,8 @@ Coordinates sibling and cross-lineage communication permissions.
 A 3-AI supervisory committee checking transcripts for logical deadlocks, circular reasoning, and dialogue health.
 
 * **Methods**:
-  * `audit_team_dialog(team: AgentTeam, transcript: str) -> Tuple[bool, str]`
-    Audits logs and yields is_healthy status and reasoning.
+  * `audit_team_dialog(team: AgentTeam, transcript: str) -> AuditResult`
+    Returns `HEALTHY`, `UNHEALTHY`, or `UNKNOWN` with a reason and optional operational cause.
   * `report_anomaly(failed_team: AgentTeam, reason: str, manager: ATTManager)`
     Escalates failure alerts recursively up ancestors or directly to the Level 0 Root AI.
 

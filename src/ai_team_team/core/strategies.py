@@ -14,7 +14,7 @@ from ai_team_team.core.utils import generate_with_retry
 
 async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: Any) -> str:
     """Prepares the agent context, memory compression, transition notice, and returns the identity header."""
-    team.status_map[agent.name] = "Thinking..."
+    team.set_status(agent.name, "Thinking...")
     if manager and manager.on_status_change:
         manager.on_status_change(agent.name, "Thinking...")
 
@@ -251,7 +251,7 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                 tool_retry_count = 0
                 for step in range(max_steps):
                     try:
-                        team.status_map[agent.name] = f"Thinking (Step {step+1}/{max_steps})..."
+                        team.set_status(agent.name, f"Thinking (Step {step+1}/{max_steps})...")
                         if manager and manager.on_status_change:
                             manager.on_status_change(agent.name, f"Thinking (Step {step+1}/{max_steps})...")
 
@@ -337,30 +337,71 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                 tool_obj = team.tools[tool_name]
                                 team.logger.info(f"Executing tool: {tool_name} with args={args}, kwargs={kwargs}")
                                 
-                                team.status_map[agent.name] = f"Executing Tool: {tool_name}"
+                                team.set_status(agent.name, f"Executing Tool: {tool_name}")
                                 if manager and manager.on_status_change:
                                     manager.on_status_change(agent.name, f"Executing Tool: {tool_name}")
                                 if manager and manager.on_activity_added:
                                     manager.on_activity_added(agent.name, "Action", f"{tool_name}({tool_args_str})")
 
-                                if manager and tool_name in manager.tool_auditors:
-                                    auditor = manager.tool_auditors[tool_name]
-                                    if inspect.iscoroutinefunction(auditor):
-                                        approved, audit_reason = await auditor(*args, **kwargs)
-                                    else:
-                                        approved, audit_reason = await asyncio.to_thread(auditor, *args, **kwargs)
-                                    if not approved:
-                                        observation = f"Error: Tool execution rejected by auditor: {audit_reason}"
+                                active_agent_token = (
+                                    manager._active_tool_agent.set(agent)
+                                    if manager
+                                    else None
+                                )
+                                try:
+                                    if (
+                                        manager
+                                        and tool_name
+                                        in manager.tool_auditors
+                                    ):
+                                        auditor = manager.tool_auditors[
+                                            tool_name
+                                        ]
+                                        if inspect.iscoroutinefunction(
+                                            auditor
+                                        ):
+                                            approved, audit_reason = (
+                                                await auditor(
+                                                    *args, **kwargs
+                                                )
+                                            )
+                                        else:
+                                            approved, audit_reason = (
+                                                await asyncio.to_thread(
+                                                    auditor,
+                                                    *args,
+                                                    **kwargs,
+                                                )
+                                            )
+                                        if not approved:
+                                            observation = (
+                                                "Error: Tool execution "
+                                                "rejected by auditor: "
+                                                f"{audit_reason}"
+                                            )
+                                        else:
+                                            observation = await tool_obj(
+                                                *args, **kwargs
+                                            )
                                     else:
                                         observation = await tool_obj(*args, **kwargs)
-                                else:
-                                    observation = await tool_obj(*args, **kwargs)
+                                finally:
+                                    if (
+                                        manager
+                                        and active_agent_token is not None
+                                    ):
+                                        manager._active_tool_agent.reset(
+                                            active_agent_token
+                                        )
                                 
-                                team.status_map[agent.name] = "Thinking..."
+                                team.set_status(agent.name, "Thinking...")
                                 if manager and manager.on_status_change:
                                     manager.on_status_change(agent.name, "Thinking...")
                                 if manager:
-                                    manager._auto_save()
+                                    manager._auto_save(
+                                        agents={agent.name},
+                                        teams={team.team_id},
+                                    )
                                 if manager and manager.on_activity_added:
                                     obs_summary = str(observation)
                                     if len(obs_summary) > 80:
@@ -466,11 +507,14 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     team.logger.error(f"Agent {agent.name} execution error: {e}")
                     return f"Error executing task: {e}"
         finally:
-            team.status_map[agent.name] = "Idle"
+            team.set_status(agent.name, "Idle")
             if manager and manager.on_status_change:
                 manager.on_status_change(agent.name, "Idle")
             if manager:
-                manager._auto_save()
+                manager._auto_save(
+                    agents={agent.name},
+                    teams={team.team_id},
+                )
 
 class NativeReasoningStrategy(BaseReasoningStrategy):
     """Implements modern API-level parallel native tool calling reasoning loop."""
@@ -502,7 +546,7 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
             max_tool_rounds = manager.config.max_tool_rounds if manager else 5
 
             for round_idx in range(max_tool_rounds):
-                team.status_map[agent.name] = f"Thinking (Round {round_idx+1}/{max_tool_rounds})..."
+                team.set_status(agent.name, f"Thinking (Round {round_idx+1}/{max_tool_rounds})...")
                 if manager and manager.on_status_change:
                     manager.on_status_change(agent.name, f"Thinking (Round {round_idx+1}/{max_tool_rounds})...")
 
@@ -588,7 +632,10 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                             raise ATTException(f"Tool execution failed {tool_retry_count} times in this step. Maximum tool retries ({max_retries}) exceeded.")
 
                     if manager:
-                        manager._auto_save()
+                        manager._auto_save(
+                            agents={agent.name},
+                            teams={team.team_id},
+                        )
                 else:
                     # Final answer received (no tool calls requested)
                     agent.messages.append({"role": "assistant", "content": response.text})
@@ -622,16 +669,49 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
 
             return "Error: Native tool calling exceeded maximum tool rounds without producing a text final answer."
         finally:
-            team.status_map[agent.name] = "Idle"
+            team.set_status(agent.name, "Idle")
             if manager and manager.on_status_change:
                 manager.on_status_change(agent.name, "Idle")
             if manager:
-                manager._auto_save()
+                manager._auto_save(
+                    agents={agent.name},
+                    teams={team.team_id},
+                )
 
     async def _execute_single_tool(self, tool_call: ToolCall, team: Any, agent: Agent, manager: Any) -> ToolResult:
         tool_name = tool_call.name
         args = []
         kwargs = tool_call.arguments or {}
+        if isinstance(kwargs, str):
+            try:
+                kwargs = json.loads(kwargs)
+            except json.JSONDecodeError as exc:
+                return ToolResult(
+                    tool_call_id=tool_call.call_id,
+                    name=tool_name,
+                    content=(
+                        f"Error: Tool '{tool_name}' arguments are invalid "
+                        f"JSON: {exc}"
+                    ),
+                    raw=tool_call.raw,
+                )
+        if not isinstance(kwargs, dict):
+            return ToolResult(
+                tool_call_id=tool_call.call_id,
+                name=tool_name,
+                content=(
+                    f"Error: Tool '{tool_name}' arguments must be an object."
+                ),
+                raw=tool_call.raw,
+            )
+        active_agent_token = (
+            manager._active_tool_agent.set(agent) if manager else None
+        )
+
+        def finish(result: ToolResult) -> ToolResult:
+            if manager and active_agent_token is not None:
+                manager._active_tool_agent.reset(active_agent_token)
+            return result
 
         # Audit check
         if manager and tool_name in manager.tool_auditors:
@@ -643,10 +723,10 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                     approved, audit_reason = await asyncio.to_thread(auditor, *args, **kwargs)
                 if not approved:
                     content = f"Error: Tool execution rejected by auditor: {audit_reason}"
-                    return ToolResult(tool_call_id=tool_call.call_id, name=tool_name, content=content, raw=tool_call.raw)
+                    return finish(ToolResult(tool_call_id=tool_call.call_id, name=tool_name, content=content, raw=tool_call.raw))
             except Exception as e:
                 content = f"Error auditing tool '{tool_name}': {e}"
-                return ToolResult(tool_call_id=tool_call.call_id, name=tool_name, content=content, raw=tool_call.raw)
+                return finish(ToolResult(tool_call_id=tool_call.call_id, name=tool_name, content=content, raw=tool_call.raw))
 
         if tool_name in team.tools:
             tool_obj = team.tools[tool_name]
@@ -657,4 +737,4 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
         else:
             content = f"Error: Tool '{tool_name}' is not registered."
 
-        return ToolResult(tool_call_id=tool_call.call_id, name=tool_name, content=content, raw=tool_call.raw)
+        return finish(ToolResult(tool_call_id=tool_call.call_id, name=tool_name, content=content, raw=tool_call.raw))

@@ -6,10 +6,11 @@ from typing import Dict, Any, Optional, Callable, List, Tuple, Union, Type, get_
 logger = logging.getLogger("ATT.Tools")
 
 def _type_to_schema_type(hint: Any) -> Dict[str, Any]:
+    import types
     import typing
     origin = getattr(hint, "__origin__", None)
     
-    if origin is typing.Union:
+    if origin in {typing.Union, types.UnionType}:
         args = getattr(hint, "__args__", [])
         non_none_args = [a for a in args if a is not type(None) and a is not None]
         if not non_none_args:
@@ -183,13 +184,21 @@ class Tool:
             logger.error(f"Error executing tool '{self.name}': {e}")
             return f"Error executing tool '{self.name}': {e}"
 
-
 def _resolve_actual_team(caller_node: Any, att_manager: Any) -> Any:
     from .core import Agent, AgentTeam
     if isinstance(caller_node, AgentTeam):
         return caller_node
     elif isinstance(caller_node, Agent):
         return att_manager.get_agent_team(caller_node)
+    return None
+
+def _resolve_actual_agent(caller_node: Any, att_manager: Any) -> Any:
+    from .core import Agent
+
+    if isinstance(caller_node, Agent):
+        return caller_node
+    if att_manager is not None and hasattr(att_manager, "_active_tool_agent"):
+        return att_manager._active_tool_agent.get()
     return None
 
 def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, Tool]:
@@ -316,7 +325,9 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not parent or parent.team_id != actual_team.team_id:
             return f"Error: Caller team '{actual_team.team_id}' is not the parent of child '{child_id}'."
             
-        child.communication_rules["allow_sibling_talk"] = bool(allow)
+        async with child.state_lock:
+            child.communication_rules["allow_sibling_talk"] = bool(allow)
+        att_manager._auto_save(teams={child.team_id})
         return f"Successfully set sibling talk for child team '{child_id}' to {allow}."
 
     async def update_team_purpose(new_purpose: str) -> str:
@@ -325,8 +336,10 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
         
-        old_purpose = actual_team.team_purpose
-        actual_team.team_purpose = new_purpose
+        async with actual_team.state_lock:
+            old_purpose = actual_team.team_purpose
+            actual_team.team_purpose = new_purpose
+        att_manager._auto_save(teams={actual_team.team_id})
         return f"Successfully updated team purpose from '{old_purpose}' to '{new_purpose}'."
 
     async def update_team_status(purpose: str, progress: str) -> str:
@@ -335,8 +348,10 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
         
-        actual_team.team_purpose = purpose
-        actual_team.team_progress = progress
+        async with actual_team.state_lock:
+            actual_team.team_purpose = purpose
+            actual_team.team_progress = progress
+        att_manager._auto_save(teams={actual_team.team_id})
         return f"Successfully updated team purpose to '{purpose}' and progress to '{progress}'."
 
     async def send_peer_message(team_id: str, message: str) -> str:
@@ -424,15 +439,24 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             from .core import ManagerDefaultClientAdapter
             client = ManagerDefaultClientAdapter(att_manager)
             
-        new_agent = Agent(
-            name=f"Dynamic_{role_name}",
-            role=role_name,
-            llm_client=client,
-            role_description=role_description,
-            system_instructions=system_instructions
+        async with child.state_lock:
+            new_agent = Agent(
+                name=att_manager.unique_agent_name(
+                    f"Dynamic_{role_name}", child
+                ),
+                role=role_name,
+                llm_client=client,
+                role_description=role_description,
+                system_instructions=system_instructions
+            )
+            if any(member.name == new_agent.name for member in child.members):
+                return f"Error: Member '{new_agent.name}' already exists."
+            child.members.append(new_agent)
+            att_manager.agents[new_agent.name] = new_agent
+        att_manager._auto_save(
+            agents={new_agent.name},
+            teams={child.team_id},
         )
-        child.members.append(new_agent)
-        att_manager.agents[new_agent.name] = new_agent
         return f"Successfully added new member '{new_agent.name}' (Role: {role_name}) to team '{team_id}'."
 
     async def remove_team_member(team_id: str, agent_name: str) -> str:
@@ -453,19 +477,21 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not parent or parent.team_id != actual_team.team_id:
             return f"Error: Caller team '{actual_team.team_id}' is not the parent of child '{team_id}'."
             
-        min_size = att_manager.config.min_subagent_team_size
-        if len(child.members) <= min_size:
-            return f"Error: Cannot remove member. Team '{team_id}' must maintain at least {min_size} members."
-            
-        target_agent = None
-        for m in child.members:
-            if m.name == agent_name:
-                target_agent = m
-                break
-        if not target_agent:
-            return f"Error: Member '{agent_name}' not found in team '{team_id}'."
-            
-        child.members.remove(target_agent)
+        async with child.state_lock:
+            min_size = att_manager.config.min_subagent_team_size
+            if len(child.members) <= min_size:
+                return f"Error: Cannot remove member. Team '{team_id}' must maintain at least {min_size} members."
+
+            target_agent = None
+            for m in child.members:
+                if m.name == agent_name:
+                    target_agent = m
+                    break
+            if not target_agent:
+                return f"Error: Member '{agent_name}' not found in team '{team_id}'."
+
+            child.members.remove(target_agent)
+        att_manager._auto_save(teams={child.team_id})
         return f"Successfully removed member '{agent_name}' from team '{team_id}'."
 
     async def initiate_membership_vote(
@@ -486,19 +512,23 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                     available = list(att_manager.model_configs.keys()) + list(att_manager.llm_clients.keys())
                     return f"Error: Model '{model_name}' is not registered. Available models are: {available}."
 
-        from .core import Agent, AgentTeam
         actual_team = _resolve_actual_team(caller_node, att_manager)
-        caller_agent_name = getattr(caller_node, 'name', "Unknown")
-                    
+        actual_agent = _resolve_actual_agent(caller_node, att_manager)
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
-            
         if action not in {"add", "remove"}:
             return "Error: Action must be 'add' or 'remove'."
-            
+        if initiator_type not in {"individual", "AT"}:
+            return "Error: initiator_type must be 'individual' or 'AT'."
+        if initiator_type == "individual":
+            if actual_agent is None or actual_agent not in actual_team.members:
+                return "Error: Only an active team member can initiate an individual proposal."
+
         import uuid
         vp_id = f"VP-{uuid.uuid4().hex[:6]}"
-        initiator_name = caller_agent_name if initiator_type == "individual" else "AT"
+        initiator_name = (
+            actual_agent.name if initiator_type == "individual" else "AT"
+        )
         
         proposal = {
             "proposal_id": vp_id,
@@ -512,11 +542,16 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             "status": "active"
         }
         
-        if initiator_type == "individual" and caller_agent_name != "Unknown":
-            proposal["votes"][caller_agent_name] = {"vote": "Agree", "public": True, "rationale": "Initiated proposal."}
+        if initiator_type == "individual":
+            proposal["votes"][actual_agent.name] = {
+                "vote": "Agree",
+                "public": True,
+                "rationale": "Initiated proposal.",
+            }
             
         async with actual_team.state_lock:
             actual_team.proposals[vp_id] = proposal
+        att_manager._auto_save(proposals={actual_team.team_id})
         return f"Vote proposal '{vp_id}' successfully initiated. Other members must vote using 'cast_vote'."
 
     async def cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str:
@@ -525,11 +560,15 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return "Error: Membership voting is disabled."
             
         actual_team = _resolve_actual_team(caller_node, att_manager)
-        caller_agent_name = getattr(caller_node, 'name', "Unknown")
-                    
+        actual_agent = _resolve_actual_agent(caller_node, att_manager)
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
-            
+        if actual_agent is None or actual_agent not in actual_team.members:
+            return "Error: Only an active team member can vote."
+        caller_agent_name = actual_agent.name
+        new_agent = None
+        membership_changed = False
+
         async with actual_team.state_lock:
             if proposal_id not in actual_team.proposals:
                 return f"Error: Proposal '{proposal_id}' not found."
@@ -540,91 +579,158 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                 
             if vote not in {"Agree", "Disagree", "Abstain"}:
                 return "Error: Vote must be 'Agree', 'Disagree', or 'Abstain'."
-                
+            if caller_agent_name in prop["votes"]:
+                return f"Error: Member '{caller_agent_name}' has already voted."
+
             prop["votes"][caller_agent_name] = {
-            "vote": vote,
-            "public": bool(public),
-            "rationale": rationale
-        }
-        
-        total_members = len(actual_team.members)
-        if len(prop["votes"]) == total_members:
-            agree_count = sum(1 for v in prop["votes"].values() if v["vote"] == "Agree")
-            ratio = agree_count / total_members
-            
-            if ratio >= (2 / 3):
-                prop["status"] = "approved"
-                
-                # Check if team is running (deferred execution)
-                if getattr(actual_team, "is_running", False):
-                    prop.setdefault("proposed_details", {})["executed"] = False
-                    if prop["action"] == "add":
+                "vote": vote,
+                "public": bool(public),
+                "rationale": rationale,
+            }
+
+            total_members = len(actual_team.members)
+            if len(prop["votes"]) < total_members:
+                result = f"Successfully cast vote on proposal '{proposal_id}'."
+            else:
+                agree_count = sum(
+                    1
+                    for ballot in prop["votes"].values()
+                    if ballot["vote"] == "Agree"
+                )
+                ratio = agree_count / total_members
+                if ratio < (2 / 3):
+                    prop["status"] = "rejected"
+                    result = (
+                        f"Proposal '{proposal_id}' rejected "
+                        f"({agree_count}/{total_members} Agree, threshold is 2/3)."
+                    )
+                else:
+                    prop["status"] = "approved"
+                    details = prop.setdefault("proposed_details", {})
+                    if getattr(actual_team, "is_running", False):
+                        details["executed"] = False
+                        if prop["action"] == "remove" and len(
+                            actual_team.members
+                        ) <= att_manager.config.min_subagent_team_size:
+                            prop["status"] = "rejected"
+                            result = (
+                                f"Proposal '{proposal_id}' failed execution. "
+                                "Removing the member would violate minimum "
+                                "team size constraints."
+                            )
+                        else:
+                            result = (
+                                f"Proposal '{proposal_id}' approved "
+                                f"({agree_count}/{total_members} Agree). "
+                                "Membership execution is deferred to the end "
+                                "of the current round."
+                            )
+                    elif details.get("executed", False):
+                        result = (
+                            f"Error: Proposal '{proposal_id}' was already executed."
+                        )
+                    elif prop["action"] == "add":
+                        details["executed"] = True
                         role_name = prop["target"]
-                        return f"Proposal '{proposal_id}' approved ({agree_count}/{total_members} Agree). Adding member '{role_name}' is deferred to the end of the current round."
+                        model_name = details.get("model")
+                        role_desc = details.get("role_description", "")
+                        sys_inst = details.get("system_instructions", "")
+                        if model_name and model_name != "default":
+                            if model_name in att_manager.llm_clients:
+                                client = att_manager.llm_clients[model_name]
+                            elif (
+                                model_name in att_manager.model_configs
+                                and att_manager.generator_handler
+                            ):
+                                from .core import HandlerClientAdapter
+
+                                client = HandlerClientAdapter(
+                                    model_name, att_manager.generator_handler
+                                )
+                            else:
+                                prop["status"] = "rejected"
+                                result = (
+                                    f"Error: Model '{model_name}' is not registered."
+                                )
+                                client = None
+                        else:
+                            from .core import ManagerDefaultClientAdapter
+
+                            client = ManagerDefaultClientAdapter(att_manager)
+                        if client is not None:
+                            from .core import Agent
+
+                            new_agent = Agent(
+                                name=att_manager.unique_agent_name(
+                                    f"Dynamic_{role_name}", actual_team
+                                ),
+                                role=role_name,
+                                llm_client=client,
+                                role_description=role_desc,
+                                system_instructions=sys_inst,
+                            )
+                            if any(
+                                member.name == new_agent.name
+                                for member in actual_team.members
+                            ):
+                                prop["status"] = "rejected"
+                                result = (
+                                    f"Error: Member '{new_agent.name}' already exists."
+                                )
+                                new_agent = None
+                            else:
+                                actual_team.members.append(new_agent)
+                                att_manager.agents[new_agent.name] = new_agent
+                                membership_changed = True
+                                result = (
+                                    f"Proposal '{proposal_id}' approved "
+                                    f"({agree_count}/{total_members} Agree). "
+                                    f"Added new member '{new_agent.name}' to the team!"
+                                )
                     else:
-                        agent_name = prop["target"]
+                        details["executed"] = True
                         min_size = att_manager.config.min_subagent_team_size
+                        target_agent = next(
+                            (
+                                member
+                                for member in actual_team.members
+                                if member.name == prop["target"]
+                            ),
+                            None,
+                        )
                         if len(actual_team.members) <= min_size:
                             prop["status"] = "rejected"
-                            return f"Proposal '{proposal_id}' failed execution. Removing '{agent_name}' would violate minimum team size constraints of {min_size} members. Proposal closed as rejected."
-                        return f"Proposal '{proposal_id}' approved ({agree_count}/{total_members} Agree). Removing member '{agent_name}' is deferred to the end of the current round."
-                
-                # Immediate execution (e.g. outside debate rounds, like in unit tests)
-                prop.setdefault("proposed_details", {})["executed"] = True
-                if prop["action"] == "add":
-                    role_name = prop["target"]
-                    p_details = prop["proposed_details"]
-                    model_name = p_details.get("model")
-                    role_desc = p_details.get("role_description", "")
-                    sys_inst = p_details.get("system_instructions", "")
-                    
-                    client = None
-                    if model_name and model_name != "default":
-                        if model_name in att_manager.llm_clients:
-                            client = att_manager.llm_clients[model_name]
-                        elif model_name in att_manager.model_configs and att_manager.generator_handler:
-                            from .core import HandlerClientAdapter
-                            client = HandlerClientAdapter(model_name, att_manager.generator_handler)
+                            result = (
+                                f"Proposal '{proposal_id}' failed execution. "
+                                "Removing the member would violate minimum "
+                                "team size constraints."
+                            )
+                        elif target_agent is None:
+                            prop["status"] = "rejected"
+                            result = (
+                                f"Proposal '{proposal_id}' failed execution. "
+                                f"Member '{prop['target']}' not found."
+                            )
                         else:
-                            raise ValueError(f"Model '{model_name}' is not registered.")
-                    else:
-                        from .core import ManagerDefaultClientAdapter
-                        client = ManagerDefaultClientAdapter(att_manager)
-                        
-                    from .core import Agent
-                    new_agent = Agent(
-                        name=f"Dynamic_{role_name}",
-                        role=role_name,
-                        llm_client=client,
-                        role_description=role_desc,
-                        system_instructions=sys_inst
-                    )
-                    actual_team.members.append(new_agent)
-                    att_manager.agents[new_agent.name] = new_agent
-                    return f"Proposal '{proposal_id}' approved ({agree_count}/{total_members} Agree). Added new member '{new_agent.name}' to the team!"
-                else:
-                    agent_name = prop["target"]
-                    min_size = att_manager.config.min_subagent_team_size
-                    if len(actual_team.members) <= min_size:
-                        prop["status"] = "rejected"
-                        return f"Proposal '{proposal_id}' failed execution. Removing '{agent_name}' would violate minimum team size constraints of {min_size} members. Proposal closed as rejected."
-                        
-                    target_agent = None
-                    for m in actual_team.members:
-                        if m.name == agent_name:
-                            target_agent = m
-                            break
-                    if not target_agent:
-                        prop["status"] = "rejected"
-                        return f"Proposal '{proposal_id}' failed execution. Member '{agent_name}' not found. Proposal closed as rejected."
-                        
-                    actual_team.members.remove(target_agent)
-                    return f"Proposal '{proposal_id}' approved ({agree_count}/{total_members} Agree). Removed member '{agent_name}' from the team!"
-            else:
-                prop["status"] = "rejected"
-                return f"Proposal '{proposal_id}' rejected ({agree_count}/{total_members} Agree, threshold is 2/3)."
-                
-        return f"Successfully cast vote on proposal '{proposal_id}'."
+                            actual_team.members.remove(target_agent)
+                            membership_changed = True
+                            result = (
+                                f"Proposal '{proposal_id}' approved "
+                                f"({agree_count}/{total_members} Agree). "
+                                f"Removed member '{target_agent.name}' from the team!"
+                            )
+
+        changed_agents = {new_agent.name} if new_agent is not None else set()
+        att_manager._auto_save(
+            agents=changed_agents,
+            teams=(
+                {actual_team.team_id}
+                if membership_changed
+                else set()
+            ),
+            proposals={actual_team.team_id},
+        )
+        return result
 
     async def retract_membership_vote(proposal_id: str) -> str:
         """Withdraws an active proposal. Only the initiator can retract. Arguments: proposal_id (str)"""
@@ -632,10 +738,12 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return "Error: Membership voting is disabled."
             
         actual_team = _resolve_actual_team(caller_node, att_manager)
-        caller_agent_name = getattr(caller_node, 'name', "Unknown")
-                    
+        actual_agent = _resolve_actual_agent(caller_node, att_manager)
         if not actual_team:
             return "Error: Could not resolve the active AgentTeam."
+        if actual_agent is None or actual_agent not in actual_team.members:
+            return "Error: Only an active team member can retract a proposal."
+        caller_agent_name = actual_agent.name
             
         async with actual_team.state_lock:
             if proposal_id not in actual_team.proposals:
@@ -650,7 +758,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                 return f"Error: Only the initiator '{initiator_name}' can retract this proposal."
                 
             prop["status"] = "retracted"
-            
+        att_manager._auto_save(proposals={actual_team.team_id})
         return f"Successfully retracted proposal '{proposal_id}'."
 
     async def request_migration(target_parent_id: str, rationale: str) -> str:
@@ -695,15 +803,15 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         import uuid
         lib_id = f"DL-{uuid.uuid4().hex[:6]}"
-        from .doc_library import DocumentLibrary
-        lib = DocumentLibrary(
+        lib = att_manager._new_document_library(
             lib_id=lib_id,
             name=name,
             owner_team_id=caller_team.team_id,
             description=description,
-            is_public_visible=is_public
+            is_public_visible=is_public,
         )
         att_manager.libraries[lib_id] = lib
+        att_manager._auto_save(libraries={lib_id})
         return f"Successfully created document library '{name}' with ID '{lib_id}'."
 
     async def update_library_metadata(lib_id: str, description: Optional[str] = None, is_public: Optional[bool] = None) -> str:
@@ -722,6 +830,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             lib.description = description
         if is_public is not None:
             lib.is_public_visible = is_public
+        att_manager._auto_save(libraries={lib_id})
         return f"Successfully updated metadata for library '{lib_id}'."
 
     async def list_public_libraries() -> str:
@@ -752,13 +861,17 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not caller_team or lib.owner_team_id != caller_team.team_id:
             return f"Error: Permission denied. Your team does not own library '{lib_id}'."
             
-        clean_path = "/" + path.strip("/").replace("\\", "/")
+        try:
+            clean_path = att_manager.normalize_library_path(path)
+        except PermissionError as exc:
+            return f"Error: {exc}"
         if lib_id not in att_manager.library_permissions:
             att_manager.library_permissions[lib_id] = {}
         if clean_path not in att_manager.library_permissions[lib_id]:
             att_manager.library_permissions[lib_id][clean_path] = {}
             
         att_manager.library_permissions[lib_id][clean_path][target_team_id] = permission
+        att_manager._auto_save(permissions={lib_id})
         return f"Successfully granted '{permission}' permission for path '{clean_path}' in library '{lib_id}' to team '{target_team_id}'."
 
     async def revoke_library_permission(lib_id: str, path: str, target_team_id: str) -> str:
@@ -773,10 +886,14 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if not caller_team or lib.owner_team_id != caller_team.team_id:
             return f"Error: Permission denied. Your team does not own library '{lib_id}'."
             
-        clean_path = "/" + path.strip("/").replace("\\", "/")
+        try:
+            clean_path = att_manager.normalize_library_path(path)
+        except PermissionError as exc:
+            return f"Error: {exc}"
         if lib_id in att_manager.library_permissions and clean_path in att_manager.library_permissions[lib_id]:
             if target_team_id in att_manager.library_permissions[lib_id][clean_path]:
                 del att_manager.library_permissions[lib_id][clean_path][target_team_id]
+                att_manager._auto_save(permissions={lib_id})
                 return f"Successfully revoked permissions for path '{clean_path}' in library '{lib_id}' for team '{target_team_id}'."
         return f"No permissions found for path '{clean_path}' in library '{lib_id}' for team '{target_team_id}'."
 
@@ -796,7 +913,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         try:
             lib = att_manager.libraries[lib_id]
-            lib.write_file(path, content)
+            await asyncio.to_thread(lib.write_file, path, content)
             return f"Successfully written file '{path}' in library '{lib_id}'."
         except Exception as e:
             return f"Error writing file '{path}' in library '{lib_id}': {e}"
@@ -817,7 +934,9 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         try:
             lib = att_manager.libraries[lib_id]
-            return lib.read_file(path, start_line, end_line)
+            return await asyncio.to_thread(
+                lib.read_file, path, start_line, end_line
+            )
         except Exception as e:
             return f"Error reading file '{path}' in library '{lib_id}': {e}"
 
@@ -837,7 +956,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         try:
             lib = att_manager.libraries[lib_id]
-            return lib.delete_file(path)
+            return await asyncio.to_thread(lib.delete_file, path)
         except Exception as e:
             return f"Error deleting path '{path}' in library '{lib_id}': {e}"
 
@@ -857,7 +976,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             
         try:
             lib = att_manager.libraries[lib_id]
-            items = lib.list_contents(path)
+            items = await asyncio.to_thread(lib.list_contents, path)
             if not items:
                 return f"Library '{lib_id}' path '{path}' is empty or not a directory."
             return f"Contents of library '{lib_id}' path '{path}':\n" + "\n".join(items)
@@ -885,7 +1004,6 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         "delete_library_file": Tool("delete_library_file", "Deletes a file or directory in a library. Requires 'WRITE' permission. Arguments: lib_id (str), path (str)", delete_library_file),
         "list_library_files": Tool("list_library_files", "Lists files and directories under a path in a library. Requires 'READ' permission. Arguments: lib_id (str), path (str, default '/')", list_library_files)
     }
-
 
     if att_manager and att_manager.config.enable_membership_voting:
         base_tools["initiate_membership_vote"] = Tool("initiate_membership_vote", "Initiates a democratic vote to add or remove a team member. Arguments: action (str - 'add' or 'remove'), target (str - role name for 'add', agent name for 'remove'), rationale (str), initiator_type (str - 'individual' or 'AT'), proposed_details (dict - containing 'model', 'role_description', 'system_instructions' if action is 'add')", initiate_membership_vote)

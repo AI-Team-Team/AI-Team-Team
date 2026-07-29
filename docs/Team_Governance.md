@@ -73,7 +73,7 @@ To ensure stability in high-overhead multi-agent environments, the framework pro
 When an agent's client hits a token limit, it resolves via `failover_policy`:
 
 1. **Auto-Fallback (`"auto"`)**: Automatically hot-swaps to the first alternative registered model that is under budget and supports the required tool calling mode.
-2. **Parent-Representative Delegation (`"parent"`)**: The child team synchronously queries the parent team's representative LLM for a model recommendation, hot-swaps the client, and retries.
+2. **Parent-Representative Delegation (`"parent"`)**: The child team awaits the parent representative's model recommendation, hot-swaps the client, and retries.
 
 ## 6. Code Configuration Example
 
@@ -109,6 +109,7 @@ Emergency Wakeups are triggered when a team's asynchronous `receive_message` met
 
 - `"child_failure_escalation"`
 - `"escalation_spawn"`
+- `"audit_unknown_escalation"` when `audit_unknown_escalation_mode="wake"`
 
 If the global configuration flag `enable_emergency_wakeup` is set to `True`, the system evaluates the target team's execution state:
 
@@ -129,16 +130,16 @@ Waking up a team requires triggering `manager.execute_emergency_discussion()`, w
   asyncio.create_task(self.execute_emergency_discussion(team, emergency_msg))
   ```
 
-- **Blocked/Missing Event Loop (`deferred_emergency_tasks`)**: If the event loop is blocked (e.g., executing a synchronous SQLite serialization) or not running, scheduling a task will throw a `RuntimeError`. The manager safely traps this and defers the coroutine into an `asyncio.Queue`:
+- **Missing Event Loop (`deferred_emergency_tasks`)**: If no loop is running, the manager stores a plain call specification for later scheduling:
 
   ```python
   except RuntimeError as e:
       self.deferred_emergency_tasks.put_nowait(
-          self.execute_emergency_discussion(team, emergency_msg)
+      (team, emergency_msg, skip_audit)
       )
   ```
 
-  The manager guarantees these deferred tasks will be flushed and executed sequentially the next time a safe boundary is reached via `manager.flush_deferred_tasks()`.
+  `await manager.flush_deferred_tasks()` schedules those specifications when a loop is available. No un-awaited coroutine object is retained.
 
 ### C. The Emergency Discussion Round
 

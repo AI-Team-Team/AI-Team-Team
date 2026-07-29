@@ -145,17 +145,17 @@ sequenceDiagram
     participant Manager as ATTManager
 
     A1->>T: Call initiate_membership_vote(action='add', target='QA', proposed_details={...})
-    Note over T: Acquire async team.state_lock<br/>Create VP-xxxx proposal<br/>Set Agent 1 vote to 'Agree'<br/>Trigger SQLite _auto_save()<br/>(Deferred by _suppress_auto_save context)
+    Note over T: Acquire async team.state_lock<br/>Create VP-xxxx proposal<br/>Set Agent 1 vote to 'Agree'<br/>Record dirty team delta
     T-->>A1: Return Proposal ID (VP-xxxx)
 
     A2->>T: Call cast_vote(proposal_id='VP-xxxx', vote='Agree', public=False)
-    Note over T: Acquire async team.state_lock<br/>Voter 2 vote is cast anonymously (masked as "Anonymous Voter")<br/>Trigger SQLite _auto_save()<br/>(Deferred by _suppress_auto_save context)
+    Note over T: Acquire async team.state_lock<br/>Validate identity and record Voter 2 once<br/>Record dirty team delta
     T-->>A2: Success (1 voter remaining)
 
     A3->>T: Call cast_vote(proposal_id='VP-xxxx', vote='Agree')
     Note over T: Acquire async team.state_lock<br/>All 3 active members have voted.<br/>Agree: 3/3 (100% >= 2/3)<br/>Execute action: spawn Dynamic_QA
     T->>Manager: Spawn new member (Dynamic_QA) and append to T.members
-    Note over T: Trigger SQLite _auto_save()<br/>(Deferred by _suppress_auto_save context)
+    Note over T: Queue one incremental team delta
     T-->>A3: Success (Proposal approved and executed)
 ```
 
@@ -209,7 +209,7 @@ sequenceDiagram
     end
     
     Manager->>Manager: Trigger manager.on_team_migration callback
-    Manager->>Manager: Call manager._auto_save() to write new pointers to SQLite<br/>(Deferred by _suppress_auto_save context)
+    Manager->>Manager: Invalidate moved branch depth cache<br/>Queue affected team deltas
     
     Manager-->>T: Return success status
 ```

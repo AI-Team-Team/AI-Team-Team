@@ -1,163 +1,281 @@
-import logging
 import json
-from typing import Tuple, Any, Optional
-from .core import Agent, generate_with_retry, ATTException
+import logging
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Optional
+
+from .core import Agent, generate_with_retry
+
+
+class AuditStatus(str, Enum):
+    """The outcome category of a supervisory audit."""
+
+    HEALTHY = "healthy"
+    UNHEALTHY = "unhealthy"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class AuditResult:
+    """A structured audit result that preserves operational failures."""
+
+    status: AuditStatus
+    reason: str
+    cause: Optional[str] = None
+
 
 class SupervisoryTeam:
-    """Composed of exactly 3 AIs. Audits intra-team and inter-team dialog effectiveness, and triggers recursive parent escalation."""
-    def __init__(self, root_ai: Agent, llm_client: Any, manager: Optional[Any] = None):
+    """A three-agent committee that audits team discussions."""
+
+    def __init__(
+        self,
+        root_ai: Agent,
+        llm_client: Any,
+        manager: Optional[Any] = None,
+    ):
         self.root_ai = root_ai
         self.llm_client = llm_client
         self.manager = manager
         self.auditors = [
-            Agent(name="Auditor_Integrity_01", role="Integrity_Auditor", llm_client=llm_client),
-            Agent(name="Auditor_Continuity_02", role="Continuity_Auditor", llm_client=llm_client),
-            Agent(name="Auditor_Deadlock_03", role="Deadlock_Auditor", llm_client=llm_client),
+            Agent(
+                name="Auditor_Integrity_01",
+                role="Integrity_Auditor",
+                llm_client=llm_client,
+            ),
+            Agent(
+                name="Auditor_Continuity_02",
+                role="Continuity_Auditor",
+                llm_client=llm_client,
+            ),
+            Agent(
+                name="Auditor_Deadlock_03",
+                role="Deadlock_Auditor",
+                llm_client=llm_client,
+            ),
         ]
         self.logger = logging.getLogger("SupervisoryTeam")
 
-    async def _compress_transcript(self, transcript: str, llm_client: Any) -> str:
-        """Summarizes extremely long transcripts using a fast LLM call to save token overhead."""
+    async def _compress_transcript(
+        self, transcript: str, llm_client: Any
+    ) -> str:
         if len(transcript) < 8000:
             return transcript
-            
-        self.logger.info(f"Transcript too large ({len(transcript)} chars), summarizing before audit debate...")
-        summarize_prompt = (
-            f"Summarize the following multi-agent conversation transcript into a dense historical outline. "
-            f"Preserve all arguments, logic shifts, role violations, and deadlock indicators:\n\n"
-            f"--- TRANSCRIPT BEGIN ---\n"
-            f"{transcript}\n"
-            f"--- TRANSCRIPT END ---\n"
-        )
-        
-        retries = self.manager.config.llm_max_retries if (self.manager and self.manager.config) else 3
-        backoff = self.manager.config.llm_retry_backoff_factor if (self.manager and self.manager.config) else 1.5
-        
-        try:
-            summary = await generate_with_retry(
-                llm_client=llm_client,
-                prompt=summarize_prompt,
-                system_instruction="You are a precise context compression assistant.",
-                temperature=0.1,
-                retries=retries,
-                backoff_factor=backoff,
-                manager=self.manager
-            )
-            return summary
-        except Exception as e:
-            self.logger.warning(f"Failed to compress transcript: {e}. Proceeding with truncated transcript.")
-            return transcript[-8000:]
 
-    async def audit_team_dialog(self, team: Any, dialog_transcript: str) -> Tuple[bool, str]:
-        """
-        Evaluates dialogue transcript efficiency inside an AT using a 3-AI debate committee.
-        Returns (is_healthy, reason).
-        """
+        self.logger.info(
+            "Transcript is %s characters; compressing it before audit.",
+            len(transcript),
+        )
+        summarize_prompt = (
+            "Summarize the following multi-agent conversation transcript "
+            "into a dense historical outline. Preserve arguments, logic "
+            "shifts, role violations, and deadlock indicators:\n\n"
+            f"--- TRANSCRIPT BEGIN ---\n{transcript}\n"
+            "--- TRANSCRIPT END ---\n"
+        )
+        retries = (
+            self.manager.config.llm_max_retries
+            if self.manager and self.manager.config
+            else 3
+        )
+        backoff = (
+            self.manager.config.llm_retry_backoff_factor
+            if self.manager and self.manager.config
+            else 1.5
+        )
+        return await generate_with_retry(
+            llm_client=llm_client,
+            prompt=summarize_prompt,
+            system_instruction=(
+                "You are a precise context compression assistant."
+            ),
+            temperature=0.1,
+            retries=retries,
+            backoff_factor=backoff,
+            manager=self.manager,
+        )
+
+    async def audit_team_dialog(
+        self, team: Any, dialog_transcript: str
+    ) -> AuditResult:
+        """Audits a transcript without treating audit outages as healthy."""
         for auditor in self.auditors:
             auditor.messages.clear()
         try:
-            # 1. Compress transcript if too long
-            working_transcript = await self._compress_transcript(dialog_transcript, self.llm_client)
-
-            # 2. Import locally to avoid circular dependencies at load time
+            working_transcript = await self._compress_transcript(
+                dialog_transcript, self.llm_client
+            )
             from ai_team_team.core.team import AgentTeam
-            
-            # Assemble a transient AgentTeam representing the audit committee
+
             supervisor_team = AgentTeam(
                 creator=self.root_ai,
                 preset_name="supervisor_audit",
-                team_purpose="Audit descendant team dialogues for deadlocks, role violations, and reasoning continuity."
+                team_purpose=(
+                    "Audit descendant team dialogues for deadlocks, role "
+                    "violations, and reasoning continuity."
+                ),
             )
             supervisor_team.members = self.auditors
             supervisor_team.system_instructions = (
-                "You are a strict, objective Supervisory Auditor. Cooperate to evaluate debate logic, deadlocks, and role alignment."
+                "You are a strict, objective Supervisory Auditor. Cooperate "
+                "to evaluate debate logic, deadlocks, and role alignment."
             )
             if self.manager:
                 supervisor_team.chapter_num = team.chapter_num
 
-            # 3. Trigger standard debate among the auditors (non-recursive skip_audit=True, rounds=2)
             audit_prompt = (
-                f"Audit the following multi-agent discussion transcript for efficiency and logic.\n"
-                f"Check if there are deadlocks, repetitive arguments, or deviations from roles.\n"
-                f"The 3 of you represent Integrity, Continuity, and Deadlock tracking. Debate the health of this dialogue.\n\n"
-                f"--- TARGET TRANSCRIPT BEGIN ---\n"
-                f"{working_transcript}\n"
-                f"--- TARGET TRANSCRIPT END ---\n"
+                "Audit the following multi-agent discussion transcript for "
+                "efficiency and logic. Check for deadlocks, repetition, and "
+                "role deviation. Debate its health from the perspectives of "
+                "integrity, continuity, and deadlock tracking.\n\n"
+                f"--- TARGET TRANSCRIPT BEGIN ---\n{working_transcript}\n"
+                "--- TARGET TRANSCRIPT END ---\n"
             )
-
             debate_transcript = await self.manager.execute_team_discussion(
                 supervisor_team,
                 prompt=audit_prompt,
                 rounds=2,
-                skip_audit=True
+                skip_audit=True,
             )
-
-            # 4. Extract JSON consensus from the debate transcript
             consensus_prompt = (
-                f"Below is the debate and discussion transcript among the 3 Supervisory Auditors "
-                f"evaluating a child team's dialogue.\n\n"
-                f"--- AUDITOR DEBATE TRANSCRIPT BEGIN ---\n"
-                f"{debate_transcript}\n"
-                f"--- AUDITOR DEBATE TRANSCRIPT END ---\n\n"
-                f"Based on their discussion, extract their consensus on the health of the child team's dialogue.\n"
-                f"Output exactly a JSON payload:\n"
-                f"{{\n"
-                f"  \"is_healthy\": true | false,\n"
-                f"  \"reason\": \"A concise summary of their combined consensus and reasoning...\"\n"
-                f"}}"
+                "Extract the supervisory committee's consensus from the "
+                "following debate. Output exactly a JSON object with a "
+                "boolean `is_healthy` and string `reason`.\n\n"
+                f"{debate_transcript}"
             )
-
-            retries = self.manager.config.llm_max_retries if (self.manager and self.manager.config) else 3
-            backoff = self.manager.config.llm_retry_backoff_factor if (self.manager and self.manager.config) else 1.5
-
+            retries = (
+                self.manager.config.llm_max_retries
+                if self.manager and self.manager.config
+                else 3
+            )
+            backoff = (
+                self.manager.config.llm_retry_backoff_factor
+                if self.manager and self.manager.config
+                else 1.5
+            )
             response = await generate_with_retry(
                 llm_client=self.llm_client,
                 prompt=consensus_prompt,
-                system_instruction="You are a precise JSON consensus synthesis compiler.",
+                system_instruction=(
+                    "You are a precise JSON consensus synthesis compiler."
+                ),
                 temperature=0.2,
                 require_json=True,
                 retries=retries,
                 backoff_factor=backoff,
-                manager=self.manager
+                manager=self.manager,
             )
-
+            if not isinstance(response, str):
+                response = getattr(response, "text", response)
+            if not isinstance(response, str):
+                raise TypeError("Audit consensus response must be text.")
             if "```" in response:
-                response = response.replace("```json", "").replace("```", "").strip()
-
+                response = (
+                    response.replace("```json", "")
+                    .replace("```", "")
+                    .strip()
+                )
             data = json.loads(response)
-            is_healthy = bool(data.get("is_healthy", True))
-            reason = str(data.get("reason", "No reason provided."))
-            self.logger.info(f"Consensus Audit for team {team.team_id}: healthy={is_healthy}, reason={reason}")
-            return is_healthy, reason
-
-        except Exception as e:
-            # Safe Fallback: degrade gracefully to not block business operations
-            self.logger.warning(f"Supervisory audit failed, defaulting to healthy: {e}")
-            return True, f"Audit failed: {e}"
-
-    async def report_anomaly(self, failed_team: Any, reason: str, manager: Any):
-        """
-        Escalates anomaly up the lineage tree by reporting to the direct parent.
-        If the parent is not found, escalates directly to the root AI (Level 0).
-        """
-        self.logger.error(f"[SUPERVISOR ALERT] Anomaly detected in team {failed_team.team_id}: {reason}")
-        
-        current_parent = failed_team.parent_team or manager.find_parent_team(failed_team)
-        
-        if current_parent is not None:
-            self.logger.info(f"[SUPERVISOR] Escalating failure of child {failed_team.team_id} to parent team {current_parent.team_id}.")
-            current_parent.receive_message({
-                "type": "child_failure_escalation",
-                "from": "Supervisor",
-                "failed_team_id": failed_team.team_id,
-                "reason": reason
-            })
-            return
-            
-        self.logger.critical("[SUPERVISOR CRITICAL] Root-level failure or lineage collapse! Escalating directly to Root AI Level 0.")
-        if self.root_ai.llm_client:
-            alert_msg = (
-                f"CRITICAL SYSTEM FAILURE: Anomaly in team {failed_team.team_id}.\n"
-                f"Original anomaly reason: {reason}"
+            if type(data.get("is_healthy")) is not bool:
+                raise ValueError(
+                    "Audit consensus must contain boolean `is_healthy`."
+                )
+            reason = data.get("reason")
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError(
+                    "Audit consensus must contain a non-empty `reason`."
+                )
+            status = (
+                AuditStatus.HEALTHY
+                if data["is_healthy"]
+                else AuditStatus.UNHEALTHY
             )
-            print(f"!!! ROOT ALERT !!! {alert_msg}")
+            result = AuditResult(status=status, reason=reason)
+            self.logger.info(
+                "Consensus audit for team %s: status=%s, reason=%s",
+                team.team_id,
+                result.status.value,
+                result.reason,
+            )
+            return result
+        except Exception as exc:
+            self.logger.error(
+                "Supervisory audit could not determine a result: %s", exc
+            )
+            return AuditResult(
+                status=AuditStatus.UNKNOWN,
+                reason="The supervisory audit service could not determine "
+                "the discussion's health.",
+                cause=f"{type(exc).__name__}: {exc}",
+            )
+
+    async def report_anomaly(
+        self, failed_team: Any, reason: str, manager: Any
+    ) -> None:
+        """Escalates a confirmed anomaly to the parent or root callbacks."""
+        await self._report(
+            failed_team=failed_team,
+            manager=manager,
+            message_type="child_failure_escalation",
+            reason=reason,
+            cause=None,
+        )
+
+    async def report_unknown(
+        self, failed_team: Any, result: AuditResult, manager: Any
+    ) -> None:
+        """Escalates an indeterminate audit according to manager policy."""
+        await self._report(
+            failed_team=failed_team,
+            manager=manager,
+            message_type="audit_unknown_escalation",
+            reason=result.reason,
+            cause=result.cause,
+        )
+
+    async def _report(
+        self,
+        *,
+        failed_team: Any,
+        manager: Any,
+        message_type: str,
+        reason: str,
+        cause: Optional[str],
+    ) -> None:
+        message = {
+            "type": message_type,
+            "from": "Supervisor",
+            "failed_team_id": failed_team.team_id,
+            "reason": reason,
+        }
+        if cause:
+            message["cause"] = cause
+
+        current_parent = (
+            failed_team.parent_team
+            or manager.find_parent_team(failed_team)
+        )
+        if current_parent is not None:
+            current_parent.receive_message(message)
+            return
+
+        self.logger.critical(
+            "Root-level supervisory escalation for team %s: %s",
+            failed_team.team_id,
+            reason,
+        )
+        if manager.on_system_event:
+            try:
+                manager.on_system_event(message_type, dict(message))
+            except Exception as exc:
+                self.logger.error(
+                    "Root system-event callback failed: %s", exc
+                )
+        if manager.on_emergency_escalation:
+            try:
+                manager.on_emergency_escalation(
+                    failed_team.team_id, message_type, reason
+                )
+            except Exception as exc:
+                self.logger.error(
+                    "Root emergency callback failed: %s", exc
+                )

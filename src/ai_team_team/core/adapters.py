@@ -1,4 +1,5 @@
 import inspect
+import json
 from typing import Union, List, Dict, Optional, Any, Callable
 from ai_team_team.core.response import ToolCall, LLMResponse
 
@@ -12,10 +13,10 @@ class HandlerClientAdapter:
     def supports_native_tool_calling(self) -> bool:
         if hasattr(self.handler, "supports_native_tool_calling"):
             try:
-                return self.handler.supports_native_tool_calling()
+                return self.handler.supports_native_tool_calling() is True
             except Exception:
                 pass
-        return getattr(self, "_supports_native", False)
+        return getattr(self, "_supports_native", False) is True
 
     async def generate(
         self,
@@ -25,7 +26,10 @@ class HandlerClientAdapter:
         temperature: float = 0.3,
         require_json: bool = False
     ) -> LLMResponse:
-        sig = inspect.signature(self.handler)
+        try:
+            sig = inspect.signature(self.handler)
+        except (TypeError, ValueError):
+            sig = None
         kwargs = {
             "model_name": self.model_name,
             "prompt": prompt,
@@ -33,10 +37,18 @@ class HandlerClientAdapter:
             "temperature": temperature,
             "require_json": require_json
         }
-        if "tools" in sig.parameters:
+        if sig is not None and (
+            "tools" in sig.parameters
+            or any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in sig.parameters.values()
+            )
+        ):
             kwargs["tools"] = tools
 
-        res = await self.handler(**kwargs)
+        res = self.handler(**kwargs)
+        if inspect.isawaitable(res):
+            res = await res
         
         if isinstance(res, LLMResponse):
             return res
@@ -46,10 +58,26 @@ class HandlerClientAdapter:
             text = res.get("text")
             t_calls = []
             for tc in res.get("tool_calls", []):
+                function = tc.get("function") or {}
+                name = tc.get("name") or function.get("name")
+                arguments = tc.get("arguments", function.get("arguments", {}))
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"Invalid JSON arguments for tool '{name}': {exc}"
+                        ) from exc
+                if arguments is None:
+                    arguments = {}
+                if not isinstance(arguments, dict):
+                    raise ValueError(
+                        f"Tool arguments for '{name}' must be an object."
+                    )
                 t_calls.append(ToolCall(
                     call_id=tc.get("id"),
-                    name=tc.get("name"),
-                    arguments=tc.get("arguments"),
+                    name=name,
+                    arguments=arguments,
                     raw=tc.get("raw")
                 ))
             return LLMResponse(text=text, tool_calls=t_calls)
@@ -64,18 +92,27 @@ class ManagerDefaultClientAdapter:
     def supports_native_tool_calling(self) -> bool:
         if self.manager.generator_handler:
             config = self.manager.model_configs.get("default")
-            if config and config.get("supports_native_tool_calling"):
+            if (
+                config
+                and config.get("supports_native_tool_calling") is True
+            ):
                 return True
             if hasattr(self.manager.generator_handler, "supports_native_tool_calling"):
                 try:
-                    return self.manager.generator_handler.supports_native_tool_calling()
+                    return (
+                        self.manager.generator_handler
+                        .supports_native_tool_calling() is True
+                    )
                 except Exception:
                     pass
         
         if self.manager.root_ai and self.manager.root_ai.llm_client and self.manager.root_ai.llm_client is not self:
             if hasattr(self.manager.root_ai.llm_client, "supports_native_tool_calling"):
                 try:
-                    return bool(self.manager.root_ai.llm_client.supports_native_tool_calling())
+                    return (
+                        self.manager.root_ai.llm_client
+                        .supports_native_tool_calling() is True
+                    )
                 except Exception:
                     pass
         return False
@@ -102,11 +139,27 @@ class ManagerDefaultClientAdapter:
             )
 
         if self.manager.root_ai and self.manager.root_ai.llm_client and type(self.manager.root_ai.llm_client) is not ManagerDefaultClientAdapter:
-            return await self.manager.root_ai.llm_client.generate(
-                    prompt=prompt,
-                    system_instruction=system_instruction,
-                    tools=tools,
-                    temperature=temperature,
-                    require_json=require_json
+            generate = self.manager.root_ai.llm_client.generate
+            kwargs = {
+                "prompt": prompt,
+                "system_instruction": system_instruction,
+                "temperature": temperature,
+                "require_json": require_json,
+            }
+            try:
+                signature = inspect.signature(generate)
+            except (TypeError, ValueError):
+                signature = None
+            if signature is not None and (
+                "tools" in signature.parameters
+                or any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
                 )
+            ):
+                kwargs["tools"] = tools
+            result = generate(**kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            return result
         raise ValueError("No default client or generator handler configured on ATTManager.")

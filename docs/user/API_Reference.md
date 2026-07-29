@@ -30,7 +30,8 @@ config = ATTConfig(
     enable_emergency_wakeup: bool = True,
     emergency_discussion_rounds: int = 1,
     tool_calling_mode: str = "auto",
-    max_tool_rounds: int = 5
+    max_tool_rounds: int = 5,
+    audit_unknown_escalation_mode: str = "wake"
 )
 ```
 
@@ -55,6 +56,10 @@ config = ATTConfig(
 * **`emergency_discussion_rounds`**: The number of emergency discussion rounds executed when a team is woken up (default: `1`).
 * **`tool_calling_mode`**: The strategy used for tool calling and reasoning steps. Options: `"text_react"`, `"native"`, `"auto"` (default: `"auto"`).
 * **`max_tool_rounds`**: The maximum reasoning loop steps allowed for the native strategy execution round (default: `5`).
+* **`audit_unknown_escalation_mode`**: Whether an indeterminate supervisory audit immediately wakes the parent (`"wake"`) or only enters its inbox (`"queue"`).
+
+Policy names and size/depth bounds are validated during construction. Invalid
+values raise `ValueError`.
 
 ## 👤 `Agent`
 
@@ -120,7 +125,7 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 * **`register_preset(name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]])`**
   Registers a custom dynamic committee preset (e.g. roles and system prompt).
 * **`register_tools_context(context: Dict[str, Any])`**
-  Registers system resources context (databases, file readers) and automatically binds coordination tools to all teams.
+  Registers additional runtime resources and rebinds tools. `att_manager` is present automatically and cannot be overwritten.
 * **`create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
   Dynamically spawns a new recursive Agent Team (AT) with a parent-child relationship. `is_public_visible` sets library visibility for discovery, and `initial_docs` maps file paths to initial contents to populate in the team's DocLib.
 
@@ -130,10 +135,14 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
   Renders the active hierarchical agent team lineage as an indented ASCII tree.
 * **`negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`**
   Arbitrates the migration of an AgentTeam using the configured migration policy strategy (which defaults to requiring approvals from the Least Common Ancestor and parent team representatives using their own LLM clients), updates structure, and broadcasts alerts.
-* **`save_state(db_path: Optional[str] = None)`**
-  Serializes the entire manager configuration, registered agents, active team lineages, inboxes, proposals, broker agreements, and Document Library folders (with full directory structure and file contents) into a local SQLite database.
-* **`load_state(db_path: str)`**
-  Restores the entire manager topology, configs, agent histories, document libraries, inbox alerts, agreements, and proposals from a local SQLite database snapshot.
+* **`await save_state(path: Optional[str] = None, full: bool = True)`**
+  Queues and waits for a versioned snapshot commit.
+* **`await load_state(path: str)`**
+  Restores the registry after runtime clients or a generator handler have been rebound. Missing model aliases raise `StateRestoreError`.
+* **`await flush_state()`**
+  Waits for all queued incremental writes.
+* **`await close()`**
+  Flushes pending writes and releases persistence resources. `ATTManager` also supports `async with`.
 
 ### Callbacks
 
@@ -231,7 +240,7 @@ A non-participating 3-AI committee (comprising Integrity, Continuity, and Deadlo
 
 The Supervisory Team is managed and called automatically by `ATTManager` at the end of each debate session. External users do not typically interact with this class directly, but it coordinates dialogue health audits using the manager's `critic_client` or falls back to the manager's global `generator_handler` under the `"critic"` model alias.
 
-* If a dialogue audit fails (`is_healthy = False`), the supervisor automatically executes the **Asynchronous Escalation Protocol**, routing anomaly warnings up to the parent team's inbox queue (or to the Level 0 Root AI if no parent exists).
+* Audits return `AuditResult` with `HEALTHY`, `UNHEALTHY`, or `UNKNOWN`. Confirmed anomalies use emergency escalation. Operationally unknown audits wake or queue at the parent according to `audit_unknown_escalation_mode`; wakeups skip one audit cycle and are deduplicated.
 
 ## 🔌 `LLMClientProto`
 

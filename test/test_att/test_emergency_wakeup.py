@@ -105,11 +105,15 @@ class TestEmergencyWakeup(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.1)
 
         # Verify manager's execute_emergency_discussion was triggered
-        self.manager.execute_emergency_discussion.assert_called_once_with(team, {
-            "type": "child_failure_escalation",
-            "from": "Supervisor",
-            "reason": "Emergency child error"
-        })
+        self.manager.execute_emergency_discussion.assert_called_once_with(
+            team,
+            {
+                "type": "child_failure_escalation",
+                "from": "Supervisor",
+                "reason": "Emergency child error",
+            },
+            skip_audit=False,
+        )
 
     async def test_emergency_escalation_callback(self):
         """Verify that on_emergency_escalation callback is invoked on emergency signals."""
@@ -141,6 +145,16 @@ class TestEmergencyWakeup(unittest.IsolatedAsyncioTestCase):
         # it should trigger execute_emergency_discussion.
         # We will mock the generate function of one agent to append a message in round 2
         async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):
+            if require_json:
+                return (
+                    '{"is_healthy": true, '
+                    '"reason": "Dialogue approved."}'
+                )
+            if (
+                system_instruction
+                and "Supervisory Auditor" in system_instruction
+            ):
+                return "Final Answer: Audit turn complete."
             # Inject message directly into inbox to simulate it arriving late
             team.message_inbox.append({
                 "type": "child_failure_escalation",

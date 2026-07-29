@@ -23,14 +23,27 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         os.chdir(self.tmpdir)
         
         self.db_path = os.path.join(self.tmpdir, "att_state.db")
-        
 
-        
         # Setup mock client that will produce ReAct final answer
         self.mock_react_client = MagicMock()
-        self.mock_react_client.generate = AsyncMock(
-            return_value='Thought: We are doing the task.\nFinal Answer: Task complete!'
-        )
+        async def mock_generate(
+            prompt,
+            system_instruction=None,
+            temperature=0.3,
+            require_json=False,
+            **kwargs,
+        ):
+            if require_json:
+                return (
+                    '{"is_healthy": true, '
+                    '"reason": "Dialogue approved."}'
+                )
+            return (
+                "Thought: We are doing the task.\n"
+                "Final Answer: Task complete!"
+            )
+
+        self.mock_react_client.generate = mock_generate
         
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_react_client)
         self.manager = ATTManager(
@@ -40,7 +53,8 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         self.manager.llm_clients["critic"] = self.mock_react_client
         self.manager.register_tools_context({"att_manager": self.manager})
 
-    def tearDown(self):
+    async def asyncTearDown(self):
+        await self.manager.close()
         os.chdir(self.old_cwd)
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
@@ -283,7 +297,7 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         team_parent.communication_rules["allow_sibling_talk"] = True
         
         # Force a manual save to confirm it writes successfully
-        self.manager.save_state()
+        await self.manager.save_state()
         
         # Assert database file was written
         self.assertTrue(os.path.exists(self.db_path))
@@ -297,10 +311,11 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
             root_ai=new_root_ai,
             db_path=self.db_path
         )
+        new_manager.llm_clients["critic"] = self.mock_react_client
         new_manager.register_tools_context({"att_manager": new_manager})
         
         # Load state from the database
-        new_manager.load_state(self.db_path)
+        await new_manager.load_state(self.db_path)
         
         # 3. Assertions to verify recovery was absolutely lossless
         self.assertEqual(len(new_manager.teams), 2)
@@ -340,10 +355,11 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
             "Task complete!" in debate_result or "Arbitration approved." in debate_result,
             f"Debate result: {debate_result} did not contain expected mock outputs."
         )
+        await new_manager.close()
 
     async def test_supervisor_reference_sync_on_load_state(self):
         """Verify that SupervisoryTeam.root_ai reference is updated to the newly loaded root_ai in load_state."""
-        self.manager.save_state()
+        await self.manager.save_state()
         self.assertTrue(os.path.exists(self.db_path))
 
         temp_root_ai = Agent(name="Temp_Root_AI", role="Architect", llm_client=self.mock_react_client)
@@ -351,13 +367,15 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
             root_ai=temp_root_ai,
             db_path=self.db_path
         )
+        new_manager.llm_clients["critic"] = self.mock_react_client
         self.assertIs(new_manager.supervisor.root_ai, temp_root_ai)
 
-        new_manager.load_state(self.db_path)
+        await new_manager.load_state(self.db_path)
 
         self.assertIsNot(new_manager.supervisor.root_ai, temp_root_ai)
         self.assertIs(new_manager.supervisor.root_ai, new_manager.root_ai)
         self.assertEqual(new_manager.root_ai.name, "Root_AI")
+        await new_manager.close()
 
 if __name__ == "__main__":
     unittest.main()

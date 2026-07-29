@@ -93,7 +93,7 @@ This flowchart sequences the multi-round cooperative debate process executed whe
 flowchart TD
     Start["Call manager.execute_team_discussion(team, prompt, rounds)"] --> Init["1. Setup transcript logs\n2. Initialize discussion round = 1"]
     
-    Init --> SuppressIOGate["with manager._suppress_auto_save():\n(Blocks high-frequency SQLite writes)"]
+    Init --> SuppressIOGate["async with manager.suppress_auto_save():\n(Task-local dirty-delta batching)"]
     SuppressIOGate --> LoopRounds{"round <= total_rounds?"}
     
     LoopRounds -- "Yes" --> MemberIteration["Iterate through each member (Agent) in team"]
@@ -105,7 +105,7 @@ flowchart TD
     
     NextMember -- "Yes" --> SupervisoryAudit["3-AI Supervisory Team audits round transcript"]
     
-    SupervisoryAudit --> AuditResult{"is_healthy == True?"}
+    SupervisoryAudit --> AuditResult{"AuditStatus?"}
     
     AuditResult -- "No (Anomaly)" --> ReportAnomaly["Call report_anomaly()\nRoute failure alert to parent inbox\n(or escalate to Level 0 Root AI)"]
     ReportAnomaly --> IncrementRound["Increment round by 1"]

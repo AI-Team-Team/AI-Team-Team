@@ -63,7 +63,9 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         team = manager.create_agent_team(creator=self.root_ai, member_count=3)
         
         # Execute debate: first turn will trigger limit for default model, and hot-swap to gemini-3.5
-        transcript = await manager.execute_team_discussion(team, "Debate prompt", rounds=1)
+        transcript = await manager.execute_team_discussion(
+            team, "Debate prompt", rounds=1, skip_audit=True
+        )
         
         # Verify it completed successfully using gemini-3.5
         self.assertIn("Resolved on Gemini.", transcript)
@@ -75,12 +77,17 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failover_event["new_model"], "gemini-3.5")
 
     async def test_parent_representative_delegation_failover(self):
-        """Verify that child team synchronously delegates failover model choice to parent representative LLM."""
+        """Verify that a child awaits its parent representative's failover choice."""
         config = ATTConfig(
-            model_token_limits={"default": 5, "opus-4.8": 5000},
+            model_token_limits={
+                "default": 5000,
+                "low-budget": 5,
+                "opus-4.8": 5000,
+            },
             failover_policy="parent"
         )
         manager = ATTManager(root_ai=self.root_ai, config=config)
+        manager.llm_clients["low-budget"] = self.mock_client
         
         # Setup parent team and child team
         parent_team = manager.create_agent_team(creator=self.root_ai, member_count=3, preset_name="generic")
@@ -104,7 +111,12 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         parent_team.members[0].llm_client = manager.supervisor.llm_client # uses default wrapper
 
         # Execute debate on child team
-        transcript = await manager.execute_team_discussion(child_team, "Run child debate", rounds=1)
+        transcript = await manager.execute_team_discussion(
+            child_team,
+            "Run child debate",
+            rounds=1,
+            skip_audit=True,
+        )
         
         # Verify it hot-swapped to opus-4.8 selected by parent
         self.assertIn("Resolved on Claude Opus.", transcript)

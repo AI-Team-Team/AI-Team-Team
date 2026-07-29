@@ -96,9 +96,11 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
         self.assertIn("gemini-3.5-flash - A very impressive large model", generated_requests[0]["system"])
 
         # 5. Verify critic/supervisor routing fallback
-        is_healthy, reason = await self.manager.supervisor.audit_team_dialog(team, "Dummy dialogue")
-        self.assertTrue(is_healthy)
-        self.assertEqual(reason, "Approved")
+        result = await self.manager.supervisor.audit_team_dialog(
+            team, "Dummy dialogue"
+        )
+        self.assertEqual(result.status.value, "healthy")
+        self.assertEqual(result.reason, "Approved")
         self.assertEqual(len(generated_requests), 8) # Updated from 2 to 8 due to 3-AI committee debate (6 turns + 1 consensus)
         self.assertEqual(generated_requests[7]["model"], "default")
         self.assertTrue(generated_requests[7]["json"])

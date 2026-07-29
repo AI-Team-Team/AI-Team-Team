@@ -4,6 +4,7 @@ import unittest
 import asyncio
 from typing import Dict, Any, List, Optional, TypedDict
 from unittest.mock import MagicMock, AsyncMock
+from pydantic import BaseModel, Field
 
 # Setup paths
 CURRENT_DIR = os.path.dirname(__file__)
@@ -13,13 +14,6 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from ai_team_team import ATTManager, Agent, Tool, ATTConfig, LLMResponse, ToolCall, ToolResult
-
-# Pydantic support
-try:
-    from pydantic import BaseModel, Field
-    HAS_PYDANTIC = True
-except ImportError:
-    HAS_PYDANTIC = False
 
 class TestDualModeToolCalling(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -104,7 +98,6 @@ class TestDualModeToolCalling(unittest.IsolatedAsyncioTestCase):
         self.assertIn("city", schema["required"])
         self.assertIn("days", schema["required"])
 
-    @unittest.skipUnless(HAS_PYDANTIC, "Pydantic not installed")
     def test_schema_generation_pydantic(self):
         """Verify tool schema using Pydantic model definition."""
         class WeatherModel(BaseModel):

@@ -18,6 +18,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
+    "pydantic>=2.0.0",
     "sqlalchemy>=2.0.0",
     "tokenizers>=0.13.0",
 ]

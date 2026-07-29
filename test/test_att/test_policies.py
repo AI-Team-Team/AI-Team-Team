@@ -298,7 +298,12 @@ class TestPolicies(unittest.IsolatedAsyncioTestCase):
         
         agent.llm_client.generate = mock_discussion_completion
 
-        debate_result = await self.manager.execute_team_discussion(team, "Final topic debate", rounds=1)
+        debate_result = await self.manager.execute_team_discussion(
+            team,
+            "Final topic debate",
+            rounds=1,
+            skip_audit=True,
+        )
         self.assertIn("Discussion completed", debate_result)
 
 if __name__ == "__main__":

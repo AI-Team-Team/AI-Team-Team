@@ -21,7 +21,7 @@ An `AgentTeam` represents a single node in the hierarchy. A team must have at le
 
 - **`parent_team (Optional[AgentTeam])`**: The dual-linked reference to the parent. None for Level 1 teams spawned by the Root AI.
 - **`child_teams (List[AgentTeam])`**: References to dynamic sub-teams.
-- **`depth (int)`**: An $O(1)$ constant-time memoized property tracking the distance from the Root AI. Re-hydrated instantly from SQLite.
+- **`depth (int)`**: A memoized property tracking distance from the Root AI. Migrations recursively invalidate the moved branch's cache.
 
 ### Concurrency & Mutation State
 

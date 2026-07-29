@@ -18,8 +18,16 @@ class LLMClientProto(Protocol):
         """Returns True if the client/model configuration natively supports structured function calling."""
         ...
 
-from .core import Agent, AgentTeam, ATTManager, ATTConfig, ATTException, LLMGenerationError
-from .core.exceptions import TokenLimitExceededError
+from .core import (
+    Agent,
+    AgentTeam,
+    ATTManager,
+    ATTConfig,
+    ATTException,
+    LLMGenerationError,
+)
+from .core.exceptions import StateRestoreError, TokenLimitExceededError
+from .supervision import AuditResult, AuditStatus
 from .tool import Tool
 from .gated_reader import GatedFileReader
 from .doc_library import DocumentLibrary
@@ -35,6 +43,9 @@ __all__ = [
     "ATTException",
     "LLMGenerationError",
     "TokenLimitExceededError",
+    "StateRestoreError",
+    "AuditResult",
+    "AuditStatus",
     "DocumentLibrary",
     "ToolCall",
     "ToolResult",

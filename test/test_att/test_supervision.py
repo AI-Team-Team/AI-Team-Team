@@ -10,7 +10,12 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from ai_team_team import ATTManager, Agent, ATTConfig
+from ai_team_team import (
+    ATTManager,
+    Agent,
+    ATTConfig,
+    AuditStatus,
+)
 
 class TestATTSupervision(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -83,7 +88,21 @@ class TestATTSupervision(unittest.IsolatedAsyncioTestCase):
         team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
         team.chapter_num = 100
 
-        self.mock_client.generate.return_value = "Final Answer: Done."
+        async def mock_generate(
+            prompt,
+            system_instruction=None,
+            temperature=0.3,
+            require_json=False,
+            **kwargs,
+        ):
+            if require_json:
+                return (
+                    '{"is_healthy": true, '
+                    '"reason": "Dialogue approved."}'
+                )
+            return "Final Answer: Done."
+
+        self.mock_client.generate = mock_generate
         await self.manager.execute_team_discussion(team, "Task description", rounds=1)
 
         # Status changes should be logged
@@ -111,23 +130,27 @@ class TestATTSupervision(unittest.IsolatedAsyncioTestCase):
         self.mock_client.generate = mock_generate
         
         team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
-        is_healthy, reason = await self.manager.supervisor.audit_team_dialog(team, "Some debate transcript")
+        result = await self.manager.supervisor.audit_team_dialog(
+            team, "Some debate transcript"
+        )
         
-        self.assertTrue(is_healthy)
-        self.assertEqual(reason, "Committee consensus is healthy.")
+        self.assertIs(result.status, AuditStatus.HEALTHY)
+        self.assertEqual(result.reason, "Committee consensus is healthy.")
 
     async def test_supervisory_audit_exception_fallback(self):
-        """Verify that audit_team_dialog fallback is triggered on LLM exception, returning is_healthy=True."""
+        """Verify that audit service failures produce UNKNOWN."""
         async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False, **kwargs):
             raise Exception("API Connection Timeout")
         self.mock_client.generate = mock_generate
         
         team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
-        is_healthy, reason = await self.manager.supervisor.audit_team_dialog(team, "Some debate transcript")
+        result = await self.manager.supervisor.audit_team_dialog(
+            team, "Some debate transcript"
+        )
         
-        self.assertTrue(is_healthy)
-        self.assertIn("Audit failed", reason)
-        self.assertIn("API Connection Timeout", reason)
+        self.assertIs(result.status, AuditStatus.UNKNOWN)
+        self.assertIn("could not determine", result.reason)
+        self.assertIn("API Connection Timeout", result.cause)
 
     async def test_supervisory_audit_transcript_compression(self):
         """Verify that a large transcript (>8000 chars) triggers compression."""
@@ -154,12 +177,17 @@ class TestATTSupervision(unittest.IsolatedAsyncioTestCase):
         self.mock_client.generate = mock_generate
         
         team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
-        is_healthy, reason = await self.manager.supervisor.audit_team_dialog(team, large_transcript)
+        result = await self.manager.supervisor.audit_team_dialog(
+            team, large_transcript
+        )
         
         self.assertIsNotNone(captured_compression_prompt)
         self.assertIn("Summarize the following", captured_compression_prompt)
-        self.assertFalse(is_healthy)
-        self.assertEqual(reason, "Committee agreed there is a deadlock.")
+        self.assertIs(result.status, AuditStatus.UNHEALTHY)
+        self.assertEqual(
+            result.reason,
+            "Committee agreed there is a deadlock.",
+        )
 
 if __name__ == "__main__":
     unittest.main()

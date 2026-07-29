@@ -183,5 +183,15 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PermissionError):
             lib._resolve_path(traversal_path)
 
+        for invalid_path in ("", ".", "..", "../secret.txt"):
+            with self.subTest(path=invalid_path):
+                with self.assertRaises(PermissionError):
+                    lib.write_file(invalid_path, "blocked")
+
+        for root_path in ("/", "///"):
+            with self.subTest(path=root_path):
+                with self.assertRaises(PermissionError):
+                    lib.delete_file(root_path)
+
 if __name__ == "__main__":
     unittest.main()

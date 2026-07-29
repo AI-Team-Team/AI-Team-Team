@@ -12,7 +12,7 @@ Please refer to the following documents for granular flow diagrams:
 1. **[Spawning, Escalation & Migration](Spawning_Escalation.md)**: Details the recursive `AgentTeam` lineages (Level 0 Root AI spawning Level 1 ATs, which recursively spawn deeper sub-teams of Level $N$), closed-loop parent escalation alerts, and LLM-arbitrated parent migrations.
 2. **[Gated FileReader Size Limits](Gated_Reading.md)**: Visualizes the `read_file` token-protection logic, showing the "Outline View" structural fallback and dynamic line slicing triggers for massive files.
 3. **[Tooling & Execution Engines](Tooling_and_Execution.md)**: Combines the `ToolAuditor` execution interception sequence with the master multi-round debate ReAct loop (shielded by I/O suppression contexts) and parallel tool execution gathering.
-4. **[State Persistence & Recovery](State_Persistence.md)**: Visualizes the SQLite-backed auto-saving event triggers, ephemeral state cascading deletions, and the manager's two-pass deserialization pipeline with $O(1)$ constant-time caching.
+4. **[State Persistence & Recovery](State_Persistence.md)**: Visualizes task-local batching, the single-writer queue, incremental commits, and validated restore.
 5. **[Lineage Tree Mutations](Lineage_Tree_Mutations.md)**: Consolidates the control flows governing dynamic sub-team spawning, sibling talk broker negotiation, and the deeply audited lineage migration LLM arbitration rounds.
 6. **[Supervision & Emergencies](Supervision_and_Emergencies.md)**: Maps the 3-AI Supervisory transcript audit loop, the recursive parent escalation tree, and the preemptive `enable_emergency_wakeup` task switching.
 
@@ -56,5 +56,5 @@ flowchart TD
     MigrationCheck -- "Approved (LCA representative debate)" --> MigrationExec["1. Restructure tree pointers<br/>2. Save to SQLite DB<br/>3. Inject Context Transition Notice"]
     
     ToolCall -- "Discussion finished" --> SupervisoryTeam["3-AI Supervisory Team (Integrity, Continuity, Deadlock) audits logs"]
-    SupervisoryTeam -- "Anomaly found (is_healthy = False)" --> Escalate["Climb lineage up to find healthy parent<br/>Route Failure Alert to Parent Inbox (triggers emergency wakeup)"]
+    SupervisoryTeam -- "UNHEALTHY or UNKNOWN" --> Escalate["Route structured alert to parent<br/>UNKNOWN uses wake or queue policy"]
 ```

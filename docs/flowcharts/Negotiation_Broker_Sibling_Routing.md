@@ -13,8 +13,9 @@ sequenceDiagram
     participant Manager as ATTManager
     participant Team as AgentTeam
     
-    Mixin->>Manager: register_tools_context(context)
-    Note over Manager: Save SQLite DB, Vector Store, Gated Reader context
+    Note over Manager: Install reserved att_manager context automatically
+    Mixin->>Manager: register_tools_context(optional_resources)
+    Note over Manager: Merge host resources without replacing att_manager
     
     Mixin->>Manager: create_agent_team(creator, member_count=3)
     Note over Manager: Spawn AgentTeam with Creator (Agent/Team)

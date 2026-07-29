@@ -1,233 +1,90 @@
-# State Persistence & Multi-Turn Memory Architecture
+# State Persistence and Multi-Turn Memory
 
-This document describes the SQLAlchemy ORM and SQLite-backed state snapshotting, workflow recovery, and true multi-turn agent memory architecture implemented in the ATT (AI-Team-Team) framework.
+ATT persists mutable runtime state to a versioned SQLite database through a
+single asynchronous writer. The public persistence API is asynchronous:
 
-## 1. Architectural Overview
+```python
+async with ATTManager(root_ai, config, db_path="att.db") as manager:
+    # Build teams and run discussions.
+    await manager.save_state()          # Full snapshot and commit.
+    await manager.flush_state()         # Wait for queued deltas.
 
-Instead of stateless executions or pseudo-memory constructed via transient string concatenation, the ATT framework uses:
-
-1. **Multi-Turn Agent Memory**: Structured message threads (`List[Dict[str, str]]`) stored inside each `Agent` instance, compatible with Chat APIs.
-2. **Smooth Team Transition Notices**: Supportive transition updates appended to the agent's message queue automatically when a shared agent transitions between teams.
-3. **Dialogue Memory Compression & Pruning**: Automatic token conservation that summarizes early conversation logs while keeping the latest high-fidelity messages untouched.
-4. **Global Expert Directory Injection**: Dynamic listing of all system-registered experts injected into the agent identity header to facilitate discovery and hiring.
-5. **SQLAlchemy ORM & SQLite State Persistence**: A local SQLite database managed via SQLAlchemy ORM that serializes the entire active manager topology, lineage nodes, inbox metrics, debate proposals, and document libraries.
-
-### Memory Pruning & Compression
-
-To prevent context window overflow and reduce API token consumption during long discussions, the framework employs an automatic turn-based dialogue compression pipeline:
-
-* **Configurable Gates**: Controlled via `enable_memory_compression: bool` (default `True`) and `max_memory_turns: int` (default `20`, representing 10 rounds of conversation) in `ATTConfig`.
-* **Pruning Process**: When an agent's memory queue (`agent.messages`) exceeds `max_memory_turns + 2` turns:
-  1. The initial instruction profile (index 0) is kept untouched.
-  2. All intermediate messages (from index 1 to `len - max_memory_turns - 1`) are extracted and serialized.
-  3. The intermediate messages are summarized by the agent's own LLM client (using its configured model alias) with a summarization prompt: `"Summarize the preceding execution logs and discussions into a single cohesive paragraph of historical facts. Focus on what was completed."`
-  4. The intermediate messages are replaced by a single system message: `*** HISTORICAL SUMMARY ARCHIVE ***\n{summary}`.
-  5. The latest `max_memory_turns` messages are retained fully as high-fidelity context.
-
-### Smooth Team Transitions
-
-When a shared agent is hired or migrated across different teams, the framework automatically appends a supportive transition notice instead of interrupting or wiping out memory:
-
-* **Trigger Condition**: When the active team ID during a ReAct step execution changes (`agent.last_context["team_id"] != self.team_id`).
-* **Format**:
-
-  ```markdown
-  *** TRANSITION NOTICE: ACTIVE TEAM UPDATE ***
-  You have transitioned to work with another team group:
-  - Active Team: {team_id} (Preset: {preset_name})
-  - Team Purpose: {team_purpose}
-  - Your Assigned Role: {role}
-  Please continue your work and cooperate in this team based on your prior memory.
-  ```
-
-### Global Expert Directory Injection
-
-To allow agents to dynamically discover and hire existing system specialists, a directory of all active global experts is injected into the agent's system instruction identity header at the start of every ReAct step:
-
-* Loops through all registered agents in `manager.agents`.
-* Appends them under `## GLOBAL EXPERTS AVAILABLE FOR HIRE` detailing their name, role, and description:
-
-  ```markdown
-  ## GLOBAL EXPERTS AVAILABLE FOR HIRE
-  - **{name}** ({role}): {description}
-  ```
-
-### Topology Schema (ER Diagram)
-
-The SQLAlchemy ORM declarative models mirror the dynamic parent-child topology, agent properties, libraries, and inbox states:
-
-```mermaid
-erDiagram
-    manager_config {
-        string config_key PK "Primary Key (e.g., 'att_config', 'root_ai_name')"
-        string config_value "Serialized configuration value (JSON or string)"
-    }
-    
-    agents {
-        string name PK "Primary Key (Agent name, e.g., 'Dynamic_Planner')"
-        string role "Assigned role name"
-        string role_description "Description of role responsibilities"
-        string system_instructions "Agent's individual system prompt instructions"
-        string model_alias "Target model config alias"
-        string last_context "Last executed context state (JSON)"
-    }
-    
-    agent_messages {
-        int id PK "Auto-incrementing Primary Key"
-        string agent_name FK "Foreign Key referencing agents.name"
-        string role "Message role ('user', 'assistant', 'system', 'tool')"
-        string content "Raw message content string"
-        real created_at "Timestamp of message creation"
-        json tool_calls "Native JSON array of structured tool call details"
-        string tool_call_id "Optional matching tool call identifier"
-        string name "Optional name attribute (e.g. for role='tool')"
-    }
-    
-    teams {
-        string team_id PK "Primary Key (Format: 'AT-xxxxxx')"
-        string preset_name "Dynamic preset name (e.g., 'analysts', 'generic')"
-        string team_purpose "Globally broadcasted purpose statement"
-        string team_progress "Broadcasted progress metric statement"
-        int depth "Hierarchy level depth integer"
-        int chapter_num "Current log chapter index"
-        string parent_team_id FK "Foreign Key referencing teams.team_id (self-referential parent)"
-        int migration_count "Count of migrations executed"
-        string creator_type "Creator node type ('agent' or 'team')"
-        string creator_id "Name/ID of creator node"
-        string communication_rules "Inbox gating policies (JSON)"
-        string status_map "Status metrics of members (JSON)"
-        string system_instructions "Dynamic team system instruction prompt"
-    }
-    
-    team_members {
-        string team_id PK, FK "Composite PK, FK referencing teams.team_id"
-        string agent_name PK, FK "Composite PK, FK referencing agents.name"
-    }
-    
-    team_inbox {
-        int id PK "Auto-incrementing Primary Key"
-        string team_id FK "Foreign Key referencing teams.team_id"
-        string sender "Sender node name/ID"
-        string msg_type "Message type ('escalation_spawn', 'peer_message')"
-        string payload "Raw alert content or payload (JSON)"
-        real created_at "Timestamp of message entry"
-    }
-    
-    team_proposals {
-        string proposal_id PK "Primary Key (Format: 'VP-xxxxxx')"
-        string team_id FK "Foreign Key referencing teams.team_id"
-        string action "Proposal action ('add' or 'remove')"
-        string target "Name of role/member target"
-        string initiator_type "Initiator node type ('individual')"
-        string initiator_name "Name of initiator agent"
-        string rationale "Reasoning submitted for voting"
-        string proposed_details "Configurations for additions (JSON)"
-        string votes "Submitted ballots and rationales (JSON)"
-        string status "Current status ('active', 'approved', 'rejected')"
-    }
-    
-    broker_agreements {
-        string sender_team_id PK "Composite PK referencing teams.team_id"
-        string recipient_team_id PK "Composite PK referencing teams.team_id"
-    }
-    
-    libraries {
-        string lib_id PK "Primary Key (Format: matches team_id)"
-        string name "DocLib folder name"
-        string owner_team_id "Owner team reference ID"
-        string description "Library description metadata"
-        int is_public_visible "Boolean visibility flag (0 or 1)"
-    }
-    
-    library_permissions {
-        string lib_id PK "Composite Primary Key"
-        string path PK "Composite Primary Key (Target folder/file prefix path)"
-        string team_id PK "Composite Primary Key referencing teams.team_id"
-        string permission "Granted permission level ('READ' or 'WRITE')"
-    }
-    
-    doc_lib_files {
-        string lib_id PK, FK "Composite PK, FK referencing libraries.lib_id"
-        string path PK "Composite Primary Key (Absolute virtual file path)"
-        string content "Raw file content blob or string"
-    }
-
-    %% Relationships
-    agents ||--o{ agent_messages : "owns messages"
-    teams ||--o{ team_members : "contains members"
-    agents ||--o{ team_members : "belongs to"
-    teams ||--o{ team_inbox : "contains inbox alerts"
-    teams ||--o{ team_proposals : "contains proposals"
-    libraries ||--o{ doc_lib_files : "contains files"
+restored = ATTManager(rebound_root, config)
+restored.register_generator_handler(runtime_handler)
+await restored.load_state("att.db")
+await restored.close()
 ```
 
-## 2. Database Schema Tables
+`save_state(path=None, full=True)` writes a complete snapshot by default.
+`flush_state()` waits for every queued write. `close()` flushes, disposes the
+reused SQLAlchemy engines, and shuts down the persistence worker. The
+asynchronous context manager calls `close()` on exit.
 
-### `manager_config`
+## Incremental single-writer design
 
-Stores top-level ATT Manager settings (e.g. `att_config` serialized as JSON) and references like `root_ai_name`.
+Auto-save hooks mark individual agents, teams, proposals, inboxes, agreements,
+libraries, permissions, configuration records, and library file paths dirty.
+The manager captures an immutable delta and sends it to one writer queue.
+SQLite and document-file I/O run outside the event-loop thread. A delta
+rewrites only the selected rows. Replacing an agent's bounded message history
+does not rewrite another agent's messages.
 
-### `agents` & `agent_messages`
+Long operations batch their changes with a nested, task-local context:
 
-Stores the core identities and multi-turn message histories of all agents. `model_alias` records their execution client fallback targets. `agent_messages` maintains sequential order using `created_at` timestamps.
+```python
+async with manager.suppress_auto_save():
+    # Nested scopes merge into this task's outer batch.
+    ...
+```
 
-### `teams` & `team_members`
+The implementation uses `ContextVar`, so concurrent team discussions do not
+share suppression state. The outermost scope submits one merged delta.
 
-Stores the active team topologies, purposes, progress metrics, sibling communication policies, and memberships. Reconstructs complex parent-child lineage pointers via `parent_team_id`.
+## Persisted and runtime-only state
 
-### `team_inbox` & `team_proposals`
+The database stores:
 
-Stores unresolved alerts escalated from child teams and active votes. Votes and proposal payloads are stored as JSON arrays.
+- schema version, `ATTConfig`, model metadata, presets, and token usage;
+- all registered agents and their bounded message histories;
+- teams, membership, lineage, migration counters, inboxes, and proposals;
+- broker agreements;
+- document-library metadata, ACLs, paths, and file contents.
 
-### `broker_agreements`
+Callables and external connections are runtime bindings and are not
+serialized. This includes generator handlers, concrete clients, tools,
+auditors, and callbacks.
 
-Stores tunnels negotiated dynamically by the `NegotiationBroker` to authorize cross-lineage peer-to-peer dialogues.
+## Restore contract
 
-### `libraries`, `library_permissions` & `doc_lib_files`
+`load_state(path)` requires the current schema version; old databases are not
+migrated. It reads persisted model aliases before constructing agents.
+Hosts must register direct clients or a generator handler before loading:
 
-Stores file permissions ACLs and full file paths and content strings.
+```python
+manager = ATTManager(runtime_root)
+manager.llm_clients["analysis"] = analysis_client
+manager.register_generator_handler(handler)
+await manager.load_state("att.db")
+```
 
-## 3. Serialization Lifecycle
+If any named alias lacks a direct client and no generator handler can serve
+it, loading raises `StateRestoreError` listing every missing alias. ATT never
+silently substitutes the default model.
 
-### Configurable Storage Path
+Restoration rebuilds agents, physical document files under
+`config.workspace_root/.att_doc_libs`, teams, parent/child pointers, tools,
+permissions, proposals, inboxes, and agreements. Runtime tools and callbacks
+already registered on the host remain runtime-owned.
 
-By default, data is saved relative to the configured workspace root to ensure predictable storage locations, regardless of where the Python process was launched. This is configured via `workspace_root` in `ATTConfig`. Document libraries automatically construct their absolute paths by joining `workspace_root` with `.att_doc_libs/<lib_id>`.
+## Memory compression
 
-### Auto-Saving & Incremental Upserts
+When an agent exceeds `max_memory_turns`, ATT summarizes older messages while
+preserving the initial instruction, recent high-fidelity messages, and native
+tool-call/result boundaries. The subsequent agent delta rewrites only that
+agent's bounded message window.
 
-The system automatically captures snapshots by invoking `manager._auto_save()` on critical state modifications:
+## Schema policy
 
-* Spawning teams (`create_agent_team`)
-* Adding/removing members (`add_team_member`, `remove_team_member`)
-* Creating/negotiating voting proposals (`cast_vote`, `initiate_membership_vote`, etc.)
-* Reaching debate conclusions (`execute_team_discussion`)
-* Executing reasoning steps and tools (`execute_reasoning_step`)
-* Direct writing/deleting file modifications inside libraries (`write_library_file`, `delete_library_file`)
-
-### I/O Suppression via Context Managers
-
-While atomic tools trigger immediate `_auto_save()` calls, sustained routines like `execute_team_discussion` employ an architectural **I/O Suppression Context Manager** (`manager._suppress_auto_save`).
-
-* During active team discussions, all intermediate auto-save hooks triggered by internal agent reasoning loops are intercepted and suppressed.
-* This explicitly shields the disk from excessive, high-frequency SQLite write bottlenecks.
-* A single, comprehensive batch save is naturally performed when the context manager block (the discussion round) safely concludes.
-
-**Incremental Upserts (O(1) updates):**
-To ensure high performance and prevent data fragmentation, the serialization engine uses **Explicit Query Upserts**. Rather than performing a destructive wipe (`DELETE FROM`) of the entire database, the engine queries the existing objects and incrementally updates their attributes in-place.
-
-**Ephemeral State Cleanup & Integrity:**
-To prevent SQLite `IntegrityError` (duplicate keys) and "phantom" data restoration, highly volatile collections (such as `LibraryPermissionModel` and `TeamInboxModel`) undergo a strict cascading deletion phase during serialization. Before writing new records, the engine explicitly deletes existing rows bound to the active topology components, guaranteeing clean, collision-free insertions without orphaned state.
-
-**Fail-Fast Safety:**
-Database writes are strict. If `save_state` encounters an integrity, disk, or lock error, the framework will immediately escalate to a `RuntimeError` and cleanly crash. This prevents "phantom processing" where agents continue burning API tokens while their thoughts fail to persist to disk.
-
-### Recovery Workflow (`load_state`)
-
-1. **Config Restoration**: Restores parameters and binds `self.root_ai` taking into account the defined `workspace_root`.
-2. **Agent Cache Rebuilding**: Recreates `Agent` instances, restores their `llm_client` adapter, and re-sequences their multi-turn `messages`.
-3. **Physical File Restoration**: Iterates through `doc_lib_files`, clears local `.att_doc_libs/<lib_id>` folders inside the workspace root, and writes files back to disk.
-4. **Topology Lineage Reconstruction**: Two-pass deserialization of the lineage hierarchy:
-   * First pass: Instantiates teams, sets parameters, status maps, and sibling permissions. It also hydrates the $O(1)$ cached `depth` directly from the database column, bypassing expensive recursive tree traversals on heavily nested topologies.
-   * Second pass: Hooks up dual-linked node references (`parent_team` and `child_teams`) and restores their `creator` object pointers.
-5. **Tool & Library Binding**: Binds permissions, restores member arrays, links built-in libraries, and registers system tools.
-6. **Agreements & Inboxes**: Hydrates active proposals, unresolved inboxes, and negotiated broker agreements.
+The current persistence schema version is `2`. Compatibility with earlier
+SQLite layouts is intentionally unsupported. Create a new database when
+upgrading from an earlier schema.

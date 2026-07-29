@@ -47,6 +47,6 @@ class NegotiationBroker:
         if success:
             self.peer_talk_agreements.add((sender.team_id, recipient.team_id))
             self.peer_talk_agreements.add((recipient.team_id, sender.team_id))
-            self.manager._auto_save()
+            self.manager._auto_save(agreements=True)
             return True
         return False
