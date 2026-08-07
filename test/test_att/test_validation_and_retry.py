@@ -114,7 +114,7 @@ class TestValidationAndRetry(unittest.IsolatedAsyncioTestCase):
         ]
         
         agent = team.members[0]
-        # max_tool_retries is 2 in setUp. We expect it to raise ATTException on the 2nd failing call.
+        # Two retries allow three total attempts; the third failure closes it.
         with self.assertRaises(ATTException) as ctx:
             await team.execute_react_step(
                 agent=agent,
@@ -142,15 +142,18 @@ class TestValidationAndRetry(unittest.IsolatedAsyncioTestCase):
         from ai_team_team.core.response import ToolCall, LLMResponse
         tool_call_1 = ToolCall(call_id="call_1", name="fail_tool", arguments={})
         tool_call_2 = ToolCall(call_id="call_2", name="fail_tool", arguments={})
+        tool_call_3 = ToolCall(call_id="call_3", name="fail_tool", arguments={})
         
         self.mock_client.generate.side_effect = [
-            LLMResponse(text="Executing tools", tool_calls=[tool_call_1, tool_call_2]),
+            LLMResponse(
+                text="Executing tools",
+                tool_calls=[tool_call_1, tool_call_2, tool_call_3],
+            ),
             LLMResponse(text="Final Answer: Done")
         ]
         
         agent = team.members[0]
-        # max_tool_retries is 2. Both tools will return errors in the first round.
-        # This will increment the retry counter to 2, hitting the limit of 2 immediately.
+        # Two retries allow three total attempts; the third failure closes it.
         with self.assertRaises(ATTException) as ctx:
             await team.execute_react_step(
                 agent=agent,

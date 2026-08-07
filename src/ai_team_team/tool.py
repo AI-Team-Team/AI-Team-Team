@@ -186,6 +186,10 @@ class Tool:
 
 def _resolve_actual_team(caller_node: Any, att_manager: Any) -> Any:
     from .core import Agent, AgentTeam
+    if att_manager is not None and hasattr(att_manager, "_active_team"):
+        active_team = att_manager._active_team.get()
+        if active_team is not None:
+            return active_team
     if isinstance(caller_node, AgentTeam):
         return caller_node
     elif isinstance(caller_node, Agent):

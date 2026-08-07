@@ -12,11 +12,24 @@ from ai_team_team.core.response import ToolCall, ToolResult, LLMResponse
 from ai_team_team.core.exceptions import ATTException
 from ai_team_team.core.utils import generate_with_retry
 
+
+def _append_agent_message(
+    agent: Agent, message: Dict[str, Any], team: Any, manager: Any
+) -> None:
+    """Records a message with its invocation-scoped team and discussion."""
+    enriched = dict(message)
+    enriched["team_id"] = team.team_id
+    discussion_id = (
+        manager._active_discussion_id.get() if manager else None
+    )
+    enriched["discussion_id"] = discussion_id
+    agent.append_message(enriched)
+
 async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: Any) -> str:
     """Prepares the agent context, memory compression, transition notice, and returns the identity header."""
     team.set_status(agent.name, "Thinking...")
-    if manager and manager.on_status_change:
-        manager.on_status_change(agent.name, "Thinking...")
+    if manager:
+        manager._emit_callback("on_status_change", agent.name, "Thinking...")
 
     peer_context = ""
     if manager:
@@ -82,7 +95,9 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
             f"- Your Assigned Role: {agent.role}\n"
             f"Please continue your work and cooperate in this team based on your prior memory."
         )
-        agent.messages.append({"role": "system", "content": notice})
+        _append_agent_message(
+            agent, {"role": "system", "content": notice}, team, manager
+        )
     agent.last_context = current_context
 
     enable_compression = manager.config.enable_memory_compression if manager else True
@@ -136,9 +151,13 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
             "content": f"*** HISTORICAL SUMMARY ARCHIVE ***\n{summary_text}"
         }
         latest_messages = agent.messages[slice_idx :]
-        agent.messages = [first_msg, archive_message] + latest_messages
+        _append_agent_message(agent, archive_message, team, manager)
+        enriched_archive = agent.messages.pop()
+        agent.messages = [first_msg, enriched_archive] + latest_messages
 
-    agent.messages.append({"role": "user", "content": prompt})
+    _append_agent_message(
+        agent, {"role": "user", "content": prompt}, team, manager
+    )
     return identity_header
 
 def parse_tool_args(args_str: str) -> Tuple[List[Any], Dict[str, Any]]:
@@ -252,8 +271,12 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                 for step in range(max_steps):
                     try:
                         team.set_status(agent.name, f"Thinking (Step {step+1}/{max_steps})...")
-                        if manager and manager.on_status_change:
-                            manager.on_status_change(agent.name, f"Thinking (Step {step+1}/{max_steps})...")
+                        if manager:
+                            manager._emit_callback(
+                                "on_status_change",
+                                agent.name,
+                                f"Thinking (Step {step+1}/{max_steps})...",
+                            )
 
                         retries = manager.config.llm_max_retries if manager else 3
                         backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
@@ -273,7 +296,12 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
 
                         team.logger.info(f"Agent {agent.name} ReAct step {step+1} response:\n{response}")
 
-                        agent.messages.append({"role": "assistant", "content": response})
+                        _append_agent_message(
+                            agent,
+                            {"role": "assistant", "content": response},
+                            team,
+                            manager,
+                        )
 
                         if manager and manager.on_log_append:
                             formatted_prompt = json.dumps(agent.messages[:-1], indent=2, ensure_ascii=False)
@@ -291,7 +319,8 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                 f"{response}\n"
                                 f"--- RESPONSE END ---\n"
                             )
-                            manager.on_log_append(
+                            manager._emit_callback(
+                                "on_log_append",
                                 team.team_id,
                                 f"ReAct LLM Step | {agent.name} ({agent.role}) Step {step+1}",
                                 log_content,
@@ -300,15 +329,25 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
 
                         if "Final Answer:" in response:
                             final_ans_content = response.split("Final Answer:", 1)[1].strip()
-                            if manager and manager.on_activity_added:
-                                manager.on_activity_added(agent.name, "Final Answer", final_ans_content)
+                            if manager:
+                                manager._emit_callback(
+                                    "on_activity_added",
+                                    agent.name,
+                                    "Final Answer",
+                                    final_ans_content,
+                                )
                             return final_ans_content
 
                         thought_match = re.search(r"Thought:\s*(.*)", response, re.IGNORECASE)
                         if thought_match:
                             thought_content = thought_match.group(1).split("Action:")[0].strip()
-                            if manager and manager.on_activity_added:
-                                manager.on_activity_added(agent.name, "Thought", thought_content)
+                            if manager:
+                                manager._emit_callback(
+                                    "on_activity_added",
+                                    agent.name,
+                                    "Thought",
+                                    thought_content,
+                                )
 
                         tool_name = None
                         tool_args_str = None
@@ -338,10 +377,18 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                 team.logger.info(f"Executing tool: {tool_name} with args={args}, kwargs={kwargs}")
                                 
                                 team.set_status(agent.name, f"Executing Tool: {tool_name}")
-                                if manager and manager.on_status_change:
-                                    manager.on_status_change(agent.name, f"Executing Tool: {tool_name}")
-                                if manager and manager.on_activity_added:
-                                    manager.on_activity_added(agent.name, "Action", f"{tool_name}({tool_args_str})")
+                                if manager:
+                                    manager._emit_callback(
+                                        "on_status_change",
+                                        agent.name,
+                                        f"Executing Tool: {tool_name}",
+                                    )
+                                    manager._emit_callback(
+                                        "on_activity_added",
+                                        agent.name,
+                                        "Action",
+                                        f"{tool_name}({tool_args_str})",
+                                    )
 
                                 active_agent_token = (
                                     manager._active_tool_agent.set(agent)
@@ -395,22 +442,36 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                         )
                                 
                                 team.set_status(agent.name, "Thinking...")
-                                if manager and manager.on_status_change:
-                                    manager.on_status_change(agent.name, "Thinking...")
+                                if manager:
+                                    manager._emit_callback(
+                                        "on_status_change",
+                                        agent.name,
+                                        "Thinking...",
+                                    )
                                 if manager:
                                     manager._auto_save(
                                         agents={agent.name},
                                         teams={team.team_id},
                                     )
-                                if manager and manager.on_activity_added:
+                                if manager:
                                     obs_summary = str(observation)
                                     if len(obs_summary) > 80:
                                         obs_summary = obs_summary[:77] + "..."
-                                    manager.on_activity_added(agent.name, "Observation", obs_summary)
+                                    manager._emit_callback(
+                                        "on_activity_added",
+                                        agent.name,
+                                        "Observation",
+                                        obs_summary,
+                                    )
                             else:
                                 observation = f"Error: Tool '{tool_name}' is not registered."
-                                if manager and manager.on_activity_added:
-                                    manager.on_activity_added(agent.name, "Observation", observation)
+                                if manager:
+                                    manager._emit_callback(
+                                        "on_activity_added",
+                                        agent.name,
+                                        "Observation",
+                                        observation,
+                                    )
 
                             team.logger.info(f"Tool {tool_name} observation: {observation}")
                             
@@ -421,7 +482,8 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                     f"ACTION: {tool_name}({tool_args_str})\n"
                                     f"OBSERVATION:\n{observation}\n"
                                 )
-                                manager.on_log_append(
+                                manager._emit_callback(
+                                    "on_log_append",
                                     team.team_id,
                                     f"ReAct Tool Call | {agent.name} ({agent.role})",
                                     log_content,
@@ -431,14 +493,30 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                             if observation.startswith("Error:") or observation.startswith("Error "):
                                 tool_retry_count += 1
                                 max_retries = manager.config.max_tool_retries if manager else 3
-                                if tool_retry_count >= max_retries:
+                                if tool_retry_count > max_retries:
                                     raise ATTException(f"Tool execution failed {tool_retry_count} times in this step. Maximum tool retries ({max_retries}) exceeded. Last error: {observation}")
 
-                            agent.messages.append({"role": "user", "content": f"Observation: {observation}"})
+                            _append_agent_message(
+                                agent,
+                                {
+                                    "role": "user",
+                                    "content": f"Observation: {observation}",
+                                },
+                                team,
+                                manager,
+                            )
                         else:
                             if step == max_steps - 1:
                                 return response
-                            agent.messages.append({"role": "user", "content": "Observation: Please output either 'Action: tool_name(args)' or 'Final Answer: <content>'."})
+                            _append_agent_message(
+                                agent,
+                                {
+                                    "role": "user",
+                                    "content": "Observation: Please output either 'Action: tool_name(args)' or 'Final Answer: <content>'.",
+                                },
+                                team,
+                                manager,
+                            )
                     except ATTException as e:
                         raise e
                     except Exception as e:
@@ -471,7 +549,12 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     
                     response = resp_obj.text if isinstance(resp_obj, LLMResponse) else str(resp_obj)
                     response = response.strip()
-                    agent.messages.append({"role": "assistant", "content": response})
+                    _append_agent_message(
+                        agent,
+                        {"role": "assistant", "content": response},
+                        team,
+                        manager,
+                    )
 
                     if manager and manager.on_log_append:
                         formatted_prompt = json.dumps(agent.messages[:-1], indent=2, ensure_ascii=False)
@@ -488,7 +571,8 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                             f"{response}\n"
                             f"--- RESPONSE END ---\n"
                         )
-                        manager.on_log_append(
+                        manager._emit_callback(
+                            "on_log_append",
                             team.team_id,
                             f"Direct LLM Call | {agent.name} ({agent.role})",
                             log_content,
@@ -497,8 +581,13 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
 
                     if "Final Answer:" in response:
                         final_ans_content = response.split("Final Answer:", 1)[1].strip()
-                        if manager and manager.on_activity_added:
-                            manager.on_activity_added(agent.name, "Final Answer", final_ans_content)
+                        if manager:
+                            manager._emit_callback(
+                                "on_activity_added",
+                                agent.name,
+                                "Final Answer",
+                                final_ans_content,
+                            )
                         return final_ans_content
                     return response
                 except ATTException as e:
@@ -508,8 +597,10 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     return f"Error executing task: {e}"
         finally:
             team.set_status(agent.name, "Idle")
-            if manager and manager.on_status_change:
-                manager.on_status_change(agent.name, "Idle")
+            if manager:
+                manager._emit_callback(
+                    "on_status_change", agent.name, "Idle"
+                )
             if manager:
                 manager._auto_save(
                     agents={agent.name},
@@ -547,8 +638,12 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
 
             for round_idx in range(max_tool_rounds):
                 team.set_status(agent.name, f"Thinking (Round {round_idx+1}/{max_tool_rounds})...")
-                if manager and manager.on_status_change:
-                    manager.on_status_change(agent.name, f"Thinking (Round {round_idx+1}/{max_tool_rounds})...")
+                if manager:
+                    manager._emit_callback(
+                        "on_status_change",
+                        agent.name,
+                        f"Thinking (Round {round_idx+1}/{max_tool_rounds})...",
+                    )
 
                 retries = manager.config.llm_max_retries if manager else 3
                 backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
@@ -575,11 +670,16 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                 if response.tool_calls:
                     # Append assistant message with structured tool calls
                     tool_calls_dict = [tc.to_dict() for tc in response.tool_calls]
-                    agent.messages.append({
-                        "role": "assistant",
-                        "content": response.text,
-                        "tool_calls": tool_calls_dict
-                    })
+                    _append_agent_message(
+                        agent,
+                        {
+                            "role": "assistant",
+                            "content": response.text,
+                            "tool_calls": tool_calls_dict,
+                        },
+                        team,
+                        manager,
+                    )
 
                     # Concurrently execute tools
                     tasks = []
@@ -590,20 +690,35 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
 
                     # Append tool result messages
                     for tr in results:
-                        agent.messages.append({
-                            "role": "tool",
-                            "tool_call_id": tr.tool_call_id,
-                            "name": tr.name,
-                            "content": tr.content
-                        })
+                        _append_agent_message(
+                            agent,
+                            {
+                                "role": "tool",
+                                "tool_call_id": tr.tool_call_id,
+                                "name": tr.name,
+                                "content": tr.content,
+                            },
+                            team,
+                            manager,
+                        )
 
                         # Trigger callbacks
-                        if manager and manager.on_activity_added:
-                            manager.on_activity_added(agent.name, "Action", f"{tr.name}(id={tr.tool_call_id})")
+                        if manager:
+                            manager._emit_callback(
+                                "on_activity_added",
+                                agent.name,
+                                "Action",
+                                f"{tr.name}(id={tr.tool_call_id})",
+                            )
                             obs_summary = str(tr.content)
                             if len(obs_summary) > 80:
                                 obs_summary = obs_summary[:77] + "..."
-                            manager.on_activity_added(agent.name, "Observation", obs_summary)
+                            manager._emit_callback(
+                                "on_activity_added",
+                                agent.name,
+                                "Observation",
+                                obs_summary,
+                            )
 
                         if manager and manager.on_log_append:
                             log_content = (
@@ -613,7 +728,8 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                                 f"ACTION: {tr.name}\n"
                                 f"OBSERVATION:\n{tr.content}\n"
                             )
-                            manager.on_log_append(
+                            manager._emit_callback(
+                                "on_log_append",
                                 team.team_id,
                                 f"Native Tool Result | {agent.name} ({agent.role})",
                                 log_content,
@@ -628,7 +744,7 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                     
                     if has_error:
                         max_retries = manager.config.max_tool_retries if manager else 3
-                        if tool_retry_count >= max_retries:
+                        if tool_retry_count > max_retries:
                             raise ATTException(f"Tool execution failed {tool_retry_count} times in this step. Maximum tool retries ({max_retries}) exceeded.")
 
                     if manager:
@@ -638,10 +754,20 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                         )
                 else:
                     # Final answer received (no tool calls requested)
-                    agent.messages.append({"role": "assistant", "content": response.text})
+                    _append_agent_message(
+                        agent,
+                        {"role": "assistant", "content": response.text},
+                        team,
+                        manager,
+                    )
                     
-                    if manager and manager.on_activity_added:
-                        manager.on_activity_added(agent.name, "Final Answer", response.text or "")
+                    if manager:
+                        manager._emit_callback(
+                            "on_activity_added",
+                            agent.name,
+                            "Final Answer",
+                            response.text or "",
+                        )
                         
                     if manager and manager.on_log_append:
                         formatted_prompt = json.dumps(agent.messages[:-1], indent=2, ensure_ascii=False)
@@ -658,7 +784,8 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                             f"{response.text}\n"
                             f"--- RESPONSE END ---\n"
                         )
-                        manager.on_log_append(
+                        manager._emit_callback(
+                            "on_log_append",
                             team.team_id,
                             f"Native Final Response | {agent.name} ({agent.role})",
                             log_content,
@@ -670,8 +797,10 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
             return "Error: Native tool calling exceeded maximum tool rounds without producing a text final answer."
         finally:
             team.set_status(agent.name, "Idle")
-            if manager and manager.on_status_change:
-                manager.on_status_change(agent.name, "Idle")
+            if manager:
+                manager._emit_callback(
+                    "on_status_change", agent.name, "Idle"
+                )
             if manager:
                 manager._auto_save(
                     agents={agent.name},

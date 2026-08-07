@@ -263,19 +263,12 @@ class SupervisoryTeam:
             failed_team.team_id,
             reason,
         )
-        if manager.on_system_event:
-            try:
-                manager.on_system_event(message_type, dict(message))
-            except Exception as exc:
-                self.logger.error(
-                    "Root system-event callback failed: %s", exc
-                )
-        if manager.on_emergency_escalation:
-            try:
-                manager.on_emergency_escalation(
-                    failed_team.team_id, message_type, reason
-                )
-            except Exception as exc:
-                self.logger.error(
-                    "Root emergency callback failed: %s", exc
-                )
+        manager._emit_callback(
+            "on_system_event", message_type, dict(message)
+        )
+        manager._emit_callback(
+            "on_emergency_escalation",
+            failed_team.team_id,
+            message_type,
+            reason,
+        )

@@ -40,6 +40,7 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
                 migration_policy="permissive",
             ),
         )
+        self.manager.register_llm_client("test", self.client)
 
     async def asyncTearDown(self):
         await self.manager.close()
@@ -193,13 +194,14 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
                 model_max_output_tokens={"bounded": 4},
             ),
         )
+        manager.register_llm_client("bounded", client)
         await generate_with_retry(
             client, "12345678", manager=manager, retries=1
         )
         self.assertEqual(observed, [("bounded", 4)])
         await manager.close()
 
-    def test_governance_approval_requires_literal_boolean(self):
+    async def test_governance_approval_requires_literal_boolean(self):
         events = []
         self.manager.on_system_event = lambda event, details: events.append(
             (event, details)
@@ -219,6 +221,7 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertFalse(approved)
                 self.assertIn("Invalid governance decision format", reason)
+        await self.manager.flush_callbacks()
         self.assertEqual(
             sum(event == "governance_authorization_format_error" for event, _ in events),
             len(invalid_payloads),
@@ -248,6 +251,7 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=source_root),
             db_path=db_path,
         )
+        source.register_llm_client("test", self.client)
         persisted_team = source.create_agent_team(source.root_ai)
         persisted_team.doc_library.write_file("persisted.txt", "new state")
         await source.save_state()
@@ -288,6 +292,7 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=source_root),
             db_path=db_path,
         )
+        source.register_llm_client("test", self.client)
         parent = source.create_agent_team(source.root_ai)
         child = source.create_agent_team(parent)
         await source.save_state()
@@ -300,6 +305,7 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
             Agent("DepthRoot", "Architect", self.client),
             ATTConfig(workspace_root=os.path.join(self.tmpdir, "unused")),
         )
+        restored.register_llm_client("test", self.client)
         await restored.load_state(db_path)
         self.assertEqual(restored.teams[parent.team_id].depth, 1)
         self.assertEqual(restored.teams[child.team_id].depth, 2)
@@ -373,6 +379,7 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=workspace),
             db_path=db_path,
         )
+        manager.register_llm_client("test", self.client)
         team_a = manager.create_agent_team(manager.root_ai)
         team_b = manager.create_agent_team(manager.root_ai)
         tools_a = get_default_tools({"att_manager": manager}, team_a)
@@ -399,6 +406,7 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
             Agent("LinkRoot", "Architect", self.client),
             ATTConfig(workspace_root=os.path.join(self.tmpdir, "unused-links")),
         )
+        restored.register_llm_client("test", self.client)
         await restored.load_state(db_path)
         restored_a = restored.teams[team_a.team_id]
         restored_tools = get_default_tools(
@@ -447,6 +455,7 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=source_root),
             db_path=db_path,
         )
+        source.register_llm_client("test", self.client)
         first = source.create_agent_team(source.root_ai)
         second = source.create_agent_team(source.root_ai)
         first.doc_library.write_file("first.txt", "first original")

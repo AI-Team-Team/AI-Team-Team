@@ -90,8 +90,7 @@ Do **NOT** attempt to pass raw `MagicMock` or `AsyncMock` objects expecting the 
 
 ## 6. Concurrency & I/O Shielding Mocks
 
-When writing tests that evaluate `AgentTeam` mutations, respect
-`team.state_lock` and the task-local `manager.suppress_auto_save()` context.
+When writing tests that evaluate `AgentTeam` mutations, respect `team.state_lock` and the task-local `manager.suppress_auto_save()` context.
 
 To test these protected blocks without triggering actual DB hits or risking deadlocks in the test loop:
 
@@ -102,8 +101,10 @@ To test these protected blocks without triggering actual DB hits or risking dead
             self.manager._auto_save(teams={team.team_id})
 ```
 
-Persistence tests must await `save_state`, `load_state`, `flush_state`, and
-`close`. Use `asyncTearDown` or `async with ATTManager(...)` so writer threads
-and SQLite engines are released. Successful LLM mocks must accept the
-arguments used by their selected mode; a mock is native-capable only when
-`supports_native_tool_calling()` returns the literal boolean `True`.
+Persistence tests must await `save_state`, `load_state`, `flush_state`, and `close`. Use `asyncTearDown` or `async with ATTManager(...)` so writer threads and SQLite engines are released. Successful LLM mocks must accept the arguments used by their selected mode; a mock is native-capable only when `supports_native_tool_calling()` returns the literal boolean `True`.
+
+Direct mock clients used by persisted agents must be registered with `manager.register_llm_client(alias, client)` before the first auto-save. Close the writer manager before constructing another manager for the same database; tests that intentionally verify contention should assert `DatabaseOwnershipError`.
+
+Callbacks are background observations. Call `await manager.flush_callbacks()` before asserting their effects. Retry tests must use typed transient failures such as `ConnectionError` or an exception with `retryable=True`; arbitrary `RuntimeError` instances intentionally do not retry.
+
+Reliability changes should cover schema preflight without mutation, competing processes, abrupt writer termination, pending-delta coalescing, cancellation, shared-agent context/tool scope, durable UNKNOWN alert states, callback ordering and isolation, and hanging-provider shutdown behavior. The suite's `test_high_hardening.py` contains reference patterns for these cases.

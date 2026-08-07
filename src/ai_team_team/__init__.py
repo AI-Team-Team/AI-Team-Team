@@ -31,7 +31,15 @@ from .core import (
     ATTException,
     LLMGenerationError,
 )
-from .core.exceptions import StateRestoreError, TokenLimitExceededError
+from .core.exceptions import (
+    AmbiguousTeamContextError,
+    DatabaseOwnershipError,
+    LLMRateLimitError,
+    LLMServiceError,
+    StateRestoreError,
+    TokenLimitExceededError,
+    TransientLLMError,
+)
 from .supervision import AuditResult, AuditStatus
 from .tool import Tool
 from .gated_reader import GatedFileReader
@@ -49,6 +57,11 @@ __all__ = [
     "LLMGenerationError",
     "TokenLimitExceededError",
     "StateRestoreError",
+    "DatabaseOwnershipError",
+    "AmbiguousTeamContextError",
+    "TransientLLMError",
+    "LLMRateLimitError",
+    "LLMServiceError",
     "AuditResult",
     "AuditStatus",
     "DocumentLibrary",

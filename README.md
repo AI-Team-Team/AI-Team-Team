@@ -37,6 +37,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Permits active teams to request parent-hierarchy migrations, arbitrated by modular strategies with loop/cycle detection and parent notification logs.
 * **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects an ASCII-drawn indented tree map of active teams (displaying purposes, status, and progress metrics in real-time) directly into the agent prompt context.
 * **[Global Expert Discovery](docs/State_Persistence.md)**: Automatically appends a directory of all active system experts (names, roles, and profiles) into the agent's identity context to facilitate peer discovery.
+* **Shared-Agent Continuity**: One `Agent` may participate in several teams with one identity and complete memory. Invocation-scoped team/discussion context keeps prompts and team-sensitive tools correctly scoped while the agent's own model calls remain serialized.
 * **[Resilient Failover Routing](docs/Team_Governance.md#5-token-budget--failover-policies)**: Dynamically hot-swaps exhausted or failing model clients. Supports `"auto"` selection and asynchronous `"parent"` representative selection.
 
 ### 🧠 ReAct Loops & Execution Engine
@@ -61,9 +62,9 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 
 ### 💾 Persistence & Diagnostics
 
-* **[Asynchronous SQLite Persistence](docs/State_Persistence.md)**: Serializes changed topology, memory, DocLib, ACL, and governance records through an incremental single-writer queue, with explicit flush and restore validation.
+* **[Asynchronous SQLite Persistence](docs/State_Persistence.md)**: Serializes changed topology, memory, DocLib, ACL, and governance records through an exclusive cross-process writer lease with one active and one coalesced pending delta, explicit flush, and transactional restore validation.
 * **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A non-participating 3-AI Supervisory Team executes parallel LLM evaluations (Integrity Auditor, Continuity Auditor, Deadlock Auditor) to review round transcripts, recursively escalating anomalies up the tree lineage.
-* **Decoupled Dashboards**: Exposes clear runtime callback event hooks (`on_status_change`, `on_activity_added`, `on_log_append`) to update console UIs without codebase pollution.
+* **Decoupled Dashboards**: Dispatches synchronous or asynchronous runtime callbacks (`on_status_change`, `on_activity_added`, `on_log_append`) in order on an isolated background channel, so slow or failing observers cannot block discussions.
 
 ## 📦 Installation
 
@@ -290,7 +291,6 @@ config = ATTConfig(
     failover_policy="auto",               # Automatically hot-swaps LLM client on TokenLimitError
     enable_emergency_wakeup=True,         # Enables deferred inbox processing for emergencies
     tool_calling_mode="auto",             # Auto-detects Pluggable Reasoning Strategy (Native or TextReAct)
-    strict_state_persistence=True,
     audit_unknown_escalation_mode="wake" # Or "queue"
 )
 
@@ -307,6 +307,7 @@ async def my_handler(
     model_name: str,
     prompt: Union[str, List[Dict[str, str]]],
     system_instruction: Optional[str] = None,
+    max_output_tokens: Optional[int] = None,
     temperature: float = 0.3,
     require_json: bool = False
 ) -> str:
@@ -322,8 +323,14 @@ manager.register_generator_handler(my_handler)
 # await manager.save_state("att_backup.db")
 # await manager.flush_state()
 # await manager.close()
+```
 
-manager.register_generator_handler(my_handler)
+Direct client objects must have one stable identity binding before state is saved.
+
+A client's `model_name` attribute is not accepted unless that same object is registered under the name:
+
+```python
+manager.register_llm_client("analysis", analysis_client)
 ```
 
 #### 🔌 LLM Client Interface (`LLMClientProto`)
@@ -343,6 +350,7 @@ class LLMClientProto(Protocol):
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
+        max_output_tokens: Optional[int] = None,
         temperature: float = 0.7,
         require_json: bool = False
     ) -> LLMResponse:
@@ -357,6 +365,10 @@ class LLMClientProto(Protocol):
         """
         Returns True if the client/model configuration natively supports structured function calling.
         """
+        ...
+
+    def supports_output_token_limit(self) -> Union[bool, str]:
+        """Returns the supported hard-quota parameter name when available."""
         ...
 ```
 
@@ -462,6 +474,10 @@ def my_emergency_callback(team_id, alert_type, alert_reason):
     print(f"[EMERGENCY ALERT] Team {team_id} encountered {alert_type}: {alert_reason}")
 
 manager.on_emergency_escalation = my_emergency_callback
+
+# Callbacks may also be async. Tests and hosts that need an observation barrier
+# can explicitly wait for all callbacks queued so far.
+await manager.flush_callbacks()
 ```
 
 ### 5. Spawn Team & Execute Discussion
@@ -476,7 +492,7 @@ team = manager.create_agent_team(
 )
 
 # Run cooperative multi-round debate
-transcript = manager.execute_team_discussion(
+transcript = await manager.execute_team_discussion(
     team=team,
     prompt="Audit the system logic mapping for project A.",
     rounds=2
@@ -552,8 +568,8 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `model_registry` | `dict` | `{}` | Mapping of specialized agent roles to specific LLM models or endpoints. |
 | `max_migrations_per_team_discussion` | `int` | `1` | The maximum hierarchy migration requests a team can execute during a single discussion session. |
 | `enable_membership_voting` | `bool` | `False` | Whether to enable the optional democratic membership voting system. |
-| `llm_max_retries` | `int` | `3` | The maximum retry attempts for LLM generation failures. |
-| `llm_retry_backoff_factor` | `float` | `1.5` | The exponential backoff multiplier for retrying LLM calls. |
+| `llm_max_retries` | `int` | `3` | Number of retries after the initial LLM attempt. `0` performs one attempt without retrying. |
+| `llm_retry_backoff_factor` | `float` | `1.5` | Initial exponential-backoff delay. `0` retries immediately. Only typed/provider-classified transient failures are retried. |
 | `enable_memory_compression` | `bool` | `True` | Whether to enable automatic dialogue compression/pruning of early conversation turns. |
 | `max_memory_turns` | `int` | `20` | The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns. |
 | `communication_policy` | `str` | `"permissive"` | The strategy used for inter-team communication gating. Options: `"permissive"`, `"rule_gated"`, `"proxied"`. |
@@ -562,12 +578,13 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `emergency_discussion_rounds` | `int` | `1` | The number of emergency discussion rounds executed when a team is woken up. |
 | `tool_calling_mode` | `str` | `"auto"` | Strategy for invoking tools. `"native"`, `"react"`, or `"auto"`. |
 | `max_tool_rounds` | `int` | `5` | Max depth of native parallel tool calls during a reasoning step. |
-| `model_token_limits` | `dict` | `None` | Mapping of model aliases to their token budget limits (used for failover routing). |
+| `max_tool_retries` | `int` | `3` | Number of tool retries after the initial failed attempt. `0` disables retries. |
+| `model_token_limits` | `dict` | `None` | Mapping of model aliases to hard token quotas; `0` disables that model's quota entirely. |
 | `model_max_output_tokens` | `dict` | `None` | Per-model maximum output reservation/request cap used by the atomic hard-quota ledger. |
 | `default_max_output_tokens` | `int` | `1024` | Default maximum output reservation when a model-specific cap is absent. |
 | `failover_policy` | `str` | `"auto"` | Fallback strategy on token exhaustion: `"auto"` (next available) or `"parent"` (LLM debate proxy). |
-| `strict_state_persistence` | `bool` | `True` | Enables strict propagation of persistence errors. |
 | `audit_unknown_escalation_mode` | `str` | `"wake"` | Handling for indeterminate audits: immediately `"wake"` the parent or only `"queue"` the alert. |
+| `audit_unknown_soft_threshold` | `int` | `100` | Soft operational warning threshold for unique UNKNOWN alerts; alerts are never dropped or expired automatically. |
 
 ### `GatedFileReader` Parameters
 

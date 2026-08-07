@@ -5,17 +5,22 @@ flowchart LR
     Mutation["State mutation"] --> Dirty["Mark entity/path dirty"]
     Dirty --> Scope{"Inside task-local suppression?"}
     Scope -- "Yes" --> Merge["Merge into outer ContextVar batch"]
-    Scope -- "No" --> Capture["Capture immutable delta"]
+    Scope -- "No" --> Capture["Capture versioned shallow COW record"]
     Merge --> Capture
-    Capture --> Queue["Single writer queue"]
-    Queue --> Worker["Worker thread: file and SQLite I/O"]
+    Capture --> Admission{"Writer admission"}
+    Admission --> Active["One executing delta"]
+    Admission --> Pending["One coalesced pending delta"]
+    Pending --> Active
+    Active --> Worker["Worker: deep copy, JSON, files and SQLite"]
     Worker --> Commit["Incremental transaction commit"]
-    Flush["await flush_state()"] --> Queue
+    Flush["await flush_state()"] --> Admission
 ```
 
 ```mermaid
 flowchart TD
-    Load["await load_state(path)"] --> Version["Validate schema version"]
+    Open["Claim exclusive writer lease"] --> Preflight["Read schema version before DDL"]
+    Preflight --> Load["await load_state(path)"]
+    Load --> Version["Validate schema version"]
     Version --> Aliases["Read persisted model aliases"]
     Aliases --> Bindings{"All aliases have a direct client\nor generator handler?"}
     Bindings -- "No" --> Error["Raise StateRestoreError with all aliases"]
@@ -30,4 +35,4 @@ flowchart TD
     Publish -- "Failure" --> Rollback
 ```
 
-The schema is versioned and intentionally does not migrate old databases.
+SQLite uses foreign keys, WAL, and an explicit busy timeout. A second manager or process fails its non-blocking writer lease immediately. The schema is versioned and intentionally does not migrate old databases.

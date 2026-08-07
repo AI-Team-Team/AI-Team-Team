@@ -11,6 +11,8 @@ This document provides a technical overview of the internal classes, properties,
 
 Represents an individual AI specialist equipped with role definitions and generator client integration.
 
+One instance may be shared across teams. Its `lock` serializes complete model turns, `message_history` retains complete cross-team provenance, and manager `ContextVar` values provide the active team and discussion.
+
 * **Constructor**:
 
   ```python
@@ -47,6 +49,8 @@ Represents a dynamic team of at least 3 agents ($N \ge 3$) executing discussions
 
 Master orchestrator managing the overall ATT topology, dynamic presets, tool registrations, and callback events.
 
+Synchronous and asynchronous callbacks share one ordered background dispatcher; callback failures are logged and never alter core transaction outcomes.
+
 * **Constructor**:
 
   ```python
@@ -55,7 +59,9 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
 
 * **Methods**:
   * `register_model(name: str, config: Dict[str, Any])`
-    Registers a unified model configuration (e.g. metadata, type, ai_note).
+    Registers model metadata and optionally a `client=` runtime binding.
+  * `register_llm_client(alias: str, client: Any)`
+    Registers one stable alias for one direct client identity.
   * `register_generator_handler(handler: Callable[..., str])`
     Registers a global callback handler for generating text from a model alias.
   * `register_preset(name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]])`
@@ -72,7 +78,7 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
     Spawns a new team of size $N \ge 3$, establishes parent-child lineages, and binds generic/custom tools.
   * `suppress_auto_save() -> AsyncContextManager`
     Nested, task-local batching context that merges dirty deltas and submits one write when the outer scope exits.
-  * `execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`
+  * `await execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`
     Executes a multi-agent debate session under the team's serial session lock. Normal and emergency sessions share the lock; separate teams remain concurrent.
   * `find_parent_team(target: AgentTeam) -> Optional[AgentTeam]`
     Locates the parent team in the active team topology using child references and creator pointers.
@@ -89,7 +95,12 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
   * `await flush_state()`
     Waits for all queued incremental commits.
   * `await close()`
-    Flushes writes and closes the single writer, engines, and sessions.
+    Rejects new work, cancels external LLM waits, flushes accepted writes, and
+    closes the single writer lease, engines, and sessions.
+  * `await flush_callbacks()`
+    Waits for the ordered observational callback queue.
+  * `acknowledge_unknown_alert(...)` / `clear_unknown_alerts(...)`
+    Explicitly acknowledges durable, fingerprinted UNKNOWN audit alerts.
 
 ### `ATTConfig`
 
@@ -116,10 +127,12 @@ Configuration options for tuning the ATT multi-agent framework.
       migration_policy: str = "ancestor_approval",
       enable_emergency_wakeup: bool = True,
       emergency_discussion_rounds: int = 1,
+      max_tool_retries: int = 3,
       model_token_limits: Optional[dict] = None,
       model_max_output_tokens: Optional[dict] = None,
       default_max_output_tokens: int = 1024,
-      audit_unknown_escalation_mode: str = "wake"
+      audit_unknown_escalation_mode: str = "wake",
+      audit_unknown_soft_threshold: int = 100
   )
   ```
 
@@ -176,9 +189,7 @@ Represents a team's document database with prefix-based permissions and path tra
   * `delete_file(path: str) -> str`
   * `list_contents(path: str) -> List[str]`
 
-Native filesystem symlinks are rejected. Cross-library links are manager-owned
-metadata exposed through `create_library_link`; direct `DocumentLibrary` methods
-operate on physical files only.
+Native filesystem symlinks are rejected. Cross-library links are manager-owned metadata exposed through `create_library_link`; direct `DocumentLibrary` methods operate on physical files only.
 
 ## Policies & Strategy Interfaces
 
@@ -203,7 +214,7 @@ operate on physical files only.
 SQLAlchemy Declarative Models mapping the topology schema, defined in [models.py](file:///Users/charlestsaur/Documents/sandbox/AI-Team-Team/src/ai_team_team/database/models.py):
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
-* **`AgentModel` & `AgentMessageModel`**: Persists agent identity profiles and sequential conversation history message buffers.
+* **`AgentModel` & `AgentMessageModel`**: Persists agent identity profiles and complete conversation histories with `team_id` and `discussion_id` provenance.
 * **`TeamModel`**: Tracks active topologies, migration counts, sibling settings, and links dual-linked parent-child hierarchy nodes.
 * **`TeamInboxModel` & `TeamProposalModel`**: Persists child escalations, peer messages, and democratic proposal votes.
 * **`BrokerAgreementModel`**: Tracks cross-lineage tunnels negotiated by the broker.
@@ -211,5 +222,5 @@ SQLAlchemy Declarative Models mapping the topology schema, defined in [models.py
 
 ### Database Session Factory
 
-* **`get_session(db_path: str, disable_fks: bool = False) -> Generator[Session, None, None]`**
-  A context manager defined in [session.py](file:///Users/charlestsaur/Documents/sandbox/AI-Team-Team/src/ai_team_team/database/session.py) that initializes SQLite database engines, migrates schemas, and yields transactional SQLAlchemy session instances. Allows setting `PRAGMA foreign_keys = OFF` to bypass constraint audits during state purges.
+* **`get_session(db_path: str) -> Generator[Session, None, None]`**
+  A strict standalone writer context defined in `database/session.py`. It acquires the same exclusive writer lease, performs schema preflight before DDL, enables the configured SQLite safeguards, and yields a transactional SQLAlchemy session. Foreign-key enforcement cannot be disabled.

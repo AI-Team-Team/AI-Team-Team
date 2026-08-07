@@ -3,9 +3,64 @@ import inspect
 import json
 import logging
 from typing import Union, List, Dict, Optional, Any
-from .exceptions import LLMGenerationError, TokenLimitExceededError
+from .exceptions import (
+    LLMGenerationError,
+    TokenLimitExceededError,
+    TransientLLMError,
+)
 
 logger = logging.getLogger("ATT.CoreUtils")
+
+
+_RETRYABLE_PROVIDER_ERROR_NAMES = {
+    "APIConnectionError",
+    "APITimeoutError",
+    "ConnectError",
+    "ConnectTimeout",
+    "InternalServerError",
+    "RateLimitError",
+    "ReadTimeout",
+    "ServiceUnavailableError",
+}
+
+
+def _is_retryable_llm_error(error: BaseException) -> bool:
+    """Classifies transient failures by type or explicit provider metadata."""
+    if isinstance(
+        error,
+        (TransientLLMError, TimeoutError, ConnectionError),
+    ):
+        return True
+    if getattr(error, "retryable", None) is True:
+        return True
+    status = getattr(error, "status_code", None)
+    if status is None:
+        response = getattr(error, "response", None)
+        status = getattr(response, "status_code", None)
+    if status == 429 or (
+        isinstance(status, int) and 500 <= status <= 599
+    ):
+        return True
+    return type(error).__name__ in _RETRYABLE_PROVIDER_ERROR_NAMES
+
+
+async def _await_external_llm(awaitable: Any, manager: Optional[Any]) -> Any:
+    task = asyncio.current_task()
+    if manager is not None:
+        if getattr(manager, "_closing", False):
+            close_awaitable = getattr(awaitable, "close", None)
+            if callable(close_awaitable):
+                close_awaitable()
+            cancelled = asyncio.CancelledError("ATTManager is closing.")
+            cancelled.request_sent = False
+            raise cancelled
+        if task is not None:
+            manager._llm_tasks.add(task)
+    try:
+        return await awaitable
+    finally:
+        if manager is not None and task is not None:
+            manager._llm_tasks.discard(task)
 
 
 def _output_limit_parameter(llm_client: Any) -> Optional[str]:
@@ -100,10 +155,23 @@ async def generate_with_retry(
     prompt_text = prompt if isinstance(prompt, str) else json.dumps(prompt)
 
     if manager:
-        resolved_alias = resolved_alias or manager.resolve_model_alias(llm_client)
+        resolved_alias = (
+            resolved_alias
+            or manager.resolve_runtime_model_alias(llm_client)
+        )
         prompt_tokens = manager.count_tokens(prompt_text, resolved_alias)
 
-    for attempt in range(1, retries + 1):
+    if not isinstance(retries, int) or isinstance(retries, bool) or retries < 0:
+        raise ValueError("retries must be a non-negative integer.")
+    if (
+        not isinstance(backoff_factor, (int, float))
+        or isinstance(backoff_factor, bool)
+        or backoff_factor < 0
+    ):
+        raise ValueError("backoff_factor must be a non-negative number.")
+    attempts = retries + 1
+
+    for attempt in range(1, attempts + 1):
         reservation = None
         request_sent = False
         try:
@@ -113,16 +181,21 @@ async def generate_with_retry(
                 and resolved_alias in manager.config.model_token_limits
             ):
                 output_parameter = _output_limit_parameter(llm_client)
-                requested_output = (
-                    _configured_output_limit(manager, resolved_alias)
-                    if output_parameter
-                    else None
+                requested_output = _configured_output_limit(
+                    manager, resolved_alias
                 )
                 reservation = manager.token_budget.reserve(
                     resolved_alias,
                     prompt_tokens,
                     requested_output,
                 )
+                if reservation is not None and output_parameter is None:
+                    manager.token_budget.release(reservation)
+                    reservation = None
+                    raise ValueError(
+                        "Hard token budgets require an LLM client that "
+                        "accepts max_output_tokens or max_tokens."
+                    )
 
             if hasattr(llm_client, "generate"):
                 kwargs = {}
@@ -135,13 +208,17 @@ async def generate_with_retry(
                         pass
                 if output_parameter and reservation is not None:
                     kwargs[output_parameter] = reservation.output_tokens
-                request_sent = True
-                response = await llm_client.generate(
+                request = llm_client.generate(
                     prompt=prompt,
                     system_instruction=system_instruction,
                     temperature=temperature,
                     require_json=require_json,
                     **kwargs
+                )
+                request_sent = True
+                response = await _await_external_llm(
+                    request,
+                    manager,
                 )
             else:
                 # Fallback to direct callable
@@ -153,11 +230,18 @@ async def generate_with_retry(
                 }
                 if output_parameter and reservation is not None:
                     call_kwargs[output_parameter] = reservation.output_tokens
-                request_sent = True
                 if asyncio.iscoroutinefunction(llm_client):
-                    response = await llm_client(**call_kwargs)
+                    request = llm_client(**call_kwargs)
+                    request_sent = True
+                    response = await _await_external_llm(
+                        request, manager
+                    )
                 else:
-                    response = llm_client(**call_kwargs)
+                    request = asyncio.to_thread(llm_client, **call_kwargs)
+                    request_sent = True
+                    response = await _await_external_llm(
+                        request, manager
+                    )
             
             response_text = ""
             if isinstance(response, str):
@@ -186,44 +270,42 @@ async def generate_with_retry(
         except asyncio.CancelledError as exc:
             if reservation is not None:
                 sent = getattr(exc, "request_sent", request_sent) is not False
-                manager.token_budget.settle(
-                    reservation,
-                    _actual_usage(
-                        exc,
-                        prompt_tokens if sent else 0,
-                        0,
-                    ),
-                )
+                if sent:
+                    manager.token_budget.settle(
+                        reservation,
+                        _actual_usage(exc, prompt_tokens, 0),
+                    )
+                else:
+                    manager.token_budget.release(reservation)
             raise
         except Exception as e:
             if reservation is not None:
                 sent = getattr(e, "request_sent", request_sent) is not False
-                manager.token_budget.settle(
-                    reservation,
-                    _actual_usage(
-                        e,
-                        prompt_tokens if sent else 0,
-                        0,
-                    ),
-                )
+                if sent:
+                    manager.token_budget.settle(
+                        reservation,
+                        _actual_usage(e, prompt_tokens, 0),
+                    )
+                else:
+                    manager.token_budget.release(reservation)
             if isinstance(e, TokenLimitExceededError):
                 raise e
-            err_msg = str(e)
-            is_permanent = any(
-                term in err_msg.lower()
-                for term in ["invalid api key", "unauthorized", "not found"]
-            )
-            is_transient = not is_permanent
-            
-            if attempt == retries or not is_transient:
-                logger.error(f"LLM generation failed permanently on attempt {attempt}: {e}")
-                raise LLMGenerationError(f"LLM generation failed after {attempt} attempts: {e}")
-                
-            sleep_time = backoff_factor ** attempt
+            is_transient = _is_retryable_llm_error(e)
+
+            if attempt == attempts or not is_transient:
+                logger.error(
+                    "LLM generation failed on attempt %s: %s", attempt, e
+                )
+                raise LLMGenerationError(
+                    f"LLM generation failed after {attempt} attempt(s): {e}"
+                ) from e
+
+            sleep_time = float(backoff_factor) * (2 ** (attempt - 1))
             logger.warning(
-                f"LLM generation failed (attempt {attempt}/{retries}): {e}. "
+                f"LLM generation failed (attempt {attempt}/{attempts}): {e}. "
                 f"Retrying in {sleep_time:.2f}s..."
             )
-            await asyncio.sleep(sleep_time)
+            if sleep_time:
+                await asyncio.sleep(sleep_time)
 
     raise LLMGenerationError("LLM generation failed: maximum retries exceeded.")

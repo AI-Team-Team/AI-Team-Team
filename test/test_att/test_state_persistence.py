@@ -50,7 +50,7 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
             root_ai=self.root_ai,
             db_path=self.db_path
         )
-        self.manager.llm_clients["critic"] = self.mock_react_client
+        self.manager.register_llm_client("critic", self.mock_react_client)
         self.manager.register_tools_context({"att_manager": self.manager})
 
     async def asyncTearDown(self):
@@ -305,13 +305,14 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         # 2. Simulated Crash - Destruct current manager & local state
         # (We also wipe out DocLib directories physically to see if recovery rebuilds them)
         shutil.rmtree(os.path.abspath(".att_doc_libs"), ignore_errors=True)
+        await self.manager.close()
         
         new_root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_react_client)
         new_manager = ATTManager(
             root_ai=new_root_ai,
             db_path=self.db_path
         )
-        new_manager.llm_clients["critic"] = self.mock_react_client
+        new_manager.register_llm_client("critic", self.mock_react_client)
         new_manager.register_tools_context({"att_manager": new_manager})
         
         # Load state from the database
@@ -361,13 +362,14 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         """Verify that SupervisoryTeam.root_ai reference is updated to the newly loaded root_ai in load_state."""
         await self.manager.save_state()
         self.assertTrue(os.path.exists(self.db_path))
+        await self.manager.close()
 
         temp_root_ai = Agent(name="Temp_Root_AI", role="Architect", llm_client=self.mock_react_client)
         new_manager = ATTManager(
             root_ai=temp_root_ai,
             db_path=self.db_path
         )
-        new_manager.llm_clients["critic"] = self.mock_react_client
+        new_manager.register_llm_client("critic", self.mock_react_client)
         self.assertIs(new_manager.supervisor.root_ai, temp_root_ai)
 
         await new_manager.load_state(self.db_path)

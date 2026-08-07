@@ -12,6 +12,8 @@ The `ATTManager` is the singleton-like global event bus and state coordinator. I
 - **`model_configs (Dict[str, Any])`**: The centralized registry decoupling model identities from underlying provider configurations.
 - **`deferred_emergency_tasks (queue.Queue)`**: A thread-safe queue holding `asyncio` coroutines. If an emergency alert triggers while the asyncio event loop is blocked or not running, the task is deferred here and processed later via `manager.flush_deferred_tasks()`.
 - **`tools_context (Dict[str, Any])`**: A shared memory space injected into ReAct tools containing references like `{"att_manager": self}`.
+- **Invocation Context (`ContextVar`)**: Carries the active agent, team, and discussion ID through nested model and tool calls without caching a shared agent to one owner team.
+- **Persistence Coordinator**: Holds one cross-process writer lease, one active delta, and one coalesced pending delta. Snapshot materialization and SQLite work execute off the event loop.
 
 ## 2. `AgentTeam`: The Dynamic Group Unit
 
@@ -26,6 +28,7 @@ An `AgentTeam` represents a single node in the hierarchy. A team must have at le
 ### Concurrency & Mutation State
 
 - **`state_lock (asyncio.Lock)`**: The asynchronous mutex that protects the team's structural integrity. Any ReAct operation that mutates `self.members`, `self.proposals`, or `self.status_map` MUST acquire this lock via `async with team.state_lock:` to prevent race conditions during `asyncio.gather()` parallel tool executions.
+- **`discussion_lock (asyncio.Lock)`**: Serializes ordinary and emergency discussions for this team without blocking discussions in other teams.
 - **`message_inbox (List[Dict[str, Any]])`**: The asynchronous receiving queue for sibling messages and parent escalations.
 - **`proposals (Dict[str, Dict])`**: Active democratic voting proposals (e.g., adding/removing members).
 
@@ -36,7 +39,9 @@ The `Agent` encapsulates a single identity and ReAct execution profile.
 ### Execution Properties
 
 - **`llm_client (LLMClientProto)`**: The attached adapter handling prompt formatting and parsing.
-- **`messages (List[Dict])`**: The sequential high-fidelity memory buffer.
+- **`messages (List[Dict])`**: The bounded high-fidelity model window.
+- **`message_history (List[Dict])`**: The complete persistent cross-team history; generated records contain `team_id` and `discussion_id`.
+- **`lock (asyncio.Lock)`**: Serializes all model work for this identity when the same agent participates in several teams.
 - **`max_memory_turns (int)`**: The configuration value defining when the agent compresses old conversational turns into a background summary to save context window tokens.
 
 ### ReAct Compilation

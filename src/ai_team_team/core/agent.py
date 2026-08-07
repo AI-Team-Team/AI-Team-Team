@@ -9,6 +9,8 @@ class Agent:
         self.role_description = role_description
         self.system_instructions = system_instructions
         self.messages: List[Dict[str, str]] = []
+        self.message_history: List[Dict[str, Any]] = []
+        self._history_seen_ids: set[int] = set()
         self.last_context: Optional[Dict[str, Any]] = None
         self._lock: Optional[asyncio.Lock] = None
 
@@ -18,6 +20,21 @@ class Agent:
         if self._lock is None:
             self._lock = asyncio.Lock()
         return self._lock
+
+    def sync_message_history(self) -> None:
+        """Captures messages inserted directly through the compatibility list."""
+        for message in self.messages:
+            identity = id(message)
+            if identity not in self._history_seen_ids:
+                self.message_history.append(message)
+                self._history_seen_ids.add(identity)
+
+    def append_message(self, message: Dict[str, Any]) -> None:
+        """Appends to the model window and the complete persistent history."""
+        self.sync_message_history()
+        self.messages.append(message)
+        self.message_history.append(message)
+        self._history_seen_ids.add(id(message))
 
     def launch_att(
         self,
@@ -43,8 +60,7 @@ class Agent:
             is_public_visible=is_public_visible,
             initial_docs=initial_docs
         )
-        for team in manager.teams.values():
-            if self in team.members:
-                child.chapter_num = team.chapter_num
-                break
+        parent = manager.get_agent_team(self)
+        if parent is not None:
+            child.chapter_num = parent.chapter_num
         return child

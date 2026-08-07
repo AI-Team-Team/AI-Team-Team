@@ -92,42 +92,52 @@ class TokenBudgetLedger:
             return 0
         actual_tokens = max(0, int(actual_tokens))
         with self._lock:
-            active = self._reservations.pop(
-                reservation.reservation_id, None
-            )
-            if active is None:
-                raise RuntimeError("Token reservation was already settled.")
+            active = self._release_locked(reservation)
             alias = active.model_alias
-            remaining_reserved = (
-                self._reserved_by_model.get(alias, 0)
-                - active.reserved_tokens
-            )
-            if remaining_reserved:
-                self._reserved_by_model[alias] = remaining_reserved
-            else:
-                self._reserved_by_model.pop(alias, None)
             new_usage = int(self._manager.model_token_usage.get(alias, 0)) + actual_tokens
             self._manager.model_token_usage[alias] = new_usage
 
         self._manager._auto_save(configs=True)
         limit = self._manager.config.model_token_limits.get(alias)
         if limit is not None and new_usage > limit:
-            callback = getattr(self._manager, "on_system_event", None)
-            if callback:
-                try:
-                    callback(
-                        "token_budget_overrun",
-                        {
-                            "model_name": alias,
-                            "limit": limit,
-                            "actual_usage": new_usage,
-                            "reservation": active.reserved_tokens,
-                            "settled_usage": actual_tokens,
-                        },
-                    )
-                except Exception:
-                    pass
+            self._manager._emit_callback(
+                "on_system_event",
+                "token_budget_overrun",
+                {
+                    "model_name": alias,
+                    "limit": limit,
+                    "actual_usage": new_usage,
+                    "reservation": active.reserved_tokens,
+                    "settled_usage": actual_tokens,
+                },
+            )
         return new_usage
+
+    def release(self, reservation: Optional[TokenReservation]) -> None:
+        """Releases a request that was never dispatched without charging it."""
+        if reservation is None:
+            return
+        with self._lock:
+            self._release_locked(reservation)
+
+    def _release_locked(
+        self, reservation: TokenReservation
+    ) -> TokenReservation:
+        active = self._reservations.pop(
+            reservation.reservation_id, None
+        )
+        if active is None:
+            raise RuntimeError("Token reservation was already settled.")
+        alias = active.model_alias
+        remaining_reserved = (
+            self._reserved_by_model.get(alias, 0)
+            - active.reserved_tokens
+        )
+        if remaining_reserved:
+            self._reserved_by_model[alias] = remaining_reserved
+        else:
+            self._reserved_by_model.pop(alias, None)
+        return active
 
     def available(self, model_alias: str) -> Optional[int]:
         """Returns unconsumed and unreserved capacity for failover routing."""
@@ -157,7 +167,6 @@ class TokenBudgetLedger:
         prompt_tokens: int,
         output_tokens: int,
     ) -> None:
-        callback = getattr(self._manager, "on_system_event", None)
         details = {
             "model_name": alias,
             "limit": limit,
@@ -166,11 +175,9 @@ class TokenBudgetLedger:
             "prompt_tokens": prompt_tokens,
             "max_output_tokens": output_tokens,
         }
-        if callback:
-            try:
-                callback("token_limit_exceeded", details)
-            except Exception:
-                pass
+        self._manager._emit_callback(
+            "on_system_event", "token_limit_exceeded", details
+        )
         error = TokenLimitExceededError(
             f"Model {alias} token limit exceeded. Budget: {limit}, "
             f"Current usage: {usage}, Reserved: {reserved}, "

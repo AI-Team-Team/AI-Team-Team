@@ -47,6 +47,7 @@ class TestATTMigration(unittest.IsolatedAsyncioTestCase):
         
         # Call migration tool
         res = await c1.tools["request_migration"](t2.team_id, "Need to align with P2 objectives")
+        await self.manager.flush_callbacks()
         
         self.assertIn("Success", res)
         self.assertEqual(c1.parent_team, t2)

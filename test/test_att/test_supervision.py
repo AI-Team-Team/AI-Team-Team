@@ -104,6 +104,7 @@ class TestATTSupervision(unittest.IsolatedAsyncioTestCase):
 
         self.mock_client.generate = mock_generate
         await self.manager.execute_team_discussion(team, "Task description", rounds=1)
+        await self.manager.flush_callbacks()
 
         # Status changes should be logged
         self.assertTrue(len(status_changes) > 0)

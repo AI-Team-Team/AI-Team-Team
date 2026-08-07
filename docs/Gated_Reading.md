@@ -102,12 +102,10 @@ To enable secure document storage and sharing between agent teams, the framework
   * **Evaluation Order**: The framework evaluates permissions by decomposing the target file path into parent segment directories (from the full path down to the root `/`). If a matching permission for the caller's team is found on any parent path segment, it is immediately applied.
   * **Permission Hierarchy**: A `WRITE` permission grant implicitly permits `READ` operations. Sibling or cross-lineage teams can request access by sending peer messages to the library owner.
 * **Managed Cross-Library File Links**: `create_library_link` stores only a
-  target `lib_id` and relative file path. It never creates an operating-system
-  symlink. Every read or write resolves the link chain and rechecks the caller's
-  live ACL on every source and target path, so revocation takes effect
-  immediately. Writes require `WRITE` throughout the chain; deleting a link
-  removes only link metadata. Links are file-only, must terminate in a registered
-  DocLib file, and cycles are rejected.
+  target `lib_id` and relative file path. It never creates an operating-system symlink.
+  
+  Every read or write resolves the link chain and rechecks the caller's live ACL on every source and target path, so revocation takes effect immediately.
+  
+  Writes require `WRITE` throughout the chain; deleting a link removes only link metadata. Links are file-only, must terminate in a registered DocLib file, and cycles are rejected.
 * **Native Symlink Rejection**: DocLib roots and path components may not be
-  filesystem symbolic links. File descriptors are opened relative to a no-follow
-  directory chain so a native symlink cannot escape the managed root.
+  filesystem symbolic links. File descriptors are opened relative to a no-follow directory chain so a native symlink cannot escape the managed root.

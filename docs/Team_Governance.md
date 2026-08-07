@@ -16,11 +16,21 @@ can continue concurrently.
 
 ### Inbox Overflows & Summarization
 
-To prevent prompt length limits, the inbox utilizes `inbox_summarize_threshold_chars`. If unread messages exceed this threshold during polling, the `ATTManager` utilizes its `critic_client` to automatically compress the raw payloads into a dense, bulleted summary before injecting it into the debate.
+To prevent prompt length limits, the inbox utilizes `inbox_summarize_threshold_chars`.
+
+If unread messages exceed this threshold during polling, the `ATTManager` utilizes its `critic_client` to automatically compress the raw payloads into a dense, bulleted summary before injecting it into the debate.
+
+UNKNOWN audit alerts are not subject to TTL or a hard capacity.
+
+Stable fingerprints merge repeats and retain occurrence counts and timestamps.
+
+The discussion marks them `processing`, acknowledges them only on success, and returns them to `pending` after failure or cancellation. A configurable soft threshold emits operational warnings without discarding unique alerts.
 
 ## 2. Peer-to-Peer Communication & Negotiation Broker
 
-Dynamic sub-teams often need to collaborate across lineage boundaries. Calling `send_peer_message(team_id, message)` routes the payload to the target team's inbox. However, all cross-team communication is gated by the **NegotiationBroker**, ensuring isolated execution chains cannot maliciously interact without parent authorization.
+Dynamic sub-teams often need to collaborate across lineage boundaries. Calling `send_peer_message(team_id, message)` routes the payload to the target team's inbox.
+
+However, all cross-team communication is gated by the **NegotiationBroker**, ensuring isolated execution chains cannot maliciously interact without parent authorization.
 
 ### Sibling Routing (Common Parents)
 
@@ -48,9 +58,7 @@ The specific strategy the Negotiation Broker uses to approve or deny requests is
 
 - **Behavior**: Instead of static rules, the parent team leaders of both the sender and recipient are consulted dynamically. The representatives evaluate the request details and rationale via their own **LLM client** and return a JSON approval (`{"approved": true|false, "reason": "..."}`).
 
-All LLM governance gates fail closed through the same strict schema. Only the
-JSON boolean literal `true` grants authority. Strings, numbers, null, and a
-missing `approved` field are format errors, are audited, and are rejected.
+All LLM governance gates fail closed through the same strict schema. Only the JSON boolean literal `true` grants authority. Strings, numbers, null, and a missing `approved` field are format errors, are audited, and are rejected.
 
 ### D. Guided Observation Feedback
 
@@ -76,12 +84,15 @@ Dynamic parent-hierarchy migrations are triggered when a team requests to move u
 
 To ensure stability in high-overhead multi-agent environments, the framework provides token budgeting circuit breakers and dynamic model failover strategies.
 
-Configured limits are hard quotas. Before every model attempt, ATT atomically
-reserves the estimated prompt plus the maximum permitted output. Provider usage
-is used for settlement when available; otherwise ATT uses its tokenizer
-estimate. Unused output capacity is returned, while sent failures and
-cancellations charge reported usage or at least the prompt. Failover reads the
-same ledger, including active reservations.
+Configured limits are hard quotas. Before every model attempt, ATT atomically reserves the estimated prompt plus the maximum permitted output.
+
+Provider usage is used for settlement when available; otherwise ATT uses its tokenizer estimate.
+
+Unused output capacity is returned, while sent failures and cancellations charge reported usage or at least the prompt. Failover reads the same ledger, including active reservations.
+
+Because a quota is hard, a bound client must accept `max_output_tokens` or `max_tokens` (or explicitly advertise that capability); ATT fails closed before dispatch when it cannot enforce the reserved output ceiling.
+
+Setting a model's token limit to `0` hard-disables that model. Failover only selects aliases that have an explicit runtime binding.
 
 ### A. Failover Routing Strategies
 
@@ -129,7 +140,7 @@ Emergency Wakeups are triggered when a team's asynchronous `receive_message` met
 
 If the global configuration flag `enable_emergency_wakeup` is set to `True`, the system evaluates the target team's execution state:
 
-1. **If the team is currently in a discussion loop (`is_running == True`)**: The alert simply waits in the `message_inbox`. The manager will automatically parse it during the next ReAct cycle.
+1. **If the team is currently in a discussion loop (`is_running == True`)**: The alert remains in `message_inbox`. UNKNOWN repeats merge by fingerprint; other alerts wait for the next round/session.
 2. **If the team is idle (`is_running == False`)**: The system initiates an immediate preemptive `asyncio` context switch to wake the team up by scanning the inbox post-discussion:
 
    ```python

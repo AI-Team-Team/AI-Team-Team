@@ -32,7 +32,7 @@ ATT is backend-agnostic. To connect your LLM provider (e.g., Google GenAI, OpenA
 The adapter class must implement a `generate` method with the following signature:
 
 ```python
-from typing import Optional, Any
+from typing import Any, List, Optional
 
 class MyLLMClient:
     async def generate(
@@ -40,6 +40,7 @@ class MyLLMClient:
         prompt: str,
         system_instruction: Optional[str] = None,
         tools: Optional[List[Any]] = None,
+        max_output_tokens: Optional[int] = None,
         temperature: float = 0.3,
         require_json: bool = False,
         **kwargs
@@ -51,6 +52,7 @@ class MyLLMClient:
             prompt: The user query or discussion history.
             system_instruction: Guidelines and context injected for the agent.
             tools: Optional list of native `Tool` instances. Adapters MUST parse these into their provider's schema manually.
+            max_output_tokens: Required provider output ceiling when a hard token quota is configured.
             temperature: Sampling temperature.
             require_json: If True, you MUST return a valid JSON string (used by the 3-AI Supervisory Team).
         """
@@ -87,6 +89,7 @@ async def my_generator_handler(
     prompt: str,
     system_instruction: Optional[str] = None,
     tools: Optional[List[Any]] = None,
+    max_output_tokens: Optional[int] = None,
     temperature: float = 0.3,
     require_json: bool = False
 ) -> str:
@@ -151,7 +154,7 @@ team = manager.create_agent_team(
 )
 
 # Execute debate discussion (rounds=2 means each member speaks twice)
-transcript = manager.execute_team_discussion(
+transcript = await manager.execute_team_discussion(
     team=team,
     prompt="Audit the schema details provided in file_schema.sql.",
     rounds=2
@@ -183,6 +186,10 @@ def log_append_callback(team_id: str, title: str, content: str, chapter_num: Opt
         f.write(f"\n=== {title} ===\n{content}\n")
 
 manager.on_log_append = log_append_callback
+
+# Callbacks run on an ordered background dispatcher. Wait at an observation
+# boundary when the host needs to know that every callback has completed.
+await manager.flush_callbacks()
 ```
 
 ## 🔗 6. Dynamic Team Migration & Topology Tree
@@ -249,6 +256,7 @@ async def my_generator_handler(
     prompt: str,
     system_instruction: Optional[str] = None,
     tools: Optional[List[Any]] = None,
+    max_output_tokens: Optional[int] = None,
     temperature: float = 0.3,
     require_json: bool = False
 ) -> str:
@@ -257,12 +265,12 @@ async def my_generator_handler(
     real_name = config.get("model_name") if config else model_name
 
     if real_name == "gemini-3.5-flash":
-        return await call_gemini_sdk(prompt, system_instruction, tools, temperature, require_json)
+        return await call_gemini_sdk(prompt, system_instruction, tools, max_output_tokens, temperature, require_json)
     elif real_name == "gpt-5.5":
-        return await call_openai_sdk(prompt, system_instruction, tools, temperature, require_json)
+        return await call_openai_sdk(prompt, system_instruction, tools, max_output_tokens, temperature, require_json)
     
     # Fallback default model
-    return await call_default_sdk(prompt, system_instruction, tools, require_json)
+    return await call_default_sdk(prompt, system_instruction, tools, max_output_tokens, require_json)
 
 manager.register_generator_handler(my_generator_handler)
 ```
@@ -372,7 +380,4 @@ Agent teams can use standard file operations:
 
 All `read_library_file` operations are automatically audited by the `GatedFileReader`. If a team member attempts to read a file exceeding 50 KB without specifying a line chunk window, the operation will be rejected and return an Outline Warning, protecting the LLM context from pollution.
 
-Managed links work only between registered DocLib files. Creation requires
-`WRITE` on the source path and `READ` on the target. Reads and writes recheck the
-target ACL every time; writes require target `WRITE`, and deleting the link does
-not delete the target file. Native filesystem symlinks are rejected.
+Managed links work only between registered DocLib files. Creation requires `WRITE` on the source path and `READ` on the target. Reads and writes recheck the target ACL every time; writes require target `WRITE`, and deleting the link does not delete the target file. Native filesystem symlinks are rejected.

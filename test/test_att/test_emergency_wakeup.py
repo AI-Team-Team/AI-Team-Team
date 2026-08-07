@@ -129,6 +129,7 @@ class TestEmergencyWakeup(unittest.IsolatedAsyncioTestCase):
             "from": "AT-child",
             "objective": "Need high-level help"
         })
+        await self.manager.flush_callbacks()
 
         # Verify callback invocation
         callback_mock.assert_called_once_with(

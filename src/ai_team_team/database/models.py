@@ -41,6 +41,8 @@ class AgentMessageModel(Base):
     tool_calls: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     tool_call_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    team_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    discussion_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     agent: Mapped["AgentModel"] = relationship(back_populates="messages")
 

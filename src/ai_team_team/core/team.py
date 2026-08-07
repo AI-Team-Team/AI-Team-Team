@@ -133,14 +133,11 @@ class AgentTeam:
 
     def receive_message(self, message: Dict[str, Any]):
         manager = getattr(self, "manager", None)
-        if (
-            manager
-            and message.get("type") == "audit_unknown_escalation"
-            and manager.is_unknown_audit_wakeup_active(self, message)
-        ):
-            return
-        with self._inbox_lock:
-            self.message_inbox.append(message)
+        if manager and message.get("type") == "audit_unknown_escalation":
+            message = manager._merge_unknown_alert(self, message)
+        else:
+            with self._inbox_lock:
+                self.message_inbox.append(message)
         self.logger.info(f"Team {self.team_id} received message of type '{message.get('type')}' from '{message.get('from')}'")
         if manager:
             message_type = message.get("type")
@@ -163,15 +160,14 @@ class AgentTeam:
                     manager.schedule_emergency_wakeup(
                         self, message, skip_audit=skip_audit
                     )
-                if getattr(manager, "on_emergency_escalation", None):
-                    try:
-                        manager.on_emergency_escalation(
-                            self.team_id,
-                            message_type,
-                            message.get("reason") or message.get("objective") or str(message)
-                        )
-                    except Exception as e:
-                        self.logger.error(f"Error in on_emergency_escalation callback: {e}")
+                manager._emit_callback(
+                    "on_emergency_escalation",
+                    self.team_id,
+                    message_type,
+                    message.get("reason")
+                    or message.get("objective")
+                    or str(message),
+                )
             
             manager._auto_save(inboxes={self.team_id})
 
@@ -185,6 +181,12 @@ class AgentTeam:
     ) -> str:
         """Executes a reasoning step (ReAct or Native tool calling) for a single agent inside the AT."""
         manager = manager if manager is not None else getattr(self, "manager", None)
+        if (
+            not isinstance(max_steps, int)
+            or isinstance(max_steps, bool)
+            or max_steps < 1
+        ):
+            raise ValueError("max_steps must be a positive integer.")
         if not agent.llm_client:
             return "Error: Agent has no LLM client configured."
 
@@ -194,60 +196,84 @@ class AgentTeam:
         failover_attempts = 0
 
         async with agent.lock:
-            while True:
-                try:
-                    # Check if subclass overrides execute_react_step (for legacy support)
-                    is_react_default = (
-                        hasattr(self, "execute_react_step") and 
-                        getattr(self.execute_react_step, "__func__", None) is AgentTeam.execute_react_step
-                    )
-                    is_overridden = not is_react_default
-                    if is_overridden:
-                        return await self.execute_react_step(
+            team_token = manager._active_team.set(self) if manager else None
+            discussion_token = None
+            if manager:
+                discussion_id = manager._active_discussion_id.get()
+                if discussion_id is None:
+                    discussion_id = f"DISC-{uuid.uuid4().hex}"
+                discussion_token = manager._active_discussion_id.set(discussion_id)
+            try:
+                while True:
+                    try:
+                        is_react_default = (
+                            hasattr(self, "execute_react_step")
+                            and getattr(
+                                self.execute_react_step, "__func__", None
+                            )
+                            is AgentTeam.execute_react_step
+                        )
+                        if not is_react_default:
+                            return await self.execute_react_step(
+                                agent=agent,
+                                prompt=prompt,
+                                system_instruction=system_instruction,
+                                max_steps=max_steps,
+                                manager=manager,
+                            )
+
+                        from .strategies import (
+                            NativeReasoningStrategy,
+                            TextReactReasoningStrategy,
+                        )
+
+                        mode = (
+                            manager.config.tool_calling_mode
+                            if manager
+                            else "auto"
+                        )
+                        if mode == "auto":
+                            native_check = getattr(
+                                agent.llm_client,
+                                "supports_native_tool_calling",
+                                None,
+                            )
+                            is_native = (
+                                callable(native_check)
+                                and native_check() is True
+                            )
+                            strategy = (
+                                NativeReasoningStrategy()
+                                if is_native
+                                else TextReactReasoningStrategy()
+                            )
+                        elif mode == "native":
+                            strategy = NativeReasoningStrategy()
+                        else:
+                            strategy = TextReactReasoningStrategy()
+
+                        return await strategy.execute(
+                            team=self,
                             agent=agent,
                             prompt=prompt,
                             system_instruction=system_instruction,
                             max_steps=max_steps,
-                            manager=manager
+                            manager=manager,
                         )
-
-                    from .strategies import TextReactReasoningStrategy, NativeReasoningStrategy
-
-                    mode = manager.config.tool_calling_mode if manager else "auto"
-                    if mode == "auto":
-                        is_native = False
-                        if hasattr(agent.llm_client, "supports_native_tool_calling"):
-                            is_native = (
-                                agent.llm_client
-                                .supports_native_tool_calling() is True
-                            )
-                        
-                        if is_native:
-                            strategy = NativeReasoningStrategy()
-                        else:
-                            strategy = TextReactReasoningStrategy()
-                    elif mode == "native":
-                        strategy = NativeReasoningStrategy()
-                    else:
-                        strategy = TextReactReasoningStrategy()
-
-                    return await strategy.execute(
-                        team=self,
-                        agent=agent,
-                        prompt=prompt,
-                        system_instruction=system_instruction,
-                        max_steps=max_steps,
-                        manager=manager
-                    )
-                except TokenLimitExceededError as e:
-                    if manager and failover_attempts < max_failovers:
-                        swapped = await manager.handle_failover(agent, self, e)
-                        if swapped:
-                            failover_attempts += 1
-                            if agent.messages and agent.messages[-1].get("role") == "user":
-                                agent.messages.pop()
-                            continue
-                    raise e
+                    except TokenLimitExceededError as e:
+                        if manager and failover_attempts < max_failovers:
+                            swapped = await manager.handle_failover(agent, self, e)
+                            if swapped:
+                                failover_attempts += 1
+                                if agent.messages and agent.messages[-1].get("role") == "user":
+                                    agent.messages.pop()
+                                continue
+                        raise e
+            finally:
+                if manager and discussion_token is not None:
+                    manager._active_discussion_id.reset(discussion_token)
+                if manager and team_token is not None:
+                    manager._active_team.reset(team_token)
 
     async def execute_react_step(
         self,

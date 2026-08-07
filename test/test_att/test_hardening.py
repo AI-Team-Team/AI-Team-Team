@@ -172,6 +172,7 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=self.tmpdir),
             db_path=db_path,
         )
+        manager.register_llm_client("test", self.client)
         team = manager.create_agent_team(self.root)
         await manager.save_state()
         untouched = team.members[1]
@@ -202,6 +203,7 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=self.tmpdir),
             db_path=db_path,
         )
+        manager.register_llm_client("test", self.client)
         original_write = DatabaseStore.write
 
         def slow_write(store, snapshot):
@@ -232,16 +234,19 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=self.tmpdir),
             db_path=db_path,
         )
+        manager.register_llm_client("test", self.client)
         team = manager.create_agent_team(self.root)
         await manager.save_state()
         team.doc_library.write_file("delta/note.txt", "persisted delta")
         await manager.flush_state()
         shutil.rmtree(team.doc_library.root_dir)
+        await manager.close()
 
         restored = ATTManager(
             Agent("Root", "Architect", llm_client=self.client),
             ATTConfig(workspace_root=self.tmpdir),
         )
+        restored.register_llm_client("test", self.client)
         await restored.load_state(db_path)
         restored_team = restored.teams[team.team_id]
         self.assertIn(
@@ -250,9 +255,17 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
         )
         await restored.close()
 
-        manager.llm_clients["named"] = self.client
-        team.members[0].llm_client = self.client
-        await manager.save_state()
+        rebinder = ATTManager(
+            Agent("Root", "Architect", llm_client=self.client),
+            ATTConfig(workspace_root=self.tmpdir),
+            db_path=db_path,
+        )
+        rebinder.register_llm_client("test", self.client)
+        await rebinder.load_state(db_path)
+        rebinder.llm_clients.pop("test")
+        rebinder.register_llm_client("named", self.client)
+        await rebinder.save_state()
+        await rebinder.close()
         missing = ATTManager(
             Agent("Root", "Architect", llm_client=self.client),
             ATTConfig(workspace_root=self.tmpdir),
@@ -260,7 +273,6 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(StateRestoreError, "named"):
             await missing.load_state(db_path)
         await missing.close()
-        await manager.close()
 
     async def test_incremental_inbox_and_proposal_restore(self):
         db_path = os.path.join(self.tmpdir, "governance.db")
@@ -272,6 +284,7 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             ),
             db_path=db_path,
         )
+        manager.register_llm_client("test", self.client)
         team = manager.create_agent_team(self.root)
         await manager.flush_state()
         tools = get_default_tools(
@@ -289,11 +302,13 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             }
         )
         await manager.flush_state()
+        await manager.close()
 
         restored = ATTManager(
             Agent("Root", "Architect", llm_client=self.client),
             ATTConfig(workspace_root=self.tmpdir),
         )
+        restored.register_llm_client("test", self.client)
         await restored.load_state(db_path)
         restored_team = restored.teams[team.team_id]
         self.assertIn(proposal_id, restored_team.proposals)
@@ -302,7 +317,6 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             "incremental inbox",
         )
         await restored.close()
-        await manager.close()
 
     async def test_unknown_wake_queue_and_deduplication(self):
         parent = self.manager.create_agent_team(self.root)
@@ -377,6 +391,7 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=self.tmpdir),
             db_path=db_path,
         )
+        scoped.register_llm_client("test", self.client)
         async with scoped:
             scoped.create_agent_team(scoped.root_ai)
         self.assertTrue(scoped._persistence._closed)

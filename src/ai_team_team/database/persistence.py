@@ -1,14 +1,16 @@
 import asyncio
 import json
+import os
+import sqlite3
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from sqlalchemy import create_engine, delete
+from sqlalchemy import create_engine, delete, event
 from sqlalchemy.orm import sessionmaker
 
-from ai_team_team.core.exceptions import StateRestoreError
+from ai_team_team.core.exceptions import DatabaseOwnershipError, StateRestoreError
 from ai_team_team.database.models import (
     Base,
     AgentMessageModel,
@@ -26,7 +28,61 @@ from ai_team_team.database.models import (
 )
 
 
-STATE_SCHEMA_VERSION = "3"
+STATE_SCHEMA_VERSION = "4"
+
+
+class WriterLease:
+    """A non-blocking cross-process lease for one SQLite writer manager."""
+
+    def __init__(self, db_path: str):
+        self.db_path = str(Path(db_path).resolve())
+        self.lock_path = f"{self.db_path}.writer.lock"
+        Path(self.lock_path).parent.mkdir(parents=True, exist_ok=True)
+        self._file = open(self.lock_path, "a+", encoding="utf-8")
+        try:
+            try:
+                import fcntl
+
+                fcntl.flock(
+                    self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB
+                )
+                self._lock_kind = "fcntl"
+            except ImportError:
+                import msvcrt
+
+                self._file.seek(0)
+                if not self._file.read(1):
+                    self._file.write(" ")
+                    self._file.flush()
+                self._file.seek(0)
+                msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)
+                self._lock_kind = "msvcrt"
+        except (BlockingIOError, OSError) as exc:
+            self._file.close()
+            raise DatabaseOwnershipError(
+                f"State database {self.db_path!r} already has an active "
+                "writer manager."
+            ) from exc
+        self._file.seek(0)
+        self._file.truncate()
+        self._file.write(f"pid={os.getpid()}\n")
+        self._file.flush()
+
+    def close(self) -> None:
+        if self._file.closed:
+            return
+        try:
+            if self._lock_kind == "fcntl":
+                import fcntl
+
+                fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
+            else:
+                import msvcrt
+
+                self._file.seek(0)
+                msvcrt.locking(self._file.fileno(), msvcrt.LK_UNLCK, 1)
+        finally:
+            self._file.close()
 
 
 class DatabaseStore:
@@ -35,10 +91,12 @@ class DatabaseStore:
     def __init__(self, db_path: str):
         self.db_path = str(Path(db_path).resolve())
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._preflight_schema()
         self.engine = create_engine(
             f"sqlite:///{self.db_path}",
-            connect_args={"check_same_thread": False},
+            connect_args={"check_same_thread": False, "timeout": 5.0},
         )
+        event.listen(self.engine, "connect", self._configure_connection)
         Base.metadata.create_all(self.engine)
         self.session_factory = sessionmaker(
             autocommit=False,
@@ -47,11 +105,56 @@ class DatabaseStore:
             bind=self.engine,
         )
 
+    @staticmethod
+    def _configure_connection(dbapi_connection: Any, _: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys = ON")
+            cursor.execute("PRAGMA busy_timeout = 5000")
+            cursor.execute("PRAGMA journal_mode = WAL")
+        finally:
+            cursor.close()
+
+    def _preflight_schema(self) -> None:
+        """Rejects unsupported databases before SQLAlchemy can modify them."""
+        if not os.path.exists(self.db_path) or os.path.getsize(self.db_path) == 0:
+            return
+        uri = f"file:{Path(self.db_path).as_posix()}?mode=ro"
+        connection = sqlite3.connect(uri, uri=True)
+        try:
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            user_tables = {name for name in tables if name != "sqlite_sequence"}
+            if not user_tables:
+                return
+            if "manager_config" not in user_tables:
+                raise StateRestoreError(
+                    "Existing SQLite database has no ATT schema version; "
+                    "it was not modified."
+                )
+            row = connection.execute(
+                "SELECT config_value FROM manager_config "
+                "WHERE config_key='schema_version'"
+            ).fetchone()
+            version = row[0] if row else None
+            if version != STATE_SCHEMA_VERSION:
+                raise StateRestoreError(
+                    f"Unsupported state schema version {version!r}; expected "
+                    f"{STATE_SCHEMA_VERSION!r}. The database was not modified."
+                )
+        finally:
+            connection.close()
+
     def close(self) -> None:
         self.engine.dispose()
 
     def write(self, snapshot: Dict[str, Any]) -> None:
         """Writes a full snapshot or an incremental immutable delta."""
+        snapshot = self._materialize(snapshot)
         session = self.session_factory()
         try:
             if snapshot["full"]:
@@ -59,13 +162,16 @@ class DatabaseStore:
 
             self._write_configs(session, snapshot.get("configs"))
             self._write_agents(session, snapshot.get("agents", []))
+            session.flush()
             self._write_teams(session, snapshot.get("teams", []))
+            session.flush()
             self._write_inboxes(session, snapshot.get("inboxes", {}))
             self._write_proposals(
                 session, snapshot.get("proposals", {})
             )
             self._write_agreements(session, snapshot.get("agreements"))
             self._write_libraries(session, snapshot.get("libraries", []))
+            session.flush()
             self._write_permissions(session, snapshot.get("permissions", {}))
             self._write_file_changes(session, snapshot.get("file_changes", {}))
             self._write_links(session, snapshot.get("links"))
@@ -75,6 +181,62 @@ class DatabaseStore:
             raise
         finally:
             session.close()
+
+    @staticmethod
+    def _materialize(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        """Performs expensive deep JSON copying on the persistence worker."""
+        result = dict(snapshot)
+        configs = snapshot.get("configs")
+        if configs is not None:
+            result["configs"] = {
+                key: (
+                    value
+                    if key in {"schema_version", "root_ai_name"}
+                    else json.dumps(value)
+                )
+                for key, value in configs.items()
+            }
+        result["agents"] = [
+            {
+                **agent,
+                "last_context": (
+                    json.dumps(agent["last_context"])
+                    if agent.get("last_context") is not None
+                    else None
+                ),
+                "messages": json.loads(json.dumps(list(agent["messages"]))),
+            }
+            for agent in snapshot.get("agents", ())
+        ]
+        result["teams"] = [
+            {
+                **team,
+                "communication_rules": json.dumps(
+                    team["communication_rules"]
+                ),
+                "status_map": json.dumps(team["status_map"]),
+            }
+            for team in snapshot.get("teams", ())
+        ]
+        result["inboxes"] = {
+            team_id: {
+                **inbox,
+                "messages": json.loads(
+                    json.dumps(list(inbox["messages"]))
+                ),
+            }
+            for team_id, inbox in snapshot.get("inboxes", {}).items()
+        }
+        result["proposals"] = json.loads(
+            json.dumps(snapshot.get("proposals", {}))
+        )
+        result["permissions"] = json.loads(
+            json.dumps(snapshot.get("permissions", {}))
+        )
+        result["links"] = json.loads(
+            json.dumps(snapshot.get("links", {}))
+        )
+        return result
 
     def read(self) -> Dict[str, Any]:
         """Reads all persisted state into detached plain Python structures."""
@@ -108,6 +270,8 @@ class DatabaseStore:
                             "tool_calls": msg.tool_calls,
                             "tool_call_id": msg.tool_call_id,
                             "name": msg.name,
+                            "team_id": msg.team_id,
+                            "discussion_id": msg.discussion_id,
                         }
                     )
                 agents.append(
@@ -277,12 +441,15 @@ class DatabaseStore:
                         tool_calls=message.get("tool_calls"),
                         tool_call_id=message.get("tool_call_id"),
                         name=message.get("name"),
+                        team_id=message.get("team_id"),
+                        discussion_id=message.get("discussion_id"),
                         created_at=agent["message_timestamp"] + index * 0.001,
                     )
                 )
 
     @staticmethod
     def _write_teams(session: Any, teams: Iterable[Dict[str, Any]]) -> None:
+        teams = list(teams)
         for team in teams:
             session.merge(
                 TeamModel(
@@ -292,7 +459,7 @@ class DatabaseStore:
                     team_progress=team["team_progress"],
                     depth=team["depth"],
                     chapter_num=team["chapter_num"],
-                    parent_team_id=team["parent_team_id"],
+                    parent_team_id=None,
                     migration_count=team["migration_count"],
                     creator_type=team["creator_type"],
                     creator_id=team["creator_id"],
@@ -301,6 +468,16 @@ class DatabaseStore:
                     system_instructions=team["system_instructions"],
                 )
             )
+        session.flush()
+        for team in teams:
+            session.query(TeamModel).filter_by(
+                team_id=team["team_id"]
+            ).update(
+                {"parent_team_id": team["parent_team_id"]},
+                synchronize_session=False,
+            )
+        session.flush()
+        for team in teams:
             session.execute(
                 delete(team_members).where(
                     team_members.c.team_id == team["team_id"]
@@ -451,26 +628,64 @@ class DatabaseStore:
 
 
 class PersistenceCoordinator:
-    """Serializes all database work through one reusable worker thread."""
+    """Runs one write and coalesces all later deltas into one pending write."""
 
-    def __init__(self):
+    def __init__(self, db_path: Optional[str] = None):
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="att-state-writer"
         )
         self._stores: Dict[str, DatabaseStore] = {}
-        self._futures: List[Future[Any]] = []
-        self._lock = threading.Lock()
+        self._leases: Dict[str, WriterLease] = {}
+        self._active_task: Optional[Future[Any]] = None
+        self._active_completion: Optional[Future[Any]] = None
+        self._pending_path: Optional[str] = None
+        self._pending_snapshot: Optional[Dict[str, Any]] = None
+        self._pending_completion: Optional[Future[Any]] = None
+        self._error: Optional[BaseException] = None
+        self._lock = threading.RLock()
         self._closed = False
+        if db_path:
+            try:
+                self.claim(db_path)
+            except Exception:
+                self._executor.shutdown(wait=False)
+                raise
+
+    def claim(self, db_path: str) -> None:
+        """Acquires this manager's exclusive writer lease immediately."""
+        resolved = str(Path(db_path).resolve())
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Persistence coordinator is closed.")
+            if resolved not in self._leases:
+                self._leases[resolved] = WriterLease(resolved)
 
     def submit(self, db_path: str, snapshot: Dict[str, Any]) -> Future[Any]:
-        if self._closed:
-            raise RuntimeError("Persistence coordinator is closed.")
-        future = self._executor.submit(self._write, db_path, snapshot)
         with self._lock:
-            self._futures.append(future)
-        return future
+            if self._closed:
+                raise RuntimeError("Persistence coordinator is closed.")
+            self.claim(db_path)
+            resolved = str(Path(db_path).resolve())
+            if self._active_task is None:
+                completion: Future[Any] = Future()
+                self._start_locked(resolved, snapshot, completion)
+                return completion
+            if self._pending_snapshot is None:
+                self._pending_path = resolved
+                self._pending_snapshot = snapshot
+                self._pending_completion = Future()
+            else:
+                if self._pending_path != resolved:
+                    raise RuntimeError(
+                        "Cannot queue deltas for different databases before flush."
+                    )
+                self._pending_snapshot = self._merge_snapshots(
+                    self._pending_snapshot, snapshot
+                )
+            return self._pending_completion
 
     async def read(self, db_path: str) -> Dict[str, Any]:
+        self.claim(db_path)
         await self.flush()
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
@@ -480,13 +695,27 @@ class PersistenceCoordinator:
     async def flush(self) -> None:
         while True:
             with self._lock:
-                futures = self._futures
-                self._futures = []
+                futures = tuple(
+                    future
+                    for future in (
+                        self._active_completion,
+                        self._pending_completion,
+                    )
+                    if future is not None
+                )
             if not futures:
-                return
+                break
             await asyncio.gather(
-                *(asyncio.wrap_future(future) for future in futures)
+                *(
+                    asyncio.shield(asyncio.wrap_future(future))
+                    for future in futures
+                ),
+                return_exceptions=True,
             )
+        with self._lock:
+            error = self._error
+        if error is not None:
+            raise error
 
     async def close(self) -> None:
         if self._closed:
@@ -503,6 +732,8 @@ class PersistenceCoordinator:
             for store in self._stores.values():
                 store.close()
             self._executor.shutdown(wait=True)
+            for lease in self._leases.values():
+                lease.close()
 
         await loop.run_in_executor(None, close_all)
         if flush_error is not None:
@@ -518,7 +749,98 @@ class PersistenceCoordinator:
             return store
 
     def _write(self, db_path: str, snapshot: Dict[str, Any]) -> None:
+        capture_error = snapshot.get("_capture_error")
+        if capture_error is not None:
+            raise capture_error
         self._store(db_path).write(snapshot)
 
     def _read(self, db_path: str) -> Dict[str, Any]:
         return self._store(db_path).read()
+
+    def _start_locked(
+        self,
+        db_path: str,
+        snapshot: Dict[str, Any],
+        completion: Future[Any],
+    ) -> None:
+        self._active_completion = completion
+        self._active_task = self._executor.submit(
+            self._write, db_path, snapshot
+        )
+        self._active_task.add_done_callback(self._finish_active)
+
+    def _finish_active(self, task: Future[Any]) -> None:
+        exception = task.exception()
+        with self._lock:
+            completion = self._active_completion
+            if exception is None:
+                if completion is not None and not completion.done():
+                    completion.set_result(None)
+            else:
+                if self._error is None:
+                    self._error = exception
+                if completion is not None and not completion.done():
+                    completion.set_exception(exception)
+
+            self._active_task = None
+            self._active_completion = None
+            if self._pending_snapshot is not None:
+                path = self._pending_path
+                snapshot = self._pending_snapshot
+                pending_completion = self._pending_completion
+                self._pending_path = None
+                self._pending_snapshot = None
+                self._pending_completion = None
+                self._start_locked(path, snapshot, pending_completion)
+
+    @staticmethod
+    def _merge_snapshots(
+        earlier: Dict[str, Any], later: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Coalesces immutable deltas without losing later entity values."""
+        if later.get("_capture_error") is not None:
+            return later
+        if earlier.get("_capture_error") is not None:
+            return earlier
+        if later.get("full"):
+            return later
+        merged = dict(earlier)
+        merged["full"] = bool(earlier.get("full"))
+        merged["state_version"] = later.get(
+            "state_version", earlier.get("state_version")
+        )
+        if later.get("configs") is not None:
+            merged["configs"] = later["configs"]
+        if later.get("agreements") is not None:
+            merged["agreements"] = later["agreements"]
+
+        for key, identity in (
+            ("agents", "name"),
+            ("teams", "team_id"),
+            ("libraries", "lib_id"),
+        ):
+            records = {
+                record[identity]: record
+                for record in earlier.get(key, [])
+            }
+            records.update(
+                {
+                    record[identity]: record
+                    for record in later.get(key, [])
+                }
+            )
+            merged[key] = list(records.values())
+
+        for key in ("inboxes", "proposals", "permissions", "links"):
+            records = dict(earlier.get(key, {}))
+            records.update(later.get(key, {}))
+            merged[key] = records
+
+        file_changes = {
+            lib_id: dict(changes)
+            for lib_id, changes in earlier.get("file_changes", {}).items()
+        }
+        for lib_id, changes in later.get("file_changes", {}).items():
+            file_changes.setdefault(lib_id, {}).update(changes)
+        merged["file_changes"] = file_changes
+        return merged

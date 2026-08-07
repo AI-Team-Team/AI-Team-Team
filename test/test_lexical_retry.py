@@ -75,7 +75,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
                 nonlocal call_count
                 call_count += 1
                 if call_count < 2:
-                    raise RuntimeError("Transient API Error")
+                    raise ConnectionError("Transient API Error")
                 if require_json:
                     return '{"is_healthy": true, "reason": "Approved"}'
                 return "Final Answer: Worked after retry"

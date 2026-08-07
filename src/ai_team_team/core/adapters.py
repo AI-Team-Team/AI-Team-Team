@@ -27,6 +27,8 @@ class HandlerClientAdapter:
             "max_output_tokens" in signature.parameters
             or "max_tokens" in signature.parameters
         ):
+            # The adapter itself accepts max_output_tokens and translates it
+            # to the handler's concrete parameter below.
             return "max_output_tokens"
         if any(
             parameter.kind == inspect.Parameter.VAR_KEYWORD

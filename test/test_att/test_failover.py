@@ -25,6 +25,9 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         self.mock_client = MagicMock()
         # Default mock response for standard LLM calls
         self.mock_client.generate = AsyncMock(return_value="Final Answer: Done.")
+        self.mock_client.supports_output_token_limit.return_value = (
+            "max_output_tokens"
+        )
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
 
     async def test_token_limit_exceeded_error(self):
@@ -52,6 +55,9 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         # Register a gemini-3.5 mock client
         mock_gemini = MagicMock()
         mock_gemini.generate = AsyncMock(return_value="Final Answer: Resolved on Gemini.")
+        mock_gemini.supports_output_token_limit.return_value = (
+            "max_output_tokens"
+        )
         manager.llm_clients["gemini-3.5"] = mock_gemini
         
         # Setup system event tracker
@@ -66,6 +72,7 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         transcript = await manager.execute_team_discussion(
             team, "Debate prompt", rounds=1, skip_audit=True
         )
+        await manager.flush_callbacks()
         
         # Verify it completed successfully using gemini-3.5
         self.assertIn("Resolved on Gemini.", transcript)
@@ -96,11 +103,21 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         # Mock opus client
         mock_opus = MagicMock()
         mock_opus.generate = AsyncMock(return_value="Final Answer: Resolved on Claude Opus.")
+        mock_opus.supports_output_token_limit.return_value = (
+            "max_output_tokens"
+        )
         manager.llm_clients["opus-4.8"] = mock_opus
 
         # We configure generator handler to respond to parent rep decision query with json,
         # and standard queries with text
-        async def mock_handler(model_name, prompt, system_instruction=None, temperature=0.3, require_json=False):
+        async def mock_handler(
+            model_name,
+            prompt,
+            system_instruction=None,
+            max_output_tokens=None,
+            temperature=0.3,
+            require_json=False,
+        ):
             if require_json and "selected_model" in prompt:
                 return '{"selected_model": "opus-4.8"}'
             return "Final Answer: Parent logic."

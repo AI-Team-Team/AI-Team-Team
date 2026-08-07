@@ -136,13 +136,15 @@ If the auditor returns `False`, the execution is blocked, and the error reason i
 
 ## 8. Network Resilience & Memory Compression
 
-* **Transient API Recovery**: The `generate_with_retry` wrapper automatically handles unknown SDK exceptions via exponential backoff (`llm_max_retries`, `llm_retry_backoff_factor`).
+* **Typed Transient API Recovery**: `generate_with_retry` retries only explicit timeout, connection, rate-limit, retryable service, or provider-status failures. Authentication, validation, programming, and other unclassified errors fail immediately. `llm_max_retries=0` performs one request without a retry, and `llm_retry_backoff_factor=0` retries without waiting.
 * **Prompt Injection Guarantee**: During pruning, the active user `prompt` is forcefully appended to the message queue strictly *after* the memory compression block finishes, guaranteeing it is never swallowed.
 
 ## 9. Persistence & Serialization
 
-To support 100% state recovery after crashes, the `AgentMessageModel` table contains three columns mapping to the structured tool calls:
+To support complete state recovery and shared-agent provenance, the `AgentMessageModel` table stores structured tool calls plus invocation context:
 
 * **`tool_calls`**: A native SQLite JSON column storing the list of structured tool executions.
 * **`tool_call_id`**: A string column mapping the message to its specific trigger.
 * **`name`**: A string column specifying which tool was executed.
+* **`team_id`**: The team active for this message.
+* **`discussion_id`**: The discussion invocation that produced this message.

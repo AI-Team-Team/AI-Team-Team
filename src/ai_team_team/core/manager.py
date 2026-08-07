@@ -1,5 +1,6 @@
 import asyncio
 import contextvars
+import inspect
 import os
 import logging
 import json
@@ -8,6 +9,7 @@ import threading
 import shutil
 import tempfile
 import uuid
+import hashlib
 from contextlib import asynccontextmanager
 from typing import List, Dict, Optional, Tuple, Any, Callable
 
@@ -19,7 +21,12 @@ from .agent import Agent
 from .team import AgentTeam
 from .broker import NegotiationBroker
 from .config import ATTConfig
-from .exceptions import ATTException, TokenLimitExceededError, StateRestoreError
+from .exceptions import (
+    AmbiguousTeamContextError,
+    ATTException,
+    TokenLimitExceededError,
+    StateRestoreError,
+)
 from .utils import generate_with_retry
 from .adapters import ManagerDefaultClientAdapter, HandlerClientAdapter
 from .token_budget import TokenBudgetLedger
@@ -63,7 +70,8 @@ class ATTManager:
         self._team_parent_map: Dict[str, str] = {}
         self._topology_lock = threading.RLock()
         self._snapshot_lock = threading.RLock()
-        self._persistence = PersistenceCoordinator()
+        self._state_version = 0
+        self._persistence = PersistenceCoordinator(db_path)
         self._persistence_batch: contextvars.ContextVar[Optional[Dict[str, Any]]] = (
             contextvars.ContextVar(
                 f"att_persistence_batch_{id(self)}", default=None
@@ -74,8 +82,23 @@ class ATTManager:
                 f"att_active_tool_agent_{id(self)}", default=None
             )
         )
+        self._active_team: contextvars.ContextVar[Optional[AgentTeam]] = (
+            contextvars.ContextVar(f"att_active_team_{id(self)}", default=None)
+        )
+        self._active_discussion_id: contextvars.ContextVar[Optional[str]] = (
+            contextvars.ContextVar(
+                f"att_active_discussion_{id(self)}", default=None
+            )
+        )
         self._unknown_audit_wakeups: set[str] = set()
         self._emergency_tasks: set[asyncio.Task[Any]] = set()
+        self._llm_tasks: set[asyncio.Task[Any]] = set()
+        self._closing = False
+        self._closed = False
+        self._callback_queue: Optional[asyncio.Queue[Any]] = None
+        self._callback_worker: Optional[asyncio.Task[Any]] = None
+        self._deferred_callbacks: List[Tuple[Callable[..., Any], tuple]] = []
+        self._callback_lock = threading.RLock()
         
         # Async tasks deferred bridging
         import queue
@@ -211,6 +234,8 @@ class ATTManager:
 
         if not self._dirty_state_has_changes(dirty):
             return
+        with self._snapshot_lock:
+            self._state_version += 1
         batch = self._persistence_batch.get()
         if batch is not None:
             self._merge_dirty_state(batch, dirty)
@@ -219,13 +244,18 @@ class ATTManager:
 
     def _submit_dirty_state(self, dirty: Dict[str, Any]) -> None:
         with self._snapshot_lock:
-            snapshot = self._capture_state_snapshot(dirty)
+            try:
+                snapshot = self._capture_state_snapshot(dirty)
+            except Exception as exc:
+                snapshot = {"_capture_error": exc}
             self._persistence.submit(self.db_path, snapshot)
 
     async def save_state(
         self, path: Optional[str] = None, full: bool = True
     ) -> None:
         """Persists state asynchronously and waits for the write to commit."""
+        if self._closing:
+            raise RuntimeError("ATTManager is closing and cannot accept saves.")
         target_path = path or self.db_path
         if not target_path:
             return
@@ -236,30 +266,108 @@ class ATTManager:
         with self._snapshot_lock:
             snapshot = self._capture_state_snapshot(dirty)
             future = self._persistence.submit(target_path, snapshot)
-        await asyncio.wrap_future(future)
+        await asyncio.shield(asyncio.wrap_future(future))
 
     async def flush_state(self) -> None:
         """Waits until every queued state delta has committed."""
         await self._persistence.flush()
 
     async def close(self) -> None:
-        """Flushes state and releases the persistence worker and engines."""
-        active_tasks = tuple(
+        """Cancels external waits, commits accepted state, and releases resources."""
+        if self._closed:
+            return
+        self._closing = True
+        current = asyncio.current_task()
+        active_tasks = {
             task
-            for task in self._emergency_tasks
-            if not task.done() and task is not asyncio.current_task()
-        )
+            for task in self._llm_tasks | self._emergency_tasks
+            if not task.done() and task is not current
+        }
+        for task in active_tasks:
+            task.cancel()
         if active_tasks:
-            await asyncio.gather(*active_tasks, return_exceptions=True)
-        await self._persistence.close()
+            # Deliver cancellation without waiting on providers that suppress it.
+            await asyncio.sleep(0)
+            for task in active_tasks:
+                if task.done():
+                    try:
+                        task.result()
+                    except BaseException:
+                        pass
+
+        callback_worker = self._callback_worker
+        if callback_worker is not None and not callback_worker.done():
+            callback_worker.cancel()
+            await asyncio.sleep(0)
+        try:
+            await self._persistence.close()
+        finally:
+            self._closed = True
 
     async def load_state(self, path: str) -> None:
         """Restores a versioned state snapshot without blocking the event loop."""
+        if self._closing:
+            raise RuntimeError("ATTManager is closing and cannot restore state.")
         if not os.path.exists(path):
             raise FileNotFoundError(f"State database file '{path}' not found.")
         state = await self._persistence.read(path)
         await self._apply_state_snapshot(state)
         self.db_path = path
+
+    def _emit_callback(self, name: str, *args: Any) -> None:
+        """Queues an observational callback without blocking core execution."""
+        callback = getattr(self, name, None)
+        if callback is None or self._closing:
+            return
+        item = (callback, tuple(args))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            with self._callback_lock:
+                self._deferred_callbacks.append(item)
+            return
+        self._ensure_callback_dispatcher(loop)
+        self._callback_queue.put_nowait(item)
+
+    def _ensure_callback_dispatcher(
+        self, loop: Optional[asyncio.AbstractEventLoop] = None
+    ) -> None:
+        if self._callback_worker is not None and not self._callback_worker.done():
+            return
+        loop = loop or asyncio.get_running_loop()
+        self._callback_queue = asyncio.Queue()
+        with self._callback_lock:
+            deferred = self._deferred_callbacks
+            self._deferred_callbacks = []
+        for item in deferred:
+            self._callback_queue.put_nowait(item)
+        self._callback_worker = loop.create_task(
+            self._dispatch_callbacks(), name=f"att-callbacks-{id(self)}"
+        )
+
+    async def _dispatch_callbacks(self) -> None:
+        while True:
+            callback, args = await self._callback_queue.get()
+            try:
+                if inspect.iscoroutinefunction(callback):
+                    await callback(*args)
+                else:
+                    result = await asyncio.to_thread(callback, *args)
+                    if inspect.isawaitable(result):
+                        await result
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger.exception("Observational ATT callback failed.")
+            finally:
+                self._callback_queue.task_done()
+
+    async def flush_callbacks(self) -> None:
+        """Waits for queued callbacks; primarily useful for tests and shutdown hosts."""
+        if self._closing:
+            return
+        self._ensure_callback_dispatcher()
+        await self._callback_queue.join()
 
     def _capture_state_snapshot(self, dirty: Dict[str, Any]) -> Dict[str, Any]:
         full = dirty["full"]
@@ -268,20 +376,54 @@ class ATTManager:
         if full or dirty["configs"]:
             configs = {
                 "schema_version": STATE_SCHEMA_VERSION,
-                "att_config": json.dumps(self.config.__dict__),
+                "att_config": self.config.to_dict(),
                 "root_ai_name": self.root_ai.name,
-                "model_configs": json.dumps(self.model_configs),
-                "presets": json.dumps(self.presets),
-                "model_token_usage": json.dumps(self.model_token_usage),
+                "model_configs": {
+                    alias: dict(config)
+                    for alias, config in self.model_configs.items()
+                },
+                "presets": {
+                    name: {
+                        **preset,
+                        "roles": tuple(
+                            tuple(role) for role in preset.get("roles", ())
+                        ),
+                    }
+                    for name, preset in self.presets.items()
+                },
+                "model_token_usage": dict(self.model_token_usage),
             }
 
-        agent_names = set(self.agents) if full else set(dirty["agents"])
+        agent_lookup = dict(self.agents)
+        relevant_teams = (
+            self.teams.values()
+            if full
+            else (
+                self.teams[team_id]
+                for team_id in dirty["teams"]
+                if team_id in self.teams
+            )
+        )
+        for relevant_team in relevant_teams:
+            for member in relevant_team.members:
+                agent_lookup.setdefault(member.name, member)
+        agent_names = set(agent_lookup) if full else set(dirty["agents"])
+        if not full:
+            for team_id in dirty["teams"]:
+                team = self.teams.get(team_id)
+                if team is not None:
+                    agent_names.update(member.name for member in team.members)
         agents = []
+        unresolved_agents: List[str] = []
         for name in sorted(agent_names):
-            agent = self.agents.get(name)
+            agent = agent_lookup.get(name)
             if agent is None:
                 continue
-            model_alias = self.resolve_model_alias(agent.llm_client)
+            try:
+                model_alias = self.resolve_model_alias(agent.llm_client)
+            except ValueError:
+                unresolved_agents.append(agent.name)
+                continue
             agents.append(
                 {
                     "name": agent.name,
@@ -294,13 +436,19 @@ class ATTManager:
                     ),
                     "model_alias": model_alias,
                     "last_context": (
-                        json.dumps(agent.last_context)
-                        if agent.last_context
-                        else None
+                        dict(agent.last_context) if agent.last_context else None
                     ),
-                    "messages": json.loads(json.dumps(agent.messages)),
+                    "messages": tuple(
+                        dict(message)
+                        for message in self._agent_history(agent)
+                    ),
                     "message_timestamp": now,
                 }
+            )
+        if unresolved_agents:
+            raise ValueError(
+                "Cannot persist agents whose LLM clients have no stable, "
+                "unique registered alias: " + ", ".join(unresolved_agents)
             )
 
         team_ids = set(self.teams) if full else set(dirty["teams"])
@@ -331,10 +479,13 @@ class ATTManager:
                     "migration_count": team.migration_count,
                     "creator_type": creator_type,
                     "creator_id": creator_id,
-                    "communication_rules": json.dumps(
-                        team.communication_rules
-                    ),
-                    "status_map": json.dumps(team.status_snapshot()),
+                    "communication_rules": {
+                        **team.communication_rules,
+                        "rules": tuple(
+                            team.communication_rules.get("rules", ())
+                        ),
+                    },
+                    "status_map": team.status_snapshot(),
                     "system_instructions": getattr(
                         team, "system_instructions", ""
                     ),
@@ -350,7 +501,7 @@ class ATTManager:
             if team is None:
                 continue
             with team.inbox_lock:
-                messages = json.loads(json.dumps(team.message_inbox))
+                messages = tuple(dict(message) for message in team.message_inbox)
             inboxes[team_id] = {
                 "messages": messages,
                 "message_timestamp": now,
@@ -362,7 +513,10 @@ class ATTManager:
             team_id: [
                 {
                     "proposal_id": proposal_id,
-                    **json.loads(json.dumps(proposal)),
+                    **{
+                        key: dict(value) if isinstance(value, dict) else value
+                        for key, value in proposal.items()
+                    },
                 }
                 for proposal_id, proposal in self.teams[
                     team_id
@@ -394,16 +548,20 @@ class ATTManager:
             set(self.libraries) if full else set(dirty["permissions"])
         )
         permissions = {
-            lib_id: json.loads(
-                json.dumps(self.library_permissions.get(lib_id, {}))
-            )
+            lib_id: {
+                path: dict(team_map)
+                for path, team_map in self.library_permissions.get(
+                    lib_id, {}
+                ).items()
+            }
             for lib_id in permission_ids
         }
         link_ids = set(self.libraries) if full else set(dirty["links"])
         links = {
-            lib_id: json.loads(
-                json.dumps(self.library_links.get(lib_id, {}))
-            )
+            lib_id: {
+                path: dict(target)
+                for path, target in self.library_links.get(lib_id, {}).items()
+            }
             for lib_id in link_ids
         }
 
@@ -418,6 +576,7 @@ class ATTManager:
                 )
 
         return {
+            "state_version": self._state_version,
             "full": full,
             "configs": configs,
             "agents": agents,
@@ -450,12 +609,15 @@ class ATTManager:
         required_aliases = {
             row["model_alias"]
             for row in state["agents"]
-            if row.get("model_alias") not in (None, "default")
+            if row.get("model_alias") != "default"
         }
         missing_aliases = sorted(
             alias
             for alias in required_aliases
-            if alias not in self.llm_clients and not self.generator_handler
+            if alias not in self.llm_clients
+            and not (
+                self.generator_handler and alias in self.model_configs
+            )
         )
         if missing_aliases:
             raise StateRestoreError(
@@ -463,22 +625,21 @@ class ATTManager:
                 + ", ".join(missing_aliases)
             )
 
-        runtime_root_client = self.root_ai.llm_client
         self.agents.clear()
         for row in state["agents"]:
             alias = row.get("model_alias")
             if alias in self.llm_clients:
                 client = self.llm_clients[alias]
-            elif alias not in (None, "default") and self.generator_handler:
+            elif (
+                alias != "default"
+                and alias in self.model_configs
+                and self.generator_handler
+            ):
                 client = HandlerClientAdapter(alias, self.generator_handler)
                 client._supports_native = self.model_configs.get(
                     alias, {}
                 ).get("supports_native_tool_calling", False)
-            elif "default" in self.llm_clients:
-                client = self.llm_clients["default"]
-            elif runtime_root_client:
-                client = runtime_root_client
-            elif self.generator_handler:
+            elif alias == "default" and self.generator_handler:
                 client = ManagerDefaultClientAdapter(self)
             else:
                 raise StateRestoreError(
@@ -497,6 +658,8 @@ class ATTManager:
                 else None
             )
             agent.messages = []
+            agent.message_history = []
+            agent._history_seen_ids = set()
             for message in row["messages"]:
                 restored = {
                     key: value
@@ -504,6 +667,8 @@ class ATTManager:
                     if value is not None
                 }
                 agent.messages.append(restored)
+                agent.message_history.append(restored)
+                agent._history_seen_ids.add(id(restored))
             self.agents[agent.name] = agent
 
         root_name = configs["root_ai_name"]
@@ -559,6 +724,20 @@ class ATTManager:
             team._cached_depth = None
             team.manager = self
             team.message_inbox = row["inbox"]
+            for message in team.message_inbox:
+                if message.get("type") == "audit_unknown_escalation":
+                    message.setdefault(
+                        "fingerprint",
+                        self._unknown_alert_fingerprint(message),
+                    )
+                    message.setdefault("occurrence_count", 1)
+                    message.setdefault("first_seen", time.time())
+                    message.setdefault("last_seen", message["first_seen"])
+                    if message.get("state") == "processing":
+                        message["state"] = "pending"
+                    else:
+                        message.setdefault("state", "pending")
+                    message.pop("processing_count", None)
             team.proposals = {
                 proposal["proposal_id"]: {
                     key: value
@@ -780,13 +959,23 @@ class ATTManager:
             raise StateRestoreError(
                 "Persisted model token usage must contain non-negative integers."
             )
+        if any(row.get("model_alias") is None for row in agent_rows):
+            raise StateRestoreError(
+                "Every persisted agent must reference an explicit model alias."
+            )
         missing_aliases = sorted(
             {
                 row.get("model_alias")
                 for row in agent_rows
-                if row.get("model_alias") not in {None, "default"}
-                and row.get("model_alias") not in self.llm_clients
-                and not self.generator_handler
+                if row.get("model_alias") != "default"
+                and (
+                    row.get("model_alias") not in self.llm_clients
+                    and not (
+                        self.generator_handler
+                        and row.get("model_alias")
+                        in persisted_model_configs
+                    )
+                )
             }
         )
         if missing_aliases:
@@ -796,11 +985,10 @@ class ATTManager:
             )
         has_default_binding = bool(
             "default" in self.llm_clients
-            or self.root_ai.llm_client
             or self.generator_handler
         )
         if any(
-            row.get("model_alias") in {None, "default"}
+            row.get("model_alias") == "default"
             for row in agent_rows
         ) and not has_default_binding:
             raise StateRestoreError(
@@ -1140,10 +1328,44 @@ class ATTManager:
         """Registers an auditing hook executed before specific tool calls."""
         self.tool_auditors[tool_name] = auditor_func
 
-    def register_model(self, name: str, config: Dict[str, Any]):
+    def register_model(
+        self,
+        name: str,
+        config: Dict[str, Any],
+        client: Optional[Any] = None,
+    ):
         """Registers a unified model configuration (e.g. metadata, type, ai_note)."""
-        self.model_configs[name] = config
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Model alias must be a non-empty string.")
+        if not isinstance(config, dict):
+            raise ValueError("Model configuration must be a dictionary.")
+        self.model_configs[name] = dict(config)
+        if client is not None:
+            self.register_llm_client(name, client)
         self._auto_save(configs=True)
+
+    def register_llm_client(self, alias: str, client: Any) -> None:
+        """Binds one stable alias to one runtime client identity."""
+        if not isinstance(alias, str) or not alias.strip():
+            raise ValueError("LLM client alias must be a non-empty string.")
+        if client is None:
+            raise ValueError("LLM client cannot be None.")
+        conflicting = [
+            name
+            for name, registered in self.llm_clients.items()
+            if registered is client and name != alias
+        ]
+        if conflicting:
+            raise ValueError(
+                f"LLM client is already registered as {conflicting[0]!r}; "
+                "one client identity may have only one stable alias."
+            )
+        existing = self.llm_clients.get(alias)
+        if existing is not None and existing is not client:
+            raise ValueError(
+                f"LLM client alias {alias!r} is already bound to another client."
+            )
+        self.llm_clients[alias] = client
 
     def register_generator_handler(self, handler: Callable[..., str]):
         """Registers a global callback handler for generating text from a model alias."""
@@ -1180,25 +1402,71 @@ class ATTManager:
         return max(1, len(text) // 4)
 
     def resolve_model_alias(self, llm_client: Any) -> str:
-        """Resolves the model alias name for a given LLM client wrapper/mock."""
-        model_name = getattr(llm_client, "model_name", None)
-        if isinstance(model_name, str):
-            return model_name
-        for name, client in self.llm_clients.items():
-            if client is llm_client:
-                return name
+        """Returns a stable alias or fails instead of collapsing to default."""
         from .adapters import ManagerDefaultClientAdapter
+
         if isinstance(llm_client, ManagerDefaultClientAdapter):
             return "default"
-        return "default"
+        if isinstance(llm_client, HandlerClientAdapter):
+            alias = llm_client.model_name
+            if (
+                llm_client.handler is self.generator_handler
+                and (alias == "default" or alias in self.model_configs)
+            ):
+                return alias
+
+        aliases = [
+            name
+            for name, client in self.llm_clients.items()
+            if client is llm_client
+        ]
+        if len(aliases) == 1:
+            return aliases[0]
+        if len(aliases) > 1:
+            raise ValueError(
+                "LLM client identity is registered under multiple aliases: "
+                + ", ".join(sorted(aliases))
+            )
+
+        model_name = getattr(llm_client, "model_name", None)
+        if (
+            isinstance(model_name, str)
+            and self.llm_clients.get(model_name) is llm_client
+        ):
+            return model_name
+        raise ValueError(
+            "LLM client has no stable registered alias. Call "
+            "register_llm_client(alias, client) before persistence."
+        )
+
+    def resolve_runtime_model_alias(self, llm_client: Any) -> str:
+        """Resolves operational budgets without making an alias persistable."""
+        try:
+            return self.resolve_model_alias(llm_client)
+        except ValueError:
+            if llm_client is getattr(self.root_ai, "llm_client", None):
+                return "default"
+            return "unregistered"
 
     async def handle_failover(self, agent: Agent, team: AgentTeam, error: TokenLimitExceededError) -> bool:
         """
         Handles client failover for an agent when a token limit is reached.
         Returns True if hot-swap succeeded and caller should retry.
         """
-        old_model = self.resolve_model_alias(agent.llm_client)
+        old_model = self.resolve_runtime_model_alias(agent.llm_client)
         policy = self.config.failover_policy
+
+        def has_binding(alias: str) -> bool:
+            if alias in self.llm_clients:
+                return True
+            if alias in self.model_configs and self.generator_handler:
+                return True
+            if alias == "default":
+                return bool(
+                    self.generator_handler
+                    or getattr(self.root_ai, "llm_client", None)
+                )
+            return False
         
         parent_team = team.parent_team or self.find_parent_team(team)
         if policy == "parent" and parent_team is None:
@@ -1210,10 +1478,17 @@ class ATTManager:
         for name in self.config.model_token_limits.keys():
             if name == old_model:
                 continue
+            if not has_binding(name):
+                continue
             available = self.token_budget.available(name)
             if available is not None and available >= required_tokens:
                 candidates.append(name)
-        if "default" not in self.config.model_token_limits and "default" not in candidates:
+        if (
+            "default" not in self.config.model_token_limits
+            and "default" not in candidates
+            and old_model != "default"
+            and has_binding("default")
+        ):
             candidates.append("default")
 
         selected_model = None
@@ -1283,15 +1558,19 @@ class ATTManager:
             config = self.model_configs.get(selected_model)
             if config:
                 new_client._supports_native = config.get("supports_native_tool_calling", False)
-        else:
+        elif selected_model == "default" and has_binding("default"):
             new_client = ManagerDefaultClientAdapter(self)
+        else:
+            self.logger.error(
+                "Failover model %r has no runtime binding.", selected_model
+            )
+            return False
             
         agent.llm_client = new_client
         
         agent_status = f"Failover: Switched to {selected_model}"
         team.set_status(agent.name, agent_status)
-        if self.on_status_change:
-            self.on_status_change(agent.name, agent_status)
+        self._emit_callback("on_status_change", agent.name, agent_status)
 
         if self.on_log_append:
             log_title = f"[SYSTEM ALERT] Model Failover Event | {agent.name}"
@@ -1302,19 +1581,21 @@ class ATTManager:
                 f"FAILOVER POLICY: {policy}\n"
                 f"ACTION: Switched client from Model '{old_model}' to Model '{selected_model}' due to budget exhaustion ({error})."
             )
-            self.on_log_append(team.team_id, log_title, log_content, team.chapter_num)
+            self._emit_callback(
+                "on_log_append",
+                team.team_id,
+                log_title,
+                log_content,
+                team.chapter_num,
+            )
 
-        if self.on_system_event:
-            try:
-                self.on_system_event("model_failover", {
-                    "agent_name": agent.name,
-                    "team_id": team.team_id,
-                    "old_model": old_model,
-                    "new_model": selected_model,
-                    "reason": str(error)
-                })
-            except Exception:
-                pass
+        self._emit_callback("on_system_event", "model_failover", {
+            "agent_name": agent.name,
+            "team_id": team.team_id,
+            "old_model": old_model,
+            "new_model": selected_model,
+            "reason": str(error),
+        })
                 
         self.logger.warning(f"[FAILOVER SUCCESS] Switched Agent '{agent.name}' from Model '{old_model}' to Model '{selected_model}'. Retrying turn.")
         return True
@@ -1371,6 +1652,8 @@ class ATTManager:
         initial_docs: Optional[Dict[str, str]] = None
     ) -> AgentTeam:
         """Creates a team while holding the topology mutation lock."""
+        if self._closing:
+            raise RuntimeError("ATTManager is closing and rejects new teams.")
         with self._topology_lock:
             return self._create_agent_team(
                 creator=creator,
@@ -1404,7 +1687,15 @@ class ATTManager:
             member_count = len(member_configs)
             
         min_size = self.config.min_subagent_team_size
-        assert member_count >= min_size, f"An Agent Team must contain at least {min_size} members to debate properly."
+        if (
+            not isinstance(member_count, int)
+            or isinstance(member_count, bool)
+            or member_count < min_size
+        ):
+            raise ValueError(
+                f"An Agent Team must contain at least {min_size} members "
+                "to debate properly."
+            )
         
         team = AgentTeam(creator=creator, preset_name=preset_name, team_purpose=team_purpose)
         team.manager = self
@@ -1419,10 +1710,8 @@ class ATTManager:
         if isinstance(creator, AgentTeam):
             team.chapter_num = creator.chapter_num
         elif isinstance(creator, Agent):
-            for t in self.teams.values():
-                if creator in t.members:
-                    team.chapter_num = t.chapter_num
-                    break
+            if team._parent_team is not None:
+                team.chapter_num = team._parent_team.chapter_num
 
         def get_agent_client_by_name(client_name: Optional[str]) -> Any:
             default_wrapper = ManagerDefaultClientAdapter(self)
@@ -1579,15 +1868,26 @@ class ATTManager:
         return None
         
     def get_agent_team(self, agent: Agent) -> Optional[AgentTeam]:
-        if hasattr(agent, '_parent_team') and agent._parent_team is not None:
-            return agent._parent_team
-            
-        for team in self.teams.values():
-            if agent in team.members:
-                agent._parent_team = team
-                return team
-                
+        active_team = self._active_team.get()
+        if active_team is not None and agent in active_team.members:
+            return active_team
+        memberships = [
+            team for team in self.teams.values() if agent in team.members
+        ]
+        if len(memberships) == 1:
+            return memberships[0]
+        if len(memberships) > 1:
+            raise AmbiguousTeamContextError(
+                f"Agent {agent.name!r} belongs to multiple teams and no "
+                "invocation-scoped team context is active: "
+                + ", ".join(sorted(team.team_id for team in memberships))
+            )
         return None
+
+    @staticmethod
+    def _agent_history(agent: Agent) -> List[Dict[str, Any]]:
+        agent.sync_message_history()
+        return agent.message_history
         
     def check_library_access(self, team_id: str, lib_id: str, path: str, required_permission: str) -> bool:
         """
@@ -1906,8 +2206,12 @@ class ATTManager:
                 })
                 
                 # 3. Trigger callback
-                if self.on_team_migration:
-                    self.on_team_migration(team.team_id, current_parent_id if current_parent else None, target_parent.team_id)
+                self._emit_callback(
+                    "on_team_migration",
+                    team.team_id,
+                    current_parent_id if current_parent else None,
+                    target_parent.team_id,
+                )
                 
                 self.logger.info(f"Migration of team {team.team_id} to parent {target_parent.team_id} approved. Reason: {reason}")
                 affected_team_ids = {
@@ -2049,6 +2353,10 @@ class ATTManager:
         skip_audit: bool = False,
     ) -> str:
         """Queues one discussion behind any active session for the same team."""
+        if self._closing:
+            raise RuntimeError("ATTManager is closing and rejects new discussions.")
+        if not isinstance(rounds, int) or isinstance(rounds, bool) or rounds < 1:
+            raise ValueError("rounds must be a positive integer.")
         async with team.discussion_lock:
             return await self._execute_team_discussion_session(
                 team,
@@ -2078,6 +2386,11 @@ class ATTManager:
             status=AuditStatus.HEALTHY,
             reason="Audit skipped.",
         )
+        discussion_token = self._active_discussion_id.set(
+            f"DISC-{uuid.uuid4().hex}"
+        )
+        processed_unknown_fingerprints: set[str] = set()
+        discussion_succeeded = False
         
         auto_save_context = self.suppress_auto_save()
         await auto_save_context.__aenter__()
@@ -2085,8 +2398,26 @@ class ATTManager:
             for r in range(1, rounds + 1):
                 inbox_context = ""
                 with team.inbox_lock:
-                    pending_inbox = team.message_inbox
-                    team.message_inbox = []
+                    pending_inbox = []
+                    retained_inbox = []
+                    for message in team.message_inbox:
+                        if (
+                            message.get("type")
+                            == "audit_unknown_escalation"
+                        ):
+                            if message.get("state", "pending") == "pending":
+                                message["state"] = "processing"
+                                message["processing_count"] = message.get(
+                                    "occurrence_count", 1
+                                )
+                                pending_inbox.append(message)
+                                processed_unknown_fingerprints.add(
+                                    message["fingerprint"]
+                                )
+                            retained_inbox.append(message)
+                        else:
+                            pending_inbox.append(message)
+                    team.message_inbox = retained_inbox
                 if pending_inbox:
                     inbox_lines = []
                     for msg in pending_inbox:
@@ -2157,6 +2488,8 @@ class ATTManager:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 for agent, result in zip(round_members, results):
+                    if isinstance(result, asyncio.CancelledError):
+                        raise result
                     if isinstance(result, ATTException):
                         self.logger.error(f"Failed to execute discussion step due to ATT error: {result}")
                         if not skip_audit:
@@ -2186,15 +2519,15 @@ class ATTManager:
                         team, audit_result.reason, self
                     )
                 elif audit_result.status is AuditStatus.UNKNOWN:
-                    if self.on_system_event:
-                        self.on_system_event(
-                            "audit_unknown",
-                            {
-                                "team_id": team.team_id,
-                                "reason": audit_result.reason,
-                                "cause": audit_result.cause,
-                            },
-                        )
+                    self._emit_callback(
+                        "on_system_event",
+                        "audit_unknown",
+                        {
+                            "team_id": team.team_id,
+                            "reason": audit_result.reason,
+                            "cause": audit_result.cause,
+                        },
+                    )
                     await self.supervisor.report_unknown(
                         team, audit_result, self
                     )
@@ -2213,20 +2546,59 @@ class ATTManager:
                     f"AUDIT STATUS: {audit_result.status.value}\n"
                     f"AUDIT REASON: {audit_result.reason}\n"
                 )
-                self.on_log_append(
+                self._emit_callback(
+                    "on_log_append",
                     team.team_id,
                     log_title,
                     log_content,
-                    team.chapter_num
+                    team.chapter_num,
                 )
 
             self._auto_save(
                 agents={agent.name for agent in team.members},
                 teams={team.team_id},
             )
+            discussion_succeeded = True
             return transcript
         finally:
+            if processed_unknown_fingerprints:
+                with team.inbox_lock:
+                    if discussion_succeeded:
+                        retained_messages = []
+                        for message in team.message_inbox:
+                            is_processed_alert = (
+                                message.get("type")
+                                == "audit_unknown_escalation"
+                                and message.get("fingerprint")
+                                in processed_unknown_fingerprints
+                            )
+                            if not is_processed_alert:
+                                retained_messages.append(message)
+                                continue
+                            processing_count = message.pop(
+                                "processing_count",
+                                message.get("occurrence_count", 1),
+                            )
+                            if (
+                                message.get("occurrence_count", 1)
+                                > processing_count
+                            ):
+                                message["state"] = "pending"
+                                retained_messages.append(message)
+                        team.message_inbox = retained_messages
+                    else:
+                        for message in team.message_inbox:
+                            if (
+                                message.get("type")
+                                == "audit_unknown_escalation"
+                                and message.get("fingerprint")
+                                in processed_unknown_fingerprints
+                            ):
+                                message["state"] = "pending"
+                                message.pop("processing_count", None)
+                self._auto_save(inboxes={team.team_id})
             await auto_save_context.__aexit__(None, None, None)
+            self._active_discussion_id.reset(discussion_token)
             team.is_running = False
             if team.message_inbox and self.config.enable_emergency_wakeup:
                 wake_types = {
@@ -2271,6 +2643,8 @@ class ATTManager:
         skip_audit: bool = False,
     ) -> None:
         """Schedules an emergency discussion and deduplicates audit outages."""
+        if self._closing:
+            return
         dedupe_key = None
         if alert.get("type") == "audit_unknown_escalation":
             dedupe_key = self._unknown_audit_wakeup_key(team, alert)
@@ -2306,18 +2680,123 @@ class ATTManager:
             task.add_done_callback(self._emergency_tasks.discard)
 
     @staticmethod
-    def _unknown_audit_wakeup_key(
-        team: AgentTeam, alert: Dict[str, Any]
-    ) -> str:
-        return json.dumps(
+    def _unknown_alert_fingerprint(alert: Dict[str, Any]) -> str:
+        payload = json.dumps(
             {
-                "team_id": team.team_id,
                 "failed_team_id": alert.get("failed_team_id"),
                 "reason": alert.get("reason"),
                 "cause": alert.get("cause"),
             },
             sort_keys=True,
+            separators=(",", ":"),
         )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _merge_unknown_alert(
+        self, team: AgentTeam, alert: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Persistently coalesces one UNKNOWN alert without dropping uniques."""
+        now = time.time()
+        fingerprint = alert.get("fingerprint") or self._unknown_alert_fingerprint(
+            alert
+        )
+        with team.inbox_lock:
+            existing = next(
+                (
+                    item
+                    for item in team.message_inbox
+                    if item.get("type") == "audit_unknown_escalation"
+                    and item.get("fingerprint") == fingerprint
+                ),
+                None,
+            )
+            if existing is not None:
+                existing["occurrence_count"] = int(
+                    existing.get("occurrence_count", 1)
+                ) + 1
+                existing["last_seen"] = now
+                merged = existing
+            else:
+                merged = dict(alert)
+                merged.update(
+                    {
+                        "fingerprint": fingerprint,
+                        "occurrence_count": 1,
+                        "first_seen": now,
+                        "last_seen": now,
+                        "state": "pending",
+                    }
+                )
+                team.message_inbox.append(merged)
+            unique_count = sum(
+                item.get("type") == "audit_unknown_escalation"
+                for item in team.message_inbox
+            )
+        if unique_count >= self.config.audit_unknown_soft_threshold:
+            self.logger.warning(
+                "Team %s has %s unique pending UNKNOWN audit alerts.",
+                team.team_id,
+                unique_count,
+            )
+            self._emit_callback(
+                "on_system_event",
+                "audit_unknown_soft_threshold",
+                {"team_id": team.team_id, "unique_alerts": unique_count},
+            )
+        return merged
+
+    def acknowledge_unknown_alert(
+        self, team_id: str, fingerprint: str
+    ) -> bool:
+        """Explicitly acknowledges and removes one UNKNOWN alert."""
+        team = self.teams.get(team_id)
+        if team is None:
+            raise KeyError(f"Unknown team {team_id!r}.")
+        with team.inbox_lock:
+            before = len(team.message_inbox)
+            team.message_inbox = [
+                item
+                for item in team.message_inbox
+                if not (
+                    item.get("type") == "audit_unknown_escalation"
+                    and item.get("fingerprint") == fingerprint
+                )
+            ]
+            changed = len(team.message_inbox) != before
+        if changed:
+            self._auto_save(inboxes={team_id})
+        return changed
+
+    def clear_unknown_alerts(
+        self, team_id: str, fingerprints: Optional[set[str]] = None
+    ) -> int:
+        """Explicitly clears selected or all UNKNOWN alerts for one team."""
+        team = self.teams.get(team_id)
+        if team is None:
+            raise KeyError(f"Unknown team {team_id!r}.")
+        with team.inbox_lock:
+            retained = []
+            removed = 0
+            for item in team.message_inbox:
+                is_unknown = item.get("type") == "audit_unknown_escalation"
+                selected = fingerprints is None or item.get("fingerprint") in fingerprints
+                if is_unknown and selected:
+                    removed += 1
+                else:
+                    retained.append(item)
+            team.message_inbox = retained
+        if removed:
+            self._auto_save(inboxes={team_id})
+        return removed
+
+    @staticmethod
+    def _unknown_audit_wakeup_key(
+        team: AgentTeam, alert: Dict[str, Any]
+    ) -> str:
+        fingerprint = alert.get("fingerprint") or ATTManager._unknown_alert_fingerprint(
+            alert
+        )
+        return f"{team.team_id}:{fingerprint}"
 
     def is_unknown_audit_wakeup_active(
         self, team: AgentTeam, alert: Dict[str, Any]

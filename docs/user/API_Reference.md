@@ -31,10 +31,12 @@ config = ATTConfig(
     emergency_discussion_rounds: int = 1,
     tool_calling_mode: str = "auto",
     max_tool_rounds: int = 5,
+    max_tool_retries: int = 3,
     model_token_limits: Optional[dict] = None,
     model_max_output_tokens: Optional[dict] = None,
     default_max_output_tokens: int = 1024,
-    audit_unknown_escalation_mode: str = "wake"
+    audit_unknown_escalation_mode: str = "wake",
+    audit_unknown_soft_threshold: int = 100
 )
 ```
 
@@ -49,8 +51,8 @@ config = ATTConfig(
 * **`model_registry`**: Mapping of specialized agent roles to specific LLM models or endpoints.
 * **`max_migrations_per_team_discussion`**: The maximum number of hierarchical team migrations allowed for a team during a single discussion session.
 * **`enable_membership_voting`**: Whether to enable the democratic membership voting system for dynamic teams.
-* **`llm_max_retries`**: The maximum retry attempts for LLM generation failures.
-* **`llm_retry_backoff_factor`**: The exponential backoff factor for retrying LLM calls.
+* **`llm_max_retries`**: Retries after the initial attempt. `0` means one attempt and no retry.
+* **`llm_retry_backoff_factor`**: Initial exponential-backoff delay. `0` retries immediately.
 * **`enable_memory_compression`**: Whether to enable automatic dialogue compression/pruning of early conversation turns (default: `True`).
 * **`max_memory_turns`**: The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns (default: `20`).
 * **`communication_policy`**: The strategy used for inter-team communication gating. Options: `"permissive"`, `"rule_gated"`, `"proxied"`.
@@ -59,17 +61,20 @@ config = ATTConfig(
 * **`emergency_discussion_rounds`**: The number of emergency discussion rounds executed when a team is woken up (default: `1`).
 * **`tool_calling_mode`**: The strategy used for tool calling and reasoning steps. Options: `"text_react"`, `"native"`, `"auto"` (default: `"auto"`).
 * **`max_tool_rounds`**: The maximum reasoning loop steps allowed for the native strategy execution round (default: `5`).
-* **`model_token_limits`**: Hard per-model token quotas. Active reservations and settled usage both consume availability.
-* **`model_max_output_tokens`**: Optional per-model maximum output reservations and request caps.
+* **`max_tool_retries`**: Tool retries after the initial failed attempt. `0` disables retries.
+* **`model_token_limits`**: Hard per-model token quotas. Active reservations and settled usage both consume availability; `0` disables the model quota.
+* **`model_max_output_tokens`**: Optional per-model maximum output reservations and request caps. Clients governed by a hard quota must accept `max_output_tokens` or `max_tokens`; unsupported clients fail before dispatch.
 * **`default_max_output_tokens`**: Default maximum output reservation when a model-specific value is absent (default: `1024`).
 * **`audit_unknown_escalation_mode`**: Whether an indeterminate supervisory audit immediately wakes the parent (`"wake"`) or only enters its inbox (`"queue"`).
+* **`audit_unknown_soft_threshold`**: Emits operational warnings after this many unique UNKNOWN alerts without dropping or expiring them.
 
-Policy names and size/depth bounds are validated during construction. Invalid
-values raise `ValueError`.
+Policy names, numeric values, runtime assignments, and mutable configuration mapping updates use the same validation. Invalid values raise `ValueError`.
 
 ## 👤 `Agent`
 
 Represents an individual AI specialist equipped with role definitions.
+
+The same `Agent` object may belong to several teams. It keeps one continuous history, serializes its own model calls, and receives the current team through invocation-scoped context. Team-sensitive APIs raise `AmbiguousTeamContextError` when no context exists and membership is ambiguous.
 
 ### Constructor
 
@@ -125,7 +130,9 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 * **`register_tool_auditor(tool_name: str, auditor_func: Callable[..., Tuple[bool, str]])`**
   Registers an auditing hook executed before specific tool calls.
 * **`register_model(name: str, config: Dict[str, Any])`**
-  Registers a unified model configuration (e.g. metadata, type, ai_note).
+  Registers model metadata. An optional `client=` argument also registers the runtime binding.
+* **`register_llm_client(alias: str, client: Any)`**
+  Registers one stable, unique alias for a direct client. Required before persisting any agent that uses the client.
 * **`register_generator_handler(handler: Callable[..., str])`**
   Registers a global callback handler for generating text from a model alias.
 * **`register_preset(name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]])`**
@@ -135,7 +142,7 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 * **`create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
   Dynamically spawns a new recursive Agent Team (AT) with a parent-child relationship. `is_public_visible` sets library visibility for discovery, and `initial_docs` maps file paths to initial contents to populate in the team's DocLib.
 
-* **`execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
+* **`await execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
   Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits. Sessions for the same team, including emergency sessions, wait on one serial lock; different teams may run concurrently.
 * **`render_topology_tree() -> str`**
   Renders the active hierarchical agent team lineage as an indented ASCII tree.
@@ -148,9 +155,19 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 * **`await flush_state()`**
   Waits for all queued incremental writes.
 * **`await close()`**
-  Flushes pending writes and releases persistence resources. `ATTManager` also supports `async with`.
+  Rejects new work, cancels outstanding external LLM waits and emergency tasks,
+  flushes all accepted persistence changes without a timeout, and releases the
+  exclusive database writer lease. `ATTManager` also supports `async with`.
+* **`await flush_callbacks()`**
+  Waits for all observational callbacks queued so far.
+* **`acknowledge_unknown_alert(team_id: str, fingerprint: str) -> bool`**
+  Explicitly acknowledges and removes one durable UNKNOWN alert.
+* **`clear_unknown_alerts(team_id: str, fingerprints: Optional[set[str]] = None) -> int`**
+  Explicitly removes selected or all UNKNOWN alerts for one team.
 
 ### Callbacks
+
+Callbacks may be synchronous or asynchronous. ATT dispatches them in order on a background channel; slow callbacks do not block discussions, and callback exceptions are logged without changing core outcomes.
 
 * **`on_status_change: Optional[Callable[[str, str], None]]`**
   Invoked when an agent changes state (e.g. `"Thinking..."`, `"Executing Tool..."`, `"Idle"`).
@@ -272,7 +289,7 @@ class LLMClientProto(Protocol):
             prompt: The user query or discussion history (string or list of message dicts).
             system_instruction: Guidelines and context injected for the agent.
             tools: Optional list of native `Tool` objects (Thorough Abstraction) to be resolved by the adapter.
-            max_output_tokens: Enforced response cap for hard-quota reservations when supported.
+            max_output_tokens: Required enforced response cap when this model has a hard quota.
             temperature: Sampling temperature.
             require_json: If True, the model MUST return a valid JSON string.
         """

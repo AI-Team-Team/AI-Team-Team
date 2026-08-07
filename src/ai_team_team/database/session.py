@@ -1,32 +1,29 @@
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
 from typing import Generator
-from ai_team_team.database.models import Base
 
-def get_engine(db_path: str):
-    return create_engine(
-        f"sqlite:///{db_path}",
-        connect_args={"check_same_thread": False}
-    )
+from sqlalchemy.orm import Session
+
+from ai_team_team.database.persistence import DatabaseStore, WriterLease
+
 
 @contextmanager
-def get_session(db_path: str, disable_fks: bool = False) -> Generator[Session, None, None]:
-    engine = get_engine(db_path)
-    Base.metadata.create_all(engine)
-    
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    session = SessionLocal()
-    
-    if disable_fks:
-        session.execute(text("PRAGMA foreign_keys = OFF;"))
-        
+def get_session(db_path: str) -> Generator[Session, None, None]:
+    """Yields a strict standalone writer session under an exclusive lease."""
+    lease = WriterLease(db_path)
+    store = None
+    session = None
     try:
+        store = DatabaseStore(db_path)
+        session = store.session_factory()
         yield session
         session.commit()
     except Exception:
-        session.rollback()
+        if session is not None:
+            session.rollback()
         raise
     finally:
-        session.close()
-        engine.dispose()
+        if session is not None:
+            session.close()
+        if store is not None:
+            store.close()
+        lease.close()

@@ -1,37 +1,156 @@
-from typing import Dict, Optional
+import os
+from collections.abc import Mapping
+from typing import Any, Callable, Dict, Optional
+
+
+class ValidatedDict(dict):
+    """A mutable mapping that validates every runtime mutation."""
+
+    def __init__(
+        self,
+        values: Optional[Mapping[str, Any]],
+        validator: Callable[[str, Any], None],
+    ) -> None:
+        self._validator = validator
+        super().__init__()
+        self.update(values or {})
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._validator(key, value)
+        super().__setitem__(key, value)
+
+    def update(self, *args: Any, **kwargs: Any) -> None:
+        incoming = dict(*args, **kwargs)
+        for key, value in incoming.items():
+            self._validator(key, value)
+        super().update(incoming)
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def __ior__(self, other: Mapping[str, Any]):
+        self.update(other)
+        return self
+
 
 class ATTConfig:
-    """Configuration class for adjusting ATT debate parameters and execution depth gates."""
+    """Validated runtime configuration for ATT execution and governance."""
 
     _CHOICES = {
-        "communication_policy": {
-            "permissive",
-            "rule_gated",
-            "proxied",
-        },
+        "communication_policy": {"permissive", "rule_gated", "proxied"},
         "migration_policy": {
             "permissive",
             "ancestor_approval",
             "lineage_path",
         },
         "failover_policy": {"auto", "parent", "none"},
-        "tool_calling_mode": {
-            "auto",
-            "native",
-            "react",
-            "text_react",
-        },
+        "tool_calling_mode": {"auto", "native", "react", "text_react"},
         "audit_unknown_escalation_mode": {"wake", "queue"},
+    }
+    _POSITIVE_INTS = {
+        "max_delegation_depth",
+        "subagent_discussion_rounds",
+        "react_max_steps",
+        "inbox_summarize_threshold_chars",
+        "max_memory_turns",
+        "emergency_discussion_rounds",
+        "max_tool_rounds",
+        "default_max_output_tokens",
+        "audit_unknown_soft_threshold",
+    }
+    _NON_NEGATIVE_INTS = {
+        "max_migrations_per_team_discussion",
+        "llm_max_retries",
+        "max_tool_retries",
+    }
+    _BOOL_FIELDS = {
+        "enable_dynamic_delegation",
+        "enable_membership_voting",
+        "enable_memory_compression",
+        "enable_emergency_wakeup",
+    }
+    _MAPPING_VALIDATORS = {
+        "model_registry": "_validate_string_mapping",
+        "model_token_limits": "_validate_token_limit",
+        "model_max_output_tokens": "_validate_output_limit",
+        "model_tokenizer_configs": "_validate_string_mapping",
     }
 
     def __setattr__(self, name: str, value: object) -> None:
         choices = self._CHOICES.get(name)
-        if choices is not None and value not in choices:
-            choice_text = ", ".join(sorted(choices))
-            raise ValueError(
-                f"Invalid {name}={value!r}. Expected one of: {choice_text}."
-            )
+        if choices is not None:
+            if value not in choices:
+                choice_text = ", ".join(sorted(choices))
+                raise ValueError(
+                    f"Invalid {name}={value!r}. Expected one of: {choice_text}."
+                )
+        elif name in self._POSITIVE_INTS:
+            self._require_int(name, value, minimum=1)
+        elif name in self._NON_NEGATIVE_INTS:
+            self._require_int(name, value, minimum=0)
+        elif name == "min_subagent_team_size":
+            self._require_int(name, value, minimum=3)
+        elif name == "llm_retry_backoff_factor":
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or value < 0
+            ):
+                raise ValueError(
+                    "llm_retry_backoff_factor must be a non-negative number."
+                )
+            value = float(value)
+        elif name in self._BOOL_FIELDS and not isinstance(value, bool):
+            raise ValueError(f"{name} must be a boolean.")
+        elif name == "workspace_root":
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("workspace_root must be a non-empty string.")
+            value = os.path.expanduser(value)
+        elif name in self._MAPPING_VALIDATORS:
+            if not isinstance(value, Mapping):
+                raise ValueError(f"{name} must be a mapping.")
+            validator = getattr(self, self._MAPPING_VALIDATORS[name])
+            value = ValidatedDict(value, validator)
         super().__setattr__(name, value)
+
+    @staticmethod
+    def _require_int(name: str, value: object, minimum: int) -> None:
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value < minimum
+        ):
+            qualifier = "positive" if minimum == 1 else "non-negative"
+            raise ValueError(f"{name} must be a {qualifier} integer.")
+
+    @staticmethod
+    def _validate_string_mapping(key: str, value: Any) -> None:
+        if not isinstance(key, str) or not key:
+            raise ValueError("Configuration mapping keys must be non-empty strings.")
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                f"Configuration mapping value for {key!r} must be a non-empty string."
+            )
+
+    @staticmethod
+    def _validate_token_limit(key: str, value: Any) -> None:
+        if not isinstance(key, str) or not key:
+            raise ValueError("Model aliases must be non-empty strings.")
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(
+                f"Token limit for {key!r} must be a non-negative integer."
+            )
+
+    @staticmethod
+    def _validate_output_limit(key: str, value: Any) -> None:
+        if not isinstance(key, str) or not key:
+            raise ValueError("Model aliases must be non-empty strings.")
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ValueError(
+                f"Maximum output tokens for {key!r} must be a positive integer."
+            )
 
     def __init__(
         self,
@@ -61,56 +180,9 @@ class ATTConfig:
         default_max_output_tokens: int = 1024,
         model_tokenizer_configs: Optional[Dict[str, str]] = None,
         failover_policy: str = "auto",
-        strict_state_persistence: bool = True,
-        audit_unknown_escalation_mode: str = "wake"
-    ):
-        policy_values = {
-            "communication_policy": communication_policy,
-            "migration_policy": migration_policy,
-            "failover_policy": failover_policy,
-            "tool_calling_mode": tool_calling_mode,
-            "audit_unknown_escalation_mode": (
-                audit_unknown_escalation_mode
-            ),
-        }
-        for field_name, value in policy_values.items():
-            choices = self._CHOICES[field_name]
-            if value not in choices:
-                choice_text = ", ".join(sorted(choices))
-                raise ValueError(
-                    f"Invalid {field_name}={value!r}. Expected one of: {choice_text}."
-                )
-        if min_subagent_team_size < 3:
-            raise ValueError("min_subagent_team_size must be at least 3.")
-        if max_delegation_depth < 1:
-            raise ValueError("max_delegation_depth must be at least 1.")
-        if max_memory_turns < 1:
-            raise ValueError("max_memory_turns must be at least 1.")
-        if (
-            not isinstance(default_max_output_tokens, int)
-            or isinstance(default_max_output_tokens, bool)
-            or default_max_output_tokens < 1
-        ):
-            raise ValueError("default_max_output_tokens must be a positive integer.")
-        for model_name, limit in (model_token_limits or {}).items():
-            if (
-                not isinstance(limit, int)
-                or isinstance(limit, bool)
-                or limit < 0
-            ):
-                raise ValueError(
-                    f"Token limit for {model_name!r} must be a non-negative integer."
-                )
-        for model_name, limit in (model_max_output_tokens or {}).items():
-            if (
-                not isinstance(limit, int)
-                or isinstance(limit, bool)
-                or limit < 1
-            ):
-                raise ValueError(
-                    f"Maximum output tokens for {model_name!r} must be a positive integer."
-                )
-
+        audit_unknown_escalation_mode: str = "wake",
+        audit_unknown_soft_threshold: int = 100,
+    ) -> None:
         self.enable_dynamic_delegation = enable_dynamic_delegation
         self.max_delegation_depth = max_delegation_depth
         self.min_subagent_team_size = min_subagent_team_size
@@ -123,9 +195,7 @@ class ATTConfig:
         self.llm_max_retries = llm_max_retries
         self.llm_retry_backoff_factor = llm_retry_backoff_factor
         self.enable_memory_compression = enable_memory_compression
-        import os
-        self.workspace_root = os.path.expanduser(workspace_root)
-        self.strict_state_persistence = strict_state_persistence
+        self.workspace_root = workspace_root
         self.max_memory_turns = max_memory_turns
         self.communication_policy = communication_policy
         self.migration_policy = migration_policy
@@ -140,3 +210,11 @@ class ATTConfig:
         self.model_tokenizer_configs = model_tokenizer_configs or {}
         self.failover_policy = failover_policy
         self.audit_unknown_escalation_mode = audit_unknown_escalation_mode
+        self.audit_unknown_soft_threshold = audit_unknown_soft_threshold
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Returns a plain JSON-serializable configuration mapping."""
+        return {
+            key: dict(value) if isinstance(value, ValidatedDict) else value
+            for key, value in self.__dict__.items()
+        }

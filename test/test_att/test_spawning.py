@@ -26,9 +26,9 @@ class TestATTSpawning(unittest.IsolatedAsyncioTestCase):
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
         self.manager = ATTManager(root_ai=self.root_ai)
 
-    def test_agent_team_assertion_size(self):
+    def test_agent_team_size_validation(self):
         """Verify that an Agent Team (AT) must contain at least 3 members."""
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             self.manager.create_agent_team(creator=self.root_ai, member_count=2)
 
     def test_agent_team_spawning(self):
