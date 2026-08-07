@@ -21,14 +21,35 @@ class GatedFileReader:
             return f"Error: File '{path}' does not exist."
 
         try:
-            size_kb = os.path.getsize(path) / 1024.0
+            with open(path, "r", encoding="utf-8", errors="ignore") as stream:
+                return self.read_stream(
+                    stream,
+                    os.path.basename(path),
+                    start_line,
+                    end_line,
+                )
+        except Exception as e:
+            self.logger.error(f"Error reading file '{path}': {e}")
+            return f"Error reading file '{path}': {e}"
+
+    def read_stream(
+        self,
+        stream,
+        display_name: str,
+        start_line: int = 1,
+        end_line: Optional[int] = None,
+    ) -> str:
+        """Reads an already safely opened text stream without reopening its path."""
+        try:
+            size_kb = os.fstat(stream.fileno()).st_size / 1024.0
             if size_kb > self.large_threshold_kb and end_line is None:
-                # Return structured outline fallback
-                total_lines = self._count_lines(path)
-                first_lines = self._read_lines(path, 1, 5)
+                stream.seek(0)
+                total_lines = sum(1 for _ in stream)
+                stream.seek(0)
+                first_lines = self._read_stream_lines(stream, 1, 5)
                 return (
                     f"### LARGE FILE WARNING\n"
-                    f"- **File**: {os.path.basename(path)}\n"
+                    f"- **File**: {display_name}\n"
                     f"- **Size**: {size_kb:.1f} KB (Exceeds threshold of {self.large_threshold_kb} KB)\n"
                     f"- **Total Lines**: {total_lines}\n\n"
                     f"Direct reading of large files is gated to protect the context window.\n"
@@ -39,16 +60,14 @@ class GatedFileReader:
                     f"```\n"
                 )
 
-            # Standard paginated read
             target_end = end_line if end_line is not None else (start_line + self.max_chunk - 1)
-            # Cap read size
             if (target_end - start_line + 1) > self.max_chunk:
                 target_end = start_line + self.max_chunk - 1
-
-            return self._read_lines(path, start_line, target_end)
+            stream.seek(0)
+            return self._read_stream_lines(stream, start_line, target_end)
         except Exception as e:
-            self.logger.error(f"Error reading file '{path}': {e}")
-            return f"Error reading file '{path}': {e}"
+            self.logger.error(f"Error reading file '{display_name}': {e}")
+            return f"Error reading file '{display_name}': {e}"
 
     def read_file_tail(self, path: str, line_count: int = 50) -> str:
         """Reads and returns the last line_count lines of a file."""
@@ -68,11 +87,15 @@ class GatedFileReader:
             return sum(1 for _ in f)
 
     def _read_lines(self, path: str, start: int, end: int) -> str:
-        lines = []
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            for idx, line in enumerate(f, start=1):
-                if start <= idx <= end:
-                    lines.append(f"{idx}: {line}")
-                if idx > end:
-                    break
+            return self._read_stream_lines(f, start, end)
+
+    @staticmethod
+    def _read_stream_lines(stream, start: int, end: int) -> str:
+        lines = []
+        for idx, line in enumerate(stream, start=1):
+            if start <= idx <= end:
+                lines.append(f"{idx}: {line}")
+            if idx > end:
+                break
         return "".join(lines)

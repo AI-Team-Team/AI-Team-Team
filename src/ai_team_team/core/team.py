@@ -36,6 +36,7 @@ class AgentTeam:
         self.is_running = False
         self._cached_depth: Optional[int] = None
         self._state_lock: Optional[asyncio.Lock] = None
+        self._discussion_lock: Optional[asyncio.Lock] = None
         self._status_lock = threading.RLock()
         self._inbox_lock = threading.RLock()
 
@@ -45,6 +46,13 @@ class AgentTeam:
         if self._state_lock is None:
             self._state_lock = asyncio.Lock()
         return self._state_lock
+
+    @property
+    def discussion_lock(self):
+        """Serializes normal and emergency discussions for this team."""
+        if self._discussion_lock is None:
+            self._discussion_lock = asyncio.Lock()
+        return self._discussion_lock
 
 
     @property

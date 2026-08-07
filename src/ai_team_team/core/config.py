@@ -57,6 +57,8 @@ class ATTConfig:
         max_tool_rounds: int = 5,
         max_tool_retries: int = 3,
         model_token_limits: Optional[Dict[str, int]] = None,
+        model_max_output_tokens: Optional[Dict[str, int]] = None,
+        default_max_output_tokens: int = 1024,
         model_tokenizer_configs: Optional[Dict[str, str]] = None,
         failover_policy: str = "auto",
         strict_state_persistence: bool = True,
@@ -84,6 +86,30 @@ class ATTConfig:
             raise ValueError("max_delegation_depth must be at least 1.")
         if max_memory_turns < 1:
             raise ValueError("max_memory_turns must be at least 1.")
+        if (
+            not isinstance(default_max_output_tokens, int)
+            or isinstance(default_max_output_tokens, bool)
+            or default_max_output_tokens < 1
+        ):
+            raise ValueError("default_max_output_tokens must be a positive integer.")
+        for model_name, limit in (model_token_limits or {}).items():
+            if (
+                not isinstance(limit, int)
+                or isinstance(limit, bool)
+                or limit < 0
+            ):
+                raise ValueError(
+                    f"Token limit for {model_name!r} must be a non-negative integer."
+                )
+        for model_name, limit in (model_max_output_tokens or {}).items():
+            if (
+                not isinstance(limit, int)
+                or isinstance(limit, bool)
+                or limit < 1
+            ):
+                raise ValueError(
+                    f"Maximum output tokens for {model_name!r} must be a positive integer."
+                )
 
         self.enable_dynamic_delegation = enable_dynamic_delegation
         self.max_delegation_depth = max_delegation_depth
@@ -109,6 +135,8 @@ class ATTConfig:
         self.max_tool_rounds = max_tool_rounds
         self.max_tool_retries = max_tool_retries
         self.model_token_limits = model_token_limits or {}
+        self.model_max_output_tokens = model_max_output_tokens or {}
+        self.default_max_output_tokens = default_max_output_tokens
         self.model_tokenizer_configs = model_tokenizer_configs or {}
         self.failover_policy = failover_policy
         self.audit_unknown_escalation_mode = audit_unknown_escalation_mode

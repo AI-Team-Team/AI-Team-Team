@@ -31,6 +31,9 @@ config = ATTConfig(
     emergency_discussion_rounds: int = 1,
     tool_calling_mode: str = "auto",
     max_tool_rounds: int = 5,
+    model_token_limits: Optional[dict] = None,
+    model_max_output_tokens: Optional[dict] = None,
+    default_max_output_tokens: int = 1024,
     audit_unknown_escalation_mode: str = "wake"
 )
 ```
@@ -56,6 +59,9 @@ config = ATTConfig(
 * **`emergency_discussion_rounds`**: The number of emergency discussion rounds executed when a team is woken up (default: `1`).
 * **`tool_calling_mode`**: The strategy used for tool calling and reasoning steps. Options: `"text_react"`, `"native"`, `"auto"` (default: `"auto"`).
 * **`max_tool_rounds`**: The maximum reasoning loop steps allowed for the native strategy execution round (default: `5`).
+* **`model_token_limits`**: Hard per-model token quotas. Active reservations and settled usage both consume availability.
+* **`model_max_output_tokens`**: Optional per-model maximum output reservations and request caps.
+* **`default_max_output_tokens`**: Default maximum output reservation when a model-specific value is absent (default: `1024`).
 * **`audit_unknown_escalation_mode`**: Whether an indeterminate supervisory audit immediately wakes the parent (`"wake"`) or only enters its inbox (`"queue"`).
 
 Policy names and size/depth bounds are validated during construction. Invalid
@@ -130,7 +136,7 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
   Dynamically spawns a new recursive Agent Team (AT) with a parent-child relationship. `is_public_visible` sets library visibility for discovery, and `initial_docs` maps file paths to initial contents to populate in the team's DocLib.
 
 * **`execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
-  Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits.
+  Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits. Sessions for the same team, including emergency sessions, wait on one serial lock; different teams may run concurrently.
 * **`render_topology_tree() -> str`**
   Renders the active hierarchical agent team lineage as an indented ASCII tree.
 * **`negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`**
@@ -138,7 +144,7 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 * **`await save_state(path: Optional[str] = None, full: bool = True)`**
   Queues and waits for a versioned snapshot commit.
 * **`await load_state(path: str)`**
-  Restores the registry after runtime clients or a generator handler have been rebound. Missing model aliases raise `StateRestoreError`.
+  Transactionally restores a fully validated staged registry after runtime clients or a generator handler have been rebound. Missing or corrupt references raise `StateRestoreError` without changing the live manager or its DocLib files.
 * **`await flush_state()`**
   Waits for all queued incremental writes.
 * **`await close()`**
@@ -255,6 +261,7 @@ class LLMClientProto(Protocol):
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
         tools: Optional[List[Any]] = None,
+        max_output_tokens: Optional[int] = None,
         temperature: float = 0.7,
         require_json: bool = False
     ) -> LLMResponse:
@@ -265,6 +272,7 @@ class LLMClientProto(Protocol):
             prompt: The user query or discussion history (string or list of message dicts).
             system_instruction: Guidelines and context injected for the agent.
             tools: Optional list of native `Tool` objects (Thorough Abstraction) to be resolved by the adapter.
+            max_output_tokens: Enforced response cap for hard-quota reservations when supported.
             temperature: Sampling temperature.
             require_json: If True, the model MUST return a valid JSON string.
         """
@@ -274,6 +282,10 @@ class LLMClientProto(Protocol):
         """
         Returns True if the client/model configuration natively supports structured function calling.
         """
+        ...
+
+    def supports_output_token_limit(self) -> Union[bool, str]:
+        """Returns max_output_tokens/max_tokens support for hard quotas."""
         ...
 ```
 
@@ -331,6 +343,8 @@ These tools are automatically registered and bound to all agent teams by default
   Grants access (`"READ"` or `"WRITE"`) to a target team for a path segment in the library.
 * **`revoke_library_permission(lib_id: str, path: str, target_team_id: str) -> str`**
   Revokes permissions for a target team under a path.
+* **`create_library_link(source_lib_id: str, source_path: str, target_lib_id: str, target_path: str) -> str`**
+  Creates a file-only managed link between registered DocLibs. Creation requires source `WRITE` and target `READ`; each later operation rechecks the target ACL.
 * **`write_library_file(lib_id: str, path: str, content: str) -> str`**
   Writes content to a file in a library (requires WRITE permission).
 * **`read_library_file(lib_id: str, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str`**

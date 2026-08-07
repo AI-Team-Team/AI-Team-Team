@@ -138,3 +138,20 @@ class DocLibFileModel(Base):
     content: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     library: Mapped["LibraryModel"] = relationship(back_populates="files")
+
+
+class DocLibLinkModel(Base):
+    """A managed cross-library file link; no filesystem symlink is created."""
+
+    __tablename__ = "doc_lib_links"
+    source_lib_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("libraries.lib_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    source_path: Mapped[str] = mapped_column(String, primary_key=True)
+    target_lib_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("libraries.lib_id", ondelete="CASCADE"),
+    )
+    target_path: Mapped[str] = mapped_column(String)

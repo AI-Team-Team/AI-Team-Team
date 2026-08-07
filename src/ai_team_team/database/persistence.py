@@ -15,6 +15,7 @@ from ai_team_team.database.models import (
     AgentModel,
     BrokerAgreementModel,
     DocLibFileModel,
+    DocLibLinkModel,
     LibraryModel,
     LibraryPermissionModel,
     ManagerConfigModel,
@@ -25,7 +26,7 @@ from ai_team_team.database.models import (
 )
 
 
-STATE_SCHEMA_VERSION = "2"
+STATE_SCHEMA_VERSION = "3"
 
 
 class DatabaseStore:
@@ -67,6 +68,7 @@ class DatabaseStore:
             self._write_libraries(session, snapshot.get("libraries", []))
             self._write_permissions(session, snapshot.get("permissions", {}))
             self._write_file_changes(session, snapshot.get("file_changes", {}))
+            self._write_links(session, snapshot.get("links"))
             session.commit()
         except Exception:
             session.rollback()
@@ -201,6 +203,13 @@ class DatabaseStore:
                     row.team_id
                 ] = row.permission
 
+            links: Dict[str, Dict[str, Dict[str, str]]] = {}
+            for row in session.query(DocLibLinkModel).all():
+                links.setdefault(row.source_lib_id, {})[row.source_path] = {
+                    "target_lib_id": row.target_lib_id,
+                    "target_path": row.target_path,
+                }
+
             agreements = [
                 (row.sender_team_id, row.recipient_team_id)
                 for row in session.query(BrokerAgreementModel).all()
@@ -212,6 +221,7 @@ class DatabaseStore:
                 "teams": teams,
                 "libraries": libraries,
                 "permissions": permissions,
+                "links": links,
                 "agreements": agreements,
             }
         finally:
@@ -226,6 +236,7 @@ class DatabaseStore:
             BrokerAgreementModel,
             LibraryPermissionModel,
             DocLibFileModel,
+            DocLibLinkModel,
         ):
             session.query(model).delete(synchronize_session=False)
         session.execute(delete(team_members))
@@ -416,6 +427,27 @@ class DatabaseStore:
                             content=content,
                         )
                     )
+
+    @staticmethod
+    def _write_links(
+        session: Any,
+        links: Optional[Dict[str, Dict[str, Dict[str, str]]]],
+    ) -> None:
+        if links is None:
+            return
+        for source_lib_id, path_map in links.items():
+            session.query(DocLibLinkModel).filter_by(
+                source_lib_id=source_lib_id
+            ).delete(synchronize_session=False)
+            for source_path, target in path_map.items():
+                session.add(
+                    DocLibLinkModel(
+                        source_lib_id=source_lib_id,
+                        source_path=source_path,
+                        target_lib_id=target["target_lib_id"],
+                        target_path=target["target_path"],
+                    )
+                )
 
 
 class PersistenceCoordinator:

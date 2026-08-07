@@ -1,5 +1,7 @@
 import os
 import shutil
+import tempfile
+import uuid
 import logging
 from pathlib import PurePosixPath
 from typing import Optional, List, Callable, Dict
@@ -24,6 +26,7 @@ class DocumentLibrary:
         on_change: Optional[
             Callable[[str, str, Optional[str]], None]
         ] = None,
+        storage_dir: Optional[str] = None,
     ):
         self.lib_id = lib_id
         self.name = name
@@ -34,30 +37,54 @@ class DocumentLibrary:
         self._suppress_notifications = False
         
         # Locate the files under a managed directory
-        if root_dir is None:
-            base_dir = ".att_doc_libs"
+        if storage_dir is not None:
+            target_root = os.path.abspath(storage_dir)
         else:
-            base_dir = os.path.join(root_dir, ".att_doc_libs")
-        self.root_dir = os.path.abspath(os.path.join(base_dir, lib_id))            
+            workspace = os.path.realpath(
+                os.path.abspath(root_dir if root_dir is not None else ".")
+            )
+            base_dir = os.path.join(workspace, ".att_doc_libs")
+            if os.path.lexists(base_dir) and os.path.islink(base_dir):
+                raise PermissionError(
+                    "Access denied: Managed DocLib roots cannot be symlinks."
+                )
+            target_root = os.path.join(base_dir, lib_id)
+        if os.path.lexists(target_root) and os.path.islink(target_root):
+            raise PermissionError(
+                "Access denied: A DocLib root cannot be a symlink."
+            )
+        self.root_dir = os.path.abspath(target_root)
         os.makedirs(self.root_dir, exist_ok=True)
         self.gated_reader = GatedFileReader()
 
     def write_file(self, path: str, content: str) -> None:
         """Writes content to a file path within the library. Creates directories if necessary."""
         normalized_path = self._normalize_path(path, allow_root=False)
-        safe_path = self._resolve_path(normalized_path, allow_root=False)
-        os.makedirs(os.path.dirname(safe_path), exist_ok=True)
-        with open(safe_path, "w", encoding="utf-8") as f:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        fd = self._open_file_descriptor(
+            normalized_path, flags, create_parents=True
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
         logger.info(f"Written file '{path}' in library '{self.lib_id}'.")
         self._notify_change(normalized_path, content)
 
     def read_file(self, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str:
         """Reads a file path within the library, routing through GatedFileReader."""
-        safe_path = self._resolve_path(path, allow_root=False)
-        if not os.path.exists(safe_path):
+        normalized_path = self._normalize_path(path, allow_root=False)
+        try:
+            fd = self._open_file_descriptor(
+                normalized_path, os.O_RDONLY, create_parents=False
+            )
+        except FileNotFoundError:
             return f"Error: File '{path}' does not exist in library '{self.lib_id}'."
-        return self.gated_reader.read_file(safe_path, start_line=start_line, end_line=end_line)
+        with os.fdopen(fd, "r", encoding="utf-8", errors="ignore") as stream:
+            return self.gated_reader.read_stream(
+                stream,
+                os.path.basename(normalized_path),
+                start_line,
+                end_line,
+            )
 
     def delete_file(self, path: str) -> str:
         """Deletes a file or directory path within the library."""
@@ -106,6 +133,13 @@ class DocumentLibrary:
         try:
             for item in os.listdir(safe_dir):
                 full_item_path = os.path.join(safe_dir, item)
+                if os.path.islink(full_item_path):
+                    logger.warning(
+                        "Blocked native symlink '%s' in library '%s'.",
+                        full_item_path,
+                        self.lib_id,
+                    )
+                    continue
                 rel_path = os.path.relpath(full_item_path, self.root_dir)
                 clean_rel_path = "/" + rel_path.replace(os.sep, "/")
                 if os.path.isdir(full_item_path):
@@ -117,15 +151,44 @@ class DocumentLibrary:
         return sorted(contents)
 
     def replace_all_files(self, files: Dict[str, str]) -> None:
-        """Atomically replaces local library contents during state restoration."""
-        self._suppress_notifications = True
+        """Stages all content and atomically publishes the completed directory."""
+        parent = os.path.dirname(self.root_dir)
+        os.makedirs(parent, exist_ok=True)
+        staging = tempfile.mkdtemp(prefix=f".{self.lib_id}-stage-", dir=parent)
+        backup = os.path.join(parent, f".{self.lib_id}-backup-{uuid.uuid4().hex}")
+        moved_old = False
         try:
-            shutil.rmtree(self.root_dir, ignore_errors=True)
-            os.makedirs(self.root_dir, exist_ok=True)
+            staged = DocumentLibrary(
+                lib_id=self.lib_id,
+                name=self.name,
+                owner_team_id=self.owner_team_id,
+                description=self.description,
+                is_public_visible=self.is_public_visible,
+                storage_dir=staging,
+            )
+            staged._suppress_notifications = True
             for path, content in files.items():
-                self.write_file(path, content)
+                staged.write_file(path, content)
+            if os.path.lexists(self.root_dir):
+                if os.path.islink(self.root_dir):
+                    raise PermissionError(
+                        "Access denied: A DocLib root cannot be a symlink."
+                    )
+                os.replace(self.root_dir, backup)
+                moved_old = True
+            os.replace(staging, self.root_dir)
+            staging = ""
+            if moved_old:
+                shutil.rmtree(backup, ignore_errors=True)
+        except Exception:
+            if moved_old and not os.path.exists(self.root_dir):
+                os.replace(backup, self.root_dir)
+            raise
         finally:
-            self._suppress_notifications = False
+            if staging and os.path.exists(staging):
+                shutil.rmtree(staging, ignore_errors=True)
+            if os.path.exists(backup):
+                shutil.rmtree(backup, ignore_errors=True)
 
     @staticmethod
     def _normalize_path(path: str, allow_root: bool) -> str:
@@ -154,7 +217,68 @@ class DocumentLibrary:
                 raise PermissionError("Access denied: Path traversal attempted.")
         except Exception:
             raise PermissionError("Access denied: Path traversal attempted.")
+        self._reject_native_symlinks(clean_path)
         return resolved
+
+    def _reject_native_symlinks(self, clean_path: str) -> None:
+        if os.path.islink(self.root_dir):
+            raise PermissionError(
+                "Access denied: Native filesystem symlinks are not allowed."
+            )
+        current = self.root_dir
+        for part in PurePosixPath(clean_path).parts:
+            current = os.path.join(current, part)
+            if os.path.lexists(current) and os.path.islink(current):
+                raise PermissionError(
+                    "Access denied: Native filesystem symlinks are not allowed."
+                )
+
+    def _open_file_descriptor(
+        self,
+        clean_path: str,
+        flags: int,
+        *,
+        create_parents: bool,
+    ) -> int:
+        clean_path = self._normalize_path(clean_path, allow_root=False)
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
+        current_fd = os.open(self.root_dir, directory_flags)
+        parts = PurePosixPath(clean_path).parts
+        try:
+            for part in parts[:-1]:
+                if create_parents:
+                    try:
+                        os.mkdir(part, mode=0o700, dir_fd=current_fd)
+                    except FileExistsError:
+                        pass
+                next_fd = os.open(
+                    part, directory_flags, dir_fd=current_fd
+                )
+                os.close(current_fd)
+                current_fd = next_fd
+            return os.open(
+                parts[-1],
+                flags | nofollow,
+                0o600,
+                dir_fd=current_fd,
+            )
+        except OSError as exc:
+            if exc.errno in {getattr(os, "ELOOP", 62), 40}:
+                raise PermissionError(
+                    "Access denied: Native filesystem symlinks are not allowed."
+                ) from exc
+            raise
+        finally:
+            os.close(current_fd)
+
+    def path_exists(self, path: str) -> bool:
+        safe_path = self._resolve_path(path, allow_root=False)
+        return os.path.exists(safe_path)
+
+    def is_file(self, path: str) -> bool:
+        safe_path = self._resolve_path(path, allow_root=False)
+        return os.path.isfile(safe_path)
 
     def _notify_change(self, path: str, content: Optional[str]) -> None:
         if (

@@ -10,6 +10,10 @@ Every `AgentTeam` maintains an internal `message_inbox (List[Dict])`. This acts 
 
 Instead, the `manager.execute_team_discussion()` cycle polls the inbox at the very beginning of a debate round. If messages exist, the manager compiles them into a unified alert and appends them to the team's system prompt context.
 
+Each team owns one discussion-session lock. Normal and emergency discussions
+for the same team wait and execute serially; discussions for different teams
+can continue concurrently.
+
 ### Inbox Overflows & Summarization
 
 To prevent prompt length limits, the inbox utilizes `inbox_summarize_threshold_chars`. If unread messages exceed this threshold during polling, the `ATTManager` utilizes its `critic_client` to automatically compress the raw payloads into a dense, bulleted summary before injecting it into the debate.
@@ -44,6 +48,10 @@ The specific strategy the Negotiation Broker uses to approve or deny requests is
 
 - **Behavior**: Instead of static rules, the parent team leaders of both the sender and recipient are consulted dynamically. The representatives evaluate the request details and rationale via their own **LLM client** and return a JSON approval (`{"approved": true|false, "reason": "..."}`).
 
+All LLM governance gates fail closed through the same strict schema. Only the
+JSON boolean literal `true` grants authority. Strings, numbers, null, and a
+missing `approved` field are format errors, are audited, and are rejected.
+
 ### D. Guided Observation Feedback
 
 When a communication attempt is blocked by a non-permissive policy, instead of raising a terminal error, the tool returns a structured observation guiding the caller agent on how to correctly request authorization (e.g. instructing them to call `negotiate_peer_talk()`).
@@ -68,6 +76,13 @@ Dynamic parent-hierarchy migrations are triggered when a team requests to move u
 
 To ensure stability in high-overhead multi-agent environments, the framework provides token budgeting circuit breakers and dynamic model failover strategies.
 
+Configured limits are hard quotas. Before every model attempt, ATT atomically
+reserves the estimated prompt plus the maximum permitted output. Provider usage
+is used for settlement when available; otherwise ATT uses its tokenizer
+estimate. Unused output capacity is returned, while sent failures and
+cancellations charge reported usage or at least the prompt. Failover reads the
+same ledger, including active reservations.
+
 ### A. Failover Routing Strategies
 
 When an agent's client hits a token limit, it resolves via `failover_policy`:
@@ -87,7 +102,8 @@ config = ATTConfig(
     communication_policy="rule_gated",
     migration_policy="lineage_path",
     failover_policy="parent",
-    model_token_limits={"gpt-5.5": 50000}
+    model_token_limits={"gpt-5.5": 50000},
+    model_max_output_tokens={"gpt-5.5": 2048}
 )
 
 # 2. Instantiate the manager

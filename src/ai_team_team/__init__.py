@@ -8,6 +8,7 @@ class LLMClientProto(Protocol):
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
+        max_output_tokens: Optional[int] = None,
         temperature: float = 0.7,
         require_json: bool = False
     ) -> LLMResponse:
@@ -16,6 +17,10 @@ class LLMClientProto(Protocol):
 
     def supports_native_tool_calling(self) -> bool:
         """Returns True if the client/model configuration natively supports structured function calling."""
+        ...
+
+    def supports_output_token_limit(self) -> Union[bool, str]:
+        """Reports support for max_output_tokens or max_tokens requests."""
         ...
 
 from .core import (

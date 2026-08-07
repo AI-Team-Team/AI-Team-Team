@@ -73,7 +73,7 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
   * `suppress_auto_save() -> AsyncContextManager`
     Nested, task-local batching context that merges dirty deltas and submits one write when the outer scope exits.
   * `execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`
-    Executes a multi-agent debate session, automatically injecting unresolved inbox alerts, and running supervisory transcript audits.
+    Executes a multi-agent debate session under the team's serial session lock. Normal and emergency sessions share the lock; separate teams remain concurrent.
   * `find_parent_team(target: AgentTeam) -> Optional[AgentTeam]`
     Locates the parent team in the active team topology using child references and creator pointers.
   * `check_library_access(team_id: str, lib_id: str, path: str, required_permission: str) -> bool`
@@ -85,7 +85,7 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
   * `await save_state(path: Optional[str] = None, full: bool = True)`
     Queues and waits for a full snapshot, or a configuration delta when `full=False`.
   * `await load_state(path: str)`
-    Restores a versioned snapshot after validating every persisted model alias has a runtime binding.
+    Stages and validates every persisted reference, model binding, topology edge, DocLib file, ACL, and managed link before atomically publishing the restored runtime.
   * `await flush_state()`
     Waits for all queued incremental commits.
   * `await close()`
@@ -116,6 +116,9 @@ Configuration options for tuning the ATT multi-agent framework.
       migration_policy: str = "ancestor_approval",
       enable_emergency_wakeup: bool = True,
       emergency_discussion_rounds: int = 1,
+      model_token_limits: Optional[dict] = None,
+      model_max_output_tokens: Optional[dict] = None,
+      default_max_output_tokens: int = 1024,
       audit_unknown_escalation_mode: str = "wake"
   )
   ```
@@ -173,6 +176,10 @@ Represents a team's document database with prefix-based permissions and path tra
   * `delete_file(path: str) -> str`
   * `list_contents(path: str) -> List[str]`
 
+Native filesystem symlinks are rejected. Cross-library links are manager-owned
+metadata exposed through `create_library_link`; direct `DocumentLibrary` methods
+operate on physical files only.
+
 ## Policies & Strategy Interfaces
 
  Pluggable strategies governing communication and migrations defined in [policies.py](file:///Users/charlestsaur/Documents/sandbox/AI-Team-Team/src/ai_team_team/core/policies.py):
@@ -200,7 +207,7 @@ SQLAlchemy Declarative Models mapping the topology schema, defined in [models.py
 * **`TeamModel`**: Tracks active topologies, migration counts, sibling settings, and links dual-linked parent-child hierarchy nodes.
 * **`TeamInboxModel` & `TeamProposalModel`**: Persists child escalations, peer messages, and democratic proposal votes.
 * **`BrokerAgreementModel`**: Tracks cross-lineage tunnels negotiated by the broker.
-* **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel`**: Persists libraries, ACL segments, and physical document path contents inside the SQLite database.
+* **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel` & `DocLibLinkModel`**: Persists libraries, ACL segments, physical document contents, and managed cross-library file-link targets.
 
 ### Database Session Factory
 

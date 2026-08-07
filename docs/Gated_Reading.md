@@ -101,3 +101,13 @@ To enable secure document storage and sharing between agent teams, the framework
 * **Access Control List (ACL) & Segment-Based Path Inheritance**: File and folder access is governed by team-level permissions (`READ` or `WRITE`) registered under path prefixes. Permission inheritance propagates recursively downward to all subdirectories and files. For example, if a team is granted permission on a folder path (e.g. `/specs`), they automatically inherit the same permission on any nested paths under that folder (e.g. `/specs/subfolder/file.txt`).
   * **Evaluation Order**: The framework evaluates permissions by decomposing the target file path into parent segment directories (from the full path down to the root `/`). If a matching permission for the caller's team is found on any parent path segment, it is immediately applied.
   * **Permission Hierarchy**: A `WRITE` permission grant implicitly permits `READ` operations. Sibling or cross-lineage teams can request access by sending peer messages to the library owner.
+* **Managed Cross-Library File Links**: `create_library_link` stores only a
+  target `lib_id` and relative file path. It never creates an operating-system
+  symlink. Every read or write resolves the link chain and rechecks the caller's
+  live ACL on every source and target path, so revocation takes effect
+  immediately. Writes require `WRITE` throughout the chain; deleting a link
+  removes only link metadata. Links are file-only, must terminate in a registered
+  DocLib file, and cycles are rejected.
+* **Native Symlink Rejection**: DocLib roots and path components may not be
+  filesystem symbolic links. File descriptors are opened relative to a no-follow
+  directory chain so a native symlink cannot escape the managed root.

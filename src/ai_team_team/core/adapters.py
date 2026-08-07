@@ -18,11 +18,29 @@ class HandlerClientAdapter:
                 pass
         return getattr(self, "_supports_native", False) is True
 
+    def supports_output_token_limit(self) -> Any:
+        try:
+            signature = inspect.signature(self.handler)
+        except (TypeError, ValueError):
+            return False
+        if (
+            "max_output_tokens" in signature.parameters
+            or "max_tokens" in signature.parameters
+        ):
+            return "max_output_tokens"
+        if any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        ):
+            return "max_output_tokens"
+        return False
+
     async def generate(
         self,
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
         tools: Optional[List[Any]] = None,
+        max_output_tokens: Optional[int] = None,
         temperature: float = 0.3,
         require_json: bool = False
     ) -> LLMResponse:
@@ -45,6 +63,16 @@ class HandlerClientAdapter:
             )
         ):
             kwargs["tools"] = tools
+        if sig is not None and max_output_tokens is not None:
+            if "max_output_tokens" in sig.parameters:
+                kwargs["max_output_tokens"] = max_output_tokens
+            elif "max_tokens" in sig.parameters:
+                kwargs["max_tokens"] = max_output_tokens
+            elif any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in sig.parameters.values()
+            ):
+                kwargs["max_output_tokens"] = max_output_tokens
 
         res = self.handler(**kwargs)
         if inspect.isawaitable(res):
@@ -80,7 +108,11 @@ class HandlerClientAdapter:
                     arguments=arguments,
                     raw=tc.get("raw")
                 ))
-            return LLMResponse(text=text, tool_calls=t_calls)
+            return LLMResponse(
+                text=text,
+                tool_calls=t_calls,
+                usage=res.get("usage"),
+            )
             
         raise ValueError(f"Invalid response type returned by generator handler: {type(res)}")
 
@@ -117,11 +149,29 @@ class ManagerDefaultClientAdapter:
                     pass
         return False
 
+    def supports_output_token_limit(self) -> Any:
+        target = self.manager.generator_handler
+        if target is not None:
+            return HandlerClientAdapter(
+                "default", target
+            ).supports_output_token_limit()
+        root_client = getattr(self.manager.root_ai, "llm_client", None)
+        if root_client is not None and root_client is not self:
+            from .utils import _output_limit_parameter
+
+            return (
+                "max_output_tokens"
+                if _output_limit_parameter(root_client)
+                else False
+            )
+        return False
+
     async def generate(
         self,
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
         tools: Optional[List[Any]] = None,
+        max_output_tokens: Optional[int] = None,
         temperature: float = 0.3,
         require_json: bool = False
     ) -> LLMResponse:
@@ -134,6 +184,7 @@ class ManagerDefaultClientAdapter:
                 prompt=prompt,
                 system_instruction=system_instruction,
                 tools=tools,
+                max_output_tokens=max_output_tokens,
                 temperature=temperature,
                 require_json=require_json
             )
@@ -158,6 +209,13 @@ class ManagerDefaultClientAdapter:
                 )
             ):
                 kwargs["tools"] = tools
+            from .utils import _output_limit_parameter
+
+            output_parameter = _output_limit_parameter(
+                self.manager.root_ai.llm_client
+            )
+            if output_parameter and max_output_tokens is not None:
+                kwargs[output_parameter] = max_output_tokens
             result = generate(**kwargs)
             if inspect.isawaitable(result):
                 result = await result

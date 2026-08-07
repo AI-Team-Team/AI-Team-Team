@@ -23,7 +23,8 @@ asynchronous context manager calls `close()` on exit.
 ## Incremental single-writer design
 
 Auto-save hooks mark individual agents, teams, proposals, inboxes, agreements,
-libraries, permissions, configuration records, and library file paths dirty.
+libraries, permissions, managed links, configuration records, and library file
+paths dirty.
 The manager captures an immutable delta and sends it to one writer queue.
 SQLite and document-file I/O run outside the event-loop thread. A delta
 rewrites only the selected rows. Replacing an agent's bounded message history
@@ -48,7 +49,8 @@ The database stores:
 - all registered agents and their bounded message histories;
 - teams, membership, lineage, migration counters, inboxes, and proposals;
 - broker agreements;
-- document-library metadata, ACLs, paths, and file contents.
+- document-library metadata, ACLs, managed cross-library links, paths, and
+  file contents.
 
 Callables and external connections are runtime bindings and are not
 serialized. This includes generator handlers, concrete clients, tools,
@@ -71,10 +73,14 @@ If any named alias lacks a direct client and no generator handler can serve
 it, loading raises `StateRestoreError` listing every missing alias. ATT never
 silently substitutes the default model.
 
-Restoration rebuilds agents, physical document files under
-`config.workspace_root/.att_doc_libs`, teams, parent/child pointers, tools,
-permissions, proposals, inboxes, and agreements. Runtime tools and callbacks
-already registered on the host remain runtime-owned.
+Restoration is transactional. ATT validates every agent, member, creator,
+parent, model alias, DocLib owner, permission, agreement, file path, and managed
+link before publishing anything. It builds agents and files in a detached
+manager and a same-filesystem staging directory, recomputes derived team depth,
+then swaps the DocLib directories and live registries. Any validation, staging,
+or publication error leaves the original manager and original DocLib trees
+unchanged. Runtime tools and callbacks already registered on the host remain
+runtime-owned.
 
 ## Memory compression
 
@@ -85,6 +91,6 @@ agent's bounded message window.
 
 ## Schema policy
 
-The current persistence schema version is `2`. Compatibility with earlier
+The current persistence schema version is `3`. Compatibility with earlier
 SQLite layouts is intentionally unsupported. Create a new database when
 upgrading from an earlier schema.

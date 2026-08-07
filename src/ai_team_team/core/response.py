@@ -28,6 +28,12 @@ class ToolResult:
 
 class LLMResponse:
     """Unified wrapper around LLM response containing text and/or tool calls."""
-    def __init__(self, text: Optional[str] = None, tool_calls: Optional[List[ToolCall]] = None):
+    def __init__(
+        self,
+        text: Optional[str] = None,
+        tool_calls: Optional[List[ToolCall]] = None,
+        usage: Optional[Any] = None,
+    ):
         self.text = text
         self.tool_calls = tool_calls or []
+        self.usage = usage

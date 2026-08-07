@@ -92,3 +92,8 @@ flowchart TD
     LoopEnd -- "Yes" --> LoopSegments
     LoopEnd -- "No" --> DenyAccess
 ```
+
+Managed cross-library file links add a second resolution phase after source
+authorization. ATT follows `lib_id + relative path` metadata, repeats the same
+ACL check at every hop for the requested permission, rejects cycles, and opens
+only the final physical file. No operating-system symlink is followed.

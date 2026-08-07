@@ -1,9 +1,47 @@
 import re
-import json
 import logging
 from typing import Any, Tuple, List
 
+from pydantic import BaseModel, ConfigDict, StrictBool, ValidationError
+
 logger = logging.getLogger("ATT.Policies")
+
+
+class GovernanceDecision(BaseModel):
+    """Strict fail-closed schema shared by every LLM authorization gate."""
+
+    model_config = ConfigDict(strict=True)
+
+    approved: StrictBool
+    reason: str = "No reason provided."
+
+
+def parse_governance_decision(
+    response: str,
+    manager: Any,
+    context: str,
+) -> Tuple[bool, str]:
+    cleaned = response
+    if "```" in cleaned:
+        cleaned = cleaned.replace("```json", "").replace("```", "").strip()
+    try:
+        decision = GovernanceDecision.model_validate_json(
+            cleaned, strict=True
+        )
+    except (ValidationError, ValueError, TypeError) as exc:
+        reason = f"Invalid governance decision format: {exc}"
+        logger.warning("%s rejected: %s", context, reason)
+        callback = getattr(manager, "on_system_event", None)
+        if callback:
+            try:
+                callback(
+                    "governance_authorization_format_error",
+                    {"context": context, "reason": reason},
+                )
+            except Exception:
+                pass
+        return False, reason
+    return decision.approved, decision.reason
 
 async def generate_with_retry_fallback(
     llm_client: Any,
@@ -185,11 +223,20 @@ class ProxiedCommunicationPolicy(BaseCommunicationPolicy):
                     system_instruction=f"You are the representative agent ({rep.name}) of parent team {p.team_id if p else 'Root'}. Evaluate peer communication request.",
                     manager=manager
                 )
-                if "```" in response:
-                    response = response.replace("```json", "").replace("```", "").strip()
-                data = json.loads(response)
-                if not bool(data.get("approved", False)):
-                    logger.info(f"Peer talk between {sender.team_id} and {recipient.team_id} rejected by parent representative {rep.name}")
+                approved, reason = parse_governance_decision(
+                    response,
+                    manager,
+                    f"Peer talk {sender.team_id} -> {recipient.team_id}",
+                )
+                if not approved:
+                    logger.info(
+                        "Peer talk between %s and %s rejected by parent "
+                        "representative %s: %s",
+                        sender.team_id,
+                        recipient.team_id,
+                        rep.name,
+                        reason,
+                    )
                     return False
             except Exception as e:
                 logger.warning(f"Error querying peer talk approval from representative {rep.name}: {e}. Defaulting to rejected.")
@@ -262,11 +309,11 @@ class AncestorApprovalMigrationPolicy(BaseMigrationPolicy):
                     system_instruction=f"You are the representative agent ({rep.name}) of team {t.team_id if t else 'Root'}. Evaluate restructure proposal.",
                     manager=manager
                 )
-                if "```" in response:
-                    response = response.replace("```json", "").replace("```", "").strip()
-                data = json.loads(response)
-                approved = bool(data.get("approved", False))
-                reason = str(data.get("reason", "No reason provided."))
+                approved, reason = parse_governance_decision(
+                    response,
+                    manager,
+                    f"Migration {team.team_id} -> {target_parent.team_id}",
+                )
                 if not approved:
                     return False, f"Rejected by representative {rep.name} of team {t.team_id if t else 'Root'}: {reason}"
             except Exception as e:
@@ -326,11 +373,11 @@ class LineagePathMigrationPolicy(BaseMigrationPolicy):
                     system_instruction=f"You are the representative agent ({rep.name}) of team {t.team_id if t else 'Root'}. Evaluate restructure proposal.",
                     manager=manager
                 )
-                if "```" in response:
-                    response = response.replace("```json", "").replace("```", "").strip()
-                data = json.loads(response)
-                approved = bool(data.get("approved", False))
-                reason = str(data.get("reason", "No reason provided."))
+                approved, reason = parse_governance_decision(
+                    response,
+                    manager,
+                    f"Migration {team.team_id} -> {target_parent.team_id}",
+                )
                 if not approved:
                     return False, f"Rejected by representative {rep.name} of team {t.team_id if t else 'Root'}: {reason}"
             except Exception as e:

@@ -45,7 +45,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 * **Robust Argument Parser**: A safe literal lexical parser (`ast.literal_eval`) with multiline XML support, code block stripping, and a comma-merging heuristic to handle unquoted complex strings (like SQL queries).
 * **[Bounded Memory Compression](docs/State_Persistence.md)**: Automates memory pruning by extracting early conversation turns, calling the agent's LLM to generate a `*** HISTORICAL SUMMARY ARCHIVE ***`, and retaining a bounded high-fidelity window.
 * **[LLM Adapter Architecture](docs/Tool_System.md)**: Unifies sync, async, and streaming LLM payloads from various providers (Google, OpenAI, Anthropic) into standard `LLMResponse` and `ToolCall` formats via the `ManagerDefaultClientAdapter`.
-* **[Token Budget Circuit Breakers](docs/Team_Governance.md#5-token-budget--failover-policies)**: Enforces session-wide token budget limits per model registry alias, pre-checking prompt tokens via Hugging Face `tokenizers` (with safe offline character fallback) to trigger circuit breakers before API call invocation.
+* **[Atomic Token Budget Circuit Breakers](docs/Team_Governance.md#5-token-budget--failover-policies)**: Enforces hard per-model quotas by atomically reserving prompt and maximum output capacity before each request, settling provider usage, refunding unused capacity, and routing failover through the same ledger.
 
 ### 🗳️ Governance & Inter-Team Communication
 
@@ -563,6 +563,8 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `tool_calling_mode` | `str` | `"auto"` | Strategy for invoking tools. `"native"`, `"react"`, or `"auto"`. |
 | `max_tool_rounds` | `int` | `5` | Max depth of native parallel tool calls during a reasoning step. |
 | `model_token_limits` | `dict` | `None` | Mapping of model aliases to their token budget limits (used for failover routing). |
+| `model_max_output_tokens` | `dict` | `None` | Per-model maximum output reservation/request cap used by the atomic hard-quota ledger. |
+| `default_max_output_tokens` | `int` | `1024` | Default maximum output reservation when a model-specific cap is absent. |
 | `failover_policy` | `str` | `"auto"` | Fallback strategy on token exhaustion: `"auto"` (next available) or `"parent"` (LLM debate proxy). |
 | `strict_state_persistence` | `bool` | `True` | Enables strict propagation of persistence errors. |
 | `audit_unknown_escalation_mode` | `str` | `"wake"` | Handling for indeterminate audits: immediately `"wake"` the parent or only `"queue"` the alert. |

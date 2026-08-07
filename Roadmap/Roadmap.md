@@ -15,34 +15,7 @@ This track should precede topology expansion and other next-generation features.
 It converts the currently confirmed correctness and operational gaps into staged
 architectural work.
 
-### 1. Discussion and Budget Transaction Boundaries
-
-- Add a per-team discussion-session lock that covers session admission, migration
-  counter reset, inbox handoff, proposal execution, audit, and final status cleanup.
-  Define whether callers wait or receive an explicit `DiscussionAlreadyRunning`
-  error.
-- Introduce an atomic token ledger per model alias. Reserve prompt/output allowance
-  before dispatch, reconcile actual response tokens afterward, and release unused
-  reservations on errors or cancellation. Failover candidate selection must read
-  the same ledger.
-- Parse every LLM authorization response through a strict typed schema. Only a
-  literal boolean `true` grants authority; missing, string, numeric, or malformed
-  values fail closed and produce an auditable reason.
-
-### 2. Transactional Restore and Filesystem Publication
-
-- Read and validate a snapshot into detached staging objects before changing the
-  live manager. Validate all agent/member/creator/parent/library references, unique
-  identifiers, cycles, model aliases, and configuration constraints. Recompute
-  derived depth values rather than loading caches.
-- Stage DocLib contents in sibling temporary directories, reject symlink components
-  with no-follow filesystem operations, and atomically rename completed trees into
-  place. Keep the old tree recoverable until the manager-state commit succeeds.
-- Swap validated registries and filesystem roots as one coordinated commit. On any
-  error, retain the original manager, DocLib data, database path, and runtime
-  bindings unchanged.
-
-### 3. Bounded and Coordinated Persistence
+### 1. Bounded and Coordinated Persistence
 
 - Replace the unbounded future list with a bounded admission queue. Coalesce pending
   deltas by database path and entity key, discard completed futures promptly, expose
@@ -60,7 +33,7 @@ architectural work.
 - Move expensive snapshot serialization/copying off the event-loop thread or build
   immutable state incrementally, while keeping capture ordering deterministic.
 
-### 4. Runtime Context, Shutdown, and Event Delivery
+### 2. Runtime Context, Shutdown, and Event Delivery
 
 - Replace cached agent ownership with explicit invocation-scoped team context and
   reject ambiguous ownership where a unique team is required.
@@ -75,7 +48,7 @@ architectural work.
 - Give queued audit alerts a capacity, TTL, stable fingerprint, acknowledgement
   state, and durable deduplication window. Emit overflow and expiry system events.
 
-### 5. Fault-Injection and Stress Verification
+### 3. Fault-Injection and Stress Verification
 
 - Add deterministic races for duplicate team discussions and concurrent token
   reservations at the exact quota boundary.

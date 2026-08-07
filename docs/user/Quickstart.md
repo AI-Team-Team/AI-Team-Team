@@ -368,5 +368,11 @@ Agent teams can use standard file operations:
 - **Read file**: `Action: read_library_file(lib_id="DL-AT-abc123", path="/specs/guide.txt", start_line=1, end_line=50)`
 - **List files**: `Action: list_library_files(lib_id="DL-AT-abc123", path="/")`
 - **Delete file**: `Action: delete_library_file(lib_id="DL-AT-abc123", path="/specs/guide.txt")`
+- **Create managed file link**: `Action: create_library_link(source_lib_id="DL-AT-xyz789", source_path="/references/guide.txt", target_lib_id="DL-AT-abc123", target_path="/specs/guide.txt")`
 
 All `read_library_file` operations are automatically audited by the `GatedFileReader`. If a team member attempts to read a file exceeding 50 KB without specifying a line chunk window, the operation will be rejected and return an Outline Warning, protecting the LLM context from pollution.
+
+Managed links work only between registered DocLib files. Creation requires
+`WRITE` on the source path and `READ` on the target. Reads and writes recheck the
+target ACL every time; writes require target `WRITE`, and deleting the link does
+not delete the target file. Native filesystem symlinks are rejected.

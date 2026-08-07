@@ -8,46 +8,6 @@ Any resolved issues should not be stored in this document.
 
 ## Known Issues
 
-### Critical
-
-1. **A team can run overlapping discussion sessions.**
-   `ATTManager.execute_team_discussion()` sets `team.is_running` as a status flag,
-   but it does not acquire a per-team session lock. Concurrent calls can reset the
-   same migration counter, consume the same inbox, execute proposals, audit
-   overlapping transcripts, and clear `is_running` while another session is still
-   active. A team must either serialize discussion sessions or reject a second
-   session deterministically.
-
-2. **Model token-limit admission is not atomic.**
-   `generate_with_retry()` checks current usage before awaiting the model and only
-   records consumption after the response. Concurrent requests can all pass the
-   same check and exceed a hard budget. Prompt tokens need an atomic reservation
-   before the call, followed by response-token reconciliation and a defined refund
-   policy for failures and cancellation. The current post-call update is serialized
-   by a normal single event loop, but it is not protected for cross-thread access.
-
-3. **LLM governance approval accepts truthy non-boolean values.**
-   The proxied communication, ancestor-approval migration, and lineage-path
-   migration policies use `bool(data.get("approved", False))`. For example, the
-   JSON value `"false"` is therefore treated as approval. These authorization
-   boundaries must accept only the literal JSON boolean `true`; malformed types
-   must fail closed.
-
-4. **State restore can leave a partially replaced live manager.**
-   `_apply_state_snapshot()` mutates configuration and registries, clears live
-   agents/libraries/teams, and rewrites DocLib contents before the complete snapshot
-   has been validated. A later error leaves mixed old/new runtime state and partial
-   filesystem contents. Missing team members are silently omitted, and persisted
-   depth caches are trusted instead of recomputed. Restore needs complete referential,
-   topology, model-binding, and file validation before an atomic commit.
-
-5. **DocLib containment does not defend against symbolic links.**
-   `_resolve_path()` uses lexical `abspath`/`commonpath` checks, so a symlink below
-   the library root can redirect reads or writes outside that root. In addition,
-   `replace_all_files()` is documented as atomic but deletes the live directory and
-   rebuilds it in place. Restore must reject symlink traversal and publish staged
-   directory contents with a crash-safe directory swap.
-
 ### High
 
 1. **Persistence admission and database ownership are not production-bounded.**
@@ -74,10 +34,12 @@ Any resolved issues should not be stored in this document.
 
 4. **Numeric configuration validation is incomplete.**
    Retry counts, backoff factors, discussion/tool rounds, migration limits, inbox
-   thresholds, and model token limits accept invalid zero or negative values, and
-   runtime assignment is not validated. Team-size enforcement also uses `assert`,
-   which disappears under `python -O`. `strict_state_persistence` is persisted but
-   currently has no behavioral effect and should either be implemented or removed.
+   thresholds, and several other numeric settings accept invalid zero or negative
+   values. Token limits are validated at construction, but mutable configuration
+   containers and later runtime assignment are not validated. Team-size enforcement
+   also uses `assert`, which disappears under `python -O`.
+   `strict_state_persistence` is persisted but currently has no behavioral effect
+   and should either be implemented or removed.
 
 5. **Lifecycle and extension hooks can block indefinitely.**
    `ATTManager.close()` waits for all emergency tasks without a deadline, so a hung
@@ -97,10 +59,11 @@ Any resolved issues should not be stored in this document.
    lock. Large histories, inboxes, or DocLib indexes can still create latency spikes.
 
 8. **Adversarial reliability coverage is incomplete.**
-   The suite covers incremental writes and a slow-write heartbeat, but not corrupted
-   snapshots with rollback assertions, process interruption during restore, symbolic
-   link attacks, competing managers/processes, cancellation propagation, bounded
-   queue behavior, or long-duration persistence stress.
+   The suite now covers missing-reference rollback, late publication rollback,
+   native symlink attacks, token-call cancellation, incremental writes, and a
+   slow-write heartbeat. It still lacks a complete corruption matrix, abrupt
+   process interruption, competing managers/processes, cancellation at every
+   awaited boundary, bounded queue behavior, and long-duration persistence stress.
 
 ## Future Plans
 

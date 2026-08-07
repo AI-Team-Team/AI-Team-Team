@@ -897,6 +897,33 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                 return f"Successfully revoked permissions for path '{clean_path}' in library '{lib_id}' for team '{target_team_id}'."
         return f"No permissions found for path '{clean_path}' in library '{lib_id}' for team '{target_team_id}'."
 
+    async def create_library_link(
+        source_lib_id: str,
+        source_path: str,
+        target_lib_id: str,
+        target_path: str,
+    ) -> str:
+        """Creates an ACL-aware cross-DocLib file link."""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        caller_team = _resolve_actual_team(caller_node, att_manager)
+        if not caller_team:
+            return "Error: Could not resolve the active AgentTeam."
+        try:
+            await att_manager.create_library_link(
+                caller_team.team_id,
+                source_lib_id,
+                source_path,
+                target_lib_id,
+                target_path,
+            )
+            return (
+                f"Successfully linked '{source_lib_id}:{source_path}' to "
+                f"'{target_lib_id}:{target_path}'."
+            )
+        except Exception as exc:
+            return f"Error creating managed library link: {exc}"
+
     async def write_library_file(lib_id: str, path: str, content: str) -> str:
         """Writes content to a file in a library. Requires 'WRITE' permission. Arguments: lib_id (str), path (str), content (str)"""
         if not att_manager:
@@ -912,8 +939,9 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return f"Error: Permission denied. You do not have 'WRITE' permission for path '{path}' in library '{lib_id}'."
             
         try:
-            lib = att_manager.libraries[lib_id]
-            await asyncio.to_thread(lib.write_file, path, content)
+            await att_manager.write_library_file(
+                caller_team.team_id, lib_id, path, content
+            )
             return f"Successfully written file '{path}' in library '{lib_id}'."
         except Exception as e:
             return f"Error writing file '{path}' in library '{lib_id}': {e}"
@@ -933,9 +961,12 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return f"Error: Permission denied. You do not have 'READ' permission for path '{path}' in library '{lib_id}'."
             
         try:
-            lib = att_manager.libraries[lib_id]
-            return await asyncio.to_thread(
-                lib.read_file, path, start_line, end_line
+            return await att_manager.read_library_file(
+                caller_team.team_id,
+                lib_id,
+                path,
+                start_line,
+                end_line,
             )
         except Exception as e:
             return f"Error reading file '{path}' in library '{lib_id}': {e}"
@@ -955,8 +986,9 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return f"Error: Permission denied. You do not have 'WRITE' permission for path '{path}' in library '{lib_id}'."
             
         try:
-            lib = att_manager.libraries[lib_id]
-            return await asyncio.to_thread(lib.delete_file, path)
+            return await att_manager.delete_library_path(
+                caller_team.team_id, lib_id, path
+            )
         except Exception as e:
             return f"Error deleting path '{path}' in library '{lib_id}': {e}"
 
@@ -975,8 +1007,9 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return f"Error: Permission denied. You do not have 'READ' permission for path '{path}' in library '{lib_id}'."
             
         try:
-            lib = att_manager.libraries[lib_id]
-            items = await asyncio.to_thread(lib.list_contents, path)
+            items = await att_manager.list_library_contents(
+                caller_team.team_id, lib_id, path
+            )
             if not items:
                 return f"Library '{lib_id}' path '{path}' is empty or not a directory."
             return f"Contents of library '{lib_id}' path '{path}':\n" + "\n".join(items)
@@ -999,6 +1032,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         "list_public_libraries": Tool("list_public_libraries", "Lists all document libraries registered as publicly visible. Arguments: none", list_public_libraries),
         "grant_library_permission": Tool("grant_library_permission", "Grants permission ('READ' or 'WRITE') to a target team for a path in a library owned by the caller's team. Arguments: lib_id (str), path (str), target_team_id (str), permission (str)", grant_library_permission),
         "revoke_library_permission": Tool("revoke_library_permission", "Revokes all permissions for a target team under a path in a library owned by the caller's team. Arguments: lib_id (str), path (str), target_team_id (str)", revoke_library_permission),
+        "create_library_link": Tool("create_library_link", "Creates an ACL-aware file link between registered DocLibs. The caller needs WRITE on the source path and READ on the target path. Arguments: source_lib_id (str), source_path (str), target_lib_id (str), target_path (str)", create_library_link),
         "write_library_file": Tool("write_library_file", "Writes content to a file in a library. Requires 'WRITE' permission. Arguments: lib_id (str), path (str), content (str)", write_library_file),
         "read_library_file": Tool("read_library_file", "Reads a file chunk from a library. Requires 'READ' permission. Arguments: lib_id (str), path (str), start_line (int, default 1), end_line (int, optional)", read_library_file),
         "delete_library_file": Tool("delete_library_file", "Deletes a file or directory in a library. Requires 'WRITE' permission. Arguments: lib_id (str), path (str)", delete_library_file),

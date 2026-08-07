@@ -91,7 +91,8 @@ This flowchart sequences the multi-round cooperative debate process executed whe
 
 ```mermaid
 flowchart TD
-    Start["Call manager.execute_team_discussion(team, prompt, rounds)"] --> Init["1. Setup transcript logs\n2. Initialize discussion round = 1"]
+    Start["Call manager.execute_team_discussion(team, prompt, rounds)"] --> SessionLock["Wait for team.discussion_lock\n(normal and emergency sessions)"]
+    SessionLock --> Init["1. Setup transcript logs\n2. Initialize discussion round = 1"]
     
     Init --> SuppressIOGate["async with manager.suppress_auto_save():\n(Task-local dirty-delta batching)"]
     SuppressIOGate --> LoopRounds{"round <= total_rounds?"}

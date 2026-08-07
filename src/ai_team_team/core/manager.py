@@ -5,6 +5,9 @@ import logging
 import json
 import time
 import threading
+import shutil
+import tempfile
+import uuid
 from contextlib import asynccontextmanager
 from typing import List, Dict, Optional, Tuple, Any, Callable
 
@@ -19,6 +22,7 @@ from .config import ATTConfig
 from .exceptions import ATTException, TokenLimitExceededError, StateRestoreError
 from .utils import generate_with_retry
 from .adapters import ManagerDefaultClientAdapter, HandlerClientAdapter
+from .token_budget import TokenBudgetLedger
 
 from ai_team_team.database.persistence import (
     PersistenceCoordinator,
@@ -36,6 +40,7 @@ class ATTManager:
         self.broker = NegotiationBroker(self)
         self.llm_clients: Dict[str, Any] = {}
         self.model_token_usage: Dict[str, int] = {}
+        self.token_budget = TokenBudgetLedger(self)
         
         self.model_configs: Dict[str, Dict[str, Any]] = {}
         self.generator_handler: Optional[Callable[..., str]] = None
@@ -46,6 +51,9 @@ class ATTManager:
         self.tools_context: Dict[str, Any] = {"att_manager": self}
         self.libraries: Dict[str, DocumentLibrary] = {}
         self.library_permissions: Dict[str, Dict[str, Dict[str, str]]] = {} # lib_id -> path -> team_id -> permission
+        self.library_links: Dict[
+            str, Dict[str, Dict[str, str]]
+        ] = {}
         self._library_files: Dict[str, Dict[str, str]] = {}
  
         # Public Tool registries
@@ -113,6 +121,7 @@ class ATTManager:
             "agreements": full,
             "libraries": set(),
             "permissions": set(),
+            "links": set(),
             "file_changes": {},
         }
 
@@ -128,6 +137,7 @@ class ATTManager:
             "proposals",
             "libraries",
             "permissions",
+            "links",
         ):
             target[key].update(source[key])
         for lib_id, changes in source["file_changes"].items():
@@ -162,6 +172,7 @@ class ATTManager:
             or dirty["proposals"]
             or dirty["libraries"]
             or dirty["permissions"]
+            or dirty["links"]
             or dirty["file_changes"]
         )
 
@@ -176,6 +187,7 @@ class ATTManager:
         agreements: bool = False,
         libraries: Optional[set[str]] = None,
         permissions: Optional[set[str]] = None,
+        links: Optional[set[str]] = None,
         file_changes: Optional[
             Dict[str, Dict[str, Optional[str]]]
         ] = None,
@@ -193,6 +205,7 @@ class ATTManager:
         dirty["proposals"].update(proposals or set())
         dirty["libraries"].update(libraries or set())
         dirty["permissions"].update(permissions or set())
+        dirty["links"].update(links or set())
         for lib_id, changes in (file_changes or {}).items():
             dirty["file_changes"].setdefault(lib_id, {}).update(changes)
 
@@ -386,6 +399,13 @@ class ATTManager:
             )
             for lib_id in permission_ids
         }
+        link_ids = set(self.libraries) if full else set(dirty["links"])
+        links = {
+            lib_id: json.loads(
+                json.dumps(self.library_links.get(lib_id, {}))
+            )
+            for lib_id in link_ids
+        }
 
         file_changes = {
             lib_id: dict(changes)
@@ -411,10 +431,13 @@ class ATTManager:
             ),
             "libraries": libraries,
             "permissions": permissions,
+            "links": links,
             "file_changes": file_changes,
         }
 
-    async def _apply_state_snapshot(self, state: Dict[str, Any]) -> None:
+    async def _apply_state_snapshot_unvalidated(
+        self, state: Dict[str, Any]
+    ) -> None:
         configs = state["configs"]
         config_data = json.loads(configs["att_config"])
         self.config = ATTConfig(**config_data)
@@ -507,6 +530,7 @@ class ATTManager:
             self.libraries[library.lib_id] = library
             self._library_files[library.lib_id] = dict(row["files"])
         self.library_permissions = state["permissions"]
+        self.library_links = state.get("links", {})
 
         self.teams.clear()
         self._team_parent_map.clear()
@@ -532,7 +556,7 @@ class ATTManager:
             )
             team.status_map = json.loads(row["status_map"] or "{}")
             team.system_instructions = row["system_instructions"] or ""
-            team._cached_depth = row["depth"]
+            team._cached_depth = None
             team.manager = self
             team.message_inbox = row["inbox"]
             team.proposals = {
@@ -543,11 +567,7 @@ class ATTManager:
                 }
                 for proposal in row["proposals"]
             }
-            team.members = [
-                self.agents[name]
-                for name in row["members"]
-                if name in self.agents
-            ]
+            team.members = [self.agents[name] for name in row["members"]]
             team_map[team.team_id] = team
 
         for row in state["teams"]:
@@ -573,6 +593,499 @@ class ATTManager:
             tuple(pair) for pair in state["agreements"]
         )
 
+    async def _apply_state_snapshot(self, state: Dict[str, Any]) -> None:
+        """Stages, validates, and atomically publishes a restored state."""
+        if self.token_budget.has_active_reservations():
+            raise StateRestoreError(
+                "Cannot restore state while model token reservations are active."
+            )
+        try:
+            target_config = self._validate_state_snapshot(state)
+        except StateRestoreError:
+            raise
+        except Exception as exc:
+            raise StateRestoreError(
+                f"Invalid persisted state: {exc}"
+            ) from exc
+        workspace = os.path.realpath(
+            os.path.abspath(target_config.workspace_root)
+        )
+        managed_root = os.path.join(workspace, ".att_doc_libs")
+        if os.path.lexists(managed_root) and os.path.islink(managed_root):
+            raise StateRestoreError(
+                "The managed DocLib root cannot be a symbolic link."
+            )
+        os.makedirs(managed_root, exist_ok=True)
+        staging_workspace = tempfile.mkdtemp(
+            prefix=".att-restore-", dir=managed_root
+        )
+        staged_state = json.loads(json.dumps(state))
+        staged_config_data = json.loads(
+            staged_state["configs"]["att_config"]
+        )
+        staged_config_data["workspace_root"] = staging_workspace
+        staged_state["configs"]["att_config"] = json.dumps(
+            staged_config_data
+        )
+
+        staged = ATTManager(
+            Agent(
+                "__restore_staging_root__",
+                "Restore staging root",
+                llm_client=self.root_ai.llm_client,
+            ),
+            ATTConfig(workspace_root=staging_workspace),
+        )
+        staged.llm_clients = dict(self.llm_clients)
+        staged.generator_handler = self.generator_handler
+        staged.global_tools = dict(self.global_tools)
+        published: List[Tuple[str, Optional[str]]] = []
+        staged_closed = False
+        try:
+            await staged._apply_state_snapshot_unvalidated(staged_state)
+            await staged._persistence.close()
+            staged_closed = True
+            staged.config = target_config
+            staged.library_links = self._normalized_library_links(
+                state.get("links", {})
+            )
+
+            from ai_team_team.tool import get_default_tools
+
+            for library in staged.libraries.values():
+                library._on_change = self._on_library_change
+            for team in staged.teams.values():
+                team.manager = self
+                team.invalidate_depth_cache(recursive=False)
+                team.tools = get_default_tools(self.tools_context, team)
+                team.tools.update(self.global_tools)
+            for team in staged.teams.values():
+                _ = team.depth
+
+            published = self._publish_staged_libraries(
+                staged.libraries,
+                managed_root,
+            )
+            old_state = {
+                "config": self.config,
+                "root_ai": self.root_ai,
+                "agents": self.agents,
+                "teams": self.teams,
+                "libraries": self.libraries,
+                "library_permissions": self.library_permissions,
+                "library_links": self.library_links,
+                "library_files": self._library_files,
+                "team_parent_map": self._team_parent_map,
+                "model_configs": self.model_configs,
+                "presets": self.presets,
+                "model_token_usage": self.model_token_usage,
+                "agreements": self.broker.peer_talk_agreements,
+            }
+            try:
+                self.config = target_config
+                self.root_ai = staged.root_ai
+                self.agents = staged.agents
+                self.teams = staged.teams
+                self.libraries = staged.libraries
+                self.library_permissions = staged.library_permissions
+                self.library_links = staged.library_links
+                self._library_files = staged._library_files
+                self._team_parent_map = staged._team_parent_map
+                self.model_configs = staged.model_configs
+                self.presets = staged.presets
+                self.model_token_usage = staged.model_token_usage
+                self.broker.peer_talk_agreements = set(
+                    staged.broker.peer_talk_agreements
+                )
+                self.supervisor.root_ai = self.root_ai
+                self.tools_context["att_manager"] = self
+                self.token_budget.reset_reservations()
+            except Exception:
+                self.config = old_state["config"]
+                self.root_ai = old_state["root_ai"]
+                self.agents = old_state["agents"]
+                self.teams = old_state["teams"]
+                self.libraries = old_state["libraries"]
+                self.library_permissions = old_state["library_permissions"]
+                self.library_links = old_state["library_links"]
+                self._library_files = old_state["library_files"]
+                self._team_parent_map = old_state["team_parent_map"]
+                self.model_configs = old_state["model_configs"]
+                self.presets = old_state["presets"]
+                self.model_token_usage = old_state["model_token_usage"]
+                self.broker.peer_talk_agreements = old_state["agreements"]
+                self.supervisor.root_ai = self.root_ai
+                self._rollback_published_libraries(published)
+                published = []
+                raise
+            self._discard_library_backups(published)
+            published = []
+        except StateRestoreError:
+            if published:
+                self._rollback_published_libraries(published)
+            raise
+        except Exception as exc:
+            if published:
+                self._rollback_published_libraries(published)
+            raise StateRestoreError(
+                f"State restoration failed before commit: {exc}"
+            ) from exc
+        finally:
+            if not staged_closed:
+                await asyncio.shield(staged._persistence.close())
+            shutil.rmtree(staging_workspace, ignore_errors=True)
+
+    def _validate_state_snapshot(self, state: Dict[str, Any]) -> ATTConfig:
+        """Validates every persisted reference before staging side effects."""
+        try:
+            configs = state["configs"]
+            config = ATTConfig(**json.loads(configs["att_config"]))
+            persisted_model_configs = json.loads(
+                configs.get("model_configs", "{}")
+            )
+            persisted_presets = json.loads(configs.get("presets", "{}"))
+            persisted_usage = json.loads(
+                configs.get("model_token_usage", "{}")
+            )
+            agent_rows = state["agents"]
+            team_rows = state["teams"]
+            library_rows = state["libraries"]
+            permissions = state["permissions"]
+            agreements = state["agreements"]
+        except Exception as exc:
+            raise StateRestoreError(
+                f"Invalid persisted state structure: {exc}"
+            ) from exc
+
+        agent_names = [row.get("name") for row in agent_rows]
+        if None in agent_names or len(agent_names) != len(set(agent_names)):
+            raise StateRestoreError("Agent identifiers are missing or duplicated.")
+        root_name = configs.get("root_ai_name")
+        if root_name not in set(agent_names):
+            raise StateRestoreError(
+                f"Persisted root agent {root_name!r} was not found."
+            )
+        if not isinstance(persisted_model_configs, dict) or not isinstance(
+            persisted_presets, dict
+        ):
+            raise StateRestoreError(
+                "Persisted model configurations and presets must be objects."
+            )
+        if not isinstance(persisted_usage, dict) or any(
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value < 0
+            for value in persisted_usage.values()
+        ):
+            raise StateRestoreError(
+                "Persisted model token usage must contain non-negative integers."
+            )
+        missing_aliases = sorted(
+            {
+                row.get("model_alias")
+                for row in agent_rows
+                if row.get("model_alias") not in {None, "default"}
+                and row.get("model_alias") not in self.llm_clients
+                and not self.generator_handler
+            }
+        )
+        if missing_aliases:
+            raise StateRestoreError(
+                "Missing runtime bindings for model aliases: "
+                + ", ".join(missing_aliases)
+            )
+        has_default_binding = bool(
+            "default" in self.llm_clients
+            or self.root_ai.llm_client
+            or self.generator_handler
+        )
+        if any(
+            row.get("model_alias") in {None, "default"}
+            for row in agent_rows
+        ) and not has_default_binding:
+            raise StateRestoreError(
+                "No runtime binding is available for the default model alias."
+            )
+        for row in agent_rows:
+            if row.get("last_context"):
+                try:
+                    json.loads(row["last_context"])
+                except Exception as exc:
+                    raise StateRestoreError(
+                        f"Agent {row['name']!r} has invalid last_context JSON."
+                    ) from exc
+
+        team_ids = [row.get("team_id") for row in team_rows]
+        if None in team_ids or len(team_ids) != len(set(team_ids)):
+            raise StateRestoreError("Team identifiers are missing or duplicated.")
+        team_id_set = set(team_ids)
+        agent_name_set = set(agent_names)
+        parent_map: Dict[str, Optional[str]] = {}
+        for row in team_rows:
+            team_id = row["team_id"]
+            try:
+                json.loads(row.get("communication_rules") or "{}")
+                json.loads(row.get("status_map") or "{}")
+            except Exception as exc:
+                raise StateRestoreError(
+                    f"Team {team_id!r} contains invalid JSON metadata."
+                ) from exc
+            missing_members = sorted(
+                set(row.get("members", [])) - agent_name_set
+            )
+            if missing_members:
+                raise StateRestoreError(
+                    f"Team {team_id!r} references missing members: "
+                    + ", ".join(missing_members)
+                )
+            if len(row.get("members", [])) != len(
+                set(row.get("members", []))
+            ):
+                raise StateRestoreError(
+                    f"Team {team_id!r} contains duplicate members."
+                )
+            parent_id = row.get("parent_team_id")
+            if parent_id is not None and parent_id not in team_id_set:
+                raise StateRestoreError(
+                    f"Team {team_id!r} references missing parent {parent_id!r}."
+                )
+            parent_map[team_id] = parent_id
+            creator_type = row.get("creator_type")
+            creator_id = row.get("creator_id")
+            if creator_type == "agent":
+                valid_creator = creator_id in agent_name_set
+            elif creator_type == "team":
+                valid_creator = creator_id in team_id_set and creator_id != team_id
+            else:
+                valid_creator = False
+            if not valid_creator:
+                raise StateRestoreError(
+                    f"Team {team_id!r} has invalid creator reference "
+                    f"{creator_type!r}:{creator_id!r}."
+                )
+            for proposal in row.get("proposals", []):
+                initiator_type = proposal.get("initiator_type")
+                initiator_name = proposal.get("initiator_name")
+                if (
+                    initiator_type == "individual"
+                    and initiator_name not in agent_name_set
+                ):
+                    raise StateRestoreError(
+                        f"Proposal {proposal.get('proposal_id')!r} references "
+                        f"missing initiator agent {initiator_name!r}."
+                    )
+                if (
+                    initiator_type == "AT"
+                    and initiator_name not in {"AT", team_id}
+                ):
+                    raise StateRestoreError(
+                        f"Proposal {proposal.get('proposal_id')!r} references "
+                        f"invalid team initiator {initiator_name!r}."
+                    )
+
+        for team_id in team_id_set:
+            seen = set()
+            current: Optional[str] = team_id
+            while current is not None:
+                if current in seen:
+                    raise StateRestoreError(
+                        f"Team topology contains a cycle at {current!r}."
+                    )
+                seen.add(current)
+                current = parent_map[current]
+
+        library_ids = [row.get("lib_id") for row in library_rows]
+        if None in library_ids or len(library_ids) != len(set(library_ids)):
+            raise StateRestoreError("DocLib identifiers are missing or duplicated.")
+        library_id_set = set(library_ids)
+        files_by_library: Dict[str, Dict[str, str]] = {}
+        for row in library_rows:
+            lib_id = row["lib_id"]
+            if (
+                not isinstance(lib_id, str)
+                or lib_id in {"", ".", ".."}
+                or "/" in lib_id
+                or "\\" in lib_id
+                or "\x00" in lib_id
+            ):
+                raise StateRestoreError(
+                    f"Invalid DocLib identifier {lib_id!r}."
+                )
+            if row.get("owner_team_id") not in team_id_set:
+                raise StateRestoreError(
+                    f"DocLib {lib_id!r} references a missing owner team."
+                )
+            normalized_files = {}
+            for path, content in row.get("files", {}).items():
+                clean = self._normalize_library_file_path(path)
+                if clean in normalized_files:
+                    raise StateRestoreError(
+                        f"DocLib {lib_id!r} contains duplicate file path {clean!r}."
+                    )
+                if not isinstance(content, str):
+                    raise StateRestoreError(
+                        f"DocLib file {lib_id}:{clean} has non-text content."
+                    )
+                normalized_files[clean] = content
+            files_by_library[lib_id] = normalized_files
+        for team_id in team_id_set:
+            if f"DL-{team_id}" not in library_id_set:
+                raise StateRestoreError(
+                    f"Team {team_id!r} is missing its built-in DocLib."
+                )
+
+        for lib_id, path_map in permissions.items():
+            if lib_id not in library_id_set:
+                raise StateRestoreError(
+                    f"Permissions reference missing DocLib {lib_id!r}."
+                )
+            for path, team_map in path_map.items():
+                self.normalize_library_path(path)
+                for team_id, permission in team_map.items():
+                    if team_id not in team_id_set:
+                        raise StateRestoreError(
+                            f"Permissions reference missing team {team_id!r}."
+                        )
+                    if permission not in {"READ", "WRITE"}:
+                        raise StateRestoreError(
+                            f"Invalid DocLib permission {permission!r}."
+                        )
+
+        normalized_links = self._normalized_library_links(
+            state.get("links", {})
+        )
+        for source_lib_id, path_map in normalized_links.items():
+            if source_lib_id not in library_id_set:
+                raise StateRestoreError(
+                    f"Link references missing source DocLib {source_lib_id!r}."
+                )
+            for source_path, target in path_map.items():
+                target_lib_id = target["target_lib_id"]
+                target_path = target["target_path"]
+                if target_lib_id not in library_id_set:
+                    raise StateRestoreError(
+                        f"Link references missing target DocLib {target_lib_id!r}."
+                    )
+                if source_lib_id == target_lib_id:
+                    raise StateRestoreError(
+                        "Managed links must target another DocLib."
+                    )
+                if source_path in files_by_library[source_lib_id]:
+                    raise StateRestoreError(
+                        f"Link path {source_lib_id}:{source_path} collides with a file."
+                    )
+                visited = set()
+                node = (source_lib_id, source_path)
+                while True:
+                    if node in visited:
+                        raise StateRestoreError(
+                            f"Managed DocLib link cycle detected at {node!r}."
+                        )
+                    visited.add(node)
+                    link = normalized_links.get(node[0], {}).get(node[1])
+                    if link is None:
+                        if node[1] not in files_by_library.get(node[0], {}):
+                            raise StateRestoreError(
+                                f"Managed link resolves to missing file {node!r}."
+                            )
+                        break
+                    node = (link["target_lib_id"], link["target_path"])
+
+        for sender_id, recipient_id in agreements:
+            if sender_id not in team_id_set or recipient_id not in team_id_set:
+                raise StateRestoreError(
+                    "Broker agreement references a missing team."
+                )
+        return config
+
+    def _normalized_library_links(
+        self, links: Dict[str, Dict[str, Dict[str, str]]]
+    ) -> Dict[str, Dict[str, Dict[str, str]]]:
+        normalized: Dict[str, Dict[str, Dict[str, str]]] = {}
+        try:
+            for source_lib_id, path_map in links.items():
+                for source_path, target in path_map.items():
+                    clean_source = self._normalize_library_file_path(source_path)
+                    clean_target = self._normalize_library_file_path(
+                        target["target_path"]
+                    )
+                    source_map = normalized.setdefault(source_lib_id, {})
+                    if clean_source in source_map:
+                        raise ValueError(
+                            f"Duplicate normalized link path {clean_source!r}."
+                        )
+                    source_map[clean_source] = {
+                        "target_lib_id": target["target_lib_id"],
+                        "target_path": clean_target,
+                    }
+        except Exception as exc:
+            raise StateRestoreError(
+                f"Invalid managed DocLib link metadata: {exc}"
+            ) from exc
+        return normalized
+
+    def _publish_staged_libraries(
+        self,
+        libraries: Dict[str, DocumentLibrary],
+        managed_root: str,
+    ) -> List[Tuple[str, Optional[str]]]:
+        published: List[Tuple[str, Optional[str]]] = []
+        try:
+            staged_ids = set(libraries)
+            for lib_id, old_library in self.libraries.items():
+                final_root = os.path.join(managed_root, lib_id)
+                if (
+                    lib_id in staged_ids
+                    or os.path.abspath(old_library.root_dir)
+                    != os.path.abspath(final_root)
+                    or not os.path.exists(final_root)
+                ):
+                    continue
+                backup = os.path.join(
+                    managed_root,
+                    f".{lib_id}-restore-backup-{uuid.uuid4().hex}",
+                )
+                os.replace(final_root, backup)
+                published.append((final_root, backup))
+            for lib_id, library in libraries.items():
+                final_root = os.path.join(managed_root, lib_id)
+                if os.path.lexists(final_root) and os.path.islink(final_root):
+                    raise PermissionError(
+                        f"DocLib root {final_root!r} is a symbolic link."
+                    )
+                backup = None
+                if os.path.exists(final_root):
+                    backup = os.path.join(
+                        managed_root,
+                        f".{lib_id}-restore-backup-{uuid.uuid4().hex}",
+                    )
+                    os.replace(final_root, backup)
+                published.append((final_root, backup))
+                os.replace(library.root_dir, final_root)
+                library.root_dir = final_root
+            return published
+        except Exception:
+            self._rollback_published_libraries(published)
+            raise
+
+    @staticmethod
+    def _rollback_published_libraries(
+        published: List[Tuple[str, Optional[str]]]
+    ) -> None:
+        for final_root, backup in reversed(published):
+            if os.path.exists(final_root):
+                shutil.rmtree(final_root, ignore_errors=True)
+            if backup and os.path.exists(backup):
+                os.replace(backup, final_root)
+
+    @staticmethod
+    def _discard_library_backups(
+        published: List[Tuple[str, Optional[str]]]
+    ) -> None:
+        for _, backup in published:
+            if backup:
+                shutil.rmtree(backup, ignore_errors=True)
+
     def _new_document_library(
         self,
         *,
@@ -581,6 +1094,7 @@ class ATTManager:
         owner_team_id: str,
         description: str,
         is_public_visible: bool,
+        storage_dir: Optional[str] = None,
     ) -> DocumentLibrary:
         self._library_files.setdefault(lib_id, {})
         return DocumentLibrary(
@@ -591,6 +1105,7 @@ class ATTManager:
             is_public_visible=is_public_visible,
             root_dir=self.config.workspace_root,
             on_change=self._on_library_change,
+            storage_dir=storage_dir,
         )
 
     def _on_library_change(
@@ -691,12 +1206,12 @@ class ATTManager:
             policy = "auto"
 
         candidates = []
+        required_tokens = max(1, getattr(error, "required_tokens", 1))
         for name in self.config.model_token_limits.keys():
             if name == old_model:
                 continue
-            usage = self.model_token_usage.get(name, 0)
-            limit = self.config.model_token_limits[name]
-            if usage < limit:
+            available = self.token_budget.available(name)
+            if available is not None and available >= required_tokens:
                 candidates.append(name)
         if "default" not in self.config.model_token_limits and "default" not in candidates:
             candidates.append("default")
@@ -1128,6 +1643,183 @@ class ATTManager:
         normalized = DocumentLibrary._normalize_path(path, allow_root=True)
         return "/" if not normalized else f"/{normalized}"
 
+    @staticmethod
+    def _normalize_library_file_path(path: str) -> str:
+        return DocumentLibrary._normalize_path(path, allow_root=False)
+
+    def _resolve_library_target(
+        self,
+        team_id: str,
+        lib_id: str,
+        path: str,
+        required_permission: str,
+        *,
+        initial_visited: Optional[set[Tuple[str, str]]] = None,
+    ) -> Tuple[DocumentLibrary, str]:
+        """Resolves a managed file-link chain with live ACL checks."""
+        current_lib_id = lib_id
+        current_path = self._normalize_library_file_path(path)
+        visited = set(initial_visited or set())
+        while True:
+            node = (current_lib_id, current_path)
+            if node in visited:
+                raise ValueError("Managed DocLib link cycle detected.")
+            visited.add(node)
+            if current_lib_id not in self.libraries:
+                raise FileNotFoundError(
+                    f"Document library '{current_lib_id}' not found."
+                )
+            if not self.check_library_access(
+                team_id,
+                current_lib_id,
+                current_path,
+                required_permission,
+            ):
+                raise PermissionError(
+                    f"Permission denied for {required_permission} on "
+                    f"'{current_lib_id}:{current_path}'."
+                )
+            target = self.library_links.get(current_lib_id, {}).get(
+                current_path
+            )
+            if target is None:
+                return self.libraries[current_lib_id], current_path
+            current_lib_id = target["target_lib_id"]
+            current_path = self._normalize_library_file_path(
+                target["target_path"]
+            )
+
+    async def create_library_link(
+        self,
+        team_id: str,
+        source_lib_id: str,
+        source_path: str,
+        target_lib_id: str,
+        target_path: str,
+    ) -> None:
+        """Creates one ACL-aware cross-library file link."""
+        if source_lib_id == target_lib_id:
+            raise ValueError("Managed links must target another DocLib.")
+        source_path = self._normalize_library_file_path(source_path)
+        target_path = self._normalize_library_file_path(target_path)
+        if source_lib_id not in self.libraries or target_lib_id not in self.libraries:
+            raise FileNotFoundError("Both source and target DocLibs must be registered.")
+        if not self.check_library_access(
+            team_id, source_lib_id, source_path, "WRITE"
+        ):
+            raise PermissionError(
+                "WRITE permission is required for the link path."
+            )
+        if source_path in self.library_links.get(source_lib_id, {}):
+            raise FileExistsError("A managed link already exists at that path.")
+        if await asyncio.to_thread(
+            self.libraries[source_lib_id].path_exists, source_path
+        ):
+            raise FileExistsError("A physical file already exists at that path.")
+
+        target_library, resolved_target = self._resolve_library_target(
+            team_id,
+            target_lib_id,
+            target_path,
+            "READ",
+            initial_visited={(source_lib_id, source_path)},
+        )
+        if not await asyncio.to_thread(
+            target_library.is_file, resolved_target
+        ):
+            raise FileNotFoundError(
+                "Managed links may target existing files only."
+            )
+        with self._snapshot_lock:
+            self.library_links.setdefault(source_lib_id, {})[source_path] = {
+                "target_lib_id": target_lib_id,
+                "target_path": target_path,
+            }
+            self._auto_save(links={source_lib_id})
+
+    async def read_library_file(
+        self,
+        team_id: str,
+        lib_id: str,
+        path: str,
+        start_line: int = 1,
+        end_line: Optional[int] = None,
+    ) -> str:
+        library, resolved_path = self._resolve_library_target(
+            team_id, lib_id, path, "READ"
+        )
+        return await asyncio.to_thread(
+            library.read_file, resolved_path, start_line, end_line
+        )
+
+    async def write_library_file(
+        self,
+        team_id: str,
+        lib_id: str,
+        path: str,
+        content: str,
+    ) -> None:
+        library, resolved_path = self._resolve_library_target(
+            team_id, lib_id, path, "WRITE"
+        )
+        await asyncio.to_thread(library.write_file, resolved_path, content)
+
+    async def delete_library_path(
+        self, team_id: str, lib_id: str, path: str
+    ) -> str:
+        clean_path = self._normalize_library_file_path(path)
+        if not self.check_library_access(team_id, lib_id, clean_path, "WRITE"):
+            raise PermissionError(
+                f"Permission denied for WRITE on '{lib_id}:{clean_path}'."
+            )
+        with self._snapshot_lock:
+            link_map = self.library_links.get(lib_id, {})
+            if clean_path in link_map:
+                del link_map[clean_path]
+                self._auto_save(links={lib_id})
+                return (
+                    f"Successfully deleted managed link '{path}' in "
+                    f"library '{lib_id}'."
+                )
+        return await asyncio.to_thread(
+            self.libraries[lib_id].delete_file, clean_path
+        )
+
+    async def list_library_contents(
+        self, team_id: str, lib_id: str, path: str = "/"
+    ) -> List[str]:
+        clean_acl_path = self.normalize_library_path(path)
+        if not self.check_library_access(
+            team_id, lib_id, clean_acl_path, "READ"
+        ):
+            raise PermissionError(
+                f"Permission denied for READ on '{lib_id}:{path}'."
+            )
+        clean_dir = "" if clean_acl_path == "/" else clean_acl_path.lstrip("/")
+        if clean_dir in self.library_links.get(lib_id, {}):
+            raise NotADirectoryError("Managed links are file links only.")
+        items = await asyncio.to_thread(
+            self.libraries[lib_id].list_contents, path
+        )
+        for source_path, target in self.library_links.get(lib_id, {}).items():
+            if os.path.dirname(source_path) != clean_dir:
+                continue
+            try:
+                target_library, target_path = self._resolve_library_target(
+                    team_id, lib_id, source_path, "READ"
+                )
+                if not await asyncio.to_thread(
+                    target_library.is_file, target_path
+                ):
+                    continue
+            except (FileNotFoundError, PermissionError, ValueError):
+                continue
+            items.append(
+                f"[LINK] /{source_path} -> "
+                f"{target['target_lib_id']}:{target['target_path']}"
+            )
+        return sorted(items)
+
 
     def render_topology_tree(self) -> str:
         """Renders the active hierarchical agent team lineage as an indented tree."""
@@ -1350,6 +2042,22 @@ class ATTManager:
             )
 
     async def execute_team_discussion(
+        self,
+        team: AgentTeam,
+        prompt: str,
+        rounds: int = 2,
+        skip_audit: bool = False,
+    ) -> str:
+        """Queues one discussion behind any active session for the same team."""
+        async with team.discussion_lock:
+            return await self._execute_team_discussion_session(
+                team,
+                prompt,
+                rounds=rounds,
+                skip_audit=skip_audit,
+            )
+
+    async def _execute_team_discussion_session(
         self,
         team: AgentTeam,
         prompt: str,
