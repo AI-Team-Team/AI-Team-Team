@@ -123,8 +123,8 @@ class TestATTGovernance(unittest.IsolatedAsyncioTestCase):
         self.assertIn(proposal_id, team.proposals)
         proposal = team.proposals[proposal_id]
         self.assertEqual(proposal["status"], "active")
-        self.assertIn(agent1.name, proposal["votes"])
-        self.assertEqual(proposal["votes"][agent1.name]["vote"], "Agree")
+        self.assertIn(agent1.agent_id, proposal["votes"])
+        self.assertEqual(proposal["votes"][agent1.agent_id]["vote"], "Agree")
 
         # 2. Test retraction authorization: Agent2 tries to retract Agent1's proposal -> should fail
         res_retract_fail = await retract_vote_agent2(proposal_id=proposal_id)

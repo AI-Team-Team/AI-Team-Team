@@ -108,3 +108,7 @@ Direct mock clients used by persisted agents must be registered with `manager.re
 Callbacks are background observations. Call `await manager.flush_callbacks()` before asserting their effects. Retry tests must use typed transient failures such as `ConnectionError` or an exception with `retryable=True`; arbitrary `RuntimeError` instances intentionally do not retry.
 
 Reliability changes should cover schema preflight without mutation, competing processes, abrupt writer termination, pending-delta coalescing, cancellation, shared-agent context/tool scope, durable UNKNOWN alert states, callback ordering and isolation, and hanging-provider shutdown behavior. The suite's `test_high_hardening.py` contains reference patterns for these cases.
+
+Private Agent DocLib tests must create agents through `register_agent` or a supported team-creation path.
+
+Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, schema 5 corruption, and the absence of private body text from transcripts, callbacks, and message history. `test_private_doclib.py` contains the baseline end-to-end cases.

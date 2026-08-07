@@ -102,6 +102,18 @@ manager.register_tool(
 )
 ```
 
+### Private workspace tools
+
+The built-in private tools (`list/read/write/delete/move_private_file`) have no owner or library parameter.
+
+They resolve the current Agent from invocation `ContextVar` state and fail closed without it.
+
+`publish_private_file` copies an ordinary private file to the current team's built-in DocLib after a live target `WRITE` check; `move_library_file` requires `WRITE` on both team-library paths.
+
+Tool observations may contain content only when the owner explicitly reads a private file. That observation expires when the current reasoning invocation ends and is replaced by a redacted marker before the shared AI can run for another team.
+
+Operational callbacks never contain private file bodies.
+
 ## 6. Shared Context Injection (`tools_context`)
 
 Instead of relying on global variables, you should use the `tools_context`. ATT automatically attempts to inject it into any tool that defines a `context` parameter.

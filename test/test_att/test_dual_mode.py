@@ -199,6 +199,8 @@ class TestDualModeToolCalling(unittest.IsolatedAsyncioTestCase):
         root_ai = Agent(name="Root", role="Architect", llm_client=mock_native_client)
         manager = ATTManager(root_ai=root_ai, config=config)
         team = manager.create_agent_team(creator=root_ai, member_count=3)
+        manager.register_agent(agent_native)
+        manager.register_agent(agent_text)
         
         ans_native = await team.execute_reasoning_step(agent_native, "Start", "System instructions", manager=manager)
         self.assertEqual(ans_native, "Native Answer")

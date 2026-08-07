@@ -114,6 +114,7 @@ class SupervisoryTeam:
                     "violations, and reasoning continuity."
                 ),
             )
+            supervisor_team._runtime_only = True
             supervisor_team.members = self.auditors
             supervisor_team.system_instructions = (
                 "You are a strict, objective Supervisory Auditor. Cooperate "

@@ -16,12 +16,14 @@ One instance may be shared across teams. Its `lock` serializes complete model tu
 * **Constructor**:
 
   ```python
-  agent = Agent(name: str, role: str, llm_client: Optional[Any] = None, role_description: str = "", system_instructions: str = "")
+  agent = Agent(name: str, role: str, llm_client: Optional[Any] = None, role_description: str = "", system_instructions: str = "", agent_id: Optional[str] = None)
   ```
 
 * **Methods**:
   * `launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None) -> AgentTeam`
         Allows any active agent to recursively launch their own child dynamic `AgentTeam` structure.
+
+`agent_id` is an immutable canonical UUID. `_private_doc_library_id` and `_model_alias` are manager-owned persistence fields; public code reads only `private_doc_library_id`.
 
 ### `AgentTeam`
 
@@ -64,6 +66,12 @@ Synchronous and asynchronous callbacks share one ordered background dispatcher; 
     Registers one stable alias for one direct client identity.
   * `register_generator_handler(handler: Callable[..., str])`
     Registers a global callback handler for generating text from a model alias.
+  * `register_agent(agent: Agent) -> Agent`
+    Installs one stable identity in the ID registry and active name index and creates exactly one canonical private library.
+  * `get_private_library_id(agent_id: str) -> str`
+    Resolves private ownership without exposing a raw private-library capability on `Agent`.
+  * `await retire_agent(...)` / `await reactivate_agent(...)`
+    Applies strict retain/archive/delete lifecycle rules and explicit model rebinding.
   * `register_preset(name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]])`
     Registers custom dynamic committee presets.
   * `get_preset(name: str) -> dict`
@@ -84,6 +92,10 @@ Synchronous and asynchronous callbacks share one ordered background dispatcher; 
     Locates the parent team in the active team topology using child references and creator pointers.
   * `check_library_access(team_id: str, lib_id: str, path: str, required_permission: str) -> bool`
     Evaluates if a team is granted `READ` or `WRITE` access to a Document Library path based on prefix segments.
+  * `list_private_files`, `read_private_file`, `write_private_file`, `delete_private_file`, `move_private_file`, `publish_private_file`
+    Resolve ownership only from `_active_tool_agent`; private operations never accept caller-supplied owner or library identifiers.
+  * `move_library_file(...)`
+    Atomically moves a normal library file after checking both path ACLs.
   * `render_topology_tree() -> str`
     Renders the active lineage tree map in ASCII format.
   * `negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`
@@ -132,7 +144,8 @@ Configuration options for tuning the ATT multi-agent framework.
       model_max_output_tokens: Optional[dict] = None,
       default_max_output_tokens: int = 1024,
       audit_unknown_escalation_mode: str = "wake",
-      audit_unknown_soft_threshold: int = 100
+      audit_unknown_soft_threshold: int = 100,
+      agent_private_data_policy: str = "archive"
   )
   ```
 
@@ -173,7 +186,7 @@ Size-aware paginated file reader protecting agent context windows.
 
 ### `DocumentLibrary`
 
-Represents a team's document database with prefix-based permissions and path traversal protection.
+Represents a `team` or `agent_private` document store with path traversal protection. Team libraries use prefix ACLs. Private libraries reject ACLs, public visibility, and managed links at manager boundaries.
 
 * **Constructor**:
 
@@ -188,6 +201,8 @@ Represents a team's document database with prefix-based permissions and path tra
   * `read_file(path: str, start_line: int, end_line: Optional[int]) -> str`
   * `delete_file(path: str) -> str`
   * `list_contents(path: str) -> List[str]`
+  * `move_file(source_path: str, target_path: str, overwrite: bool = False)`
+  * `write_file_atomic(path: str, content: str, overwrite: bool = False)`
 
 Native filesystem symlinks are rejected. Cross-library links are manager-owned metadata exposed through `create_library_link`; direct `DocumentLibrary` methods operate on physical files only.
 
@@ -214,11 +229,11 @@ Native filesystem symlinks are rejected. Cross-library links are manager-owned m
 SQLAlchemy Declarative Models mapping the topology schema, defined in [models.py](file:///Users/charlestsaur/Documents/sandbox/AI-Team-Team/src/ai_team_team/database/models.py):
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
-* **`AgentModel` & `AgentMessageModel`**: Persists agent identity profiles and complete conversation histories with `team_id` and `discussion_id` provenance.
-* **`TeamModel`**: Tracks active topologies, migration counts, sibling settings, and links dual-linked parent-child hierarchy nodes.
+* **`AgentModel` & `AgentMessageModel`**: Uses immutable `agent_id` primary/foreign keys and persists lifecycle profiles plus complete conversation histories with `team_id` and `discussion_id` provenance.
+* **`TeamModel`**: Tracks active topologies, migration counts, sibling settings, and UUID-backed creator/member references.
 * **`TeamInboxModel` & `TeamProposalModel`**: Persists child escalations, peer messages, and democratic proposal votes.
 * **`BrokerAgreementModel`**: Tracks cross-lineage tunnels negotiated by the broker.
-* **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel` & `DocLibLinkModel`**: Persists libraries, ACL segments, physical document contents, and managed cross-library file-link targets.
+* **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel` & `DocLibLinkModel`**: Persists library kind, mutually exclusive team/agent ownership, lifecycle, ACL segments, physical document contents, and managed team-library link targets.
 
 ### Database Session Factory
 

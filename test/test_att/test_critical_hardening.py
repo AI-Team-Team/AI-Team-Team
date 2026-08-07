@@ -258,7 +258,7 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
         await source.close()
         with closing(sqlite3.connect(db_path)) as connection:
             connection.execute(
-                "INSERT INTO team_members (team_id, agent_name) VALUES (?, ?)",
+                "INSERT INTO team_members (team_id, agent_id) VALUES (?, ?)",
                 (persisted_team.team_id, "missing-agent"),
             )
             connection.commit()

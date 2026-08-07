@@ -9,6 +9,8 @@ The `ATTManager` is the singleton-like global event bus and state coordinator. I
 ### Key Internal State
 
 - **`teams (Dict[str, AgentTeam])`**: A flat hash map tracking every active team in the lineage hierarchy by their unique `team_id`.
+- **`agents (Dict[str, Agent])`**: Compatibility index of active agents by unique display name.
+- **`_agents_by_id (Dict[str, Agent])`**: Authoritative registry of active, retained, and archived identities by immutable UUID.
 - **`model_configs (Dict[str, Any])`**: The centralized registry decoupling model identities from underlying provider configurations.
 - **`deferred_emergency_tasks (queue.Queue)`**: A thread-safe queue holding `asyncio` coroutines. If an emergency alert triggers while the asyncio event loop is blocked or not running, the task is deferred here and processed later via `manager.flush_deferred_tasks()`.
 - **`tools_context (Dict[str, Any])`**: A shared memory space injected into ReAct tools containing references like `{"att_manager": self}`.
@@ -39,6 +41,9 @@ The `Agent` encapsulates a single identity and ReAct execution profile.
 ### Execution Properties
 
 - **`llm_client (LLMClientProto)`**: The attached adapter handling prompt formatting and parsing.
+- **`agent_id (str)`**: Immutable canonical UUID used by persistence, team membership, creators, governance identities, and private ownership.
+- **`private_doc_library_id (str)`**: Read-only identifier for the one persistent `PDL-<agent_id>` workspace. The raw library object is intentionally not exposed on `Agent`.
+- **`lifecycle_state (str)`**: `active`, `retained`, or `archived`; inactive identities leave the active name index and do not require a model binding during restore.
 - **`messages (List[Dict])`**: The bounded high-fidelity model window.
 - **`message_history (List[Dict])`**: The complete persistent cross-team history; generated records contain `team_id` and `discussion_id`.
 - **`lock (asyncio.Lock)`**: Serializes all model work for this identity when the same agent participates in several teams.
@@ -47,3 +52,5 @@ The `Agent` encapsulates a single identity and ReAct execution profile.
 ### ReAct Compilation
 
 The agent does not run its own `while` loop. Instead, the `AgentTeam` invokes `manager.execute_reasoning_step(agent, ...)`, feeding the ReAct output back into the manager's state persistence layer.
+
+Private documents are deliberate artifacts, not hidden reasoning. They enter a model observation only after the owner explicitly invokes `read_private_file`, and enter a team library only after explicit publication.

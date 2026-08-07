@@ -24,15 +24,17 @@ flowchart TD
     Version --> Aliases["Read persisted model aliases"]
     Aliases --> Bindings{"All aliases have a direct client\nor generator handler?"}
     Bindings -- "No" --> Error["Raise StateRestoreError with all aliases"]
-    Bindings -- "Yes" --> Validate["Validate every member, creator, parent, ACL, agreement and link"]
-    Validate --> Stage["Build detached manager and temporary DocLib trees"]
+    Bindings -- "Yes" --> Validate["Validate UUID references and exactly one private DocLib per agent"]
+    Validate --> Privacy["Reject private public flags, team ACLs, links, and lifecycle mismatch"]
+    Privacy --> Stage["Build detached manager and temporary DocLib trees"]
     Stage --> Pointers["Rebuild parent/child pointers and recompute depth"]
     Pointers --> Runtime["Rebind built-in and registered runtime tools"]
     Runtime --> Publish["Publish DocLib directories and swap live registries"]
     Publish --> Ready["Manager ready"]
     Validate -- "Invalid" --> Error
+    Privacy -- "Invalid" --> Error
     Stage -- "Failure" --> Rollback["Discard staging; live manager and files unchanged"]
     Publish -- "Failure" --> Rollback
 ```
 
-SQLite uses foreign keys, WAL, and an explicit busy timeout. A second manager or process fails its non-blocking writer lease immediately. The schema is versioned and intentionally does not migrate old databases.
+SQLite uses foreign keys, WAL, and an explicit busy timeout. A second manager or process fails its non-blocking writer lease immediately. Schema 5 uses Agent UUID keys and typed team/private library ownership and intentionally does not migrate old databases.

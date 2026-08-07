@@ -24,7 +24,10 @@ from ai_team_team import (
     StateRestoreError,
 )
 from ai_team_team.core.utils import generate_with_retry
-from ai_team_team.database.persistence import DatabaseStore
+from ai_team_team.database.persistence import (
+    DatabaseStore,
+    PersistenceCoordinator,
+)
 from ai_team_team.tool import get_default_tools
 
 
@@ -182,7 +185,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
     async def test_corrupt_database_reference_matrix_is_atomic(self):
         def missing_creator(connection, ids):
             connection.execute(
-                "UPDATE teams SET creator_id='missing-agent' "
+                "UPDATE teams SET creator_agent_id='missing-agent' "
                 "WHERE team_id=?",
                 (ids["parent"],),
             )
@@ -199,6 +202,12 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 "UPDATE libraries SET owner_team_id='missing-team' "
                 "WHERE lib_id=?",
                 (ids["library"],),
+            )
+
+        def wrong_builtin_owner(connection, ids):
+            connection.execute(
+                "UPDATE libraries SET owner_team_id=? WHERE lib_id=?",
+                (ids["child"], ids["library"]),
             )
 
         def missing_permission_team(connection, ids):
@@ -231,6 +240,14 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 ("VP-corrupt", ids["parent"], "individual", "missing-agent"),
             )
 
+        def invalid_proposal_initiator_type(connection, ids):
+            connection.execute(
+                "INSERT INTO team_proposals "
+                "(proposal_id, team_id, initiator_type, initiator_name) "
+                "VALUES (?, ?, ?, ?)",
+                ("VP-invalid-type", ids["parent"], "service", "AT"),
+            )
+
         def missing_model_binding(connection, ids):
             connection.execute(
                 "UPDATE agents SET model_alias='missing-model' WHERE name='Root'"
@@ -240,10 +257,12 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             "creator": missing_creator,
             "parent": missing_parent,
             "library_owner": missing_owner,
+            "builtin_library_owner": wrong_builtin_owner,
             "permission_team": missing_permission_team,
             "link_target": missing_link_target,
             "agreement_team": missing_agreement_team,
             "proposal_initiator": missing_proposal_initiator,
+            "proposal_initiator_type": invalid_proposal_initiator_type,
             "model_binding": missing_model_binding,
         }
         for name, corrupt in corruptions.items():
@@ -347,6 +366,46 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 5000,
             )
         await manager.close()
+
+    def test_tombstones_dominate_coalesced_entity_updates(self):
+        agent_id = "00000000-0000-0000-0000-000000000001"
+        lib_id = f"PDL-{agent_id}"
+        earlier = {
+            "full": False,
+            "state_version": 1,
+            "agents": [{"agent_id": agent_id, "name": "Deleted"}],
+            "teams": [],
+            "libraries": [{"lib_id": lib_id, "name": "Deleted"}],
+            "inboxes": {},
+            "proposals": {},
+            "permissions": {lib_id: {"/": {}}},
+            "links": {lib_id: {}},
+            "file_changes": {lib_id: {"note.txt": "stale"}},
+            "deleted_agents": [],
+            "deleted_libraries": [],
+        }
+        deletion = {
+            "full": False,
+            "state_version": 2,
+            "agents": [],
+            "teams": [],
+            "libraries": [],
+            "inboxes": {},
+            "proposals": {},
+            "permissions": {},
+            "links": {},
+            "file_changes": {},
+            "deleted_agents": [agent_id],
+            "deleted_libraries": [lib_id],
+        }
+
+        merged = PersistenceCoordinator._merge_snapshots(earlier, deletion)
+
+        self.assertEqual(merged["agents"], [])
+        self.assertEqual(merged["libraries"], [])
+        self.assertNotIn(lib_id, merged["permissions"])
+        self.assertNotIn(lib_id, merged["links"])
+        self.assertNotIn(lib_id, merged["file_changes"])
 
     async def test_shared_agent_context_memory_and_serial_calls(self):
         class SerialClient:

@@ -57,7 +57,7 @@ The implementation uses `ContextVar`, so concurrent team discussions do not shar
 The database stores:
 
 - schema version, `ATTConfig`, model metadata, presets, and token usage;
-- all registered agents and their complete message histories, including each message's source `team_id` and `discussion_id`;
+- all active and inactive agents by immutable UUID, lifecycle state, private-library ownership, and complete message histories, including each message's source `team_id` and `discussion_id`;
 - teams, membership, lineage, migration counters, inboxes, and proposals;
 - broker agreements;
 - document-library metadata, ACLs, managed cross-library links, paths, and file contents.
@@ -85,7 +85,7 @@ A `model_name` attribute is accepted only when the same object is registered und
 
 Loading likewise raises `StateRestoreError` listing every missing binding and never substitutes the default model.
 
-Restoration is transactional. ATT validates every agent, member, creator, parent, model alias, DocLib owner, permission, agreement, file path, and managed link before publishing anything.
+Restoration is transactional. ATT validates every agent UUID, member, creator, parent, model alias, DocLib owner, permission, agreement, file path, and managed link before publishing anything. Every agent must own exactly one canonical `PDL-<agent_id>` private library; private libraries must be non-public, have no team ACL or managed links, and match the owner's lifecycle state.
 
 It builds agents and files in a detached manager and a same-filesystem staging directory, recomputes derived team depth, then swaps the DocLib directories and live registries.
 
@@ -101,4 +101,4 @@ Its complete cross-team history remains available for persistence. One shared ag
 
 ## Schema policy
 
-The current persistence schema version is `4`. Compatibility with earlier SQLite layouts is intentionally unsupported. Create a new database when upgrading from an earlier schema.
+The current persistence schema version is `5`. Compatibility with schema `4` and earlier SQLite layouts is intentionally unsupported. Create a new database when upgrading.

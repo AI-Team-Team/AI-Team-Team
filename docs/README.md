@@ -16,7 +16,7 @@ To understand specific systems in detail, please refer to the following document
 ### 🛠️ System Specifications & Dev Docs
 
 1. **[Hierarchical Dynamic Delegation](Dynamic_Delegation.md)**: Explains the recursive `Agent` and `AgentTeam` lineages (Level 0 Root AI spawning Level 1 ATs, which recursively spawn deeper sub-teams of Level $N$), ReAct execution loops with safe literal evaluation, and the lineage escalation channels.
-2. **[Gated Context Protection & File Reading](Gated_Reading.md)**: Details the size-aware `GatedFileReader`, Outline Warning fallbacks, paginated line chunking, and the built-in collaborative `DocumentLibrary` (DocLib) storage system.
+2. **[Gated Context Protection & File Reading](Gated_Reading.md)**: Details the size-aware `GatedFileReader`, collaborative team DocLib ACLs, and persistent Private Agent DocLib boundaries and publication.
 3. **[Supervisor Auditor Team](Supervisory_Team.md)**: Details the dynamic **3-AI Supervisory Team** (Integrity, Continuity, and Deadlock Auditors) which monitors dialogue transcripts with explicit `messages.clear()` memory isolation to prevent OOM errors, and performs recursive lineage parent escalations.
 4. **[State Persistence & Multi-Turn Memory](State_Persistence.md)**: Explains the asynchronous single-writer SQLite design, incremental deltas, validated recovery, multi-turn memory, and turn-based pruning.
 5. **[Team Governance & Communication Policies](Team_Governance.md)**: Details the communication inbox protocols, the `NegotiationBroker`, rule-gated cross-lineage permissions, lineage migration policies, token budget failover strategies, and the preemptive `asyncio` event-driven interruptions triggered by child team failures.

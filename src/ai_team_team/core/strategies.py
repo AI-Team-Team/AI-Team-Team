@@ -13,6 +13,44 @@ from ai_team_team.core.exceptions import ATTException
 from ai_team_team.core.utils import generate_with_retry
 
 
+_PRIVATE_TOOL_NAMES = {
+    "list_private_files",
+    "read_private_file",
+    "write_private_file",
+    "delete_private_file",
+    "move_private_file",
+    "publish_private_file",
+}
+_PRIVATE_WINDOW_MARKER = "[ATT_PRIVATE_OBSERVATION]"
+
+
+def _redact_private_log(text: Any) -> str:
+    """Removes complete log payloads that mention private operations."""
+    rendered = str(text)
+    if (
+        _PRIVATE_WINDOW_MARKER in rendered
+        or any(name in rendered for name in _PRIVATE_TOOL_NAMES)
+    ):
+        return "[private tool payload redacted]"
+    return rendered
+
+
+def _private_action_metadata(
+    tool_name: str, tool_obj: Any, args: List[Any], kwargs: Dict[str, Any]
+) -> str:
+    """Formats private operation metadata without file content."""
+    try:
+        bound = inspect.signature(tool_obj.func).bind_partial(*args, **kwargs)
+        allowed = {
+            key: value
+            for key, value in bound.arguments.items()
+            if key != "content"
+        }
+    except (TypeError, ValueError):
+        allowed = {key: value for key, value in kwargs.items() if key != "content"}
+    return f"{tool_name}({allowed!r})"
+
+
 def _append_agent_message(
     agent: Agent, message: Dict[str, Any], team: Any, manager: Any
 ) -> None:
@@ -24,6 +62,78 @@ def _append_agent_message(
     )
     enriched["discussion_id"] = discussion_id
     agent.append_message(enriched)
+
+
+def _append_private_window_message(
+    agent: Agent,
+    message: Dict[str, Any],
+    team: Any,
+    manager: Any,
+) -> None:
+    """Keeps a private observation in the model window but not durable history."""
+    actual = dict(message)
+    actual["content"] = (
+        f"{_PRIVATE_WINDOW_MARKER}\n{actual.get('content', '')}"
+    )
+    actual["team_id"] = team.team_id
+    actual["discussion_id"] = (
+        manager._active_discussion_id.get() if manager else None
+    )
+    persisted = dict(actual)
+    persisted["content"] = "[private tool result redacted]"
+    agent.sync_message_history()
+    agent.messages.append(actual)
+    agent.message_history.append(persisted)
+    agent._history_seen_ids.add(id(actual))
+
+
+def _has_private_window_content(agent: Agent) -> bool:
+    """Returns whether the active model window contains private observations."""
+    return any(
+        _PRIVATE_WINDOW_MARKER in str(message.get("content", ""))
+        for message in agent.messages
+    )
+
+
+def _privacy_safe_agent_output(agent: Agent, value: Any) -> str:
+    """Redacts callback/log output derived from a private model window."""
+    if _has_private_window_content(agent):
+        return "[private-derived agent output redacted]"
+    return _redact_private_log(value)
+
+
+def _scrub_private_window_messages(agent: Agent) -> None:
+    """Expires private observations when the current model invocation ends."""
+    for index, message in enumerate(agent.messages):
+        if _PRIVATE_WINDOW_MARKER not in str(message.get("content", "")):
+            continue
+        safe_message = dict(message)
+        safe_message["content"] = "[private tool result redacted]"
+        agent._history_seen_ids.discard(id(message))
+        agent._history_seen_ids.add(id(safe_message))
+        agent.messages[index] = safe_message
+
+
+def _redact_private_tool_calls(
+    tool_calls: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Removes private file bodies from structured assistant messages."""
+    sanitized = []
+    for tool_call in tool_calls:
+        item = dict(tool_call)
+        function = item.get("function")
+        name = item.get("name")
+        if isinstance(function, dict):
+            name = function.get("name", name)
+        if name in _PRIVATE_TOOL_NAMES:
+            if isinstance(function, dict):
+                safe_function = dict(function)
+                safe_function["arguments"] = {"private_payload": "redacted"}
+                item["function"] = safe_function
+            if "arguments" in item:
+                item["arguments"] = {"private_payload": "redacted"}
+        sanitized.append(item)
+    return sanitized
 
 async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: Any) -> str:
     """Prepares the agent context, memory compression, transition notice, and returns the identity header."""
@@ -116,7 +226,7 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
             r = msg.get("role", "unknown").upper()
             c = msg.get("content", "")
             history_text_parts.append(f"{r}: {c}")
-        history_text = "\n".join(history_text_parts)
+        history_text = _redact_private_log("\n".join(history_text_parts))
         
         summary_prompt = (
             f"Summarize the preceding execution logs and discussions into a single cohesive paragraph of historical facts. "
@@ -232,13 +342,26 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     for vp_id, prop in team.proposals.items():
                         if prop.get("status") == "active":
                             voted_list = []
-                            for voter, v_data in prop["votes"].items():
+                            member_names = {
+                                member.agent_id: member.name
+                                for member in team.members
+                            }
+                            for voter_id, v_data in prop["votes"].items():
                                 if v_data["public"]:
-                                    voted_list.append(f"{voter}: {v_data['vote']} (Public)")
+                                    voter_name = member_names.get(
+                                        voter_id, "Former member"
+                                    )
+                                    voted_list.append(
+                                        f"{voter_name}: {v_data['vote']} (Public)"
+                                    )
                                 else:
                                     voted_list.append(f"Anonymous Voter: {v_data['vote']}")
                             voted_str = ", ".join(voted_list) if voted_list else "None"
-                            remaining = [m.name for m in team.members if m.name not in prop["votes"]]
+                            remaining = [
+                                member.name
+                                for member in team.members
+                                if member.agent_id not in prop["votes"]
+                            ]
                             remaining_str = ", ".join(remaining) if remaining else "None"
                             voting_lines.append(
                                 f"- Proposal [{vp_id}]: {prop['action'].upper()} '{prop['target']}'\n"
@@ -294,11 +417,21 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                         response = resp_obj.text if isinstance(resp_obj, LLMResponse) else str(resp_obj)
                         response = response.strip()
 
-                        team.logger.info(f"Agent {agent.name} ReAct step {step+1} response:\n{response}")
+                        team.logger.info(
+                            "Agent %s ReAct step %s response:\n%s",
+                            agent.name,
+                            step + 1,
+                            _privacy_safe_agent_output(agent, response),
+                        )
 
                         _append_agent_message(
                             agent,
-                            {"role": "assistant", "content": response},
+                            {
+                                "role": "assistant",
+                                "content": _privacy_safe_agent_output(
+                                    agent, response
+                                ),
+                            },
                             team,
                             manager,
                         )
@@ -313,10 +446,10 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                 f"{react_system_instruction}\n"
                                 f"--- SYSTEM INSTRUCTION END ---\n"
                                 f"--- PROMPT BEGIN ---\n"
-                                f"{formatted_prompt}\n"
+                                f"{_redact_private_log(formatted_prompt)}\n"
                                 f"--- PROMPT END ---\n"
                                 f"--- RESPONSE BEGIN ---\n"
-                                f"{response}\n"
+                                f"{_privacy_safe_agent_output(agent, response)}\n"
                                 f"--- RESPONSE END ---\n"
                             )
                             manager._emit_callback(
@@ -330,11 +463,16 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                         if "Final Answer:" in response:
                             final_ans_content = response.split("Final Answer:", 1)[1].strip()
                             if manager:
+                                callback_answer = (
+                                    "[private-derived final answer redacted]"
+                                    if _has_private_window_content(agent)
+                                    else final_ans_content
+                                )
                                 manager._emit_callback(
                                     "on_activity_added",
                                     agent.name,
                                     "Final Answer",
-                                    final_ans_content,
+                                    callback_answer,
                                 )
                             return final_ans_content
 
@@ -342,11 +480,16 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                         if thought_match:
                             thought_content = thought_match.group(1).split("Action:")[0].strip()
                             if manager:
+                                callback_thought = (
+                                    "[private-derived thought redacted]"
+                                    if _has_private_window_content(agent)
+                                    else thought_content
+                                )
                                 manager._emit_callback(
                                     "on_activity_added",
                                     agent.name,
                                     "Thought",
-                                    thought_content,
+                                    callback_thought,
                                 )
 
                         tool_name = None
@@ -371,10 +514,22 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
 
                         if tool_name is not None:
                             args, kwargs = parse_tool_args(tool_args_str)
+                            private_tool = tool_name in _PRIVATE_TOOL_NAMES
+                            action_metadata = f"{tool_name}({tool_args_str})"
 
                             if tool_name in team.tools:
                                 tool_obj = team.tools[tool_name]
-                                team.logger.info(f"Executing tool: {tool_name} with args={args}, kwargs={kwargs}")
+                                action_metadata = (
+                                    _private_action_metadata(
+                                        tool_name, tool_obj, args, kwargs
+                                    )
+                                    if private_tool
+                                    else f"{tool_name}({tool_args_str})"
+                                )
+                                team.logger.info(
+                                    "Executing tool: %s",
+                                    action_metadata,
+                                )
                                 
                                 team.set_status(agent.name, f"Executing Tool: {tool_name}")
                                 if manager:
@@ -387,7 +542,7 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                         "on_activity_added",
                                         agent.name,
                                         "Action",
-                                        f"{tool_name}({tool_args_str})",
+                                        action_metadata,
                                     )
 
                                 active_agent_token = (
@@ -450,11 +605,15 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                     )
                                 if manager:
                                     manager._auto_save(
-                                        agents={agent.name},
+                                        agents={agent.agent_id},
                                         teams={team.team_id},
                                     )
                                 if manager:
-                                    obs_summary = str(observation)
+                                    obs_summary = (
+                                        "[private tool result redacted]"
+                                        if private_tool
+                                        else str(observation)
+                                    )
                                     if len(obs_summary) > 80:
                                         obs_summary = obs_summary[:77] + "..."
                                     manager._emit_callback(
@@ -473,14 +632,24 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                         observation,
                                     )
 
-                            team.logger.info(f"Tool {tool_name} observation: {observation}")
+                            logged_observation = (
+                                "[private tool result redacted]"
+                                if private_tool
+                                else observation
+                            )
+                            team.logger.info(
+                                "Tool %s observation: %s",
+                                tool_name,
+                                logged_observation,
+                            )
                             
                             if manager and manager.on_log_append:
                                 log_content = (
                                     f"AGENT: {agent.name}\n"
                                     f"ROLE: {agent.role}\n"
-                                    f"ACTION: {tool_name}({tool_args_str})\n"
-                                    f"OBSERVATION:\n{observation}\n"
+                                    f"ACTION: "
+                                    f"{action_metadata if private_tool else f'{tool_name}({tool_args_str})'}\n"
+                                    f"OBSERVATION:\n{logged_observation}\n"
                                 )
                                 manager._emit_callback(
                                     "on_log_append",
@@ -496,15 +665,24 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                 if tool_retry_count > max_retries:
                                     raise ATTException(f"Tool execution failed {tool_retry_count} times in this step. Maximum tool retries ({max_retries}) exceeded. Last error: {observation}")
 
-                            _append_agent_message(
-                                agent,
-                                {
-                                    "role": "user",
-                                    "content": f"Observation: {observation}",
-                                },
-                                team,
-                                manager,
-                            )
+                            observation_message = {
+                                "role": "user",
+                                "content": f"Observation: {observation}",
+                            }
+                            if private_tool:
+                                _append_private_window_message(
+                                    agent,
+                                    observation_message,
+                                    team,
+                                    manager,
+                                )
+                            else:
+                                _append_agent_message(
+                                    agent,
+                                    observation_message,
+                                    team,
+                                    manager,
+                                )
                         else:
                             if step == max_steps - 1:
                                 return response
@@ -551,7 +729,12 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     response = response.strip()
                     _append_agent_message(
                         agent,
-                        {"role": "assistant", "content": response},
+                        {
+                            "role": "assistant",
+                            "content": _privacy_safe_agent_output(
+                                agent, response
+                            ),
+                        },
                         team,
                         manager,
                     )
@@ -565,10 +748,10 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                             f"{full_system_instruction}\n"
                             f"--- SYSTEM INSTRUCTION END ---\n"
                             f"--- PROMPT BEGIN ---\n"
-                            f"{formatted_prompt}\n"
+                            f"{_redact_private_log(formatted_prompt)}\n"
                             f"--- PROMPT END ---\n"
                             f"--- RESPONSE BEGIN ---\n"
-                            f"{response}\n"
+                            f"{_privacy_safe_agent_output(agent, response)}\n"
                             f"--- RESPONSE END ---\n"
                         )
                         manager._emit_callback(
@@ -582,11 +765,16 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     if "Final Answer:" in response:
                         final_ans_content = response.split("Final Answer:", 1)[1].strip()
                         if manager:
+                            callback_answer = (
+                                "[private-derived final answer redacted]"
+                                if _has_private_window_content(agent)
+                                else final_ans_content
+                            )
                             manager._emit_callback(
                                 "on_activity_added",
                                 agent.name,
                                 "Final Answer",
-                                final_ans_content,
+                                callback_answer,
                             )
                         return final_ans_content
                     return response
@@ -596,6 +784,7 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     team.logger.error(f"Agent {agent.name} execution error: {e}")
                     return f"Error executing task: {e}"
         finally:
+            _scrub_private_window_messages(agent)
             team.set_status(agent.name, "Idle")
             if manager:
                 manager._emit_callback(
@@ -603,7 +792,7 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                 )
             if manager:
                 manager._auto_save(
-                    agents={agent.name},
+                    agents={agent.agent_id},
                     teams={team.team_id},
                 )
 
@@ -664,17 +853,31 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                 if isinstance(response, str):
                     response = LLMResponse(text=response)
 
-                team.logger.info(f"Agent {agent.name} Native response round {round_idx+1}: text={response.text}, tool_calls={len(response.tool_calls)}")
+                team.logger.info(
+                    "Agent %s Native response round %s: text=%s, tool_calls=%s",
+                    agent.name,
+                    round_idx + 1,
+                    (
+                        "[private-derived response redacted]"
+                        if _has_private_window_content(agent)
+                        else response.text
+                    ),
+                    len(response.tool_calls),
+                )
 
                 # Convert to LLM message formats
                 if response.tool_calls:
                     # Append assistant message with structured tool calls
-                    tool_calls_dict = [tc.to_dict() for tc in response.tool_calls]
+                    tool_calls_dict = _redact_private_tool_calls(
+                        [tc.to_dict() for tc in response.tool_calls]
+                    )
                     _append_agent_message(
                         agent,
                         {
                             "role": "assistant",
-                            "content": response.text,
+                            "content": _privacy_safe_agent_output(
+                                agent, response.text
+                            ),
                             "tool_calls": tool_calls_dict,
                         },
                         team,
@@ -690,17 +893,20 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
 
                     # Append tool result messages
                     for tr in results:
-                        _append_agent_message(
-                            agent,
-                            {
-                                "role": "tool",
-                                "tool_call_id": tr.tool_call_id,
-                                "name": tr.name,
-                                "content": tr.content,
-                            },
-                            team,
-                            manager,
-                        )
+                        result_message = {
+                            "role": "tool",
+                            "tool_call_id": tr.tool_call_id,
+                            "name": tr.name,
+                            "content": tr.content,
+                        }
+                        if tr.name in _PRIVATE_TOOL_NAMES:
+                            _append_private_window_message(
+                                agent, result_message, team, manager
+                            )
+                        else:
+                            _append_agent_message(
+                                agent, result_message, team, manager
+                            )
 
                         # Trigger callbacks
                         if manager:
@@ -710,7 +916,11 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                                 "Action",
                                 f"{tr.name}(id={tr.tool_call_id})",
                             )
-                            obs_summary = str(tr.content)
+                            obs_summary = (
+                                "[private tool result redacted]"
+                                if tr.name in _PRIVATE_TOOL_NAMES
+                                else str(tr.content)
+                            )
                             if len(obs_summary) > 80:
                                 obs_summary = obs_summary[:77] + "..."
                             manager._emit_callback(
@@ -726,7 +936,8 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                                 f"ROLE: {agent.role}\n"
                                 f"TOOL CALL ID: {tr.tool_call_id}\n"
                                 f"ACTION: {tr.name}\n"
-                                f"OBSERVATION:\n{tr.content}\n"
+                                f"OBSERVATION:\n"
+                                f"{'[private tool result redacted]' if tr.name in _PRIVATE_TOOL_NAMES else tr.content}\n"
                             )
                             manager._emit_callback(
                                 "on_log_append",
@@ -749,24 +960,34 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
 
                     if manager:
                         manager._auto_save(
-                            agents={agent.name},
+                            agents={agent.agent_id},
                             teams={team.team_id},
                         )
                 else:
                     # Final answer received (no tool calls requested)
                     _append_agent_message(
                         agent,
-                        {"role": "assistant", "content": response.text},
+                        {
+                            "role": "assistant",
+                            "content": _privacy_safe_agent_output(
+                                agent, response.text
+                            ),
+                        },
                         team,
                         manager,
                     )
                     
                     if manager:
+                        callback_answer = (
+                            "[private-derived final answer redacted]"
+                            if _has_private_window_content(agent)
+                            else (response.text or "")
+                        )
                         manager._emit_callback(
                             "on_activity_added",
                             agent.name,
                             "Final Answer",
-                            response.text or "",
+                            callback_answer,
                         )
                         
                     if manager and manager.on_log_append:
@@ -778,10 +999,10 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                             f"{native_system_instruction}\n"
                             f"--- SYSTEM INSTRUCTION END ---\n"
                             f"--- PROMPT BEGIN ---\n"
-                            f"{formatted_prompt}\n"
+                            f"{_redact_private_log(formatted_prompt)}\n"
                             f"--- PROMPT END ---\n"
                             f"--- RESPONSE BEGIN ---\n"
-                            f"{response.text}\n"
+                            f"{_privacy_safe_agent_output(agent, response.text)}\n"
                             f"--- RESPONSE END ---\n"
                         )
                         manager._emit_callback(
@@ -796,6 +1017,7 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
 
             return "Error: Native tool calling exceeded maximum tool rounds without producing a text final answer."
         finally:
+            _scrub_private_window_messages(agent)
             team.set_status(agent.name, "Idle")
             if manager:
                 manager._emit_callback(
@@ -803,7 +1025,7 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                 )
             if manager:
                 manager._auto_save(
-                    agents={agent.name},
+                    agents={agent.agent_id},
                     teams={team.team_id},
                 )
 

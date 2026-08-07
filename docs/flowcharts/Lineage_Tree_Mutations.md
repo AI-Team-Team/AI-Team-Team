@@ -17,7 +17,8 @@ flowchart TD
     
     SpawnMembers --> CreateTeam["Instantiate AgentTeam with creator link"]
     
-    CreateTeam --> CreateDocLib["Create & register built-in DocumentLibrary\nPopulate any initial_docs"]
+    CreateTeam --> RegisterAgents["Register stable Agent UUIDs\nReuse or create one private DocLib each"]
+    RegisterAgents --> CreateDocLib["Create & register built-in team DocumentLibrary\nPopulate any initial_docs"]
     
     CreateDocLib --> ToolsContext{"Tools Context registered\nin ATTManager?"}
     

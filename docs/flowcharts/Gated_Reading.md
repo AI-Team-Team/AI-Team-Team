@@ -94,3 +94,24 @@ flowchart TD
 ```
 
 Managed cross-library file links add a second resolution phase after source authorization. ATT follows `lib_id + relative path` metadata, repeats the same ACL check at every hop for the requested permission, rejects cycles, and opens only the final physical file. No operating-system symlink is followed.
+
+## 4. Private Agent DocLib and Explicit Publish
+
+```mermaid
+flowchart TD
+    Tool["Private tool call"] --> Context{"Active invocation Agent?"}
+    Context -- "No" --> Deny["Fail closed"]
+    Context -- "Yes" --> Owner{"Agent active and owner of PDL-agent_id?"}
+    Owner -- "No" --> Deny
+    Owner -- "Yes" --> Private["Read/write/list/move private file"]
+    Private --> Publish{"Explicit publish requested?"}
+    Publish -- "No" --> Done["Return private tool result only"]
+    Publish -- "Yes" --> Team{"Active team contains Agent?"}
+    Team -- "No" --> Deny
+    Team -- "Yes" --> ACL{"WRITE on built-in team DocLib target?"}
+    ACL -- "No" --> Deny
+    ACL -- "Yes" --> Locks["Lock both libraries in lib_id order"]
+    Locks --> Copy["Atomic file copy; preserve private source"]
+```
+
+Private libraries never participate in team ACLs, public discovery, or managed links. Runtime callbacks record only identity, team, library, path, operation, and result—not private file bodies.

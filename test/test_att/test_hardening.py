@@ -46,6 +46,7 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             "failover_policy": "random",
             "tool_calling_mode": "maybe",
             "audit_unknown_escalation_mode": "ignore",
+            "agent_private_data_policy": "expose",
         }
         for name, value in cases.items():
             with self.subTest(name=name):
@@ -180,8 +181,8 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
 
         with closing(sqlite3.connect(db_path)) as connection:
             before = connection.execute(
-                "SELECT id FROM agent_messages WHERE agent_name = ?",
-                (untouched.name,),
+                "SELECT id FROM agent_messages WHERE agent_id = ?",
+                (untouched.agent_id,),
             ).fetchall()
 
         changed.messages.append({"role": "user", "content": "delta"})
@@ -190,8 +191,8 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
 
         with closing(sqlite3.connect(db_path)) as connection:
             after = connection.execute(
-                "SELECT id FROM agent_messages WHERE agent_name = ?",
-                (untouched.name,),
+                "SELECT id FROM agent_messages WHERE agent_id = ?",
+                (untouched.agent_id,),
             ).fetchall()
         self.assertEqual(before, after)
         await manager.close()

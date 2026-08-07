@@ -195,7 +195,17 @@ class AgentTeam:
         max_failovers = len(manager.config.model_token_limits) if manager and getattr(manager, 'config', None) else 3
         failover_attempts = 0
 
-        async with agent.lock:
+        invocation = (
+            manager.agent_invocation(
+                agent,
+                allow_runtime=bool(
+                    getattr(self, "_runtime_only", False)
+                ),
+            )
+            if manager is not None
+            else agent.invocation_guard()
+        )
+        async with invocation:
             team_token = manager._active_team.set(self) if manager else None
             discussion_token = None
             if manager:

@@ -86,6 +86,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         config = ATTConfig(llm_max_retries=3, llm_retry_backoff_factor=0.01, tool_calling_mode="react")
         manager = ATTManager(root_ai=self.root_ai, config=config)
         team = manager.create_agent_team(creator=self.root_ai, member_count=3)
+        manager.register_agent(agent)
         
         # Replace flaky agent in the team
         team.members[0] = agent
@@ -106,6 +107,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         config = ATTConfig(llm_max_retries=2, llm_retry_backoff_factor=0.001)
         manager = ATTManager(root_ai=self.root_ai, config=config)
         team = manager.create_agent_team(creator=self.root_ai, member_count=3)
+        manager.register_agent(agent)
         team.members[0] = agent
 
         anomaly_reported = False

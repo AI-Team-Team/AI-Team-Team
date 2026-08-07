@@ -48,6 +48,7 @@ class ATTConfig:
         "failover_policy": {"auto", "parent", "none"},
         "tool_calling_mode": {"auto", "native", "react", "text_react"},
         "audit_unknown_escalation_mode": {"wake", "queue"},
+        "agent_private_data_policy": {"retain", "archive", "delete"},
     }
     _POSITIVE_INTS = {
         "max_delegation_depth",
@@ -182,6 +183,7 @@ class ATTConfig:
         failover_policy: str = "auto",
         audit_unknown_escalation_mode: str = "wake",
         audit_unknown_soft_threshold: int = 100,
+        agent_private_data_policy: str = "archive",
     ) -> None:
         self.enable_dynamic_delegation = enable_dynamic_delegation
         self.max_delegation_depth = max_delegation_depth
@@ -211,6 +213,7 @@ class ATTConfig:
         self.failover_policy = failover_policy
         self.audit_unknown_escalation_mode = audit_unknown_escalation_mode
         self.audit_unknown_soft_threshold = audit_unknown_soft_threshold
+        self.agent_private_data_policy = agent_private_data_policy
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns a plain JSON-serializable configuration mapping."""

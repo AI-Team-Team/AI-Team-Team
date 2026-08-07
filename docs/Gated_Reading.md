@@ -97,6 +97,9 @@ class GatedFileReader:
 To enable secure document storage and sharing between agent teams, the framework introduces `DocumentLibrary`:
 
 * **Built-in Storage**: Every spawned `AgentTeam` automatically receives a default document library (root folder: `.att_doc_libs/<lib_id>`) mapped as `team.doc_library`.
+* **Private Agent Storage**: Every agent registered with `ATTManager` owns one `agent_private` library named `PDL-<agent_id>`. A shared agent uses the same library in every team. Team ACL grants, public discovery, ordinary library metadata tools, and managed links cannot access it. Only private tools running under the owner's active invocation context may operate on it.
+* **Invocation-Scoped Observation**: An explicit `read_private_file` result is available only inside the current reasoning invocation. When that invocation ends, ATT replaces the private observation in the shared model window with a redacted marker so a later team invocation cannot inherit the file body implicitly.
+* **Explicit Publication**: `publish_private_file` copies one ordinary text/code file into the active team's built-in DocLib after a live target `WRITE` check. It does not remove the source. Private content is not automatically added to prompts, transcripts, audits, callbacks, or message history.
 * **Gated Interoperability**: When agents call the `read_library_file` tool, the request is routed through `GatedFileReader`. This ensures files stored in libraries undergo the exact same size gating, line chunking, and outline checks to safeguard the LLM context window.
 * **Access Control List (ACL) & Segment-Based Path Inheritance**: File and folder access is governed by team-level permissions (`READ` or `WRITE`) registered under path prefixes. Permission inheritance propagates recursively downward to all subdirectories and files. For example, if a team is granted permission on a folder path (e.g. `/specs`), they automatically inherit the same permission on any nested paths under that folder (e.g. `/specs/subfolder/file.txt`).
   * **Evaluation Order**: The framework evaluates permissions by decomposing the target file path into parent segment directories (from the full path down to the root `/`). If a matching permission for the caller's team is found on any parent path segment, it is immediately applied.
@@ -109,3 +112,5 @@ To enable secure document storage and sharing between agent teams, the framework
   Writes require `WRITE` throughout the chain; deleting a link removes only link metadata. Links are file-only, must terminate in a registered DocLib file, and cycles are rejected.
 * **Native Symlink Rejection**: DocLib roots and path components may not be
   filesystem symbolic links. File descriptors are opened relative to a no-follow directory chain so a native symlink cannot escape the managed root.
+
+Private libraries cannot be link sources or targets. An archived private library is read-only; a retained library remains stored but is unreachable through AI tools until its owner is explicitly reactivated.

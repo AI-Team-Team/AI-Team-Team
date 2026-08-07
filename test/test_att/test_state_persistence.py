@@ -73,6 +73,7 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
     async def test_context_switching_notices(self):
         """Verify that a context shift adds a SYSTEM notice warning to the agent's messages."""
         agent = Agent(name="Agent_A", role="Developer", llm_client=self.mock_react_client)
+        self.manager.register_agent(agent)
         
         # Create team A
         team_a = self.manager.create_agent_team(
@@ -112,7 +113,7 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
     async def test_agent_shared_hiring(self):
         """Verify that hiring an existing agent shares its message queue across teams."""
         agent = Agent(name="Shared_Agent", role="Analyst", llm_client=self.mock_react_client)
-        self.manager.agents[agent.name] = agent
+        self.manager.register_agent(agent)
         
         # Spawn team A hiring the existing agent
         team_a = self.manager.create_agent_team(
@@ -161,6 +162,7 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         self.mock_react_client.generate = mock_agent_generate
 
         agent = Agent(name="Compressed_Agent", role="Summarizer", llm_client=self.mock_react_client)
+        self.manager.register_agent(agent)
         
         team = self.manager.create_agent_team(
             creator=self.root_ai,
@@ -198,6 +200,7 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         self.mock_react_client.generate = mock_agent_generate
 
         agent = Agent(name="Compressed_Agent", role="Summarizer", llm_client=self.mock_react_client)
+        self.manager.register_agent(agent)
         team = self.manager.create_agent_team(
             creator=self.root_ai,
             preset_name="generic",
@@ -282,13 +285,20 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         
         # Proposal
         team_parent.proposals["prop-123"] = {
-            "action": "add_member",
+            "action": "add",
             "target": "CandidateAgent",
-            "initiator_type": "agent",
+            "initiator_type": "individual",
             "initiator_name": "Root_AI",
+            "initiator_agent_id": self.root_ai.agent_id,
             "rationale": "More hands needed",
-            "proposed_details": {"role": "Helper"},
-            "votes": {"Root_AI": {"vote": "yes", "public": True}},
+            "proposed_details": {"model": "critic"},
+            "votes": {
+                self.root_ai.agent_id: {
+                    "vote": "Agree",
+                    "public": True,
+                    "rationale": "More hands needed",
+                }
+            },
             "status": "active"
         }
         
@@ -343,7 +353,12 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         
         self.assertIn("prop-123", restored_parent.proposals)
         self.assertEqual(restored_parent.proposals["prop-123"]["target"], "CandidateAgent")
-        self.assertEqual(restored_parent.proposals["prop-123"]["votes"]["Root_AI"]["vote"], "yes")
+        self.assertEqual(
+            restored_parent.proposals["prop-123"]["votes"][
+                self.root_ai.agent_id
+            ]["vote"],
+            "Agree",
+        )
         
         self.assertIn((team_parent.team_id, team_child.team_id), new_manager.broker.peer_talk_agreements)
         

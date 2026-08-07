@@ -381,3 +381,24 @@ Agent teams can use standard file operations:
 All `read_library_file` operations are automatically audited by the `GatedFileReader`. If a team member attempts to read a file exceeding 50 KB without specifying a line chunk window, the operation will be rejected and return an Outline Warning, protecting the LLM context from pollution.
 
 Managed links work only between registered DocLib files. Creation requires `WRITE` on the source path and `READ` on the target. Reads and writes recheck the target ACL every time; writes require target `WRITE`, and deleting the link does not delete the target file. Native filesystem symlinks are rejected.
+
+### Private Agent Workspace
+
+Every AI registered with the manager also receives one persistent private DocLib.
+
+A shared AI keeps the same private workspace in every AT, but no team, other AI, public listing, ACL grant, or managed link can access it.
+
+Private files are not automatically included in model prompts or transcripts.
+
+The current AI can deliberately use:
+
+- `Action: write_private_file(path="notes/hypothesis.md", content="...")`
+- `Action: read_private_file(path="notes/hypothesis.md", start_line=1, end_line=50)`
+- `Action: list_private_files(path="/")`
+- `Action: move_private_file(source_path="draft.md", target_path="final.md")`
+- `Action: delete_private_file(path="obsolete.md")`
+- `Action: publish_private_file(source_path="final.md", target_path="research/final.md")`
+
+Publishing copies the file to the current team's built-in DocLib and keeps the private source. A collision is rejected unless `overwrite=True`, and the target path is always checked for current team `WRITE` permission.
+
+An explicit private read is scoped to that single reasoning invocation. ATT redacts the observation from the AI's reusable model window when the invocation ends, preventing another team from receiving the private file body implicitly.

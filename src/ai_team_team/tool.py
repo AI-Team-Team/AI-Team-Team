@@ -436,6 +436,12 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             elif model_name in att_manager.model_configs and att_manager.generator_handler:
                 from .core import HandlerClientAdapter
                 client = HandlerClientAdapter(model_name, att_manager.generator_handler)
+                client._supports_native = (
+                    att_manager.model_configs.get(model_name, {}).get(
+                        "supports_native_tool_calling"
+                    )
+                    is True
+                )
             else:
                 available = list(att_manager.model_configs.keys()) + list(att_manager.llm_clients.keys())
                 return f"Error: Model '{model_name}' is not registered. Available models are: {available}."
@@ -456,10 +462,11 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             if any(member.name == new_agent.name for member in child.members):
                 return f"Error: Member '{new_agent.name}' already exists."
             child.members.append(new_agent)
-            att_manager.agents[new_agent.name] = new_agent
+            att_manager.register_agent(new_agent, auto_save=False)
         att_manager._auto_save(
-            agents={new_agent.name},
+            agents={new_agent.agent_id},
             teams={child.team_id},
+            libraries={new_agent.private_doc_library_id},
         )
         return f"Successfully added new member '{new_agent.name}' (Role: {role_name}) to team '{team_id}'."
 
@@ -540,6 +547,11 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             "target": target,
             "initiator_type": initiator_type,
             "initiator_name": initiator_name,
+            "initiator_agent_id": (
+                actual_agent.agent_id
+                if initiator_type == "individual"
+                else None
+            ),
             "rationale": rationale,
             "proposed_details": proposed_details or {},
             "votes": {},
@@ -547,7 +559,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         }
         
         if initiator_type == "individual":
-            proposal["votes"][actual_agent.name] = {
+            proposal["votes"][actual_agent.agent_id] = {
                 "vote": "Agree",
                 "public": True,
                 "rationale": "Initiated proposal.",
@@ -570,6 +582,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if actual_agent is None or actual_agent not in actual_team.members:
             return "Error: Only an active team member can vote."
         caller_agent_name = actual_agent.name
+        caller_agent_id = actual_agent.agent_id
         new_agent = None
         membership_changed = False
 
@@ -583,10 +596,10 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                 
             if vote not in {"Agree", "Disagree", "Abstain"}:
                 return "Error: Vote must be 'Agree', 'Disagree', or 'Abstain'."
-            if caller_agent_name in prop["votes"]:
+            if caller_agent_id in prop["votes"]:
                 return f"Error: Member '{caller_agent_name}' has already voted."
 
-            prop["votes"][caller_agent_name] = {
+            prop["votes"][caller_agent_id] = {
                 "vote": vote,
                 "public": bool(public),
                 "rationale": rationale,
@@ -651,6 +664,12 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                                 client = HandlerClientAdapter(
                                     model_name, att_manager.generator_handler
                                 )
+                                client._supports_native = (
+                                    att_manager.model_configs.get(
+                                        model_name, {}
+                                    ).get("supports_native_tool_calling")
+                                    is True
+                                )
                             else:
                                 prop["status"] = "rejected"
                                 result = (
@@ -684,7 +703,9 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                                 new_agent = None
                             else:
                                 actual_team.members.append(new_agent)
-                                att_manager.agents[new_agent.name] = new_agent
+                                att_manager.register_agent(
+                                    new_agent, auto_save=False
+                                )
                                 membership_changed = True
                                 result = (
                                     f"Proposal '{proposal_id}' approved "
@@ -724,7 +745,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                                 f"Removed member '{target_agent.name}' from the team!"
                             )
 
-        changed_agents = {new_agent.name} if new_agent is not None else set()
+        changed_agents = {new_agent.agent_id} if new_agent is not None else set()
         att_manager._auto_save(
             agents=changed_agents,
             teams=(
@@ -733,6 +754,11 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                 else set()
             ),
             proposals={actual_team.team_id},
+            libraries=(
+                {new_agent.private_doc_library_id}
+                if new_agent is not None
+                else set()
+            ),
         )
         return result
 
@@ -748,6 +774,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         if actual_agent is None or actual_agent not in actual_team.members:
             return "Error: Only an active team member can retract a proposal."
         caller_agent_name = actual_agent.name
+        caller_agent_id = actual_agent.agent_id
             
         async with actual_team.state_lock:
             if proposal_id not in actual_team.proposals:
@@ -758,7 +785,10 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                 return f"Error: Proposal '{proposal_id}' is already closed."
                 
             initiator_name = prop.get("initiator_name")
-            if prop.get("initiator_type") == "individual" and initiator_name != caller_agent_name:
+            if (
+                prop.get("initiator_type") == "individual"
+                and prop.get("initiator_agent_id") != caller_agent_id
+            ):
                 return f"Error: Only the initiator '{initiator_name}' can retract this proposal."
                 
             prop["status"] = "retracted"
@@ -1020,6 +1050,110 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         except Exception as e:
             return f"Error listing path '{path}' in library '{lib_id}': {e}"
 
+    async def list_private_files(path: str = "/") -> str:
+        """Lists the current AI's private files. Arguments: path (str)."""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        try:
+            items = await att_manager.list_private_files(path)
+            return "Private workspace is empty." if not items else "\n".join(items)
+        except Exception as exc:
+            return f"Error listing private files: {exc}"
+
+    async def read_private_file(
+        path: str,
+        start_line: int = 1,
+        end_line: Optional[int] = None,
+    ) -> str:
+        """Reads one private file for the current AI."""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        try:
+            return await att_manager.read_private_file(path, start_line, end_line)
+        except Exception as exc:
+            return f"Error reading private file: {exc}"
+
+    async def write_private_file(path: str, content: str) -> str:
+        """Writes one private file for the current AI."""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        try:
+            await att_manager.write_private_file(path, content)
+            return f"Successfully wrote private file '{path}'."
+        except Exception as exc:
+            return f"Error writing private file: {exc}"
+
+    async def delete_private_file(path: str) -> str:
+        """Deletes one private file for the current AI."""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        try:
+            return await att_manager.delete_private_file(path)
+        except Exception as exc:
+            return f"Error deleting private file: {exc}"
+
+    async def move_private_file(
+        source_path: str,
+        target_path: str,
+        overwrite: bool = False,
+    ) -> str:
+        """Moves one private file for the current AI."""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        try:
+            await att_manager.move_private_file(
+                source_path, target_path, overwrite
+            )
+            return f"Successfully moved private file to '{target_path}'."
+        except Exception as exc:
+            return f"Error moving private file: {exc}"
+
+    async def publish_private_file(
+        source_path: str,
+        target_path: str,
+        overwrite: bool = False,
+    ) -> str:
+        """Copies one private file into the current team's built-in DocLib."""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        try:
+            await att_manager.publish_private_file(
+                source_path, target_path, overwrite
+            )
+            return f"Successfully published private file to '{target_path}'."
+        except FileExistsError as exc:
+            return (
+                f"Error publishing private file: {exc} You may rename the "
+                "private source, move/rename the team file when you have WRITE "
+                "permission on both paths, or retry with overwrite=true."
+            )
+        except Exception as exc:
+            return f"Error publishing private file: {exc}"
+
+    async def move_library_file(
+        lib_id: str,
+        source_path: str,
+        target_path: str,
+        overwrite: bool = False,
+    ) -> str:
+        """Moves one normal team-library file with source and target ACL checks."""
+        if not att_manager:
+            return "Error: ATTManager not available."
+        caller_team = _resolve_actual_team(caller_node, att_manager)
+        if not caller_team:
+            return "Error: Could not resolve the active AgentTeam."
+        try:
+            await att_manager.move_library_file(
+                caller_team.team_id,
+                lib_id,
+                source_path,
+                target_path,
+                overwrite,
+            )
+            return f"Successfully moved library file to '{target_path}'."
+        except Exception as exc:
+            return f"Error moving library file: {exc}"
+
     base_tools = {
         "dispatch_subagent": Tool("dispatch_subagent", "Spawns a child AT. Each AT (AI-Team) must have at least 3 Agents. Arguments: task (str), team_purpose (str), member_configs (dict), system_instructions (str), allow_sibling_talk (bool), sibling_talk_rules (str), is_public_visible (bool), initial_documents (dict - mapping file paths to their content strings to be populated in the child team's default DocLib).", dispatch_subagent),
         "delegate_escalation": Tool("delegate_escalation", "Escalates objective upward in the ATT lineage tree with objective (str) and rationale (str).", delegate_escalation),
@@ -1040,7 +1174,14 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         "write_library_file": Tool("write_library_file", "Writes content to a file in a library. Requires 'WRITE' permission. Arguments: lib_id (str), path (str), content (str)", write_library_file),
         "read_library_file": Tool("read_library_file", "Reads a file chunk from a library. Requires 'READ' permission. Arguments: lib_id (str), path (str), start_line (int, default 1), end_line (int, optional)", read_library_file),
         "delete_library_file": Tool("delete_library_file", "Deletes a file or directory in a library. Requires 'WRITE' permission. Arguments: lib_id (str), path (str)", delete_library_file),
-        "list_library_files": Tool("list_library_files", "Lists files and directories under a path in a library. Requires 'READ' permission. Arguments: lib_id (str), path (str, default '/')", list_library_files)
+        "list_library_files": Tool("list_library_files", "Lists files and directories under a path in a library. Requires 'READ' permission. Arguments: lib_id (str), path (str, default '/')", list_library_files),
+        "list_private_files": Tool("list_private_files", "Lists files in the current AI's private workspace. Arguments: path (str, default '/')", list_private_files),
+        "read_private_file": Tool("read_private_file", "Reads a file from the current AI's private workspace. Arguments: path (str), start_line (int), end_line (int, optional)", read_private_file),
+        "write_private_file": Tool("write_private_file", "Writes a file in the current AI's private workspace. Arguments: path (str), content (str)", write_private_file),
+        "delete_private_file": Tool("delete_private_file", "Deletes a file from the current AI's private workspace. Arguments: path (str)", delete_private_file),
+        "move_private_file": Tool("move_private_file", "Moves a file in the current AI's private workspace. Arguments: source_path (str), target_path (str), overwrite (bool)", move_private_file),
+        "publish_private_file": Tool("publish_private_file", "Copies a private file to the current team's built-in DocLib. Arguments: source_path (str), target_path (str), overwrite (bool)", publish_private_file),
+        "move_library_file": Tool("move_library_file", "Moves a normal team-library file after source and target WRITE checks. Arguments: lib_id (str), source_path (str), target_path (str), overwrite (bool)", move_library_file)
     }
 
     if att_manager and att_manager.config.enable_membership_voting:

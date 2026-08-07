@@ -58,6 +58,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 
 * **[Gated Context Protection](docs/Gated_Reading.md)**: Restricts direct large file reads; falls back to Outline Warnings with a 5-line sample of files exceeding 50 KB, prompting agents to make paginated, sliced chunk requests.
 * **[Collaborative DocLib Storage](docs/Gated_Reading.md#5-document-libraries-doclib)**: Equips teams with built-in document libraries. Access is governed by prefix path ACL permissions (`READ`/`WRITE`) that inherit recursively downward to subdirectories.
+* **Private Agent DocLibs**: Gives every registered AI one persistent private workspace (`PDL-<agent_id>`). Private files follow a shared AI across teams, remain outside team ACLs and prompts, and enter a team library only through an explicit copy/publish tool.
 * **Tool Auditor Interception**: Registers pre-execution interception hooks to audit, vet, approve, or reject specific tool calls (e.g. database safety query check).
 
 ### 💾 Persistence & Diagnostics
@@ -291,7 +292,8 @@ config = ATTConfig(
     failover_policy="auto",               # Automatically hot-swaps LLM client on TokenLimitError
     enable_emergency_wakeup=True,         # Enables deferred inbox processing for emergencies
     tool_calling_mode="auto",             # Auto-detects Pluggable Reasoning Strategy (Native or TextReAct)
-    audit_unknown_escalation_mode="wake" # Or "queue"
+    audit_unknown_escalation_mode="wake", # Or "queue"
+    agent_private_data_policy="archive"   # Or "retain" / "delete"
 )
 
 # 2. Setup Root Agent (client is dynamically resolved if omitted)
@@ -331,6 +333,20 @@ A client's `model_name` attribute is not accepted unless that same object is reg
 
 ```python
 manager.register_llm_client("analysis", analysis_client)
+```
+
+Every manager registration creates exactly one private DocLib for the stable Agent UUID.
+
+External agents should use the supported registration API:
+
+```python
+researcher = Agent("Researcher", "Evidence analyst", analysis_client)
+manager.register_agent(researcher)
+private_id = manager.get_private_library_id(researcher.agent_id)
+
+# Lifecycle APIs are asynchronous and preserve the same identity/library.
+await manager.retire_agent(researcher.agent_id)  # Default: archive.
+await manager.reactivate_agent(researcher.agent_id, "analysis")
 ```
 
 #### 🔌 LLM Client Interface (`LLMClientProto`)

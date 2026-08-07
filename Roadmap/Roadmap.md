@@ -16,13 +16,14 @@ The next iterations focus on sociological architecture and self-evolution: expan
   - Equip a specialized `ToolMaker` agent with access to an isolated code sandbox.
   - Expose a `manager.forge_tool()` API, which securely compiles (`exec`) LLM-generated code strings into native Callables, attaching them to a designated `ToolLibrary` with READ/WRITE permission tracking.
 
-### 2. Internal Monologue Scratchpad (Subconscious Reasoning)
+### 2. Private Agent DocLib (Persistent Personal Workspace) — Implemented
 
-- **Concept**: Provide agents with a private "scratchpad" to deliberate complex logic without polluting the shared team communication channels or prematurely revealing negotiation strategies.
-- **Implementation Strategy**:
-  - Introduce an XML-based `<scratchpad>` tag for agent reasoning.
-  - The `ATTManager` will intercept and strip `<scratchpad>` content before broadcasting the thought to the public `dialog_history` buffer.
-  - The extracted scratchpad content is routed exclusively to the individual agent's private context memory, allowing it to maintain an uninterrupted Chain-of-Thought across multiple discussion rounds.
+- **Concept**: Give every registered AI one durable private document library for deliberate notes, hypotheses, plans, research summaries, and cross-team experience. It stores user-visible work artifacts and never captures or infers hidden model reasoning.
+- **Implemented Architecture**:
+  - A stable Agent UUID owns exactly one `PDL-<agent_id>` library across all team memberships.
+  - Private access is resolved only from invocation-scoped agent identity; team ACLs, public discovery, metadata APIs, and managed links cannot expose a private library.
+  - An AI explicitly reads its own files or copies a selected file into the current team's built-in DocLib. Private content is never automatically inserted into prompts, transcripts, audits, callbacks, or message history.
+  - Retain, archive, reactivate, and confirmed permanent-delete policies provide an auditable lifecycle backed by schema 5 persistence and atomic restore validation.
 
 ### 3. Multi-Parent DAG Topology (Team Subscription Modeling)
 

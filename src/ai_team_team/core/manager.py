@@ -38,11 +38,19 @@ from ai_team_team.database.persistence import (
 
 class ATTManager:
     """Master controller managing the overall ATT (AI Team Team) topology."""
-    def __init__(self, root_ai: Agent, config: Optional[ATTConfig] = None, db_path: Optional[str] = None):
+    def __init__(
+        self,
+        root_ai: Agent,
+        config: Optional[ATTConfig] = None,
+        db_path: Optional[str] = None,
+        *,
+        _restore_mode: bool = False,
+    ):
         self.root_ai = root_ai
         self.config = config or ATTConfig()
         self.db_path = db_path
-        self.agents: Dict[str, Agent] = {root_ai.name: root_ai}
+        self.agents: Dict[str, Agent] = {}
+        self._agents_by_id: Dict[str, Agent] = {}
         self.teams: Dict[str, AgentTeam] = {}
         self.broker = NegotiationBroker(self)
         self.llm_clients: Dict[str, Any] = {}
@@ -70,6 +78,9 @@ class ATTManager:
         self._team_parent_map: Dict[str, str] = {}
         self._topology_lock = threading.RLock()
         self._snapshot_lock = threading.RLock()
+        self._runtime_gate = asyncio.Lock()
+        self._starting_invocations = 0
+        self._active_invocations = 0
         self._state_version = 0
         self._persistence = PersistenceCoordinator(db_path)
         self._persistence_batch: contextvars.ContextVar[Optional[Dict[str, Any]]] = (
@@ -125,6 +136,11 @@ class ATTManager:
                 ]
             }
         }
+        if _restore_mode:
+            self.agents[root_ai.name] = root_ai
+            self._agents_by_id[root_ai.agent_id] = root_ai
+        else:
+            self.register_agent(root_ai, auto_save=False)
 
     async def __aenter__(self) -> "ATTManager":
         return self
@@ -146,6 +162,8 @@ class ATTManager:
             "permissions": set(),
             "links": set(),
             "file_changes": {},
+            "deleted_agents": set(),
+            "deleted_libraries": set(),
         }
 
     @staticmethod
@@ -165,6 +183,8 @@ class ATTManager:
             target[key].update(source[key])
         for lib_id, changes in source["file_changes"].items():
             target["file_changes"].setdefault(lib_id, {}).update(changes)
+        target["deleted_agents"].update(source["deleted_agents"])
+        target["deleted_libraries"].update(source["deleted_libraries"])
 
     @asynccontextmanager
     async def suppress_auto_save(self):
@@ -197,6 +217,8 @@ class ATTManager:
             or dirty["permissions"]
             or dirty["links"]
             or dirty["file_changes"]
+            or dirty["deleted_agents"]
+            or dirty["deleted_libraries"]
         )
 
     def _auto_save(
@@ -215,6 +237,8 @@ class ATTManager:
             Dict[str, Dict[str, Optional[str]]]
         ] = None,
         full: bool = False,
+        deleted_agents: Optional[set[str]] = None,
+        deleted_libraries: Optional[set[str]] = None,
     ) -> None:
         """Records an immutable incremental state delta for the single writer."""
         if not self.db_path:
@@ -229,6 +253,8 @@ class ATTManager:
         dirty["libraries"].update(libraries or set())
         dirty["permissions"].update(permissions or set())
         dirty["links"].update(links or set())
+        dirty["deleted_agents"].update(deleted_agents or set())
+        dirty["deleted_libraries"].update(deleted_libraries or set())
         for lib_id, changes in (file_changes or {}).items():
             dirty["file_changes"].setdefault(lib_id, {}).update(changes)
 
@@ -306,13 +332,51 @@ class ATTManager:
 
     async def load_state(self, path: str) -> None:
         """Restores a versioned state snapshot without blocking the event loop."""
-        if self._closing:
-            raise RuntimeError("ATTManager is closing and cannot restore state.")
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"State database file '{path}' not found.")
-        state = await self._persistence.read(path)
-        await self._apply_state_snapshot(state)
-        self.db_path = path
+        async with self._runtime_gate:
+            if self._closing:
+                raise RuntimeError("ATTManager is closing and cannot restore state.")
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"State database file '{path}' not found.")
+            state = await self._persistence.read(path)
+            await self._apply_state_snapshot(state)
+            self.db_path = path
+
+    @asynccontextmanager
+    async def agent_invocation(
+        self, agent: Agent, *, allow_runtime: bool = False
+    ):
+        """Starts a model invocation atomically against restore and retirement."""
+        async with self._runtime_gate:
+            if self._closing:
+                raise RuntimeError(
+                    "ATTManager is closing and rejects new agent invocations."
+                )
+            registered = self._agents_by_id.get(agent.agent_id) is agent
+            if (not registered and not allow_runtime) or (
+                agent.lifecycle_state != "active"
+            ):
+                raise RuntimeError(
+                    "Agent is not an active identity in this manager."
+                )
+            self._starting_invocations += 1
+        invocation = agent.invocation_guard()
+        try:
+            await invocation.__aenter__()
+        except BaseException:
+            async with self._runtime_gate:
+                self._starting_invocations -= 1
+            raise
+        async with self._runtime_gate:
+            self._starting_invocations -= 1
+            self._active_invocations += 1
+        try:
+            yield
+        finally:
+            try:
+                await invocation.__aexit__(None, None, None)
+            finally:
+                async with self._runtime_gate:
+                    self._active_invocations -= 1
 
     def _emit_callback(self, name: str, *args: Any) -> None:
         """Queues an observational callback without blocking core execution."""
@@ -377,7 +441,7 @@ class ATTManager:
             configs = {
                 "schema_version": STATE_SCHEMA_VERSION,
                 "att_config": self.config.to_dict(),
-                "root_ai_name": self.root_ai.name,
+                "root_ai_id": self.root_ai.agent_id,
                 "model_configs": {
                     alias: dict(config)
                     for alias, config in self.model_configs.items()
@@ -394,7 +458,7 @@ class ATTManager:
                 "model_token_usage": dict(self.model_token_usage),
             }
 
-        agent_lookup = dict(self.agents)
+        agent_lookup = dict(self._agents_by_id)
         relevant_teams = (
             self.teams.values()
             if full
@@ -406,26 +470,41 @@ class ATTManager:
         )
         for relevant_team in relevant_teams:
             for member in relevant_team.members:
-                agent_lookup.setdefault(member.name, member)
-        agent_names = set(agent_lookup) if full else set(dirty["agents"])
+                agent_lookup.setdefault(member.agent_id, member)
+        agent_ids = set(agent_lookup) if full else set()
+        if not full:
+            for identifier in dirty["agents"]:
+                if identifier in agent_lookup:
+                    agent_ids.add(identifier)
+                elif identifier in self.agents:
+                    agent_ids.add(self.agents[identifier].agent_id)
         if not full:
             for team_id in dirty["teams"]:
                 team = self.teams.get(team_id)
                 if team is not None:
-                    agent_names.update(member.name for member in team.members)
+                    agent_ids.update(member.agent_id for member in team.members)
         agents = []
         unresolved_agents: List[str] = []
-        for name in sorted(agent_names):
-            agent = agent_lookup.get(name)
+        for agent_id in sorted(agent_ids):
+            agent = agent_lookup.get(agent_id)
             if agent is None:
                 continue
             try:
-                model_alias = self.resolve_model_alias(agent.llm_client)
+                if agent.lifecycle_state == "active":
+                    model_alias = self.resolve_model_alias(agent.llm_client)
+                else:
+                    model_alias = agent._model_alias
+                    if model_alias is None and agent.llm_client is not None:
+                        model_alias = self.resolve_model_alias(agent.llm_client)
             except ValueError:
+                unresolved_agents.append(agent.name)
+                continue
+            if agent.lifecycle_state == "active" and model_alias is None:
                 unresolved_agents.append(agent.name)
                 continue
             agents.append(
                 {
+                    "agent_id": agent.agent_id,
                     "name": agent.name,
                     "role": agent.role,
                     "role_description": getattr(
@@ -435,6 +514,7 @@ class ATTManager:
                         agent, "system_instructions", ""
                     ),
                     "model_alias": model_alias,
+                    "lifecycle_state": agent.lifecycle_state,
                     "last_context": (
                         dict(agent.last_context) if agent.last_context else None
                     ),
@@ -461,7 +541,7 @@ class ATTManager:
             creator_id = None
             if isinstance(team.creator, Agent):
                 creator_type = "agent"
-                creator_id = team.creator.name
+                creator_id = team.creator.agent_id
             elif isinstance(team.creator, AgentTeam):
                 creator_type = "team"
                 creator_id = team.creator.team_id
@@ -489,7 +569,7 @@ class ATTManager:
                     "system_instructions": getattr(
                         team, "system_instructions", ""
                     ),
-                    "members": [member.name for member in team.members],
+                    "members": [member.agent_id for member in team.members],
                     "message_timestamp": now,
                 }
             )
@@ -539,6 +619,9 @@ class ATTManager:
                     "lib_id": library.lib_id,
                     "name": library.name,
                     "owner_team_id": library.owner_team_id,
+                    "owner_agent_id": library.owner_agent_id,
+                    "library_kind": library.library_kind,
+                    "lifecycle_state": library.lifecycle_state,
                     "description": library.description,
                     "is_public_visible": library.is_public_visible,
                 }
@@ -592,6 +675,8 @@ class ATTManager:
             "permissions": permissions,
             "links": links,
             "file_changes": file_changes,
+            "deleted_agents": tuple(dirty["deleted_agents"]),
+            "deleted_libraries": tuple(dirty["deleted_libraries"]),
         }
 
     async def _apply_state_snapshot_unvalidated(
@@ -609,7 +694,8 @@ class ATTManager:
         required_aliases = {
             row["model_alias"]
             for row in state["agents"]
-            if row.get("model_alias") != "default"
+            if row.get("lifecycle_state", "active") == "active"
+            and row.get("model_alias") != "default"
         }
         missing_aliases = sorted(
             alias
@@ -626,9 +712,13 @@ class ATTManager:
             )
 
         self.agents.clear()
+        self._agents_by_id.clear()
         for row in state["agents"]:
             alias = row.get("model_alias")
-            if alias in self.llm_clients:
+            lifecycle_state = row.get("lifecycle_state", "active")
+            if lifecycle_state != "active":
+                client = None
+            elif alias in self.llm_clients:
                 client = self.llm_clients[alias]
             elif (
                 alias != "default"
@@ -651,7 +741,11 @@ class ATTManager:
                 llm_client=client,
                 role_description=row["role_description"] or "",
                 system_instructions=row["system_instructions"] or "",
+                agent_id=row["agent_id"],
             )
+            agent.lifecycle_state = lifecycle_state
+            agent._model_alias = alias
+            agent._private_doc_library_id = f"PDL-{agent.agent_id}"
             agent.last_context = (
                 json.loads(row["last_context"])
                 if row["last_context"]
@@ -669,14 +763,16 @@ class ATTManager:
                 agent.messages.append(restored)
                 agent.message_history.append(restored)
                 agent._history_seen_ids.add(id(restored))
-            self.agents[agent.name] = agent
+            self._agents_by_id[agent.agent_id] = agent
+            if lifecycle_state == "active":
+                self.agents[agent.name] = agent
 
-        root_name = configs["root_ai_name"]
-        if root_name not in self.agents:
+        root_id = configs["root_ai_id"]
+        if root_id not in self._agents_by_id:
             raise StateRestoreError(
-                f"Persisted root agent {root_name!r} was not found."
+                f"Persisted root agent {root_id!r} was not found."
             )
-        self.root_ai = self.agents[root_name]
+        self.root_ai = self._agents_by_id[root_id]
         self.supervisor.root_ai = self.root_ai
 
         self.libraries.clear()
@@ -686,11 +782,14 @@ class ATTManager:
                 lib_id=row["lib_id"],
                 name=row["name"],
                 owner_team_id=row["owner_team_id"],
+                owner_agent_id=row.get("owner_agent_id"),
+                library_kind=row.get("library_kind", "team"),
+                lifecycle_state=row.get("lifecycle_state", "active"),
                 description=row["description"] or "",
                 is_public_visible=row["is_public_visible"],
             )
             await asyncio.to_thread(
-                library.replace_all_files, row["files"]
+                library._restore_all_files, row["files"]
             )
             self.libraries[library.lib_id] = library
             self._library_files[library.lib_id] = dict(row["files"])
@@ -702,7 +801,7 @@ class ATTManager:
         team_map: Dict[str, AgentTeam] = {}
         for row in state["teams"]:
             creator = (
-                self.agents.get(row["creator_id"])
+                self._agents_by_id.get(row["creator_id"])
                 if row["creator_type"] == "agent"
                 else None
             )
@@ -746,7 +845,10 @@ class ATTManager:
                 }
                 for proposal in row["proposals"]
             }
-            team.members = [self.agents[name] for name in row["members"]]
+            team.members = [
+                self._agents_by_id[agent_id]
+                for agent_id in row["members"]
+            ]
             team_map[team.team_id] = team
 
         for row in state["teams"]:
@@ -774,6 +876,18 @@ class ATTManager:
 
     async def _apply_state_snapshot(self, state: Dict[str, Any]) -> None:
         """Stages, validates, and atomically publishes a restored state."""
+        if self._starting_invocations or self._active_invocations:
+            raise StateRestoreError(
+                "Cannot restore state while agent invocations are active or starting."
+            )
+        if any(team.is_running for team in self.teams.values()):
+            raise StateRestoreError(
+                "Cannot restore state while a team discussion is active."
+            )
+        if any(agent.lock.locked() for agent in self._agents_by_id.values()):
+            raise StateRestoreError(
+                "Cannot restore state while an agent invocation is active."
+            )
         if self.token_budget.has_active_reservations():
             raise StateRestoreError(
                 "Cannot restore state while model token reservations are active."
@@ -814,6 +928,7 @@ class ATTManager:
                 llm_client=self.root_ai.llm_client,
             ),
             ATTConfig(workspace_root=staging_workspace),
+            _restore_mode=True,
         )
         staged.llm_clients = dict(self.llm_clients)
         staged.generator_handler = self.generator_handler
@@ -849,6 +964,7 @@ class ATTManager:
                 "config": self.config,
                 "root_ai": self.root_ai,
                 "agents": self.agents,
+                "agents_by_id": self._agents_by_id,
                 "teams": self.teams,
                 "libraries": self.libraries,
                 "library_permissions": self.library_permissions,
@@ -864,6 +980,7 @@ class ATTManager:
                 self.config = target_config
                 self.root_ai = staged.root_ai
                 self.agents = staged.agents
+                self._agents_by_id = staged._agents_by_id
                 self.teams = staged.teams
                 self.libraries = staged.libraries
                 self.library_permissions = staged.library_permissions
@@ -883,6 +1000,7 @@ class ATTManager:
                 self.config = old_state["config"]
                 self.root_ai = old_state["root_ai"]
                 self.agents = old_state["agents"]
+                self._agents_by_id = old_state["agents_by_id"]
                 self.teams = old_state["teams"]
                 self.libraries = old_state["libraries"]
                 self.library_permissions = old_state["library_permissions"]
@@ -936,13 +1054,39 @@ class ATTManager:
                 f"Invalid persisted state structure: {exc}"
             ) from exc
 
+        agent_ids = [row.get("agent_id") for row in agent_rows]
         agent_names = [row.get("name") for row in agent_rows]
+        if None in agent_ids or len(agent_ids) != len(set(agent_ids)):
+            raise StateRestoreError("Agent IDs are missing or duplicated.")
+        for agent_id in agent_ids:
+            try:
+                if str(uuid.UUID(agent_id)) != agent_id:
+                    raise ValueError
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise StateRestoreError(
+                    f"Agent ID {agent_id!r} is not a canonical UUID."
+                ) from exc
         if None in agent_names or len(agent_names) != len(set(agent_names)):
-            raise StateRestoreError("Agent identifiers are missing or duplicated.")
-        root_name = configs.get("root_ai_name")
-        if root_name not in set(agent_names):
+            raise StateRestoreError("Agent names are missing or duplicated.")
+        agent_id_set = set(agent_ids)
+        active_agent_ids = {
+            row["agent_id"]
+            for row in agent_rows
+            if row.get("lifecycle_state") == "active"
+        }
+        for row in agent_rows:
+            if row.get("lifecycle_state") not in {
+                "active",
+                "retained",
+                "archived",
+            }:
+                raise StateRestoreError(
+                    f"Agent {row.get('agent_id')!r} has an invalid lifecycle state."
+                )
+        root_id = configs.get("root_ai_id")
+        if root_id not in active_agent_ids:
             raise StateRestoreError(
-                f"Persisted root agent {root_name!r} was not found."
+                f"Persisted root agent {root_id!r} was not found or is inactive."
             )
         if not isinstance(persisted_model_configs, dict) or not isinstance(
             persisted_presets, dict
@@ -959,14 +1103,19 @@ class ATTManager:
             raise StateRestoreError(
                 "Persisted model token usage must contain non-negative integers."
             )
-        if any(row.get("model_alias") is None for row in agent_rows):
+        if any(
+            row.get("model_alias") is None
+            for row in agent_rows
+            if row.get("lifecycle_state") == "active"
+        ):
             raise StateRestoreError(
-                "Every persisted agent must reference an explicit model alias."
+                "Every active persisted agent must reference an explicit model alias."
             )
         missing_aliases = sorted(
             {
                 row.get("model_alias")
                 for row in agent_rows
+                if row.get("lifecycle_state") == "active"
                 if row.get("model_alias") != "default"
                 and (
                     row.get("model_alias") not in self.llm_clients
@@ -990,6 +1139,7 @@ class ATTManager:
         if any(
             row.get("model_alias") == "default"
             for row in agent_rows
+            if row.get("lifecycle_state") == "active"
         ) and not has_default_binding:
             raise StateRestoreError(
                 "No runtime binding is available for the default model alias."
@@ -1007,7 +1157,26 @@ class ATTManager:
         if None in team_ids or len(team_ids) != len(set(team_ids)):
             raise StateRestoreError("Team identifiers are missing or duplicated.")
         team_id_set = set(team_ids)
-        agent_name_set = set(agent_names)
+        for row in agent_rows:
+            messages = row.get("messages", [])
+            if not isinstance(messages, list):
+                raise StateRestoreError(
+                    f"Agent {row.get('agent_id')!r} has invalid message history."
+                )
+            for message in messages:
+                if not isinstance(message, dict):
+                    raise StateRestoreError(
+                        f"Agent {row.get('agent_id')!r} has a malformed message."
+                    )
+                message_team_id = message.get("team_id")
+                if (
+                    message_team_id is not None
+                    and message_team_id not in team_id_set
+                ):
+                    raise StateRestoreError(
+                        f"Agent {row.get('agent_id')!r} message references "
+                        f"missing team {message_team_id!r}."
+                    )
         parent_map: Dict[str, Optional[str]] = {}
         for row in team_rows:
             team_id = row["team_id"]
@@ -1019,7 +1188,7 @@ class ATTManager:
                     f"Team {team_id!r} contains invalid JSON metadata."
                 ) from exc
             missing_members = sorted(
-                set(row.get("members", [])) - agent_name_set
+                set(row.get("members", [])) - active_agent_ids
             )
             if missing_members:
                 raise StateRestoreError(
@@ -1041,7 +1210,7 @@ class ATTManager:
             creator_type = row.get("creator_type")
             creator_id = row.get("creator_id")
             if creator_type == "agent":
-                valid_creator = creator_id in agent_name_set
+                valid_creator = creator_id in active_agent_ids
             elif creator_type == "team":
                 valid_creator = creator_id in team_id_set and creator_id != team_id
             else:
@@ -1052,15 +1221,40 @@ class ATTManager:
                     f"{creator_type!r}:{creator_id!r}."
                 )
             for proposal in row.get("proposals", []):
+                if proposal.get("action") not in {"add", "remove"}:
+                    raise StateRestoreError(
+                        f"Proposal {proposal.get('proposal_id')!r} has invalid "
+                        f"action {proposal.get('action')!r}."
+                    )
+                if proposal.get("status") not in {
+                    "active",
+                    "approved",
+                    "rejected",
+                    "retracted",
+                }:
+                    raise StateRestoreError(
+                        f"Proposal {proposal.get('proposal_id')!r} has invalid "
+                        f"status {proposal.get('status')!r}."
+                    )
+                if not isinstance(proposal.get("proposed_details", {}), dict):
+                    raise StateRestoreError(
+                        f"Proposal {proposal.get('proposal_id')!r} has invalid details."
+                    )
                 initiator_type = proposal.get("initiator_type")
+                initiator_id = proposal.get("initiator_agent_id")
                 initiator_name = proposal.get("initiator_name")
+                if initiator_type not in {"individual", "AT"}:
+                    raise StateRestoreError(
+                        f"Proposal {proposal.get('proposal_id')!r} has invalid "
+                        f"initiator type {initiator_type!r}."
+                    )
                 if (
                     initiator_type == "individual"
-                    and initiator_name not in agent_name_set
+                    and initiator_id not in agent_id_set
                 ):
                     raise StateRestoreError(
                         f"Proposal {proposal.get('proposal_id')!r} references "
-                        f"missing initiator agent {initiator_name!r}."
+                        f"missing initiator agent {initiator_id!r}."
                     )
                 if (
                     initiator_type == "AT"
@@ -1070,6 +1264,31 @@ class ATTManager:
                         f"Proposal {proposal.get('proposal_id')!r} references "
                         f"invalid team initiator {initiator_name!r}."
                     )
+                votes = proposal.get("votes", {})
+                if not isinstance(votes, dict):
+                    raise StateRestoreError(
+                        f"Proposal {proposal.get('proposal_id')!r} has invalid votes."
+                    )
+                unknown_voters = sorted(
+                    set(votes) - agent_id_set
+                )
+                if unknown_voters:
+                    raise StateRestoreError(
+                        f"Proposal {proposal.get('proposal_id')!r} references "
+                        "missing voter IDs: " + ", ".join(unknown_voters)
+                    )
+                for voter_id, ballot in votes.items():
+                    if (
+                        not isinstance(ballot, dict)
+                        or ballot.get("vote")
+                        not in {"Agree", "Disagree", "Abstain"}
+                        or not isinstance(ballot.get("public"), bool)
+                        or not isinstance(ballot.get("rationale", ""), str)
+                    ):
+                        raise StateRestoreError(
+                            f"Proposal {proposal.get('proposal_id')!r} has "
+                            f"an invalid ballot for voter {voter_id!r}."
+                        )
 
         for team_id in team_id_set:
             seen = set()
@@ -1086,6 +1305,13 @@ class ATTManager:
         if None in library_ids or len(library_ids) != len(set(library_ids)):
             raise StateRestoreError("DocLib identifiers are missing or duplicated.")
         library_id_set = set(library_ids)
+        library_kind_by_id: Dict[str, str] = {}
+        library_row_by_id = {
+            row["lib_id"]: row for row in library_rows
+        }
+        private_owner_counts: Dict[str, int] = {
+            agent_id: 0 for agent_id in agent_id_set
+        }
         files_by_library: Dict[str, Dict[str, str]] = {}
         for row in library_rows:
             lib_id = row["lib_id"]
@@ -1099,9 +1325,46 @@ class ATTManager:
                 raise StateRestoreError(
                     f"Invalid DocLib identifier {lib_id!r}."
                 )
-            if row.get("owner_team_id") not in team_id_set:
+            kind = row.get("library_kind")
+            owner_team_id = row.get("owner_team_id")
+            owner_agent_id = row.get("owner_agent_id")
+            lifecycle_state = row.get("lifecycle_state")
+            library_kind_by_id[lib_id] = kind
+            if kind == "team":
+                if owner_team_id not in team_id_set or owner_agent_id is not None:
+                    raise StateRestoreError(
+                        f"Team DocLib {lib_id!r} has invalid ownership."
+                    )
+                if lifecycle_state != "active":
+                    raise StateRestoreError(
+                        f"Team DocLib {lib_id!r} must be active."
+                    )
+            elif kind == "agent_private":
+                if owner_agent_id not in agent_id_set or owner_team_id is not None:
+                    raise StateRestoreError(
+                        f"Private DocLib {lib_id!r} has invalid ownership."
+                    )
+                if lib_id != f"PDL-{owner_agent_id}":
+                    raise StateRestoreError(
+                        f"Private DocLib {lib_id!r} has a non-canonical ID."
+                    )
+                if row.get("is_public_visible"):
+                    raise StateRestoreError(
+                        f"Private DocLib {lib_id!r} cannot be public."
+                    )
+                owner_state = next(
+                    agent_row.get("lifecycle_state")
+                    for agent_row in agent_rows
+                    if agent_row.get("agent_id") == owner_agent_id
+                )
+                if lifecycle_state != owner_state:
+                    raise StateRestoreError(
+                        f"Private DocLib {lib_id!r} lifecycle does not match its owner."
+                    )
+                private_owner_counts[owner_agent_id] += 1
+            else:
                 raise StateRestoreError(
-                    f"DocLib {lib_id!r} references a missing owner team."
+                    f"DocLib {lib_id!r} has invalid kind {kind!r}."
                 )
             normalized_files = {}
             for path, content in row.get("files", {}).items():
@@ -1117,15 +1380,42 @@ class ATTManager:
                 normalized_files[clean] = content
             files_by_library[lib_id] = normalized_files
         for team_id in team_id_set:
-            if f"DL-{team_id}" not in library_id_set:
+            built_in_id = f"DL-{team_id}"
+            built_in = library_row_by_id.get(built_in_id)
+            if built_in is None:
                 raise StateRestoreError(
                     f"Team {team_id!r} is missing its built-in DocLib."
                 )
+            if (
+                built_in.get("library_kind") != "team"
+                or built_in.get("owner_team_id") != team_id
+                or built_in.get("owner_agent_id") is not None
+            ):
+                raise StateRestoreError(
+                    f"Team {team_id!r} has an invalid built-in DocLib owner."
+                )
+        invalid_private_counts = {
+            agent_id: count
+            for agent_id, count in private_owner_counts.items()
+            if count != 1
+        }
+        if invalid_private_counts:
+            details = ", ".join(
+                f"{agent_id}={count}"
+                for agent_id, count in sorted(invalid_private_counts.items())
+            )
+            raise StateRestoreError(
+                "Every agent must own exactly one private DocLib: " + details
+            )
 
         for lib_id, path_map in permissions.items():
             if lib_id not in library_id_set:
                 raise StateRestoreError(
                     f"Permissions reference missing DocLib {lib_id!r}."
+                )
+            if library_kind_by_id[lib_id] != "team" and path_map:
+                raise StateRestoreError(
+                    f"Private DocLib {lib_id!r} cannot have team ACL entries."
                 )
             for path, team_map in path_map.items():
                 self.normalize_library_path(path)
@@ -1147,12 +1437,20 @@ class ATTManager:
                 raise StateRestoreError(
                     f"Link references missing source DocLib {source_lib_id!r}."
                 )
+            if library_kind_by_id[source_lib_id] != "team" and path_map:
+                raise StateRestoreError(
+                    f"Private DocLib {source_lib_id!r} cannot contain managed links."
+                )
             for source_path, target in path_map.items():
                 target_lib_id = target["target_lib_id"]
                 target_path = target["target_path"]
                 if target_lib_id not in library_id_set:
                     raise StateRestoreError(
                         f"Link references missing target DocLib {target_lib_id!r}."
+                    )
+                if library_kind_by_id[target_lib_id] != "team":
+                    raise StateRestoreError(
+                        f"Managed links cannot target private DocLib {target_lib_id!r}."
                     )
                 if source_lib_id == target_lib_id:
                     raise StateRestoreError(
@@ -1279,7 +1577,10 @@ class ATTManager:
         *,
         lib_id: str,
         name: str,
-        owner_team_id: str,
+        owner_team_id: Optional[str] = None,
+        owner_agent_id: Optional[str] = None,
+        library_kind: str = "team",
+        lifecycle_state: str = "active",
         description: str,
         is_public_visible: bool,
         storage_dir: Optional[str] = None,
@@ -1289,12 +1590,337 @@ class ATTManager:
             lib_id=lib_id,
             name=name,
             owner_team_id=owner_team_id,
+            owner_agent_id=owner_agent_id,
+            library_kind=library_kind,
+            lifecycle_state=lifecycle_state,
             description=description,
             is_public_visible=is_public_visible,
             root_dir=self.config.workspace_root,
             on_change=self._on_library_change,
             storage_dir=storage_dir,
         )
+
+    def register_agent(
+        self, agent: Agent, *, auto_save: bool = True
+    ) -> Agent:
+        """Registers one stable agent identity and creates its private DocLib."""
+        if not isinstance(agent, Agent):
+            raise TypeError("agent must be an Agent instance.")
+        if agent.lifecycle_state != "active":
+            raise ValueError(
+                "Only a new active Agent can be registered; inactive "
+                "identities require reactivate_agent()."
+            )
+        existing_by_id = self._agents_by_id.get(agent.agent_id)
+        if existing_by_id is not None and existing_by_id is not agent:
+            raise ValueError(
+                f"Agent ID {agent.agent_id!r} is already registered."
+            )
+        existing_by_name = self.agents.get(agent.name)
+        if existing_by_name is not None and existing_by_name is not agent:
+            raise ValueError(f"Agent name {agent.name!r} is already registered.")
+        for known in self._agents_by_id.values():
+            if known is not agent and known.name == agent.name:
+                raise ValueError(f"Agent name {agent.name!r} is already reserved.")
+
+        if existing_by_id is agent and agent.lifecycle_state != "active":
+            raise ValueError(
+                "Inactive agents must be restored with reactivate_agent()."
+            )
+
+        agent.lifecycle_state = "active"
+        lib_id = agent.private_doc_library_id or f"PDL-{agent.agent_id}"
+        expected = f"PDL-{agent.agent_id}"
+        if lib_id != expected:
+            raise ValueError(
+                f"Private DocLib ID must be {expected!r} for this agent."
+            )
+        library = self.libraries.get(lib_id)
+        if library is None:
+            library = self._new_document_library(
+                lib_id=lib_id,
+                name=f"{agent.name} Private Library",
+                owner_agent_id=agent.agent_id,
+                library_kind="agent_private",
+                lifecycle_state="active",
+                description=(
+                    f"Persistent private workspace for agent {agent.name}."
+                ),
+                is_public_visible=False,
+            )
+            self.libraries[lib_id] = library
+        elif (
+            library.library_kind != "agent_private"
+            or library.owner_agent_id != agent.agent_id
+        ):
+            raise ValueError("Private DocLib ownership is inconsistent.")
+        agent._private_doc_library_id = lib_id
+        self._agents_by_id[agent.agent_id] = agent
+        self.agents[agent.name] = agent
+        if auto_save:
+            self._auto_save(
+                agents={agent.agent_id}, libraries={lib_id}
+            )
+        return agent
+
+    def get_private_library_id(self, agent_id: str) -> str:
+        """Returns the one private library associated with an agent identity."""
+        agent = self._agents_by_id.get(agent_id)
+        if agent is None or agent.private_doc_library_id is None:
+            raise KeyError(f"Unknown agent ID {agent_id!r}.")
+        return agent.private_doc_library_id
+
+    def _require_private_agent_context(self) -> Tuple[Agent, DocumentLibrary]:
+        """Resolves private ownership exclusively from invocation context."""
+        agent = self._active_tool_agent.get()
+        if agent is None:
+            raise PermissionError(
+                "Private DocLib access requires an active agent invocation."
+            )
+        registered = self._agents_by_id.get(agent.agent_id)
+        if (
+            registered is not agent
+            or agent.lifecycle_state != "active"
+            or self.agents.get(agent.name) is not agent
+        ):
+            raise PermissionError("The active agent identity is not active.")
+        lib_id = agent.private_doc_library_id
+        library = self.libraries.get(lib_id or "")
+        if (
+            library is None
+            or library.library_kind != "agent_private"
+            or library.owner_agent_id != agent.agent_id
+        ):
+            raise PermissionError("Private DocLib ownership is unavailable.")
+        return agent, library
+
+    async def retire_agent(
+        self,
+        agent_id: str,
+        policy: Optional[str] = None,
+        confirm_delete: bool = False,
+    ) -> None:
+        """Retires one unused agent under the configured private-data policy."""
+        agent = self._agents_by_id.get(agent_id)
+        if agent is None:
+            raise KeyError(f"Unknown agent ID {agent_id!r}.")
+        async with agent.lifecycle_lock:
+            await self._retire_agent_locked(
+                agent_id, policy=policy, confirm_delete=confirm_delete
+            )
+
+    async def _retire_agent_locked(
+        self,
+        agent_id: str,
+        policy: Optional[str] = None,
+        confirm_delete: bool = False,
+    ) -> None:
+        """Implements retirement while the identity lifecycle lock is held."""
+        selected = policy or self.config.agent_private_data_policy
+        if selected not in {"retain", "archive", "delete"}:
+            raise ValueError("policy must be retain, archive, or delete.")
+        agent = self._agents_by_id.get(agent_id)
+        if agent is None:
+            raise KeyError(f"Unknown agent ID {agent_id!r}.")
+        if agent.lifecycle_state != "active":
+            raise ValueError("Agent is already inactive.")
+        if agent is self.root_ai:
+            raise ValueError("The root agent cannot be retired.")
+        if selected == "delete" and not confirm_delete:
+            raise ValueError("Permanent deletion requires confirm_delete=True.")
+
+        if selected == "delete":
+            # Revalidate every deletion precondition after all previously
+            # accepted persistence work has completed.
+            await self.flush_state()
+
+        memberships = [
+            team.team_id for team in self.teams.values() if agent in team.members
+        ]
+        if memberships:
+            raise ValueError(
+                "Agent still belongs to teams: " + ", ".join(sorted(memberships))
+            )
+        creator_teams = [
+            team.team_id for team in self.teams.values() if team.creator is agent
+        ]
+        if creator_teams:
+            raise ValueError(
+                "Agent still creates teams: " + ", ".join(sorted(creator_teams))
+            )
+        if agent.lock.locked():
+            raise ValueError("Agent has an active model invocation.")
+
+        if selected == "delete":
+            governance_refs = [
+                f"{team.team_id}:{proposal_id}"
+                for team in self.teams.values()
+                for proposal_id, proposal in team.proposals.items()
+                if proposal.get("initiator_agent_id") == agent_id
+                or agent_id in proposal.get("votes", {})
+            ]
+            if governance_refs:
+                raise ValueError(
+                    "Agent still has governance records: "
+                    + ", ".join(sorted(governance_refs))
+                )
+
+        lib_id = self.get_private_library_id(agent_id)
+        library = self.libraries[lib_id]
+        if selected in {"retain", "archive"}:
+            alias = self.resolve_model_alias(agent.llm_client)
+            old_alias = agent._model_alias
+            agent._model_alias = alias
+            state = "retained" if selected == "retain" else "archived"
+            old_client = agent.llm_client
+            agent.lifecycle_state = state
+            with library._lock:
+                library.lifecycle_state = state
+            self.agents.pop(agent.name, None)
+            agent.llm_client = None
+            try:
+                self._auto_save(agents={agent_id}, libraries={lib_id})
+                await self.flush_state()
+            except Exception:
+                agent.lifecycle_state = "active"
+                with library._lock:
+                    library.lifecycle_state = "active"
+                agent.llm_client = old_client
+                agent._model_alias = old_alias
+                self.agents[agent.name] = agent
+                raise
+            self._emit_callback(
+                "on_system_event",
+                "agent_lifecycle_changed",
+                {"agent_id": agent_id, "state": state, "library_id": lib_id},
+            )
+            return
+
+        parent_dir = os.path.dirname(library.root_dir)
+        trash_path = os.path.join(
+            parent_dir, f".{lib_id}-delete-{uuid.uuid4().hex}"
+        )
+        old_files = self._library_files.get(lib_id, {})
+        old_links = self.library_links.get(lib_id)
+        old_permissions = self.library_permissions.get(lib_id)
+        moved = False
+        committed = False
+        try:
+            agent.lifecycle_state = "deleting"
+            with library._lock:
+                library.lifecycle_state = "archived"
+                if os.path.exists(library.root_dir):
+                    os.replace(library.root_dir, trash_path)
+                    moved = True
+            self.agents.pop(agent.name, None)
+            self._agents_by_id.pop(agent_id, None)
+            self.libraries.pop(lib_id, None)
+            self._library_files.pop(lib_id, None)
+            self.library_links.pop(lib_id, None)
+            self.library_permissions.pop(lib_id, None)
+            self._auto_save(
+                deleted_agents={agent_id}, deleted_libraries={lib_id}
+            )
+            await self.flush_state()
+            committed = True
+        except Exception:
+            self._agents_by_id[agent_id] = agent
+            self.agents[agent.name] = agent
+            self.libraries[lib_id] = library
+            self._library_files[lib_id] = old_files
+            if old_links is not None:
+                self.library_links[lib_id] = old_links
+            if old_permissions is not None:
+                self.library_permissions[lib_id] = old_permissions
+            if moved and os.path.exists(trash_path):
+                os.replace(trash_path, library.root_dir)
+            with library._lock:
+                library.lifecycle_state = "active"
+            agent.lifecycle_state = "active"
+            raise
+        finally:
+            if committed and os.path.exists(trash_path):
+                shutil.rmtree(trash_path, ignore_errors=True)
+        self._emit_callback(
+            "on_system_event",
+            "agent_lifecycle_changed",
+            {"agent_id": agent_id, "state": "deleted", "library_id": lib_id},
+        )
+        agent.lifecycle_state = "deleted"
+        agent.llm_client = None
+        agent._private_doc_library_id = None
+        agent.messages.clear()
+        agent.message_history.clear()
+        agent._history_seen_ids.clear()
+
+    async def reactivate_agent(self, agent_id: str, model_alias: str) -> Agent:
+        """Reactivates a retained or archived identity with a stable binding."""
+        agent = self._agents_by_id.get(agent_id)
+        if agent is None:
+            raise KeyError(f"Unknown agent ID {agent_id!r}.")
+        async with agent.lifecycle_lock:
+            return await self._reactivate_agent_locked(agent_id, model_alias)
+
+    async def _reactivate_agent_locked(
+        self, agent_id: str, model_alias: str
+    ) -> Agent:
+        """Implements reactivation while the identity lifecycle lock is held."""
+        agent = self._agents_by_id.get(agent_id)
+        if agent is None:
+            raise KeyError(f"Unknown agent ID {agent_id!r}.")
+        if agent.lifecycle_state == "active":
+            raise ValueError("Agent is already active.")
+        if self.agents.get(agent.name) not in {None, agent}:
+            raise ValueError(f"Agent name {agent.name!r} is already active.")
+        if model_alias == "default":
+            if "default" in self.llm_clients:
+                client = self.llm_clients["default"]
+            elif self.generator_handler is not None:
+                client = ManagerDefaultClientAdapter(self)
+            else:
+                raise ValueError("The default model alias has no runtime binding.")
+        elif model_alias in self.llm_clients:
+            client = self.llm_clients[model_alias]
+        elif model_alias in self.model_configs and self.generator_handler:
+            client = HandlerClientAdapter(model_alias, self.generator_handler)
+            client._supports_native = (
+                self.model_configs.get(model_alias, {}).get(
+                    "supports_native_tool_calling"
+                )
+                is True
+            )
+        else:
+            raise ValueError(
+                f"Model alias {model_alias!r} has no runtime binding."
+            )
+        lib_id = self.get_private_library_id(agent_id)
+        library = self.libraries[lib_id]
+        old_state = agent.lifecycle_state
+        old_library_state = library.lifecycle_state
+        old_alias = agent._model_alias
+        agent.llm_client = client
+        agent._model_alias = model_alias
+        agent.lifecycle_state = "active"
+        with library._lock:
+            library.lifecycle_state = "active"
+        self.agents[agent.name] = agent
+        try:
+            self._auto_save(agents={agent_id}, libraries={lib_id})
+            await self.flush_state()
+        except Exception:
+            self.agents.pop(agent.name, None)
+            agent.llm_client = None
+            agent._model_alias = old_alias
+            agent.lifecycle_state = old_state
+            with library._lock:
+                library.lifecycle_state = old_library_state
+            raise
+        self._emit_callback(
+            "on_system_event",
+            "agent_lifecycle_changed",
+            {"agent_id": agent_id, "state": "active", "library_id": lib_id},
+        )
+        return agent
 
     def _on_library_change(
         self, lib_id: str, path: str, content: Optional[str]
@@ -1308,6 +1934,19 @@ class ATTManager:
             self._auto_save(
                 libraries={lib_id},
                 file_changes={lib_id: {path: content}},
+            )
+        library = self.libraries.get(lib_id)
+        if library is not None and library.library_kind == "agent_private":
+            self._emit_callback(
+                "on_system_event",
+                "private_library_file_changed",
+                {
+                    "agent_id": library.owner_agent_id,
+                    "library_id": lib_id,
+                    "path": path,
+                    "operation": "delete" if content is None else "write",
+                    "result": "success",
+                },
             )
 
     def register_tool(
@@ -1683,6 +2322,8 @@ class ATTManager:
     ) -> AgentTeam:
 
         """Dynamically spawns a new recursive Agent Team (AT)."""
+        if isinstance(creator, Agent):
+            self.register_agent(creator, auto_save=False)
         if member_configs:
             member_count = len(member_configs)
             
@@ -1745,7 +2386,7 @@ class ATTManager:
                 if isinstance(config, Agent):
                     agent = config
                     agent.role = role_name
-                    self.agents[agent.name] = agent
+                    self.register_agent(agent, auto_save=False)
                     members.append(agent)
                 elif isinstance(config, dict) and config.get("hire_agent") in self.agents:
                     agent = self.agents[config["hire_agent"]]
@@ -1766,13 +2407,13 @@ class ATTManager:
                         role_description=role_desc,
                         system_instructions=sys_inst
                     )
-                    self.agents[agent_name] = agent
+                    self.register_agent(agent, auto_save=False)
                     members.append(agent)
         elif roles_and_presets:
             for name, role in roles_and_presets:
                 agent_name = self.unique_agent_name(name, team)
                 agent = Agent(name=agent_name, role=role, llm_client=get_agent_client(role, name))
-                self.agents[agent_name] = agent
+                self.register_agent(agent, auto_save=False)
                 members.append(agent)
         else:
             preset = self.get_preset(preset_name)
@@ -1781,13 +2422,13 @@ class ATTManager:
                 for name, role in roles[:member_count]:
                     agent_name = self.unique_agent_name(name, team)
                     agent = Agent(name=agent_name, role=role, llm_client=get_agent_client(role, name))
-                    self.agents[agent_name] = agent
+                    self.register_agent(agent, auto_save=False)
                     members.append(agent)
             else:
                 for i in range(member_count):
                     m_name = f"{team.team_id}_member_{i+1}"
                     agent = Agent(name=m_name, role="Specialist", llm_client=get_agent_client("Specialist", m_name))
-                    self.agents[m_name] = agent
+                    self.register_agent(agent, auto_save=False)
                     members.append(agent)
 
         team.members = members
@@ -1833,11 +2474,17 @@ class ATTManager:
         self.logger.info(f"Successfully spawned Agent Team {team.team_id} (N={len(members)}, Preset: {preset_name}) spawned by {creator.name if hasattr(creator, 'name') else creator.team_id}")
         self._auto_save(
             configs=True,
-            agents={self.root_ai.name}
-            | {member.name for member in members},
+            agents={self.root_ai.agent_id}
+            | {member.agent_id for member in members},
             teams={team.team_id}
             | ({team.parent_team.team_id} if team.parent_team else set()),
-            libraries={lib_id},
+            libraries={lib_id}
+            | {
+                member.private_doc_library_id
+                for member in members
+                if member.private_doc_library_id
+            }
+            | {self.root_ai.private_doc_library_id},
         )
         return team
 
@@ -1901,6 +2548,8 @@ class ATTManager:
         except PermissionError:
             return False
         lib = self.libraries[lib_id]
+        if lib.library_kind != "team":
+            return False
         if lib.owner_team_id == team_id:
             return True
             
@@ -2004,6 +2653,11 @@ class ATTManager:
         target_path = self._normalize_library_file_path(target_path)
         if source_lib_id not in self.libraries or target_lib_id not in self.libraries:
             raise FileNotFoundError("Both source and target DocLibs must be registered.")
+        if (
+            self.libraries[source_lib_id].library_kind != "team"
+            or self.libraries[target_lib_id].library_kind != "team"
+        ):
+            raise PermissionError("Private DocLibs cannot participate in links.")
         if not self.check_library_access(
             team_id, source_lib_id, source_path, "WRITE"
         ):
@@ -2119,6 +2773,139 @@ class ATTManager:
                 f"{target['target_lib_id']}:{target['target_path']}"
             )
         return sorted(items)
+
+    async def list_private_files(self, path: str = "/") -> List[str]:
+        """Lists the current invocation agent's private workspace."""
+        _, library = self._require_private_agent_context()
+        return await asyncio.to_thread(library.list_contents, path)
+
+    async def read_private_file(
+        self,
+        path: str,
+        start_line: int = 1,
+        end_line: Optional[int] = None,
+    ) -> str:
+        """Reads private content only for the current invocation agent."""
+        _, library = self._require_private_agent_context()
+        return await asyncio.to_thread(
+            library.read_file, path, start_line, end_line
+        )
+
+    async def write_private_file(self, path: str, content: str) -> None:
+        """Writes private content only for the current invocation agent."""
+        _, library = self._require_private_agent_context()
+        await asyncio.to_thread(library.write_file, path, content)
+
+    async def delete_private_file(self, path: str) -> str:
+        """Deletes private content only for the current invocation agent."""
+        _, library = self._require_private_agent_context()
+        return await asyncio.to_thread(library.delete_file, path)
+
+    async def move_private_file(
+        self,
+        source_path: str,
+        target_path: str,
+        overwrite: bool = False,
+    ) -> None:
+        """Atomically moves a private file within its owner's workspace."""
+        _, library = self._require_private_agent_context()
+        async with self.suppress_auto_save():
+            await asyncio.to_thread(
+                library.move_file, source_path, target_path, overwrite
+            )
+
+    async def publish_private_file(
+        self,
+        source_path: str,
+        target_path: str,
+        overwrite: bool = False,
+    ) -> None:
+        """Copies one private file to the active team's built-in DocLib."""
+        agent, private_library = self._require_private_agent_context()
+        team = self._active_team.get()
+        if team is None or agent not in team.members:
+            raise PermissionError(
+                "Publishing requires an active team containing the current agent."
+            )
+        target_library = team.doc_library
+        expected_library = self.libraries.get(f"DL-{team.team_id}")
+        if (
+            self.teams.get(team.team_id) is not team
+            or target_library is None
+            or target_library is not expected_library
+            or target_library.library_kind != "team"
+            or target_library.owner_team_id != team.team_id
+        ):
+            raise RuntimeError("The active team has no built-in DocLib.")
+        clean_source = self._normalize_library_file_path(source_path)
+        clean_target = self._normalize_library_file_path(target_path)
+        if not self.check_library_access(
+            team.team_id, target_library.lib_id, clean_target, "WRITE"
+        ):
+            raise PermissionError("WRITE permission is required on the target path.")
+        if clean_target in self.library_links.get(target_library.lib_id, {}):
+            raise FileExistsError(
+                "The target path is a managed link and cannot be overwritten."
+            )
+
+        def copy_under_locks() -> None:
+            ordered = sorted(
+                (private_library, target_library), key=lambda item: item.lib_id
+            )
+            with ordered[0]._lock:
+                with ordered[1]._lock:
+                    if not private_library.is_file(clean_source):
+                        raise FileNotFoundError(
+                            f"Private file {source_path!r} does not exist."
+                        )
+                    content = private_library.read_text(clean_source)
+                    target_library.write_file_atomic(
+                        clean_target, content, overwrite=overwrite
+                    )
+
+        await asyncio.to_thread(copy_under_locks)
+        self._emit_callback(
+            "on_system_event",
+            "private_library_published",
+            {
+                "agent_id": agent.agent_id,
+                "team_id": team.team_id,
+                "source_library_id": private_library.lib_id,
+                "source_path": clean_source,
+                "target_library_id": target_library.lib_id,
+                "target_path": clean_target,
+                "operation": "copy",
+                "result": "success",
+            },
+        )
+
+    async def move_library_file(
+        self,
+        team_id: str,
+        lib_id: str,
+        source_path: str,
+        target_path: str,
+        overwrite: bool = False,
+    ) -> None:
+        """Moves a team-library file after checking both ACL paths."""
+        if lib_id not in self.libraries:
+            raise FileNotFoundError(f"Document library {lib_id!r} not found.")
+        library = self.libraries[lib_id]
+        if library.library_kind != "team":
+            raise PermissionError("Private DocLibs require private tools.")
+        clean_source = self._normalize_library_file_path(source_path)
+        clean_target = self._normalize_library_file_path(target_path)
+        if not self.check_library_access(team_id, lib_id, clean_source, "WRITE"):
+            raise PermissionError("WRITE permission is required on the source path.")
+        if not self.check_library_access(team_id, lib_id, clean_target, "WRITE"):
+            raise PermissionError("WRITE permission is required on the target path.")
+        links = self.library_links.get(lib_id, {})
+        if clean_source in links or clean_target in links:
+            raise FileExistsError("Managed-link paths cannot be moved or overwritten.")
+        async with self.suppress_auto_save():
+            await asyncio.to_thread(
+                library.move_file, clean_source, clean_target, overwrite
+            )
 
 
     def render_topology_tree(self) -> str:
@@ -2269,6 +3056,12 @@ class ATTManager:
                             client = HandlerClientAdapter(
                                 model_name, self.generator_handler
                             )
+                            client._supports_native = (
+                                self.model_configs.get(model_name, {}).get(
+                                    "supports_native_tool_calling"
+                                )
+                                is True
+                            )
                         else:
                             proposal["status"] = "rejected"
                             self.logger.warning(
@@ -2300,8 +3093,8 @@ class ATTManager:
                         proposal["status"] = "rejected"
                         continue
                     team.members.append(new_agent)
-                    self.agents[new_agent.name] = new_agent
-                    changed_agents.add(new_agent.name)
+                    self.register_agent(new_agent, auto_save=False)
+                    changed_agents.add(new_agent.agent_id)
                     membership_changed = True
                     self.logger.info(
                         "Deferred execution added member %s to team %s.",
@@ -2343,6 +3136,10 @@ class ATTManager:
                     {team.team_id} if membership_changed else set()
                 ),
                 proposals={team.team_id},
+                libraries={
+                    self._agents_by_id[agent_id].private_doc_library_id
+                    for agent_id in changed_agents
+                },
             )
 
     async def execute_team_discussion(
@@ -2358,12 +3155,29 @@ class ATTManager:
         if not isinstance(rounds, int) or isinstance(rounds, bool) or rounds < 1:
             raise ValueError("rounds must be a positive integer.")
         async with team.discussion_lock:
-            return await self._execute_team_discussion_session(
-                team,
-                prompt,
-                rounds=rounds,
-                skip_audit=skip_audit,
-            )
+            async with self._runtime_gate:
+                if self._closing:
+                    raise RuntimeError(
+                        "ATTManager is closing and rejects new discussions."
+                    )
+                is_runtime_audit = bool(
+                    skip_audit and getattr(team, "_runtime_only", False)
+                )
+                if (
+                    self.teams.get(team.team_id) is not team
+                    and not is_runtime_audit
+                ):
+                    raise ValueError("The discussion team is not registered.")
+                team.is_running = True
+            try:
+                return await self._execute_team_discussion_session(
+                    team,
+                    prompt,
+                    rounds=rounds,
+                    skip_audit=skip_audit,
+                )
+            finally:
+                team.is_running = False
 
     async def _execute_team_discussion_session(
         self,
@@ -2555,7 +3369,7 @@ class ATTManager:
                 )
 
             self._auto_save(
-                agents={agent.name for agent in team.members},
+                agents={agent.agent_id for agent in team.members},
                 teams={team.team_id},
             )
             discussion_succeeded = True

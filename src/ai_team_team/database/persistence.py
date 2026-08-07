@@ -7,7 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from sqlalchemy import create_engine, delete, event
+from sqlalchemy import create_engine, delete, event, text
 from sqlalchemy.orm import sessionmaker
 
 from ai_team_team.core.exceptions import DatabaseOwnershipError, StateRestoreError
@@ -28,7 +28,7 @@ from ai_team_team.database.models import (
 )
 
 
-STATE_SCHEMA_VERSION = "4"
+STATE_SCHEMA_VERSION = "5"
 
 
 class WriterLease:
@@ -158,7 +158,10 @@ class DatabaseStore:
         session = self.session_factory()
         try:
             if snapshot["full"]:
+                session.execute(text("PRAGMA defer_foreign_keys = ON"))
                 self._clear_all(session)
+
+            self._write_deletions(session, snapshot)
 
             self._write_configs(session, snapshot.get("configs"))
             self._write_agents(session, snapshot.get("agents", []))
@@ -191,7 +194,7 @@ class DatabaseStore:
             result["configs"] = {
                 key: (
                     value
-                    if key in {"schema_version", "root_ai_name"}
+                    if key in {"schema_version", "root_ai_id"}
                     else json.dumps(value)
                 )
                 for key, value in configs.items()
@@ -258,7 +261,7 @@ class DatabaseStore:
                 messages = []
                 message_rows = (
                     session.query(AgentMessageModel)
-                    .filter_by(agent_name=row.name)
+                    .filter_by(agent_id=row.agent_id)
                     .order_by(AgentMessageModel.created_at, AgentMessageModel.id)
                     .all()
                 )
@@ -276,12 +279,14 @@ class DatabaseStore:
                     )
                 agents.append(
                     {
+                        "agent_id": row.agent_id,
                         "name": row.name,
                         "role": row.role,
                         "role_description": row.role_description,
                         "system_instructions": row.system_instructions,
                         "model_alias": row.model_alias,
                         "last_context": row.last_context,
+                        "lifecycle_state": row.lifecycle_state,
                         "messages": messages,
                     }
                 )
@@ -289,8 +294,8 @@ class DatabaseStore:
             teams = []
             for row in session.query(TeamModel).all():
                 member_names = [
-                    name
-                    for (name,) in session.query(team_members.c.agent_name)
+                    agent_id
+                    for (agent_id,) in session.query(team_members.c.agent_id)
                     .filter(team_members.c.team_id == row.team_id)
                     .all()
                 ]
@@ -313,6 +318,7 @@ class DatabaseStore:
                             "target": proposal.target,
                             "initiator_type": proposal.initiator_type,
                             "initiator_name": proposal.initiator_name,
+                            "initiator_agent_id": proposal.initiator_agent_id,
                             "rationale": proposal.rationale,
                             "proposed_details": json.loads(
                                 proposal.proposed_details or "{}"
@@ -331,8 +337,12 @@ class DatabaseStore:
                         "chapter_num": row.chapter_num,
                         "parent_team_id": row.parent_team_id,
                         "migration_count": row.migration_count,
-                        "creator_type": row.creator_type,
-                        "creator_id": row.creator_id,
+                        "creator_type": (
+                            "agent" if row.creator_agent_id else "team"
+                        ),
+                        "creator_id": (
+                            row.creator_agent_id or row.creator_team_id
+                        ),
                         "communication_rules": row.communication_rules,
                         "status_map": row.status_map,
                         "system_instructions": row.system_instructions,
@@ -355,6 +365,9 @@ class DatabaseStore:
                         "lib_id": row.lib_id,
                         "name": row.name,
                         "owner_team_id": row.owner_team_id,
+                        "owner_agent_id": row.owner_agent_id,
+                        "library_kind": row.library_kind,
+                        "lifecycle_state": row.lifecycle_state,
                         "description": row.description,
                         "is_public_visible": bool(row.is_public_visible),
                         "files": files,
@@ -404,10 +417,39 @@ class DatabaseStore:
         ):
             session.query(model).delete(synchronize_session=False)
         session.execute(delete(team_members))
+        session.query(LibraryModel).delete(synchronize_session=False)
         session.query(TeamModel).delete(synchronize_session=False)
         session.query(AgentModel).delete(synchronize_session=False)
-        session.query(LibraryModel).delete(synchronize_session=False)
         session.query(ManagerConfigModel).delete(synchronize_session=False)
+
+    @staticmethod
+    def _write_deletions(session: Any, snapshot: Dict[str, Any]) -> None:
+        for lib_id in snapshot.get("deleted_libraries", ()):
+            session.query(DocLibLinkModel).filter(
+                (DocLibLinkModel.source_lib_id == lib_id)
+                | (DocLibLinkModel.target_lib_id == lib_id)
+            ).delete(synchronize_session=False)
+            session.query(LibraryPermissionModel).filter_by(
+                lib_id=lib_id
+            ).delete(synchronize_session=False)
+            session.query(DocLibFileModel).filter_by(
+                lib_id=lib_id
+            ).delete(synchronize_session=False)
+            session.query(LibraryModel).filter_by(
+                lib_id=lib_id
+            ).delete(synchronize_session=False)
+        for agent_id in snapshot.get("deleted_agents", ()):
+            session.execute(
+                delete(team_members).where(
+                    team_members.c.agent_id == agent_id
+                )
+            )
+            session.query(AgentMessageModel).filter_by(
+                agent_id=agent_id
+            ).delete(synchronize_session=False)
+            session.query(AgentModel).filter_by(
+                agent_id=agent_id
+            ).delete(synchronize_session=False)
 
     @staticmethod
     def _write_configs(session: Any, configs: Optional[Dict[str, str]]) -> None:
@@ -421,21 +463,23 @@ class DatabaseStore:
         for agent in agents:
             session.merge(
                 AgentModel(
+                    agent_id=agent["agent_id"],
                     name=agent["name"],
                     role=agent["role"],
                     role_description=agent["role_description"],
                     system_instructions=agent["system_instructions"],
                     model_alias=agent["model_alias"],
                     last_context=agent["last_context"],
+                    lifecycle_state=agent["lifecycle_state"],
                 )
             )
             session.query(AgentMessageModel).filter_by(
-                agent_name=agent["name"]
+                agent_id=agent["agent_id"]
             ).delete(synchronize_session=False)
             for index, message in enumerate(agent["messages"]):
                 session.add(
                     AgentMessageModel(
-                        agent_name=agent["name"],
+                        agent_id=agent["agent_id"],
                         role=message.get("role", "user"),
                         content=message.get("content"),
                         tool_calls=message.get("tool_calls"),
@@ -461,8 +505,16 @@ class DatabaseStore:
                     chapter_num=team["chapter_num"],
                     parent_team_id=None,
                     migration_count=team["migration_count"],
-                    creator_type=team["creator_type"],
-                    creator_id=team["creator_id"],
+                    creator_agent_id=(
+                        team["creator_id"]
+                        if team["creator_type"] == "agent"
+                        else None
+                    ),
+                    creator_team_id=(
+                        team["creator_id"]
+                        if team["creator_type"] == "team"
+                        else None
+                    ),
                     communication_rules=team["communication_rules"],
                     status_map=team["status_map"],
                     system_instructions=team["system_instructions"],
@@ -483,10 +535,10 @@ class DatabaseStore:
                     team_members.c.team_id == team["team_id"]
                 )
             )
-            for member_name in team["members"]:
+            for member_id in team["members"]:
                 session.execute(
                     team_members.insert().values(
-                        team_id=team["team_id"], agent_name=member_name
+                        team_id=team["team_id"], agent_id=member_id
                     )
                 )
 
@@ -528,6 +580,9 @@ class DatabaseStore:
                         target=proposal.get("target"),
                         initiator_type=proposal.get("initiator_type"),
                         initiator_name=proposal.get("initiator_name"),
+                        initiator_agent_id=proposal.get(
+                            "initiator_agent_id"
+                        ),
                         rationale=proposal.get("rationale"),
                         proposed_details=json.dumps(
                             proposal.get("proposed_details", {})
@@ -562,6 +617,11 @@ class DatabaseStore:
                     lib_id=library["lib_id"],
                     name=library["name"],
                     owner_team_id=library["owner_team_id"],
+                    owner_agent_id=library.get("owner_agent_id"),
+                    library_kind=library.get("library_kind", "team"),
+                    lifecycle_state=library.get(
+                        "lifecycle_state", "active"
+                    ),
                     description=library["description"],
                     is_public_visible=int(library["is_public_visible"]),
                 )
@@ -815,7 +875,7 @@ class PersistenceCoordinator:
             merged["agreements"] = later["agreements"]
 
         for key, identity in (
-            ("agents", "name"),
+            ("agents", "agent_id"),
             ("teams", "team_id"),
             ("libraries", "lib_id"),
         ):
@@ -843,4 +903,30 @@ class PersistenceCoordinator:
         for lib_id, changes in later.get("file_changes", {}).items():
             file_changes.setdefault(lib_id, {}).update(changes)
         merged["file_changes"] = file_changes
+        merged["deleted_agents"] = list(
+            set(earlier.get("deleted_agents", ()))
+            | set(later.get("deleted_agents", ()))
+        )
+        merged["deleted_libraries"] = list(
+            set(earlier.get("deleted_libraries", ()))
+            | set(later.get("deleted_libraries", ()))
+        )
+        deleted_agents = set(merged["deleted_agents"])
+        deleted_libraries = set(merged["deleted_libraries"])
+        merged["agents"] = [
+            record
+            for record in merged.get("agents", [])
+            if record["agent_id"] not in deleted_agents
+        ]
+        merged["libraries"] = [
+            record
+            for record in merged.get("libraries", [])
+            if record["lib_id"] not in deleted_libraries
+        ]
+        for key in ("permissions", "links", "file_changes"):
+            merged[key] = {
+                lib_id: value
+                for lib_id, value in merged.get(key, {}).items()
+                if lib_id not in deleted_libraries
+            }
         return merged
