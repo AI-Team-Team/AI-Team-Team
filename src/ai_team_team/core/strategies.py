@@ -550,6 +550,14 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                     if manager
                                     else None
                                 )
+                                invocation_token = (
+                                    manager._active_tool_invocation_id.set(
+                                        f"{manager._active_discussion_id.get() or 'runtime'}:"
+                                        f"{agent.agent_id}:{step}:{tool_name}"
+                                    )
+                                    if manager
+                                    else None
+                                )
                                 try:
                                     if (
                                         manager
@@ -594,6 +602,10 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                                     ):
                                         manager._active_tool_agent.reset(
                                             active_agent_token
+                                        )
+                                    if manager and invocation_token is not None:
+                                        manager._active_tool_invocation_id.reset(
+                                            invocation_token
                                         )
                                 
                                 team.set_status(agent.name, "Thinking...")
@@ -1058,10 +1070,21 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
         active_agent_token = (
             manager._active_tool_agent.set(agent) if manager else None
         )
+        invocation_token = (
+            manager._active_tool_invocation_id.set(
+                tool_call.call_id
+                or f"{manager._active_discussion_id.get() or 'runtime'}:"
+                f"{agent.agent_id}:{tool_name}"
+            )
+            if manager
+            else None
+        )
 
         def finish(result: ToolResult) -> ToolResult:
             if manager and active_agent_token is not None:
                 manager._active_tool_agent.reset(active_agent_token)
+            if manager and invocation_token is not None:
+                manager._active_tool_invocation_id.reset(invocation_token)
             return result
 
         # Audit check

@@ -111,4 +111,6 @@ Reliability changes should cover schema preflight without mutation, competing pr
 
 Private Agent DocLib tests must create agents through `register_agent` or a supported team-creation path.
 
-Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, schema 5 corruption, and the absence of private body text from transcripts, callbacks, and message history. `test_private_doclib.py` contains the baseline end-to-end cases.
+Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, schema 6 corruption, and the absence of private body text from transcripts, callbacks, and message history. `test_private_doclib.py` contains the baseline end-to-end cases.
+
+Communication changes must cover strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes, full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation, idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations. Schema 5 must be rejected before DDL.

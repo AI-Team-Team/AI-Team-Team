@@ -37,4 +37,4 @@ flowchart TD
     Publish -- "Failure" --> Rollback
 ```
 
-SQLite uses foreign keys, WAL, and an explicit busy timeout. A second manager or process fails its non-blocking writer lease immediately. Schema 5 uses Agent UUID keys and typed team/private library ownership and intentionally does not migrate old databases.
+SQLite uses foreign keys, WAL, and an explicit busy timeout. A second manager or process fails its non-blocking writer lease immediately. Schema 6 adds autonomous communication requests, explicit-principal approvals, ballots, directional Agreements, and peer delivery records. It intentionally does not migrate old databases.

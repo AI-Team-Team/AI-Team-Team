@@ -135,7 +135,7 @@ Configuration options for tuning the ATT multi-agent framework.
       llm_retry_backoff_factor: float = 1.5,
       enable_memory_compression: bool = True,
       max_memory_turns: int = 20,
-      communication_policy: str = "permissive",
+      communication: CommunicationConfig = PermissiveCommunicationConfig(),
       migration_policy: str = "ancestor_approval",
       enable_emergency_wakeup: bool = True,
       emergency_discussion_rounds: int = 1,
@@ -145,18 +145,27 @@ Configuration options for tuning the ATT multi-agent framework.
       default_max_output_tokens: int = 1024,
       audit_unknown_escalation_mode: str = "wake",
       audit_unknown_soft_threshold: int = 100,
-      agent_private_data_policy: str = "archive"
+      agent_private_data_policy: str = "archive",
+      parent_failover_timeout_seconds: float = 120
   )
   ```
 
 ### `NegotiationBroker`
 
-Coordinates sibling and cross-lineage communication permissions.
+Owns durable communication requests, approvals, ballots, Agreements, and peer-delivery records. It reads policy only from `ATTConfig` and accepts already authenticated runtime actors from the tool boundary.
 
-* `negotiate_communication(sender: AgentTeam, recipient: AgentTeam, mode: str = "proxied") -> bool`
-      Directly returns `True` if communication_policy is `"permissive"`. Otherwise, checks sibling rules on common parents or checks for active peer agreements.
-* `establish_peer_agreement(sender: AgentTeam, recipient: AgentTeam, rationale: str, mode: Optional[str] = None) -> bool`
-      Validates cross-lineage communication according to the specified communication policy (or config default). Valid policies: `"permissive"`, `"rule_gated"`, `"proxied"`. Allow `None` parents representing Root AI.
+* `request_peer_communication(sender, recipient, initiated_by_agent_id, rationale) -> CommunicationOperationResult`
+      Returns `APPROVED`, `ALREADY_ACTIVE`, or `PENDING_APPROVAL`. Approval policies create an immutable request snapshot and schedule explicit principals outside the caller's tool stack.
+* `send_peer_message(sender, recipient, initiated_by_agent_id, content, invocation_id=None) -> CommunicationOperationResult`
+      Commits one idempotent delivery or returns `NO_AGREEMENT`.
+* `revoke_agreement(agreement_id, actor_team_id, reason) -> CommunicationOperationResult`
+      Enforces endpoint-only revocation.
+* `approval_path(sender, recipient, policy=None) -> List[ApprovalPrincipal]`
+      Resolves ordered `agent_team` and Root `agent` principals without selecting an Agent to act for a team.
+
+### `TeamDecisionProvider`
+
+Executes governance decisions for explicit principals. AgentTeam decisions use the team's discussion lock and a complete frozen-member ballot; Agent decisions use only that Agent's invocation lock. Strict Pydantic JSON parsing accepts only literal booleans or a valid model alias from the supplied candidate set.
 
 ### `SupervisoryTeam`
 
@@ -208,31 +217,25 @@ Native filesystem symlinks are rejected. Cross-library links are manager-owned m
 
 ## Policies & Strategy Interfaces
 
- Pluggable strategies governing communication and migrations defined in [policies.py](file:///Users/charlestsaur/Documents/sandbox/AI-Team-Team/src/ai_team_team/core/policies.py):
-
-### Communication Policies
-
-* **`BaseCommunicationPolicy`**: Base protocol defining `authorize_peer_talk(sender, recipient, manager, rationale) -> bool`.
-* **`PermissiveCommunicationPolicy`**: Always returns `True` (default strategy).
-* **`RuleGatedCommunicationPolicy`**: Evaluates static regular expression pattern rules and parent rule mappings on opposing teams.
-* **`ProxiedCommunicationPolicy`**: Queries the LLM generator client of parent representatives dynamically for consent.
+Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/policies.py). Communication is not a per-call strategy interface: its strict Pydantic configuration is consumed by `NegotiationBroker`.
 
 ### Migration Policies
 
 * **`BaseMigrationPolicy`**: Base protocol defining `authorize_migration(team, target_parent, manager, rationale) -> Tuple[bool, str]`.
 * **`PermissiveMigrationPolicy`**: Always returns `(True, "Allowed")`.
-* **`AncestorApprovalMigrationPolicy`**: Consults the representatives of the current parent, target parent, and Least Common Ancestor (LCA) teams (default strategy).
-* **`LineagePathMigrationPolicy`**: Traverses and queries every team representative along the traversal path from the current parent up to the LCA, and from the target parent up to the LCA.
+* **`AncestorApprovalMigrationPolicy`**: Consults explicit current-parent, target-parent, and Least Common Ancestor principals (default strategy).
+* **`LineagePathMigrationPolicy`**: Traverses every explicit AgentTeam/Root Agent principal along the affected lineage path.
 
 ## Database Schema & ORM Models
 
-SQLAlchemy Declarative Models mapping the topology schema, defined in [models.py](file:///Users/charlestsaur/Documents/sandbox/AI-Team-Team/src/ai_team_team/database/models.py):
+SQLAlchemy Declarative Models mapping schema 6 are defined in [`models.py`](../../src/ai_team_team/database/models.py):
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
 * **`AgentModel` & `AgentMessageModel`**: Uses immutable `agent_id` primary/foreign keys and persists lifecycle profiles plus complete conversation histories with `team_id` and `discussion_id` provenance.
-* **`TeamModel`**: Tracks active topologies, migration counts, sibling settings, and UUID-backed creator/member references.
+* **`TeamModel`**: Tracks active topologies, migration counts, and UUID-backed creator/member references.
 * **`TeamInboxModel` & `TeamProposalModel`**: Persists child escalations, peer messages, and democratic proposal votes.
-* **`BrokerAgreementModel`**: Tracks cross-lineage tunnels negotiated by the broker.
+* **`CommunicationRequestModel`, `CommunicationApprovalModel`, `CommunicationBallotModel`**: Persist the request lifecycle, ordered explicit principals, and member ballots.
+* **`CommunicationAgreementModel` & `PeerMessageModel`**: Persist directional endpoint channels, revocation state, and idempotent delivery lifecycle.
 * **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel` & `DocLibLinkModel`**: Persists library kind, mutually exclusive team/agent ownership, lifecycle, ACL segments, physical document contents, and managed team-library link targets.
 
 ### Database Session Factory

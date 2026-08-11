@@ -1,6 +1,78 @@
 import os
 from collections.abc import Mapping
-from typing import Any, Callable, Dict, Optional
+from typing import Annotated, Any, Callable, Dict, Literal, Optional, Union
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class _StrictCommunicationConfig(BaseModel):
+    """Base class for immutable-shape, assignment-validated communication rules."""
+
+    model_config = ConfigDict(
+        extra="forbid", validate_assignment=True, strict=True
+    )
+
+
+class PermissiveCommunicationConfig(_StrictCommunicationConfig):
+    """Allows every AgentTeam to communicate directly."""
+
+    policy: Literal["permissive"] = "permissive"
+
+
+class ParentApprovalCommunicationConfig(_StrictCommunicationConfig):
+    """Requires both endpoint parent principals to approve a channel."""
+
+    policy: Literal["parent_approval"] = "parent_approval"
+    request_delivery: Literal["queue", "wake"] = "queue"
+    direction: Literal["one_way", "bidirectional"] = "bidirectional"
+
+
+class LineageApprovalCommunicationConfig(_StrictCommunicationConfig):
+    """Requires every principal on the sender-to-recipient route to approve."""
+
+    policy: Literal["lineage_approval"] = "lineage_approval"
+    request_delivery: Literal["queue", "wake"] = "queue"
+    direction: Literal["one_way", "bidirectional"] = "bidirectional"
+
+
+CommunicationConfig = Annotated[
+    Union[
+        PermissiveCommunicationConfig,
+        ParentApprovalCommunicationConfig,
+        LineageApprovalCommunicationConfig,
+    ],
+    Field(discriminator="policy"),
+]
+
+
+def _parse_communication_config(value: Any) -> CommunicationConfig:
+    if isinstance(
+        value,
+        (
+            PermissiveCommunicationConfig,
+            ParentApprovalCommunicationConfig,
+            LineageApprovalCommunicationConfig,
+        ),
+    ):
+        return value
+    if not isinstance(value, Mapping):
+        raise ValueError(
+            "communication must be a CommunicationConfig or mapping."
+        )
+    policy = value.get("policy", "permissive")
+    model_by_policy = {
+        "permissive": PermissiveCommunicationConfig,
+        "parent_approval": ParentApprovalCommunicationConfig,
+        "lineage_approval": LineageApprovalCommunicationConfig,
+    }
+    try:
+        model = model_by_policy[policy]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(
+            f"Invalid communication policy {policy!r}. Expected one of: "
+            "lineage_approval, parent_approval, permissive."
+        ) from exc
+    return model.model_validate(dict(value))
 
 
 class ValidatedDict(dict):
@@ -39,7 +111,6 @@ class ATTConfig:
     """Validated runtime configuration for ATT execution and governance."""
 
     _CHOICES = {
-        "communication_policy": {"permissive", "rule_gated", "proxied"},
         "migration_policy": {
             "permissive",
             "ancestor_approval",
@@ -103,6 +174,18 @@ class ATTConfig:
                     "llm_retry_backoff_factor must be a non-negative number."
                 )
             value = float(value)
+        elif name == "parent_failover_timeout_seconds":
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or value <= 0
+            ):
+                raise ValueError(
+                    "parent_failover_timeout_seconds must be a positive number."
+                )
+            value = float(value)
+        elif name == "communication":
+            value = _parse_communication_config(value)
         elif name in self._BOOL_FIELDS and not isinstance(value, bool):
             raise ValueError(f"{name} must be a boolean.")
         elif name == "workspace_root":
@@ -169,7 +252,7 @@ class ATTConfig:
         enable_memory_compression: bool = True,
         workspace_root: str = ".",
         max_memory_turns: int = 20,
-        communication_policy: str = "permissive",
+        communication: Optional[CommunicationConfig] = None,
         migration_policy: str = "ancestor_approval",
         enable_emergency_wakeup: bool = True,
         emergency_discussion_rounds: int = 1,
@@ -181,6 +264,7 @@ class ATTConfig:
         default_max_output_tokens: int = 1024,
         model_tokenizer_configs: Optional[Dict[str, str]] = None,
         failover_policy: str = "auto",
+        parent_failover_timeout_seconds: float = 120,
         audit_unknown_escalation_mode: str = "wake",
         audit_unknown_soft_threshold: int = 100,
         agent_private_data_policy: str = "archive",
@@ -199,7 +283,11 @@ class ATTConfig:
         self.enable_memory_compression = enable_memory_compression
         self.workspace_root = workspace_root
         self.max_memory_turns = max_memory_turns
-        self.communication_policy = communication_policy
+        self.communication = (
+            PermissiveCommunicationConfig()
+            if communication is None
+            else communication
+        )
         self.migration_policy = migration_policy
         self.enable_emergency_wakeup = enable_emergency_wakeup
         self.emergency_discussion_rounds = emergency_discussion_rounds
@@ -211,6 +299,7 @@ class ATTConfig:
         self.default_max_output_tokens = default_max_output_tokens
         self.model_tokenizer_configs = model_tokenizer_configs or {}
         self.failover_policy = failover_policy
+        self.parent_failover_timeout_seconds = parent_failover_timeout_seconds
         self.audit_unknown_escalation_mode = audit_unknown_escalation_mode
         self.audit_unknown_soft_threshold = audit_unknown_soft_threshold
         self.agent_private_data_policy = agent_private_data_policy
@@ -218,6 +307,12 @@ class ATTConfig:
     def to_dict(self) -> Dict[str, Any]:
         """Returns a plain JSON-serializable configuration mapping."""
         return {
-            key: dict(value) if isinstance(value, ValidatedDict) else value
+            key: (
+                dict(value)
+                if isinstance(value, ValidatedDict)
+                else value.model_dump(mode="json")
+                if isinstance(value, BaseModel)
+                else value
+            )
             for key, value in self.__dict__.items()
         }

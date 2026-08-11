@@ -12,7 +12,7 @@ Every autonomous task or research query spawns a specialized dynamic Agent Team 
 
 Both individual `Agent` instances and `AgentTeam` instances support dynamic spawning via the unified `launch_att()` method. Every team holds a trackable `team_purpose` to broadcast its objective to the network. Furthermore, dynamic teams support **heterogeneous LLM model routing**, allowing different subagent roles (e.g. Planner, Writer) to be dynamically routed to different model configurations registered in `ATTManager` and resolved through the central generator callback handler.
 
-For a detailed step-by-step visual of the spawning control flow, see the [Dynamic Spawning & Tool Binding Flowchart](flowcharts/Spawning_Escalation.md#1-dynamic-spawning--tool-binding-flowchart) and the [Tools Context Registration & Team Spawning Sequence](flowcharts/Negotiation_Broker_Sibling_Routing.md#1-sequence-of-tools-context-registration-&-team-spawning).
+For a detailed visual of spawning and topology changes, see [Lineage Tree Mutations](flowcharts/Lineage_Tree_Mutations.md).
 
 ## 2. Dual-Mode Bounded Reasoning Loops & Safe Parsers
 
@@ -70,23 +70,25 @@ When an active team or agent at a deep delegation level determines that it needs
 3. If the parent team is currently idle, receiving this alert triggers the **Active Wake-up Mechanism** (governed by `config.enable_emergency_wakeup`), which automatically starts a 1-round emergency discussion on the parent team to resolve the issue. If the parent team is already active, the `ATTManager` automatically extracts these inbox alerts at the start of the **very next round** (round-by-round consumption) and prepends them directly into the discussion prompt of all agents.
 4. Sibling agents in the parent team consume the alerts, formulate resolutions or delegate to a sibling node, and relay results back, maintaining flat execution bounds.
 
-For a visual breakdown of sibling communication authorization and inter-team message routing gates, see the [Dynamic Sibling Talk Authorization Sequence](flowcharts/Spawning_Escalation.md#2-dynamic-sibling-talk-authorization-sequence) and the [Sibling & Cross-Lineage Negotiation Flowchart](flowcharts/Negotiation_Broker_Sibling_Routing.md#2-sibling-&-cross-lineage-negotiation-flowchart). For more details on the communication gating strategies, see the [Policy-Based Governance & Decoupled Rules Guide](Policies.md).
+AgentTeam-to-AgentTeam messaging follows the single communication institution in `ATTConfig`, regardless of topology depth. See [Autonomous Communication Governance](flowcharts/Autonomous_Communication_Governance.md) and [Team Governance](Team_Governance.md).
 
 ## 4. Consolidated Autonomy Tools
 
-* **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, system_instructions: str = "", allow_sibling_talk: bool = False, sibling_talk_rules: str = "", is_public_visible: bool = False, initial_documents: dict = None) -> str`**: Spawns a recursive child AT under the ATT tree. Each AT (AI-Team) must have at least 3 Agents, specified inside `member_configs` (mapping role names to their model alias, role description, and system instructions). Supports optional context passing via `initial_documents` (a map of file paths to content strings pre-populated in the child team's default DocLib).
+* **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: dict = None) -> str`**: Spawns a recursive child AT under the ATT tree. Each AT must have at least 3 Agents, specified inside `member_configs`. Optional `initial_documents` pre-populate the child team's built-in DocLib.
 * **`delegate_escalation(objective: str, rationale: str) -> str`**: Escalates task objectives upward in the lineage tree to the direct parent.
-* **`set_sibling_talk(child_id: str, allow: bool) -> str`**: Allows parent teams to dynamically authorize sibling peer communication.
 * **`update_team_purpose(new_purpose: str) -> str`**: Updates the purpose string of the caller's team.
 * **`update_team_status(purpose: str, progress: str) -> str`**: Allows a team to dynamically update its globally broadcasted purpose and progress metrics.
-* **`negotiate_peer_talk(target_team_id: str, rationale: str) -> str`**: Requests parent teams to negotiate a cross-lineage communication agreement.
-* **`send_peer_message(team_id: str, message: str) -> str`**: Sends a direct message to a peer team's inbox, subject to sibling rules or parent brokerage agreements.
+* **`request_peer_communication(team_id: str, rationale: str) -> str`**: Requests a durable channel under the configured parent- or lineage-approval institution. The caller cannot override policy, direction, sender, or principals.
+* **`send_peer_message(team_id: str, message: str) -> str`**: Durably sends from the invocation-scoped AgentTeam. Approval institutions require an active Agreement; permissive mode does not.
+* **`revoke_peer_agreement(agreement_id: str, reason: str) -> str`**: Lets either endpoint AgentTeam revoke a channel.
+* **`list_peer_requests(status: str = "pending") -> str`**: Lists communication requests visible to the current endpoint or approval AgentTeam.
+* **`list_peer_agreements(active_only: bool = True) -> str`**: Lists Agreements whose endpoints include the current AgentTeam.
 * **`add_team_member(team_id: str, role_name: str, model_name: str, role_description: str, system_instructions: str) -> str`**: Allows parent teams to administratively add a new member with custom configurations to a child team.
 * **`remove_team_member(team_id: str, agent_name: str) -> str`**: Allows parent teams to administratively remove a member from a child team, enforcing the minimum team size constraint of 3.
 * **`initiate_membership_vote(action: str, target: str, rationale: str, initiator_type: str = "individual", proposed_details: dict = None) -> str`**: Initiates a democratic membership proposal to add/remove a member.
 * **`cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str`**: Casts a vote ("Agree", "Disagree", or "Abstain") on an active membership proposal. If `public` is set to `False`, the ballot is cast anonymously, hiding the voter's identity in the team discussion context.
 * **`retract_membership_vote(proposal_id: str) -> str`**: Allows the initiator of an active proposal to withdraw it.
-* **`request_migration(target_parent_id: str, rationale: str) -> str`**: Requests to migrate the caller's team to a new parent team in the active hierarchy. Migrations are arbitrated according to the configured migration policy (which defaults to requiring approvals from the Least Common Ancestor and parent team representatives using their own LLM clients, described in detail in the [Policy-Based Governance & Decoupled Rules Guide](Policies.md)), automatically enforce count limits, and dispatch inbox alerts to the affected parents.
+* **`request_migration(target_parent_id: str, rationale: str) -> str`**: Requests to migrate the caller's team. The configured migration policy uses explicit AgentTeam principals and the Root Agent at the topology root, then revalidates the topology atomically before committing.
 * **`create_doc_library(name: str, description: str, is_public: bool) -> str`**: Creates a new document library owned by the caller's team.
 * **`update_library_metadata(lib_id: str, description: Optional[str], is_public: Optional[bool]) -> str`**: Updates metadata or visibility of a library owned by the caller's team.
 * **`list_public_libraries() -> str`**: Lists all document libraries registered as publicly visible.

@@ -101,6 +101,11 @@ class ATTManager:
                 f"att_active_discussion_{id(self)}", default=None
             )
         )
+        self._active_tool_invocation_id: contextvars.ContextVar[
+            Optional[str]
+        ] = contextvars.ContextVar(
+            f"att_active_tool_invocation_{id(self)}", default=None
+        )
         self._unknown_audit_wakeups: set[str] = set()
         self._emergency_tasks: set[asyncio.Task[Any]] = set()
         self._llm_tasks: set[asyncio.Task[Any]] = set()
@@ -157,7 +162,10 @@ class ATTManager:
             "teams": set(),
             "inboxes": set(),
             "proposals": set(),
-            "agreements": full,
+            "communication_requests": set(),
+            "communication_approvals": set(),
+            "communication_agreements": set(),
+            "peer_messages": set(),
             "libraries": set(),
             "permissions": set(),
             "links": set(),
@@ -170,7 +178,6 @@ class ATTManager:
     def _merge_dirty_state(target: Dict[str, Any], source: Dict[str, Any]) -> None:
         target["full"] = target["full"] or source["full"]
         target["configs"] = target["configs"] or source["configs"]
-        target["agreements"] = target["agreements"] or source["agreements"]
         for key in (
             "agents",
             "teams",
@@ -179,6 +186,10 @@ class ATTManager:
             "libraries",
             "permissions",
             "links",
+            "communication_requests",
+            "communication_approvals",
+            "communication_agreements",
+            "peer_messages",
         ):
             target[key].update(source[key])
         for lib_id, changes in source["file_changes"].items():
@@ -208,7 +219,10 @@ class ATTManager:
         return bool(
             dirty["full"]
             or dirty["configs"]
-            or dirty["agreements"]
+            or dirty["communication_requests"]
+            or dirty["communication_approvals"]
+            or dirty["communication_agreements"]
+            or dirty["peer_messages"]
             or dirty["agents"]
             or dirty["teams"]
             or dirty["inboxes"]
@@ -229,7 +243,10 @@ class ATTManager:
         teams: Optional[set[str]] = None,
         inboxes: Optional[set[str]] = None,
         proposals: Optional[set[str]] = None,
-        agreements: bool = False,
+        communication_requests: Optional[set[str]] = None,
+        communication_approvals: Optional[set[str]] = None,
+        communication_agreements: Optional[set[str]] = None,
+        peer_messages: Optional[set[str]] = None,
         libraries: Optional[set[str]] = None,
         permissions: Optional[set[str]] = None,
         links: Optional[set[str]] = None,
@@ -245,11 +262,20 @@ class ATTManager:
             return
         dirty = self._new_dirty_state(full=full)
         dirty["configs"] = configs or full
-        dirty["agreements"] = agreements or full
         dirty["agents"].update(agents or set())
         dirty["teams"].update(teams or set())
         dirty["inboxes"].update(inboxes or set())
         dirty["proposals"].update(proposals or set())
+        dirty["communication_requests"].update(
+            communication_requests or set()
+        )
+        dirty["communication_approvals"].update(
+            communication_approvals or set()
+        )
+        dirty["communication_agreements"].update(
+            communication_agreements or set()
+        )
+        dirty["peer_messages"].update(peer_messages or set())
         dirty["libraries"].update(libraries or set())
         dirty["permissions"].update(permissions or set())
         dirty["links"].update(links or set())
@@ -267,6 +293,24 @@ class ATTManager:
             self._merge_dirty_state(batch, dirty)
             return
         self._submit_dirty_state(dirty)
+
+    async def _commit_dirty_state(self, dirty: Dict[str, Any]) -> None:
+        """Commits one authoritative domain delta and propagates write errors."""
+        if not self.db_path or not self._dirty_state_has_changes(dirty):
+            return
+        with self._snapshot_lock:
+            self._state_version += 1
+            snapshot = self._capture_state_snapshot(dirty)
+            future = self._persistence.submit(self.db_path, snapshot)
+        wrapped = asyncio.wrap_future(future)
+        try:
+            await asyncio.shield(wrapped)
+        except asyncio.CancelledError:
+            # Once an authoritative domain commit is accepted, keep its
+            # transaction lock until the exact delta finishes. Cancellation
+            # is delivered to the caller only after durability is known.
+            await asyncio.shield(wrapped)
+            raise
 
     def _submit_dirty_state(self, dirty: Dict[str, Any]) -> None:
         with self._snapshot_lock:
@@ -325,10 +369,17 @@ class ATTManager:
         if callback_worker is not None and not callback_worker.done():
             callback_worker.cancel()
             await asyncio.sleep(0)
+        reset_error: Optional[BaseException] = None
+        try:
+            await self.broker.reset_processing_for_shutdown()
+        except BaseException as exc:
+            reset_error = exc
         try:
             await self._persistence.close()
         finally:
             self._closed = True
+        if reset_error is not None:
+            raise reset_error
 
     async def load_state(self, path: str) -> None:
         """Restores a versioned state snapshot without blocking the event loop."""
@@ -340,6 +391,7 @@ class ATTManager:
             state = await self._persistence.read(path)
             await self._apply_state_snapshot(state)
             self.db_path = path
+            self.broker.resume_pending_requests()
 
     @asynccontextmanager
     async def agent_invocation(
@@ -559,12 +611,6 @@ class ATTManager:
                     "migration_count": team.migration_count,
                     "creator_type": creator_type,
                     "creator_id": creator_id,
-                    "communication_rules": {
-                        **team.communication_rules,
-                        "rules": tuple(
-                            team.communication_rules.get("rules", ())
-                        ),
-                    },
                     "status_map": team.status_snapshot(),
                     "system_instructions": getattr(
                         team, "system_instructions", ""
@@ -658,6 +704,54 @@ class ATTManager:
                     self._library_files.get(lib_id, {})
                 )
 
+        request_ids = (
+            set(self.broker.communication_requests)
+            if full
+            else set(dirty["communication_requests"])
+        )
+        approval_request_ids = (
+            set(self.broker.communication_requests)
+            if full
+            else set(dirty["communication_approvals"])
+        )
+        agreement_ids = (
+            set(self.broker.agreements)
+            if full
+            else set(dirty["communication_agreements"])
+        )
+        peer_message_ids = (
+            set(self.broker.peer_messages)
+            if full
+            else set(dirty["peer_messages"])
+        )
+        communication_requests = [
+            self.broker.communication_requests[request_id].model_dump(
+                mode="json"
+            )
+            for request_id in sorted(request_ids)
+            if request_id in self.broker.communication_requests
+        ]
+        communication_approvals = [
+            approval.model_dump(mode="json")
+            for request_id in sorted(approval_request_ids)
+            for approval in self.broker.approvals_for_request(request_id)
+        ]
+        communication_ballots = [
+            ballot.model_dump(mode="json")
+            for request_id in sorted(approval_request_ids)
+            for ballot in self.broker.ballots.get(request_id, [])
+        ]
+        communication_agreements = [
+            self.broker.agreements[agreement_id].model_dump(mode="json")
+            for agreement_id in sorted(agreement_ids)
+            if agreement_id in self.broker.agreements
+        ]
+        peer_messages = [
+            self.broker.peer_messages[message_id].model_dump(mode="json")
+            for message_id in sorted(peer_message_ids)
+            if message_id in self.broker.peer_messages
+        ]
+
         return {
             "state_version": self._state_version,
             "full": full,
@@ -666,11 +760,11 @@ class ATTManager:
             "teams": teams,
             "inboxes": inboxes,
             "proposals": proposals,
-            "agreements": (
-                [list(pair) for pair in sorted(self.broker.peer_talk_agreements)]
-                if full or dirty["agreements"]
-                else None
-            ),
+            "communication_requests": communication_requests,
+            "communication_approvals": communication_approvals,
+            "communication_ballots": communication_ballots,
+            "communication_agreements": communication_agreements,
+            "peer_messages": peer_messages,
             "libraries": libraries,
             "permissions": permissions,
             "links": links,
@@ -815,9 +909,6 @@ class ATTManager:
             team.team_progress = row["team_progress"]
             team.chapter_num = row["chapter_num"]
             team.migration_count = row["migration_count"] or 0
-            team.communication_rules = json.loads(
-                row["communication_rules"] or "{}"
-            )
             team.status_map = json.loads(row["status_map"] or "{}")
             team.system_instructions = row["system_instructions"] or ""
             team._cached_depth = None
@@ -870,8 +961,12 @@ class ATTManager:
             team.tools = get_default_tools(self.tools_context, team)
             team.tools.update(self.global_tools)
 
-        self.broker.peer_talk_agreements = set(
-            tuple(pair) for pair in state["agreements"]
+        self.broker.restore(
+            state.get("communication_requests", []),
+            state.get("communication_approvals", []),
+            state.get("communication_ballots", []),
+            state.get("communication_agreements", []),
+            state.get("peer_messages", []),
         )
 
     async def _apply_state_snapshot(self, state: Dict[str, Any]) -> None:
@@ -974,7 +1069,11 @@ class ATTManager:
                 "model_configs": self.model_configs,
                 "presets": self.presets,
                 "model_token_usage": self.model_token_usage,
-                "agreements": self.broker.peer_talk_agreements,
+                "communication_requests": self.broker.communication_requests,
+                "communication_approvals": self.broker.communication_approvals,
+                "communication_ballots": self.broker.ballots,
+                "communication_agreements": self.broker.agreements,
+                "peer_messages": self.broker.peer_messages,
             }
             try:
                 self.config = target_config
@@ -990,8 +1089,28 @@ class ATTManager:
                 self.model_configs = staged.model_configs
                 self.presets = staged.presets
                 self.model_token_usage = staged.model_token_usage
-                self.broker.peer_talk_agreements = set(
-                    staged.broker.peer_talk_agreements
+                self.broker.restore(
+                    (
+                        item.model_dump(mode="json")
+                        for item in staged.broker.communication_requests.values()
+                    ),
+                    (
+                        item.model_dump(mode="json")
+                        for item in staged.broker.communication_approvals.values()
+                    ),
+                    (
+                        item.model_dump(mode="json")
+                        for values in staged.broker.ballots.values()
+                        for item in values
+                    ),
+                    (
+                        item.model_dump(mode="json")
+                        for item in staged.broker.agreements.values()
+                    ),
+                    (
+                        item.model_dump(mode="json")
+                        for item in staged.broker.peer_messages.values()
+                    ),
                 )
                 self.supervisor.root_ai = self.root_ai
                 self.tools_context["att_manager"] = self
@@ -1010,7 +1129,19 @@ class ATTManager:
                 self.model_configs = old_state["model_configs"]
                 self.presets = old_state["presets"]
                 self.model_token_usage = old_state["model_token_usage"]
-                self.broker.peer_talk_agreements = old_state["agreements"]
+                self.broker.communication_requests = old_state[
+                    "communication_requests"
+                ]
+                self.broker.communication_approvals = old_state[
+                    "communication_approvals"
+                ]
+                self.broker.ballots = old_state[
+                    "communication_ballots"
+                ]
+                self.broker.agreements = old_state[
+                    "communication_agreements"
+                ]
+                self.broker.peer_messages = old_state["peer_messages"]
                 self.supervisor.root_ai = self.root_ai
                 self._rollback_published_libraries(published)
                 published = []
@@ -1048,7 +1179,11 @@ class ATTManager:
             team_rows = state["teams"]
             library_rows = state["libraries"]
             permissions = state["permissions"]
-            agreements = state["agreements"]
+            communication_requests = state["communication_requests"]
+            communication_approvals = state["communication_approvals"]
+            communication_ballots = state["communication_ballots"]
+            communication_agreements = state["communication_agreements"]
+            peer_messages = state["peer_messages"]
         except Exception as exc:
             raise StateRestoreError(
                 f"Invalid persisted state structure: {exc}"
@@ -1181,7 +1316,6 @@ class ATTManager:
         for row in team_rows:
             team_id = row["team_id"]
             try:
-                json.loads(row.get("communication_rules") or "{}")
                 json.loads(row.get("status_map") or "{}")
             except Exception as exc:
                 raise StateRestoreError(
@@ -1477,12 +1611,509 @@ class ATTManager:
                         break
                     node = (link["target_lib_id"], link["target_path"])
 
-        for sender_id, recipient_id in agreements:
-            if sender_id not in team_id_set or recipient_id not in team_id_set:
-                raise StateRestoreError(
-                    "Broker agreement references a missing team."
-                )
+        self._validate_communication_state(
+            communication_requests,
+            communication_approvals,
+            communication_ballots,
+            communication_agreements,
+            peer_messages,
+            team_id_set,
+            agent_id_set,
+            root_id,
+            {
+                row["team_id"]: row.get("inbox", [])
+                for row in team_rows
+            },
+        )
         return config
+
+    def _validate_communication_state(
+        self,
+        request_rows: List[Dict[str, Any]],
+        approval_rows: List[Dict[str, Any]],
+        ballot_rows: List[Dict[str, Any]],
+        agreement_rows: List[Dict[str, Any]],
+        peer_message_rows: List[Dict[str, Any]],
+        team_ids: set[str],
+        agent_ids: set[str],
+        root_agent_id: str,
+        inboxes: Dict[str, List[Dict[str, Any]]],
+    ) -> None:
+        """Validates schema-6 communication references and state combinations."""
+        from .communication import (
+            CommunicationAgreement,
+            CommunicationApproval,
+            CommunicationApprovalStatus,
+            CommunicationBallot,
+            CommunicationRequest,
+            CommunicationRequestStatus,
+            PeerMessage,
+            route_fingerprint,
+        )
+        from .config import _parse_communication_config
+
+        try:
+            requests = [
+                CommunicationRequest.model_validate(row)
+                for row in request_rows
+            ]
+            approvals = [
+                CommunicationApproval.model_validate(row)
+                for row in approval_rows
+            ]
+            ballots = [
+                CommunicationBallot.model_validate(row)
+                for row in ballot_rows
+            ]
+            agreements = [
+                CommunicationAgreement.model_validate(row)
+                for row in agreement_rows
+            ]
+            messages = [PeerMessage.model_validate(row) for row in peer_message_rows]
+        except Exception as exc:
+            raise StateRestoreError(
+                f"Invalid communication state payload: {exc}"
+            ) from exc
+
+        request_by_id = {request.request_id: request for request in requests}
+        if len(request_by_id) != len(requests):
+            raise StateRestoreError("Communication request IDs are duplicated.")
+        approval_keys = [approval.key for approval in approvals]
+        if len(approval_keys) != len(set(approval_keys)):
+            raise StateRestoreError("Communication approvals are duplicated.")
+        agreement_ids = [agreement.agreement_id for agreement in agreements]
+        if len(agreement_ids) != len(set(agreement_ids)):
+            raise StateRestoreError("Communication agreement IDs are duplicated.")
+        message_ids = [message.message_id for message in messages]
+        if len(message_ids) != len(set(message_ids)):
+            raise StateRestoreError("Peer message IDs are duplicated.")
+
+        approvals_by_request: Dict[str, List[Any]] = {}
+        for request in requests:
+            if request.sender_team_id not in team_ids or request.recipient_team_id not in team_ids:
+                raise StateRestoreError(
+                    f"Communication request {request.request_id!r} references a missing AgentTeam."
+                )
+            if request.sender_team_id == request.recipient_team_id:
+                raise StateRestoreError(
+                    f"Communication request {request.request_id!r} is self-addressed."
+                )
+            if request.initiated_by_agent_id not in agent_ids:
+                raise StateRestoreError(
+                    f"Communication request {request.request_id!r} references a missing initiator Agent."
+                )
+            try:
+                policy = _parse_communication_config(request.policy_snapshot)
+            except Exception as exc:
+                raise StateRestoreError(
+                    f"Communication request {request.request_id!r} has an "
+                    f"invalid policy snapshot: {exc}"
+                ) from exc
+            if policy.policy == "permissive":
+                raise StateRestoreError(
+                    f"Communication request {request.request_id!r} cannot use "
+                    "the permissive policy."
+                )
+            if request.direction.value != policy.direction:
+                raise StateRestoreError(
+                    f"Communication request {request.request_id!r} direction "
+                    "does not match its policy snapshot."
+                )
+            principal_keys = [
+                principal.key for principal in request.approval_principals
+            ]
+            if not principal_keys or len(principal_keys) != len(
+                set(principal_keys)
+            ):
+                raise StateRestoreError(
+                    f"Communication request {request.request_id!r} has an "
+                    "empty or duplicated approval route."
+                )
+            if route_fingerprint(request.approval_principals) != request.route_fingerprint:
+                raise StateRestoreError(
+                    f"Communication request {request.request_id!r} has an invalid route fingerprint."
+                )
+            for principal in request.approval_principals:
+                if principal.kind == "agent_team" and principal.principal_id not in team_ids:
+                    raise StateRestoreError(
+                        f"Communication request {request.request_id!r} references a missing approval AgentTeam."
+                    )
+                if principal.kind == "agent" and principal.principal_id != root_agent_id:
+                    raise StateRestoreError(
+                        f"Communication request {request.request_id!r} references an unauthorized approval Agent."
+                    )
+
+        for approval in approvals:
+            request = request_by_id.get(approval.request_id)
+            if request is None or approval.principal not in request.approval_principals:
+                raise StateRestoreError(
+                    f"Communication approval {approval.key!r} has no matching request principal."
+                )
+            approvals_by_request.setdefault(approval.request_id, []).append(approval)
+        for request in requests:
+            request_approvals = sorted(
+                approvals_by_request.get(request.request_id, []),
+                key=lambda item: item.sequence,
+            )
+            if len(request_approvals) != len(request.approval_principals):
+                raise StateRestoreError(
+                    f"Communication request {request.request_id!r} has incomplete approvals."
+                )
+            if [item.sequence for item in request_approvals] != list(
+                range(len(request.approval_principals))
+            ) or any(
+                approval.principal != request.approval_principals[index]
+                for index, approval in enumerate(request_approvals)
+            ):
+                raise StateRestoreError(
+                    f"Communication request {request.request_id!r} has an "
+                    "invalid approval order."
+                )
+            statuses = {approval.status for approval in request_approvals}
+            if request.status in {
+                CommunicationRequestStatus.APPROVED,
+                CommunicationRequestStatus.STALE,
+            } and statuses != {CommunicationApprovalStatus.APPROVED}:
+                raise StateRestoreError(
+                    f"Terminal communication request {request.request_id!r} "
+                    "lacks unanimous principal approval."
+                )
+            if request.status is CommunicationRequestStatus.DENIED and (
+                CommunicationApprovalStatus.DENIED not in statuses
+                or statuses
+                & {
+                    CommunicationApprovalStatus.PENDING,
+                    CommunicationApprovalStatus.PROCESSING,
+                }
+            ):
+                raise StateRestoreError(
+                    f"Denied communication request {request.request_id!r} has "
+                    "an invalid approval state."
+                )
+            if request.status in {
+                CommunicationRequestStatus.PENDING,
+                CommunicationRequestStatus.PROCESSING,
+            } and statuses & {
+                CommunicationApprovalStatus.DENIED,
+                CommunicationApprovalStatus.CANCELLED,
+            }:
+                raise StateRestoreError(
+                    f"Pending communication request {request.request_id!r} "
+                    "contains a terminal approval."
+                )
+            if (
+                request.status is CommunicationRequestStatus.PENDING
+                and CommunicationApprovalStatus.PROCESSING in statuses
+            ):
+                raise StateRestoreError(
+                    f"Pending communication request {request.request_id!r} "
+                    "contains a processing approval."
+                )
+            if (
+                request.status is CommunicationRequestStatus.PENDING
+                and statuses == {CommunicationApprovalStatus.APPROVED}
+            ):
+                raise StateRestoreError(
+                    f"Pending communication request {request.request_id!r} "
+                    "already has unanimous approval."
+                )
+            if (
+                request.status is CommunicationRequestStatus.PROCESSING
+                and CommunicationApprovalStatus.PROCESSING not in statuses
+            ):
+                raise StateRestoreError(
+                    f"Processing communication request {request.request_id!r} "
+                    "has no processing approval."
+                )
+            terminal = request.status in {
+                CommunicationRequestStatus.APPROVED,
+                CommunicationRequestStatus.DENIED,
+                CommunicationRequestStatus.STALE,
+            }
+            if terminal != (request.resolved_at is not None):
+                raise StateRestoreError(
+                    f"Communication request {request.request_id!r} has an "
+                    "invalid resolution timestamp."
+                )
+            for approval in request_approvals:
+                approval_terminal = approval.status in {
+                    CommunicationApprovalStatus.APPROVED,
+                    CommunicationApprovalStatus.DENIED,
+                    CommunicationApprovalStatus.CANCELLED,
+                }
+                if approval_terminal != (approval.resolved_at is not None):
+                    raise StateRestoreError(
+                        f"Communication approval {approval.key!r} has an "
+                        "invalid resolution timestamp."
+                    )
+
+        for request in requests:
+            successor_id = request.superseded_by_request_id
+            predecessor_id = request.supersedes_request_id
+            if request.status is CommunicationRequestStatus.STALE:
+                if successor_id is None:
+                    raise StateRestoreError(
+                        f"Stale communication request {request.request_id!r} "
+                        "has no successor."
+                    )
+            elif successor_id is not None:
+                raise StateRestoreError(
+                    f"Non-stale communication request {request.request_id!r} "
+                    "references a successor."
+                )
+            if successor_id is not None:
+                successor = request_by_id.get(successor_id)
+                if (
+                    successor is None
+                    or successor.supersedes_request_id != request.request_id
+                ):
+                    raise StateRestoreError(
+                        f"Communication request {request.request_id!r} has an "
+                        "invalid successor reference."
+                    )
+            if predecessor_id is not None:
+                predecessor = request_by_id.get(predecessor_id)
+                if (
+                    predecessor is None
+                    or predecessor.superseded_by_request_id != request.request_id
+                ):
+                    raise StateRestoreError(
+                        f"Communication request {request.request_id!r} has an "
+                        "invalid predecessor reference."
+                    )
+            seen = set()
+            current = request
+            while current.superseded_by_request_id is not None:
+                if current.request_id in seen:
+                    raise StateRestoreError(
+                        "Communication request successor chain contains a cycle."
+                    )
+                seen.add(current.request_id)
+                current = request_by_id[current.superseded_by_request_id]
+
+        ballot_keys = [
+            (
+                ballot.request_id,
+                ballot.principal.key,
+                ballot.voter_agent_id,
+            )
+            for ballot in ballots
+        ]
+        if len(ballot_keys) != len(set(ballot_keys)):
+            raise StateRestoreError("Communication ballots are duplicated.")
+        for ballot in ballots:
+            if ballot.request_id not in request_by_id or ballot.voter_agent_id not in agent_ids:
+                raise StateRestoreError("Communication ballot has a missing reference.")
+            if ballot.principal.kind != "agent_team":
+                raise StateRestoreError(
+                    "Only an AgentTeam approval may contain member ballots."
+                )
+            if not any(
+                approval.request_id == ballot.request_id
+                and approval.principal == ballot.principal
+                for approval in approvals
+            ):
+                raise StateRestoreError("Communication ballot has no matching approval.")
+
+        agreement_by_id = {item.agreement_id: item for item in agreements}
+        agreements_by_request: Dict[str, List[Any]] = {}
+        for agreement in agreements:
+            if agreement.source_team_id not in team_ids or agreement.target_team_id not in team_ids:
+                raise StateRestoreError("Communication agreement references a missing AgentTeam.")
+            request = request_by_id.get(agreement.created_from_request_id)
+            if request is None or request.status is not CommunicationRequestStatus.APPROVED:
+                raise StateRestoreError("Communication agreement has no approved source request.")
+            agreements_by_request.setdefault(request.request_id, []).append(
+                agreement
+            )
+            if (
+                agreement.source_team_id != request.sender_team_id
+                or agreement.target_team_id != request.recipient_team_id
+                or agreement.direction is not request.direction
+                or agreement.policy_snapshot != request.policy_snapshot
+                or agreement.allowed_message_types != ["peer_message"]
+            ):
+                raise StateRestoreError(
+                    "Communication agreement does not match its source request."
+                )
+            if agreement.revoked_by_team_id is not None and agreement.revoked_by_team_id not in {
+                agreement.source_team_id,
+                agreement.target_team_id,
+            }:
+                raise StateRestoreError("Communication agreement was revoked by a non-endpoint AgentTeam.")
+            if agreement.superseded_by_agreement_id is not None and agreement.superseded_by_agreement_id not in agreement_by_id:
+                raise StateRestoreError("Communication agreement references a missing successor.")
+            if agreement.active and (
+                agreement.revoked_at is not None
+                or agreement.revoked_by_team_id is not None
+                or agreement.revoke_reason is not None
+                or agreement.superseded_by_agreement_id is not None
+            ):
+                raise StateRestoreError(
+                    "Active communication agreement contains revocation metadata."
+                )
+            if not agreement.active and agreement.revoked_at is None:
+                raise StateRestoreError(
+                    "Inactive communication agreement lacks a revocation timestamp."
+                )
+
+        for request in requests:
+            source_agreements = agreements_by_request.get(
+                request.request_id, []
+            )
+            if request.status is CommunicationRequestStatus.APPROVED:
+                if len(source_agreements) != 1:
+                    raise StateRestoreError(
+                        f"Approved communication request {request.request_id!r} "
+                        "must create exactly one agreement."
+                    )
+            elif source_agreements:
+                raise StateRestoreError(
+                    f"Non-approved communication request {request.request_id!r} "
+                    "created an agreement."
+                )
+
+        active_routes = set()
+        for agreement in agreements:
+            if not agreement.active:
+                continue
+            routes = {(agreement.source_team_id, agreement.target_team_id)}
+            if agreement.direction.value == "bidirectional":
+                routes.add(
+                    (agreement.target_team_id, agreement.source_team_id)
+                )
+            if active_routes & routes:
+                raise StateRestoreError("Duplicate active communication route.")
+            active_routes.update(routes)
+
+        invocation_ids = [message.invocation_id for message in messages if message.invocation_id]
+        if len(invocation_ids) != len(set(invocation_ids)):
+            raise StateRestoreError("Peer message invocation IDs are duplicated.")
+        for message in messages:
+            if message.sender_team_id not in team_ids or message.recipient_team_id not in team_ids:
+                raise StateRestoreError("Peer message references a missing AgentTeam.")
+            if message.sender_team_id == message.recipient_team_id:
+                raise StateRestoreError("Peer message is self-addressed.")
+            if message.initiated_by_agent_id not in agent_ids:
+                raise StateRestoreError("Peer message references a missing initiating Agent.")
+            if message.agreement_id is not None:
+                agreement = agreement_by_id.get(message.agreement_id)
+                if agreement is None:
+                    raise StateRestoreError(
+                        "Peer message references a missing Agreement."
+                    )
+                forward = (
+                    message.sender_team_id == agreement.source_team_id
+                    and message.recipient_team_id == agreement.target_team_id
+                )
+                reverse = (
+                    agreement.direction.value == "bidirectional"
+                    and message.sender_team_id == agreement.target_team_id
+                    and message.recipient_team_id == agreement.source_team_id
+                )
+                if not (forward or reverse):
+                    raise StateRestoreError(
+                        "Peer message route is not covered by its Agreement."
+                    )
+            if (message.delivery_state == "consumed") != (
+                message.consumed_at is not None
+            ):
+                raise StateRestoreError(
+                    "Peer message has an invalid consumption timestamp."
+                )
+
+        approval_by_team_request = {
+            (approval.principal.principal_id, approval.request_id): approval
+            for approval in approvals
+            if approval.principal.kind == "agent_team"
+        }
+        approval_notifications: Dict[tuple[str, str], int] = {}
+        peer_notifications: Dict[str, List[str]] = {}
+        for team_id, inbox in inboxes.items():
+            if not isinstance(inbox, list):
+                raise StateRestoreError(
+                    f"AgentTeam {team_id!r} has an invalid inbox."
+                )
+            for item in inbox:
+                if not isinstance(item, dict):
+                    raise StateRestoreError(
+                        f"AgentTeam {team_id!r} has a malformed inbox item."
+                    )
+                if item.get("type") == "communication_approval_request":
+                    request_id = item.get("request_id")
+                    key = (team_id, request_id)
+                    approval = approval_by_team_request.get(key)
+                    request = request_by_id.get(request_id)
+                    if (
+                        approval is None
+                        or request is None
+                        or approval.status
+                        not in {
+                            CommunicationApprovalStatus.PENDING,
+                            CommunicationApprovalStatus.PROCESSING,
+                        }
+                        or request.status
+                        not in {
+                            CommunicationRequestStatus.PENDING,
+                            CommunicationRequestStatus.PROCESSING,
+                        }
+                    ):
+                        raise StateRestoreError(
+                            "Communication approval inbox item has no active "
+                            "matching Approval."
+                        )
+                    approval_notifications[key] = (
+                        approval_notifications.get(key, 0) + 1
+                    )
+                elif item.get("type") == "peer_message":
+                    message_id = item.get("message_id")
+                    if not isinstance(message_id, str):
+                        raise StateRestoreError(
+                            "Peer inbox item lacks a durable message ID."
+                        )
+                    peer_notifications.setdefault(message_id, []).append(
+                        team_id
+                    )
+
+        expected_approval_notifications = {
+            (approval.principal.principal_id, approval.request_id)
+            for approval in approvals
+            if approval.principal.kind == "agent_team"
+            and approval.status
+            in {
+                CommunicationApprovalStatus.PENDING,
+                CommunicationApprovalStatus.PROCESSING,
+            }
+            and request_by_id[approval.request_id].status
+            in {
+                CommunicationRequestStatus.PENDING,
+                CommunicationRequestStatus.PROCESSING,
+            }
+        }
+        if set(approval_notifications) != expected_approval_notifications or any(
+            count != 1 for count in approval_notifications.values()
+        ):
+            raise StateRestoreError(
+                "Communication approval inbox notifications are incomplete or duplicated."
+            )
+        for message in messages:
+            notification_teams = peer_notifications.pop(
+                message.message_id, []
+            )
+            if message.delivery_state == "pending":
+                if notification_teams != [message.recipient_team_id]:
+                    raise StateRestoreError(
+                        "Pending peer delivery is missing or duplicated in the "
+                        "recipient inbox."
+                    )
+            elif notification_teams:
+                raise StateRestoreError(
+                    "Consumed peer delivery remains in an AgentTeam inbox."
+                )
+        if peer_notifications:
+            raise StateRestoreError(
+                "AgentTeam inbox references an unknown peer delivery."
+            )
 
     def _normalized_library_links(
         self, links: Dict[str, Dict[str, Dict[str, str]]]
@@ -1759,6 +2390,24 @@ class ATTManager:
                 if proposal.get("initiator_agent_id") == agent_id
                 or agent_id in proposal.get("votes", {})
             ]
+            governance_refs.extend(
+                f"communication-request:{request.request_id}"
+                for request in self.broker.communication_requests.values()
+                if request.initiated_by_agent_id == agent_id
+            )
+            governance_refs.extend(
+                f"communication-ballot:{request_id}"
+                for request_id, ballots in self.broker.ballots.items()
+                if any(
+                    ballot.voter_agent_id == agent_id
+                    for ballot in ballots
+                )
+            )
+            governance_refs.extend(
+                f"peer-message:{message.message_id}"
+                for message in self.broker.peer_messages.values()
+                if message.initiated_by_agent_id == agent_id
+            )
             if governance_refs:
                 raise ValueError(
                     "Agent still has governance records: "
@@ -2108,9 +2757,6 @@ class ATTManager:
             return False
         
         parent_team = team.parent_team or self.find_parent_team(team)
-        if policy == "parent" and parent_team is None:
-            self.logger.warning(f"Parent failover policy requested but parent team not found. Falling back to 'auto'.")
-            policy = "auto"
 
         candidates = []
         required_tokens = max(1, getattr(error, "required_tokens", 1))
@@ -2140,50 +2786,76 @@ class ATTManager:
                 return False
                 
         elif policy == "parent":
-            from ai_team_team.core.policies import get_team_representative
-            parent_rep = get_team_representative(parent_team, self)
-            
-            if not parent_rep or not parent_rep.llm_client:
-                self.logger.warning("Parent representative client not available. Falling back to 'auto'.")
-                if candidates:
-                    selected_model = candidates[0]
-                else:
-                    return False
-            else:
-                prompt_candidates = ", ".join(candidates)
-                delegation_prompt = (
-                    f"Your child team {team.team_id} is running and has encountered a model failover. "
-                    f"Agent '{agent.name}' (role: {agent.role}) reached the token budget limit for Model '{old_model}'.\n"
-                    f"Please select a new model for Agent '{agent.name}' from the following available models:\n"
-                    f"[{prompt_candidates}]\n\n"
-                    f"Evaluate the task importance and budget, and output exactly a JSON payload:\n"
-                    f"{{\n"
-                    f"  \"selected_model\": \"<model_name>\"\n"
-                    f"}}"
+            from .communication import ApprovalPrincipal
+
+            if not candidates:
+                self.logger.error(
+                    "Parent-governed failover has no eligible model candidates."
                 )
-                
-                try:
-                    response_text = await generate_with_retry(
-                        llm_client=parent_rep.llm_client,
-                        prompt=delegation_prompt,
-                        system_instruction="You are a precise failover manager that selects target models. Respond in JSON.",
-                        temperature=0.1,
-                        require_json=True,
-                        manager=self
+                return False
+            principal = (
+                ApprovalPrincipal(
+                    kind="agent_team", principal_id=parent_team.team_id
+                )
+                if parent_team is not None
+                else ApprovalPrincipal(
+                    kind="agent", principal_id=self.root_ai.agent_id
+                )
+            )
+            if principal.kind == "agent" and principal.principal_id == agent.agent_id:
+                self.logger.error(
+                    "Parent-governed failover cannot re-enter the failing Agent."
+                )
+                return False
+            if principal.kind == "agent_team" and any(
+                member.agent_id == agent.agent_id
+                for member in parent_team.members
+            ):
+                self.logger.error(
+                    "Parent-governed failover cannot re-enter the failing Agent "
+                    "through a shared parent AgentTeam membership."
+                )
+                return False
+            prompt = (
+                "Select a replacement model for an Agent whose token budget is "
+                "exhausted.\n\n"
+                f"Child AgentTeam: {team.team_id}\n"
+                f"Agent: {agent.name} ({agent.role})\n"
+                f"Exhausted model: {old_model}\n"
+                f"Required tokens: {required_tokens}\n"
+            )
+            try:
+                if principal.kind == "agent":
+                    decision = await asyncio.wait_for(
+                        self.broker.decision_provider.decide_agent_model(
+                            principal, prompt, candidates
+                        ),
+                        timeout=self.config.parent_failover_timeout_seconds,
                     )
-                    if "```" in response_text:
-                        response_text = response_text.replace("```json", "").replace("```", "").strip()
-                    data = json.loads(response_text)
-                    choice = data.get("selected_model")
-                    if choice in candidates:
-                        selected_model = choice
-                        self.logger.info(f"Parent team selected model '{selected_model}' for agent '{agent.name}'.")
-                    else:
-                        self.logger.warning(f"Parent team chose invalid model '{choice}'. Falling back to first available.")
-                        selected_model = candidates[0] if candidates else None
-                except Exception as ex:
-                    self.logger.error(f"Parent representation query failed: {ex}. Falling back to first available.")
-                    selected_model = candidates[0] if candidates else None
+                else:
+                    decision = await asyncio.wait_for(
+                        self.broker.decision_provider.decide_team_model(
+                            principal, prompt, candidates
+                        ),
+                        timeout=self.config.parent_failover_timeout_seconds,
+                    )
+            except asyncio.TimeoutError:
+                self.logger.error(
+                    "Parent-governed failover did not complete before timeout."
+                )
+                return False
+            except Exception as exc:
+                self.logger.error(
+                    "Parent-governed failover failed closed: %s", exc
+                )
+                return False
+            if decision.status != "approved" or decision.selected_value not in candidates:
+                self.logger.error(
+                    "Parent-governed failover failed closed: %s",
+                    decision.reason,
+                )
+                return False
+            selected_model = decision.selected_value
 
         if not selected_model:
             self.logger.error("No failover model selected.")
@@ -2932,25 +3604,70 @@ class ATTManager:
 
     async def negotiate_and_execute_migration(self, team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]:
         """Arbitrates the migration of an AgentTeam using the critic LLM client, updates structure, and broadcasts alerts."""
-        limit = self.config.max_migrations_per_team_discussion
-        current_count = getattr(team, "migration_count", 0)
-        if current_count >= limit:
-            return False, f"Rejected: Cannot request migration. Maximum migrations per discussion session ({limit}) reached."
+        from .policies import (
+            migration_approval_principals,
+            resolve_migration_policy,
+        )
 
-        current_parent = team.parent_team
-        current_parent_id = current_parent.team_id if current_parent else "Root AI"
-        
-        from .policies import resolve_migration_policy
+        limit = self.config.max_migrations_per_team_discussion
         policy_name = getattr(self.config, "migration_policy", "ancestor_approval")
         policy = resolve_migration_policy(policy_name)
+        with self._topology_lock:
+            if self.teams.get(team.team_id) is not team:
+                return False, "Rejected: Migrating AgentTeam is not registered."
+            if self.teams.get(target_parent.team_id) is not target_parent:
+                return False, "Rejected: Target parent AgentTeam is not registered."
+            current_count = getattr(team, "migration_count", 0)
+            if current_count >= limit:
+                return False, f"Rejected: Cannot request migration. Maximum migrations per discussion session ({limit}) reached."
+            initial_parent = team.parent_team
+            if initial_parent is not None and team not in initial_parent.child_teams:
+                return False, "Rejected: Current parent/child topology is inconsistent."
+            cursor = target_parent
+            while cursor is not None:
+                if cursor is team:
+                    return False, "Rejected: Target parent is a descendant of the migrating AgentTeam."
+                cursor = cursor.parent_team
+            approved_principal_keys = tuple(
+                principal.key
+                for principal in migration_approval_principals(
+                    policy_name, team, target_parent, self
+                )
+            )
+            current_parent_id = (
+                initial_parent.team_id if initial_parent else "Root AI"
+            )
         
         try:
             approved, reason = await policy.authorize_migration(team, target_parent, self, rationale)
             
             if approved:
                 with self._topology_lock:
+                    if self.teams.get(team.team_id) is not team:
+                        return False, (
+                            "Rejected: Migrating AgentTeam was unregistered "
+                            "while authorization was pending."
+                        )
+                    if self.teams.get(target_parent.team_id) is not target_parent:
+                        return False, (
+                            "Rejected: Target parent AgentTeam was unregistered "
+                            "while authorization was pending."
+                        )
                     current_parent = team.parent_team
                     current_count = team.migration_count
+                    if current_parent is not initial_parent:
+                        return False, (
+                            "Rejected: Current parent changed while authorization "
+                            "was pending."
+                        )
+                    if (
+                        current_parent is not None
+                        and team not in current_parent.child_teams
+                    ):
+                        return False, (
+                            "Rejected: Current parent/child topology became "
+                            "inconsistent while authorization was pending."
+                        )
                     if current_count >= limit:
                         return False, (
                             "Rejected: Migration limit was reached while "
@@ -2965,6 +3682,18 @@ class ATTManager:
                                 "while authorization was pending."
                             )
                         cursor = cursor.parent_team
+
+                    current_principal_keys = tuple(
+                        principal.key
+                        for principal in migration_approval_principals(
+                            policy_name, team, target_parent, self
+                        )
+                    )
+                    if current_principal_keys != approved_principal_keys:
+                        return False, (
+                            "Rejected: The migration approval path changed "
+                            "while authorization was pending."
+                        )
 
                     if current_parent and team in current_parent.child_teams:
                         current_parent.child_teams.remove(team)
@@ -3150,6 +3879,23 @@ class ATTManager:
         skip_audit: bool = False,
     ) -> str:
         """Queues one discussion behind any active session for the same team."""
+        transcript, _ = await self._execute_team_discussion_with_members(
+            team,
+            prompt,
+            rounds=rounds,
+            skip_audit=skip_audit,
+        )
+        return transcript
+
+    async def _execute_team_discussion_with_members(
+        self,
+        team: AgentTeam,
+        prompt: str,
+        rounds: int = 2,
+        skip_audit: bool = False,
+        require_complete: bool = False,
+    ) -> Tuple[str, List[Agent]]:
+        """Runs one serialized session and captures membership after locking."""
         if self._closing:
             raise RuntimeError("ATTManager is closing and rejects new discussions.")
         if not isinstance(rounds, int) or isinstance(rounds, bool) or rounds < 1:
@@ -3169,13 +3915,18 @@ class ATTManager:
                 ):
                     raise ValueError("The discussion team is not registered.")
                 team.is_running = True
+                member_snapshot = list(team.members)
             try:
-                return await self._execute_team_discussion_session(
-                    team,
-                    prompt,
-                    rounds=rounds,
-                    skip_audit=skip_audit,
+                session_kwargs = {
+                    "rounds": rounds,
+                    "skip_audit": skip_audit,
+                }
+                if require_complete:
+                    session_kwargs["require_complete"] = True
+                transcript = await self._execute_team_discussion_session(
+                    team, prompt, **session_kwargs
                 )
+                return transcript, member_snapshot
             finally:
                 team.is_running = False
 
@@ -3185,6 +3936,7 @@ class ATTManager:
         prompt: str,
         rounds: int = 2,
         skip_audit: bool = False,
+        require_complete: bool = False,
     ) -> str:
         """Executes a multi-agent debate session inside the AT, monitored by the Supervisor."""
         with self._topology_lock:
@@ -3204,6 +3956,10 @@ class ATTManager:
             f"DISC-{uuid.uuid4().hex}"
         )
         processed_unknown_fingerprints: set[str] = set()
+        processed_communication_request_ids: set[str] = set()
+        processed_peer_message_ids: set[str] = set()
+        communication_member_snapshot = list(team.members)
+        discussion_had_member_errors = False
         discussion_succeeded = False
         
         auto_save_context = self.suppress_auto_save()
@@ -3229,6 +3985,23 @@ class ATTManager:
                                     message["fingerprint"]
                                 )
                             retained_inbox.append(message)
+                        elif (
+                            message.get("type")
+                            == "communication_approval_request"
+                        ):
+                            request_id = message.get("request_id")
+                            if request_id:
+                                pending_inbox.append(message)
+                                processed_communication_request_ids.add(
+                                    request_id
+                                )
+                            retained_inbox.append(message)
+                        elif message.get("type") == "peer_message":
+                            message_id = message.get("message_id")
+                            pending_inbox.append(message)
+                            retained_inbox.append(message)
+                            if message_id:
+                                processed_peer_message_ids.add(message_id)
                         else:
                             pending_inbox.append(message)
                     team.message_inbox = retained_inbox
@@ -3311,6 +4084,7 @@ class ATTManager:
                         raise result
                     elif isinstance(result, Exception):
                         self.logger.error(f"Agent {agent.name} encountered an error: {result}")
+                        discussion_had_member_errors = True
                         ans = f"Error: {result}"
                     else:
                         ans = str(result)
@@ -3322,7 +4096,13 @@ class ATTManager:
                     await self._apply_deferred_membership_changes(team)
 
             transcript = "\n".join(dialog_history)
-            
+
+            if require_complete and discussion_had_member_errors:
+                raise RuntimeError(
+                    "The governance discussion was incomplete because at "
+                    "least one Agent reasoning step failed."
+                )
+
             # Run supervisory audit
             if not skip_audit:
                 audit_result = await self.supervisor.audit_team_dialog(
@@ -3368,6 +4148,20 @@ class ATTManager:
                     team.chapter_num,
                 )
 
+            # A governance ballot may only follow a discussion that reached
+            # the complete session boundary. A partial member failure keeps
+            # every queued communication Approval pending for a later retry.
+            if (
+                processed_communication_request_ids
+                and not discussion_had_member_errors
+            ):
+                await self.broker.process_team_approvals_from_transcript(
+                    team,
+                    sorted(processed_communication_request_ids),
+                    transcript,
+                    communication_member_snapshot,
+                )
+
             self._auto_save(
                 agents={agent.agent_id for agent in team.members},
                 teams={team.team_id},
@@ -3375,6 +4169,27 @@ class ATTManager:
             discussion_succeeded = True
             return transcript
         finally:
+            if processed_peer_message_ids and discussion_succeeded:
+                consumed_at = time.time()
+                with team.inbox_lock:
+                    team.message_inbox = [
+                        message
+                        for message in team.message_inbox
+                        if message.get("message_id")
+                        not in processed_peer_message_ids
+                    ]
+                changed_peer_messages = set()
+                with self._snapshot_lock:
+                    for message_id in processed_peer_message_ids:
+                        message = self.broker.peer_messages.get(message_id)
+                        if message is not None:
+                            message.delivery_state = "consumed"
+                            message.consumed_at = consumed_at
+                            changed_peer_messages.add(message_id)
+                self._auto_save(
+                    inboxes={team.team_id},
+                    peer_messages=changed_peer_messages,
+                )
             if processed_unknown_fingerprints:
                 with team.inbox_lock:
                     if discussion_succeeded:

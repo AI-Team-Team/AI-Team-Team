@@ -9,7 +9,7 @@ Configuration class to configure the multi-agent framework settings.
 ### Constructor
 
 ```python
-from ai_team_team import ATTConfig
+from ai_team_team import ATTConfig, PermissiveCommunicationConfig
 
 config = ATTConfig(
     enable_dynamic_delegation: bool = True,
@@ -25,7 +25,7 @@ config = ATTConfig(
     llm_retry_backoff_factor: float = 1.5,
     enable_memory_compression: bool = True,
     max_memory_turns: int = 20,
-    communication_policy: str = "permissive",
+    communication: CommunicationConfig = PermissiveCommunicationConfig(),
     migration_policy: str = "ancestor_approval",
     enable_emergency_wakeup: bool = True,
     emergency_discussion_rounds: int = 1,
@@ -37,7 +37,8 @@ config = ATTConfig(
     default_max_output_tokens: int = 1024,
     audit_unknown_escalation_mode: str = "wake",
     audit_unknown_soft_threshold: int = 100,
-    agent_private_data_policy: str = "archive"
+    agent_private_data_policy: str = "archive",
+    parent_failover_timeout_seconds: float = 120
 )
 ```
 
@@ -56,7 +57,7 @@ config = ATTConfig(
 * **`llm_retry_backoff_factor`**: Initial exponential-backoff delay. `0` retries immediately.
 * **`enable_memory_compression`**: Whether to enable automatic dialogue compression/pruning of early conversation turns (default: `True`).
 * **`max_memory_turns`**: The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns (default: `20`).
-* **`communication_policy`**: The strategy used for inter-team communication gating. Options: `"permissive"`, `"rule_gated"`, `"proxied"`.
+* **`communication`**: Strict `PermissiveCommunicationConfig`, `ParentApprovalCommunicationConfig`, or `LineageApprovalCommunicationConfig`. Approval configurations select `request_delivery` (`"queue"`/`"wake"`) and Agreement `direction` (`"one_way"`/`"bidirectional"`). The institution applies to every AgentTeam depth.
 * **`migration_policy`**: The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`.
 * **`enable_emergency_wakeup`**: Whether to trigger active wake-up discussion on idle parent teams upon receiving high-priority child anomalies (default: `True`).
 * **`emergency_discussion_rounds`**: The number of emergency discussion rounds executed when a team is woken up (default: `1`).
@@ -69,6 +70,7 @@ config = ATTConfig(
 * **`audit_unknown_escalation_mode`**: Whether an indeterminate supervisory audit immediately wakes the parent (`"wake"`) or only enters its inbox (`"queue"`).
 * **`audit_unknown_soft_threshold`**: Emits operational warnings after this many unique UNKNOWN alerts without dropping or expiring them.
 * **`agent_private_data_policy`**: Default retirement handling for private data: `"archive"` (read-only), `"retain"`, or confirmed `"delete"`.
+* **`parent_failover_timeout_seconds`**: Positive timeout for explicit parent AgentTeam/Root Agent model selection. Parent-governed failover never falls back to `"auto"`.
 
 Policy names, numeric values, runtime assignments, and mutable configuration mapping updates use the same validation. Invalid values raise `ValueError`.
 
@@ -136,7 +138,7 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 * **`get_private_library_id(agent_id: str) -> str`**
   Returns the canonical `PDL-<agent_id>` ID.
 * **`await retire_agent(agent_id: str, policy: Optional[str] = None, confirm_delete: bool = False)`**
-  Deactivates an unused AI under `retain`, `archive`, or confirmed `delete`. Root, team members, team creators, and agents with an active model call cannot be retired.
+  Deactivates an unused AI under `retain`, `archive`, or confirmed `delete`. Root, team members, team creators, agents with an active model call, and identities referenced by durable governance/audit records cannot be permanently deleted.
 * **`await reactivate_agent(agent_id: str, model_alias: str) -> Agent`**
   Restores a retained or archived AI with an explicit stable runtime model binding and its original private library.
 * **`register_tool_auditor(tool_name: str, auditor_func: Callable[..., Tuple[bool, str]])`**
@@ -159,7 +161,7 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 * **`render_topology_tree() -> str`**
   Renders the active hierarchical agent team lineage as an indented ASCII tree.
 * **`negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`**
-  Arbitrates the migration of an AgentTeam using the configured migration policy strategy (which defaults to requiring approvals from the Least Common Ancestor and parent team representatives using their own LLM clients), updates structure, and broadcasts alerts.
+  Arbitrates migration through explicit AgentTeam and Root Agent principals, revalidates the topology under its mutation lock, updates structure atomically, and broadcasts alerts.
 * **`await save_state(path: Optional[str] = None, full: bool = True)`**
   Queues and waits for a versioned snapshot commit.
 * **`await load_state(path: str)`**
@@ -329,16 +331,20 @@ These tools are automatically registered and bound to all agent teams by default
 
 ### Spawning & Communication
 
-* **`dispatch_subagent(task: str, team_purpose: str, member_configs: Optional[dict] = None, system_instructions: str = "", allow_sibling_talk: bool = False, sibling_talk_rules: str = "", is_public_visible: bool = False, initial_documents: Optional[dict] = None) -> str`**
+* **`dispatch_subagent(task: str, team_purpose: str, member_configs: Optional[dict] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: Optional[dict] = None) -> str`**
   Spawns a recursive child `AgentTeam` (Level $N+1$). Each team must contain at least 3 members. Optional context files can be pre-populated via `initial_documents` (maps file paths to contents).
 * **`delegate_escalation(objective: str, rationale: str) -> str`**
   Escalates a task or deadlock upward to the team's direct parent in the lineage hierarchy.
-* **`set_sibling_talk(child_id: str, allow: bool = True) -> str`**
-  Allows a parent team to dynamically authorize sibling peer communication for a specific child team.
 * **`send_peer_message(team_id: str, message: str) -> str`**
-  Sends a direct message to a peer team's inbox, subject to communication policy gates.
-* **`negotiate_peer_talk(target_team_id: str, rationale: str) -> str`**
-  Requests parent representatives to negotiate a cross-lineage communication agreement tunnel.
+  Durably sends from the invocation-scoped AgentTeam. It returns stable JSON with `DELIVERED` or `NO_AGREEMENT`.
+* **`request_peer_communication(team_id: str, rationale: str) -> str`**
+  Requests a durable Agreement under the configured parent- or lineage-approval policy. It accepts no sender, policy, direction, or principal override.
+* **`revoke_peer_agreement(agreement_id: str, reason: str) -> str`**
+  Revokes a channel when the current invocation-scoped AgentTeam is either endpoint.
+* **`list_peer_requests(status: str = "pending") -> str`**
+  Lists requests involving the current endpoint or approval AgentTeam.
+* **`list_peer_agreements(active_only: bool = True) -> str`**
+  Lists Agreements whose endpoints include the current AgentTeam.
 
 ### Team Status & Membership
 

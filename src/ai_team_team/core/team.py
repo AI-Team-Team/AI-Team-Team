@@ -23,10 +23,6 @@ class AgentTeam:
         self.members: List[Agent] = []
         
         self.child_teams: List['AgentTeam'] = []
-        self.communication_rules: Dict[str, Any] = {
-            "allow_sibling_talk": False,
-            "rules": []
-        }
         self.logger = logging.getLogger(f"AgentTeam:{self.team_id}")
         self.message_inbox: List[Dict[str, Any]] = []
         self.tools: Dict[str, Tool] = {}

@@ -1,150 +1,87 @@
-import re
+"""ATT governance policies backed by explicit AgentTeam or Agent principals."""
+
+from __future__ import annotations
+
 import logging
-from typing import Any, Tuple, List
+import uuid
+from typing import Any, List, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, StrictBool, ValidationError
+
+from .communication import ApprovalPrincipal
 
 logger = logging.getLogger("ATT.Policies")
 
 
 class GovernanceDecision(BaseModel):
-    """Strict fail-closed schema shared by every LLM authorization gate."""
+    """Strict fail-closed schema for boolean governance decisions."""
 
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, extra="forbid")
 
     approved: StrictBool
     reason: str = "No reason provided."
 
 
 def parse_governance_decision(
-    response: str,
-    manager: Any,
-    context: str,
+    response: str, manager: Any, context: str
 ) -> Tuple[bool, str]:
-    cleaned = response
-    if "```" in cleaned:
-        cleaned = cleaned.replace("```json", "").replace("```", "").strip()
+    cleaned = response.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[len("```json") :]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
     try:
         decision = GovernanceDecision.model_validate_json(
-            cleaned, strict=True
+            cleaned.strip(), strict=True
         )
     except (ValidationError, ValueError, TypeError) as exc:
         reason = f"Invalid governance decision format: {exc}"
         logger.warning("%s rejected: %s", context, reason)
-        callback = getattr(manager, "on_system_event", None)
-        if callback:
-            try:
-                callback(
-                    "governance_authorization_format_error",
-                    {"context": context, "reason": reason},
-                )
-            except Exception:
-                pass
+        if manager is not None:
+            manager._emit_callback(
+                "on_system_event",
+                "governance_authorization_format_error",
+                {"context": context, "reason": reason},
+            )
         return False, reason
     return decision.approved, decision.reason
 
-async def generate_with_retry_fallback(
-    llm_client: Any,
-    prompt: str,
-    system_instruction: str,
-    manager: Any
-) -> str:
-    from .utils import generate_with_retry
-    retries = manager.config.llm_max_retries if manager else 3
-    backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
-    return await generate_with_retry(
-        llm_client=llm_client,
-        prompt=prompt,
-        system_instruction=system_instruction,
-        temperature=0.2,
-        require_json=True,
-        retries=retries,
-        backoff_factor=backoff,
-        manager=manager
-    )
-
-def get_team_representative(team: Any, manager: Any) -> Any:
-    if team is None:
-        return manager.root_ai
-    if team.members:
-        return team.members[0]
-    if getattr(team, "creator", None) and hasattr(team.creator, "llm_client"):
-        return team.creator
-    return manager.root_ai
 
 def get_ancestry_chain(team: Any) -> List[Any]:
     chain = []
-    curr = team
-    while curr:
-        chain.append(curr)
-        curr = curr.parent_team
+    current = team
+    while current is not None:
+        chain.append(current)
+        current = current.parent_team
     return chain
 
-def find_lca(t1: Any, t2: Any) -> Any:
-    if not t1 or not t2:
+
+def find_lca(first: Any, second: Any) -> Any:
+    if first is None or second is None:
         return None
-    chain1 = get_ancestry_chain(t1)
-    chain2 = get_ancestry_chain(t2)
-    chain1.reverse()
-    chain2.reverse()
-    lca = None
-    for n1, n2 in zip(chain1, chain2):
-        if n1.team_id == n2.team_id:
-            lca = n1
-        else:
-            break
-    return lca
+    second_ids = {team.team_id for team in get_ancestry_chain(second)}
+    return next(
+        (
+            team
+            for team in get_ancestry_chain(first)
+            if team.team_id in second_ids
+        ),
+        None,
+    )
+
 
 def get_path_to_ancestor(start: Any, ancestor: Any) -> List[Any]:
     path = []
-    curr = start
-    while curr and curr != ancestor:
-        path.append(curr)
-        curr = curr.parent_team
-    if curr == ancestor and ancestor:
-        path.append(ancestor)
+    current = start
+    while current is not None:
+        path.append(current)
+        if current is ancestor:
+            break
+        current = current.parent_team
     return path
 
-def check_rules_single_direction(parent: Any, opponent_team: Any) -> bool:
-    if not parent:
-        return True
-    rules = parent.communication_rules.get("rules", [])
-    if not rules:
-        return parent.communication_rules.get("allow_sibling_talk", False)
-    
-    for rule in rules:
-        rule_str = rule.strip()
-        if rule_str in {"allow_all", "allow_any"}:
-            return True
-        if rule_str.startswith("allow_team:"):
-            target_id = rule_str.split("allow_team:", 1)[1].strip()
-            if opponent_team.team_id == target_id:
-                return True
-        if rule_str.startswith("allow_parent:"):
-            target_parent_id = rule_str.split("allow_parent:", 1)[1].strip()
-            opp_parent = opponent_team.parent_team
-            if opp_parent and opp_parent.team_id == target_parent_id:
-                return True
-        if rule_str.startswith("allow_purpose:"):
-            pattern = rule_str.split("allow_purpose:", 1)[1].strip()
-            try:
-                if re.match(pattern, opponent_team.team_purpose or "", re.IGNORECASE):
-                    return True
-            except Exception as e:
-                logger.error(f"Invalid regex pattern in communication rules: {pattern}. Error: {e}")
-    return False
-
-# Base Policies
-
-class BaseCommunicationPolicy:
-    async def authorize_peer_talk(
-        self,
-        sender: Any,
-        recipient: Any,
-        manager: Any,
-        rationale: str
-    ) -> bool:
-        raise NotImplementedError
 
 class BaseMigrationPolicy:
     async def authorize_migration(
@@ -152,98 +89,10 @@ class BaseMigrationPolicy:
         team: Any,
         target_parent: Any,
         manager: Any,
-        rationale: str
+        rationale: str,
     ) -> Tuple[bool, str]:
         raise NotImplementedError
 
-# Communication Policy Implementations
-
-class PermissiveCommunicationPolicy(BaseCommunicationPolicy):
-    async def authorize_peer_talk(
-        self,
-        sender: Any,
-        recipient: Any,
-        manager: Any,
-        rationale: str
-    ) -> bool:
-        return True
-
-class RuleGatedCommunicationPolicy(BaseCommunicationPolicy):
-    async def authorize_peer_talk(
-        self,
-        sender: Any,
-        recipient: Any,
-        manager: Any,
-        rationale: str
-    ) -> bool:
-        sender_parent = sender.parent_team
-        recipient_parent = recipient.parent_team
-        
-        ok_sender = check_rules_single_direction(sender_parent, recipient)
-        ok_recipient = check_rules_single_direction(recipient_parent, sender)
-        
-        return ok_sender and ok_recipient
-
-class ProxiedCommunicationPolicy(BaseCommunicationPolicy):
-    async def authorize_peer_talk(
-        self,
-        sender: Any,
-        recipient: Any,
-        manager: Any,
-        rationale: str
-    ) -> bool:
-        sender_parent = sender.parent_team
-        recipient_parent = recipient.parent_team
-        
-        parents = []
-        for p in [sender_parent, recipient_parent]:
-            if p not in parents:
-                parents.append(p)
-
-        for p in parents:
-            rep = get_team_representative(p, manager)
-            if not rep or not getattr(rep, "llm_client", None):
-                continue
-            
-            prompt = (
-                f"Evaluate a request to establish a cross-lineage peer-to-peer communication channel.\n\n"
-                f"Sender Team: {sender.team_id} (Purpose: {sender.team_purpose})\n"
-                f"Recipient Team: {recipient.team_id} (Purpose: {recipient.team_purpose})\n"
-                f"Rationale: \"{rationale}\"\n\n"
-                f"Output exactly a JSON payload:\n"
-                f"{{\n"
-                f"  \"approved\": true | false,\n"
-                f"  \"reason\": \"Reasoning for your decision...\"\n"
-                f"}}"
-            )
-            try:
-                response = await generate_with_retry_fallback(
-                    llm_client=rep.llm_client,
-                    prompt=prompt,
-                    system_instruction=f"You are the representative agent ({rep.name}) of parent team {p.team_id if p else 'Root'}. Evaluate peer communication request.",
-                    manager=manager
-                )
-                approved, reason = parse_governance_decision(
-                    response,
-                    manager,
-                    f"Peer talk {sender.team_id} -> {recipient.team_id}",
-                )
-                if not approved:
-                    logger.info(
-                        "Peer talk between %s and %s rejected by parent "
-                        "representative %s: %s",
-                        sender.team_id,
-                        recipient.team_id,
-                        rep.name,
-                        reason,
-                    )
-                    return False
-            except Exception as e:
-                logger.warning(f"Error querying peer talk approval from representative {rep.name}: {e}. Defaulting to rejected.")
-                return False
-        return True
-
-# Migration Policy Implementations
 
 class PermissiveMigrationPolicy(BaseMigrationPolicy):
     async def authorize_migration(
@@ -251,9 +100,105 @@ class PermissiveMigrationPolicy(BaseMigrationPolicy):
         team: Any,
         target_parent: Any,
         manager: Any,
-        rationale: str
+        rationale: str,
     ) -> Tuple[bool, str]:
         return True, "Migration allowed by permissive policy."
+
+
+def _principal_for_team(team: Any, manager: Any) -> ApprovalPrincipal:
+    if team is None:
+        return ApprovalPrincipal(
+            kind="agent", principal_id=manager.root_ai.agent_id
+        )
+    return ApprovalPrincipal(
+        kind="agent_team", principal_id=team.team_id
+    )
+
+
+def _deduplicate(principals: List[ApprovalPrincipal]) -> List[ApprovalPrincipal]:
+    result = []
+    seen = set()
+    for principal in principals:
+        if principal.key not in seen:
+            seen.add(principal.key)
+            result.append(principal)
+    return result
+
+
+async def _authorize_principals(
+    principals: List[ApprovalPrincipal],
+    team: Any,
+    target_parent: Any,
+    manager: Any,
+    rationale: str,
+) -> Tuple[bool, str]:
+    request_id = f"MIG-{uuid.uuid4().hex}"
+    prompt = (
+        "Decide whether your governance principal approves an ATT topology "
+        "migration.\n\n"
+        f"Moving AgentTeam: {team.team_id}\n"
+        f"Current parent: {team.parent_team.team_id if team.parent_team else 'Root Agent'}\n"
+        f"Target parent: {target_parent.team_id}\n"
+        f"Rationale: {rationale}"
+    )
+    for principal in principals:
+        active_actor = manager._active_tool_agent.get()
+        if principal.kind == "agent_team" and active_actor is not None:
+            approver_team = manager.teams.get(principal.principal_id)
+            if approver_team is not None and any(
+                member.agent_id == active_actor.agent_id
+                for member in approver_team.members
+            ):
+                return (
+                    False,
+                    "Migration approval cannot synchronously re-enter the "
+                    "active Agent through another AgentTeam.",
+                )
+        if principal.kind == "agent" and active_actor is not None:
+            if principal.principal_id == active_actor.agent_id:
+                return (
+                    False,
+                    "Migration approval cannot synchronously re-enter the active Agent.",
+                )
+        outcome = await manager.broker.decision_provider.decide_principal_boolean(
+            principal, request_id, prompt
+        )
+        if outcome.status != "approved":
+            return False, (
+                f"Migration {outcome.status} by "
+                f"{principal.kind}:{principal.principal_id}: {outcome.reason}"
+            )
+    return True, "Every required governance principal approved the migration."
+
+
+def migration_approval_principals(
+    policy_name: str,
+    team: Any,
+    target_parent: Any,
+    manager: Any,
+) -> List[ApprovalPrincipal]:
+    """Resolves the exact migration authorities for validation and approval."""
+    if policy_name == "permissive":
+        return []
+    current_parent = team.parent_team
+    lca = find_lca(current_parent, target_parent)
+    if policy_name == "ancestor_approval":
+        return _deduplicate(
+            [
+                _principal_for_team(current_parent, manager),
+                _principal_for_team(target_parent, manager),
+                _principal_for_team(lca, manager),
+            ]
+        )
+    if policy_name == "lineage_path":
+        path = get_path_to_ancestor(current_parent, lca)
+        path.extend(get_path_to_ancestor(target_parent, lca))
+        principals = [_principal_for_team(item, manager) for item in path]
+        if lca is None:
+            principals.append(_principal_for_team(None, manager))
+        return _deduplicate(principals)
+    raise ValueError(f"Unknown migration policy: {policy_name!r}.")
+
 
 class AncestorApprovalMigrationPolicy(BaseMigrationPolicy):
     async def authorize_migration(
@@ -261,65 +206,15 @@ class AncestorApprovalMigrationPolicy(BaseMigrationPolicy):
         team: Any,
         target_parent: Any,
         manager: Any,
-        rationale: str
+        rationale: str,
     ) -> Tuple[bool, str]:
-        current_parent = team.parent_team
-        current_parent_id = current_parent.team_id if current_parent else "Root"
-        
-        involved_teams = []
-        if current_parent:
-            involved_teams.append(current_parent)
-        if target_parent:
-            involved_teams.append(target_parent)
-        lca = find_lca(current_parent, target_parent)
-        if lca:
-            involved_teams.append(lca)
-        else:
-            involved_teams.append(None) # Represents Root AI
-            
-        unique_involved = []
-        for t in involved_teams:
-            if t not in unique_involved:
-                unique_involved.append(t)
-                
-        for t in unique_involved:
-            rep = get_team_representative(t, manager)
-            if not rep or not getattr(rep, "llm_client", None):
-                continue
-            
-            arbitration_prompt = (
-                f"Evaluate a request to reorganize the agent team hierarchy.\n\n"
-                f"Team requesting migration: {team.team_id}\n"
-                f"Current Purpose: {team.team_purpose}\n"
-                f"Current Parent Team: {current_parent_id} (Purpose: {current_parent.team_purpose if current_parent else 'Root Coordinator'})\n\n"
-                f"Target Parent Team: {target_parent.team_id}\n"
-                f"Target Parent Purpose: {target_parent.team_purpose}\n\n"
-                f"Migration Rationale provided by the team:\n\"{rationale}\"\n\n"
-                f"Please evaluate if this migration is logical, beneficial for task progress, and does not create redundant hierarchy.\n"
-                f"Output exactly a JSON payload:\n"
-                f"{{\n"
-                f"  \"approved\": true | false,\n"
-                f"  \"reason\": \"Reasoning for your decision...\"\n"
-                f"}}"
-            )
-            try:
-                response = await generate_with_retry_fallback(
-                    llm_client=rep.llm_client,
-                    prompt=arbitration_prompt,
-                    system_instruction=f"You are the representative agent ({rep.name}) of team {t.team_id if t else 'Root'}. Evaluate restructure proposal.",
-                    manager=manager
-                )
-                approved, reason = parse_governance_decision(
-                    response,
-                    manager,
-                    f"Migration {team.team_id} -> {target_parent.team_id}",
-                )
-                if not approved:
-                    return False, f"Rejected by representative {rep.name} of team {t.team_id if t else 'Root'}: {reason}"
-            except Exception as e:
-                logger.warning(f"Error querying migration approval from representative {rep.name}: {e}. Defaulting to rejected.")
-                return False, f"Arbitration failed due to error: {e}"
-        return True, "Approved by ancestor approval policy."
+        principals = migration_approval_principals(
+            "ancestor_approval", team, target_parent, manager
+        )
+        return await _authorize_principals(
+            principals, team, target_parent, manager, rationale
+        )
+
 
 class LineagePathMigrationPolicy(BaseMigrationPolicy):
     async def authorize_migration(
@@ -327,88 +222,27 @@ class LineagePathMigrationPolicy(BaseMigrationPolicy):
         team: Any,
         target_parent: Any,
         manager: Any,
-        rationale: str
+        rationale: str,
     ) -> Tuple[bool, str]:
-        current_parent = team.parent_team
-        current_parent_id = current_parent.team_id if current_parent else "Root"
-        
-        lca = find_lca(current_parent, target_parent)
-        
-        path1 = get_path_to_ancestor(current_parent, lca)
-        path2 = get_path_to_ancestor(target_parent, lca)
-        
-        involved_teams = path1 + path2
-        if not lca:
-            involved_teams.append(None) # Root level
-            
-        unique_involved = []
-        for t in involved_teams:
-            if t not in unique_involved:
-                unique_involved.append(t)
-                
-        for t in unique_involved:
-            rep = get_team_representative(t, manager)
-            if not rep or not getattr(rep, "llm_client", None):
-                continue
-            
-            arbitration_prompt = (
-                f"Evaluate a request to reorganize the agent team hierarchy.\n\n"
-                f"Team requesting migration: {team.team_id}\n"
-                f"Current Purpose: {team.team_purpose}\n"
-                f"Current Parent Team: {current_parent_id} (Purpose: {current_parent.team_purpose if current_parent else 'Root Coordinator'})\n\n"
-                f"Target Parent Team: {target_parent.team_id}\n"
-                f"Target Parent Purpose: {target_parent.team_purpose}\n\n"
-                f"Migration Rationale provided by the team:\n\"{rationale}\"\n\n"
-                f"Please evaluate if this migration is logical, beneficial for task progress, and does not create redundant hierarchy.\n"
-                f"Output exactly a JSON payload:\n"
-                f"{{\n"
-                f"  \"approved\": true | false,\n"
-                f"  \"reason\": \"Reasoning for your decision...\"\n"
-                f"}}"
-            )
-            try:
-                response = await generate_with_retry_fallback(
-                    llm_client=rep.llm_client,
-                    prompt=arbitration_prompt,
-                    system_instruction=f"You are the representative agent ({rep.name}) of team {t.team_id if t else 'Root'}. Evaluate restructure proposal.",
-                    manager=manager
-                )
-                approved, reason = parse_governance_decision(
-                    response,
-                    manager,
-                    f"Migration {team.team_id} -> {target_parent.team_id}",
-                )
-                if not approved:
-                    return False, f"Rejected by representative {rep.name} of team {t.team_id if t else 'Root'}: {reason}"
-            except Exception as e:
-                logger.warning(f"Error querying migration approval from representative {rep.name}: {e}. Defaulting to rejected.")
-                return False, f"Arbitration failed due to error: {e}"
-        return True, "Approved by lineage path policy."
+        principals = migration_approval_principals(
+            "lineage_path", team, target_parent, manager
+        )
+        return await _authorize_principals(
+            principals,
+            team,
+            target_parent,
+            manager,
+            rationale,
+        )
 
-# Policy resolution helpers
-
-def resolve_communication_policy(policy_name: str) -> BaseCommunicationPolicy:
-    policies = {
-        "permissive": PermissiveCommunicationPolicy(),
-        "rule_gated": RuleGatedCommunicationPolicy(),
-        "proxied": ProxiedCommunicationPolicy()
-    }
-    try:
-        return policies[policy_name.lower()]
-    except (AttributeError, KeyError) as exc:
-        raise ValueError(
-            f"Unknown communication policy: {policy_name!r}."
-        ) from exc
 
 def resolve_migration_policy(policy_name: str) -> BaseMigrationPolicy:
     policies = {
         "permissive": PermissiveMigrationPolicy(),
         "ancestor_approval": AncestorApprovalMigrationPolicy(),
-        "lineage_path": LineagePathMigrationPolicy()
+        "lineage_path": LineagePathMigrationPolicy(),
     }
     try:
         return policies[policy_name.lower()]
     except (AttributeError, KeyError) as exc:
-        raise ValueError(
-            f"Unknown migration policy: {policy_name!r}."
-        ) from exc
+        raise ValueError(f"Unknown migration policy: {policy_name!r}.") from exc

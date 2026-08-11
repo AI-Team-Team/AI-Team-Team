@@ -83,8 +83,14 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failover_event["old_model"], "default")
         self.assertEqual(failover_event["new_model"], "gemini-3.5")
 
-    async def test_parent_representative_delegation_failover(self):
-        """Verify that a child awaits its parent representative's failover choice."""
+    async def test_parent_agent_team_majority_failover(self):
+        """Verify that parent failover uses an AgentTeam-wide model ballot."""
+        async def root_generate(require_json=False, **kwargs):
+            if require_json:
+                return '{"is_healthy": true, "reason": "healthy"}'
+            return "Final Answer: Done."
+
+        self.mock_client.generate = root_generate
         config = ATTConfig(
             model_token_limits={
                 "default": 5000,
@@ -96,10 +102,6 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         manager = ATTManager(root_ai=self.root_ai, config=config)
         manager.llm_clients["low-budget"] = self.mock_client
         
-        # Setup parent team and child team
-        parent_team = manager.create_agent_team(creator=self.root_ai, member_count=3, preset_name="generic")
-        child_team = manager.create_agent_team(creator=parent_team, member_count=3, preset_name="generic")
-        
         # Mock opus client
         mock_opus = MagicMock()
         mock_opus.generate = AsyncMock(return_value="Final Answer: Resolved on Claude Opus.")
@@ -108,35 +110,91 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         )
         manager.llm_clients["opus-4.8"] = mock_opus
 
-        # We configure generator handler to respond to parent rep decision query with json,
-        # and standard queries with text
-        async def mock_handler(
-            model_name,
-            prompt,
-            system_instruction=None,
-            max_output_tokens=None,
-            temperature=0.3,
-            require_json=False,
-        ):
-            if require_json and "selected_model" in prompt:
-                return '{"selected_model": "opus-4.8"}'
-            return "Final Answer: Parent logic."
+        governor = MagicMock()
 
-        manager.register_generator_handler(mock_handler)
-        
-        # Parent representative (first member) uses the handler
-        parent_team.members[0].llm_client = manager.supervisor.llm_client # uses default wrapper
+        async def govern(prompt=None, require_json=False, **kwargs):
+            if "Allowed aliases" in str(prompt):
+                return '{"model_alias": "opus-4.8", "reason": "majority"}'
+            if require_json:
+                return '{"is_healthy": true, "reason": "healthy"}'
+            return "Final Answer: Parent discussion."
 
-        # Execute debate on child team
-        transcript = await manager.execute_team_discussion(
-            child_team,
-            "Run child debate",
-            rounds=1,
-            skip_audit=True,
+        governor.generate = govern
+        governor.supports_output_token_limit.return_value = "max_output_tokens"
+        manager.llm_clients["governor"] = governor
+
+        parent_team = manager.create_agent_team(
+            creator=self.root_ai,
+            member_configs={
+                "P1": {"model": "governor"},
+                "P2": {"model": "governor"},
+                "P3": {"model": "governor"},
+            },
         )
-        
-        # Verify it hot-swapped to opus-4.8 selected by parent
-        self.assertIn("Resolved on Claude Opus.", transcript)
+        child_team = manager.create_agent_team(
+            creator=parent_team,
+            member_configs={
+                "C1": {"model": "low-budget"},
+                "C2": {"model": "low-budget"},
+                "C3": {"model": "low-budget"},
+            },
+        )
+        error = TokenLimitExceededError("budget exhausted")
+        error.required_tokens = 1
+        changed = await manager.handle_failover(
+            child_team.members[0], child_team, error
+        )
+
+        self.assertTrue(changed)
+        self.assertIs(child_team.members[0].llm_client, mock_opus)
+
+    async def test_top_level_parent_failover_uses_root_agent(self):
+        async def root_govern(prompt=None, require_json=False, **kwargs):
+            if "Allowed model aliases" in str(prompt):
+                return '{"model_alias": "high", "reason": "root choice"}'
+            if require_json:
+                return '{"is_healthy": true, "reason": "healthy"}'
+            return "Final Answer: Done."
+
+        self.mock_client.generate = root_govern
+        config = ATTConfig(
+            model_token_limits={
+                "default": 5000,
+                "low": 5,
+                "high": 5000,
+            },
+            failover_policy="parent",
+            parent_failover_timeout_seconds=1,
+        )
+        manager = ATTManager(root_ai=self.root_ai, config=config)
+        low_client = MagicMock()
+        low_client.generate = AsyncMock(return_value="Final Answer: low")
+        low_client.supports_output_token_limit.return_value = (
+            "max_output_tokens"
+        )
+        manager.register_llm_client("low", low_client)
+        high_client = MagicMock()
+        high_client.generate = AsyncMock(return_value="Final Answer: high")
+        high_client.supports_output_token_limit.return_value = (
+            "max_output_tokens"
+        )
+        manager.register_llm_client("high", high_client)
+        team = manager.create_agent_team(
+            creator=self.root_ai,
+            member_configs={
+                "A": {"model": "low"},
+                "B": {"model": "low"},
+                "C": {"model": "low"},
+            },
+        )
+        error = TokenLimitExceededError("budget exhausted")
+        error.required_tokens = 1
+
+        changed = await manager.handle_failover(team.members[0], team, error)
+
+        self.assertTrue(changed)
+        self.assertIs(team.members[0].llm_client, high_client)
+        await manager.close()
 
 if __name__ == "__main__":
     unittest.main()

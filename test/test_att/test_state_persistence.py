@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import sqlite3
 import json
+import time
 from unittest.mock import MagicMock, AsyncMock
 
 # Setup paths
@@ -14,7 +15,23 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from ai_team_team import ATTManager, Agent, AgentTeam, ATTConfig, DocumentLibrary
+from ai_team_team import (
+    ATTManager,
+    Agent,
+    AgentTeam,
+    ATTConfig,
+    DocumentLibrary,
+    ApprovalPrincipal,
+    CommunicationAgreement,
+    CommunicationApproval,
+    CommunicationRequest,
+)
+from ai_team_team.core.communication import (
+    AgreementDirection,
+    CommunicationApprovalStatus,
+    CommunicationRequestStatus,
+    route_fingerprint,
+)
 
 class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -280,8 +297,43 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         # Setup proposals & inbox & broker agreements
         team_parent.receive_message({"from": "Child", "type": "escalation", "payload": "Help needed"})
         
-        # Mock broker agreement
-        self.manager.broker.peer_talk_agreements.add((team_parent.team_id, team_child.team_id))
+        principal = ApprovalPrincipal(
+            kind="agent", principal_id=self.root_ai.agent_id
+        )
+        resolved_at = time.time()
+        request = CommunicationRequest(
+            sender_team_id=team_parent.team_id,
+            recipient_team_id=team_child.team_id,
+            initiated_by_agent_id=self.root_ai.agent_id,
+            rationale="Persist a governed channel",
+            direction=AgreementDirection.BIDIRECTIONAL,
+            policy_snapshot={
+                "policy": "parent_approval",
+                "request_delivery": "queue",
+                "direction": "bidirectional",
+            },
+            approval_principals=[principal],
+            route_fingerprint=route_fingerprint([principal]),
+            status=CommunicationRequestStatus.APPROVED,
+            resolved_at=resolved_at,
+        )
+        approval = CommunicationApproval(
+            request_id=request.request_id,
+            principal=principal,
+            sequence=0,
+            status=CommunicationApprovalStatus.APPROVED,
+            resolved_at=resolved_at,
+        )
+        agreement = CommunicationAgreement(
+            source_team_id=team_parent.team_id,
+            target_team_id=team_child.team_id,
+            direction=AgreementDirection.BIDIRECTIONAL,
+            created_from_request_id=request.request_id,
+            policy_snapshot=request.policy_snapshot,
+        )
+        self.manager.broker.communication_requests[request.request_id] = request
+        self.manager.broker.communication_approvals[approval.key] = approval
+        self.manager.broker.agreements[agreement.agreement_id] = agreement
         
         # Proposal
         team_parent.proposals["prop-123"] = {
@@ -304,7 +356,6 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
         
         # Modify some states to trigger auto-save
         team_parent.team_progress = "In progress"
-        team_parent.communication_rules["allow_sibling_talk"] = True
         
         # Force a manual save to confirm it writes successfully
         await self.manager.save_state()
@@ -360,10 +411,9 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
             "Agree",
         )
         
-        self.assertIn((team_parent.team_id, team_child.team_id), new_manager.broker.peer_talk_agreements)
+        self.assertIn(agreement.agreement_id, new_manager.broker.agreements)
         
         self.assertEqual(restored_parent.team_progress, "In progress")
-        self.assertTrue(restored_parent.communication_rules["allow_sibling_talk"])
         
         # Verify we can still run a debate on recovered manager
         debate_result = await new_manager.execute_team_discussion(restored_parent, "Continue debate topic", rounds=1)

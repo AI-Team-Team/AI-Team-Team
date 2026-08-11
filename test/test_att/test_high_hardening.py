@@ -182,6 +182,31 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             after = stream.read()
         self.assertEqual(before, after)
 
+    def test_schema_five_is_rejected_before_ddl(self):
+        db_path = os.path.join(self.tmpdir, "schema-five.db")
+        with closing(sqlite3.connect(db_path)) as connection:
+            connection.execute(
+                "CREATE TABLE manager_config "
+                "(config_key TEXT PRIMARY KEY, config_value TEXT)"
+            )
+            connection.execute(
+                "INSERT INTO manager_config VALUES "
+                "('schema_version', '5')"
+            )
+            connection.execute("CREATE TABLE schema_five_only (value TEXT)")
+            connection.execute(
+                "INSERT INTO schema_five_only VALUES ('unchanged')"
+            )
+            connection.commit()
+        with open(db_path, "rb") as stream:
+            before = stream.read()
+
+        with self.assertRaisesRegex(StateRestoreError, "version '5'"):
+            DatabaseStore(db_path)
+
+        with open(db_path, "rb") as stream:
+            self.assertEqual(stream.read(), before)
+
     async def test_corrupt_database_reference_matrix_is_atomic(self):
         def missing_creator(connection, ids):
             connection.execute(
@@ -227,9 +252,26 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
 
         def missing_agreement_team(connection, ids):
             connection.execute(
-                "INSERT INTO broker_agreements "
-                "(sender_team_id, recipient_team_id) VALUES (?, ?)",
-                (ids["parent"], "missing-team"),
+                "INSERT INTO communication_requests "
+                "(request_id, sender_team_id, recipient_team_id, "
+                "initiated_by_agent_id, rationale, direction, policy_snapshot, "
+                "approval_principals, route_fingerprint, status, "
+                "decision_reason, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "CR-corrupt",
+                    ids["parent"],
+                    "missing-team",
+                    ids["root_agent"],
+                    "corrupt",
+                    "bidirectional",
+                    '{"policy":"parent_approval","request_delivery":"queue","direction":"bidirectional"}',
+                    "[]",
+                    "invalid",
+                    "PENDING",
+                    "",
+                    1.0,
+                ),
             )
 
         def missing_proposal_initiator(connection, ids):
@@ -286,6 +328,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                     "parent": parent.team_id,
                     "child": child.team_id,
                     "library": parent.doc_library.lib_id,
+                    "root_agent": source.root_ai.agent_id,
                 }
                 await source.close()
                 with closing(sqlite3.connect(db_path)) as connection:
@@ -406,6 +449,61 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(lib_id, merged["permissions"])
         self.assertNotIn(lib_id, merged["links"])
         self.assertNotIn(lib_id, merged["file_changes"])
+
+    def test_coalesced_approval_delta_replaces_request_ballots(self):
+        principal = {"kind": "agent_team", "principal_id": "AT-parent"}
+        base = {
+            "full": False,
+            "state_version": 1,
+            "agents": [],
+            "teams": [],
+            "libraries": [],
+            "communication_requests": [],
+            "communication_agreements": [],
+            "peer_messages": [],
+            "communication_approvals": [
+                {
+                    "request_id": "CR-one",
+                    "principal": principal,
+                    "status": "PROCESSING",
+                }
+            ],
+            "communication_ballots": [
+                {
+                    "request_id": "CR-one",
+                    "principal": principal,
+                    "voter_agent_id": "agent-old",
+                }
+            ],
+            "inboxes": {},
+            "proposals": {},
+            "permissions": {},
+            "links": {},
+            "file_changes": {},
+            "deleted_agents": [],
+            "deleted_libraries": [],
+        }
+        retry = dict(base)
+        retry.update(
+            {
+                "state_version": 2,
+                "communication_approvals": [
+                    {
+                        "request_id": "CR-one",
+                        "principal": principal,
+                        "status": "PENDING",
+                    }
+                ],
+                "communication_ballots": [],
+            }
+        )
+
+        merged = PersistenceCoordinator._merge_snapshots(base, retry)
+
+        self.assertEqual(
+            merged["communication_approvals"][0]["status"], "PENDING"
+        )
+        self.assertEqual(merged["communication_ballots"], [])
 
     async def test_shared_agent_context_memory_and_serial_calls(self):
         class SerialClient:

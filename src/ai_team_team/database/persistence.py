@@ -15,12 +15,16 @@ from ai_team_team.database.models import (
     Base,
     AgentMessageModel,
     AgentModel,
-    BrokerAgreementModel,
+    CommunicationAgreementModel,
+    CommunicationApprovalModel,
+    CommunicationBallotModel,
+    CommunicationRequestModel,
     DocLibFileModel,
     DocLibLinkModel,
     LibraryModel,
     LibraryPermissionModel,
     ManagerConfigModel,
+    PeerMessageModel,
     TeamInboxModel,
     TeamModel,
     TeamProposalModel,
@@ -28,7 +32,7 @@ from ai_team_team.database.models import (
 )
 
 
-STATE_SCHEMA_VERSION = "5"
+STATE_SCHEMA_VERSION = "6"
 
 
 class WriterLease:
@@ -172,7 +176,21 @@ class DatabaseStore:
             self._write_proposals(
                 session, snapshot.get("proposals", {})
             )
-            self._write_agreements(session, snapshot.get("agreements"))
+            self._write_communication_requests(
+                session, snapshot.get("communication_requests", [])
+            )
+            session.flush()
+            self._write_communication_approvals(
+                session,
+                snapshot.get("communication_approvals", []),
+                snapshot.get("communication_ballots", []),
+            )
+            self._write_communication_agreements(
+                session, snapshot.get("communication_agreements", [])
+            )
+            self._write_peer_messages(
+                session, snapshot.get("peer_messages", [])
+            )
             self._write_libraries(session, snapshot.get("libraries", []))
             session.flush()
             self._write_permissions(session, snapshot.get("permissions", {}))
@@ -214,9 +232,6 @@ class DatabaseStore:
         result["teams"] = [
             {
                 **team,
-                "communication_rules": json.dumps(
-                    team["communication_rules"]
-                ),
                 "status_map": json.dumps(team["status_map"]),
             }
             for team in snapshot.get("teams", ())
@@ -239,6 +254,14 @@ class DatabaseStore:
         result["links"] = json.loads(
             json.dumps(snapshot.get("links", {}))
         )
+        for key in (
+            "communication_requests",
+            "communication_approvals",
+            "communication_ballots",
+            "communication_agreements",
+            "peer_messages",
+        ):
+            result[key] = json.loads(json.dumps(snapshot.get(key, [])))
         return result
 
     def read(self) -> Dict[str, Any]:
@@ -343,7 +366,6 @@ class DatabaseStore:
                         "creator_id": (
                             row.creator_agent_id or row.creator_team_id
                         ),
-                        "communication_rules": row.communication_rules,
                         "status_map": row.status_map,
                         "system_instructions": row.system_instructions,
                         "members": member_names,
@@ -387,9 +409,87 @@ class DatabaseStore:
                     "target_path": row.target_path,
                 }
 
-            agreements = [
-                (row.sender_team_id, row.recipient_team_id)
-                for row in session.query(BrokerAgreementModel).all()
+            communication_requests = [
+                {
+                    "request_id": row.request_id,
+                    "sender_team_id": row.sender_team_id,
+                    "recipient_team_id": row.recipient_team_id,
+                    "initiated_by_agent_id": row.initiated_by_agent_id,
+                    "rationale": row.rationale,
+                    "direction": row.direction,
+                    "policy_snapshot": row.policy_snapshot,
+                    "approval_principals": row.approval_principals,
+                    "route_fingerprint": row.route_fingerprint,
+                    "status": row.status,
+                    "decision_reason": row.decision_reason,
+                    "created_at": row.created_at,
+                    "resolved_at": row.resolved_at,
+                    "superseded_by_request_id": row.superseded_by_request_id,
+                    "supersedes_request_id": row.supersedes_request_id,
+                }
+                for row in session.query(CommunicationRequestModel).all()
+            ]
+            communication_approvals = [
+                {
+                    "request_id": row.request_id,
+                    "principal": {
+                        "kind": row.principal_kind,
+                        "principal_id": row.principal_id,
+                    },
+                    "sequence": row.sequence,
+                    "status": row.status,
+                    "reason": row.reason,
+                    "created_at": row.created_at,
+                    "resolved_at": row.resolved_at,
+                }
+                for row in session.query(CommunicationApprovalModel).all()
+            ]
+            communication_ballots = [
+                {
+                    "request_id": row.request_id,
+                    "principal": {
+                        "kind": row.principal_kind,
+                        "principal_id": row.principal_id,
+                    },
+                    "voter_agent_id": row.voter_agent_id,
+                    "approved": bool(row.approved),
+                    "reason": row.reason,
+                    "created_at": row.created_at,
+                }
+                for row in session.query(CommunicationBallotModel).all()
+            ]
+            communication_agreements = [
+                {
+                    "agreement_id": row.agreement_id,
+                    "source_team_id": row.source_team_id,
+                    "target_team_id": row.target_team_id,
+                    "direction": row.direction,
+                    "allowed_message_types": row.allowed_message_types,
+                    "created_from_request_id": row.created_from_request_id,
+                    "policy_snapshot": row.policy_snapshot,
+                    "active": bool(row.active),
+                    "created_at": row.created_at,
+                    "revoked_at": row.revoked_at,
+                    "revoked_by_team_id": row.revoked_by_team_id,
+                    "revoke_reason": row.revoke_reason,
+                    "superseded_by_agreement_id": row.superseded_by_agreement_id,
+                }
+                for row in session.query(CommunicationAgreementModel).all()
+            ]
+            peer_messages = [
+                {
+                    "message_id": row.message_id,
+                    "sender_team_id": row.sender_team_id,
+                    "recipient_team_id": row.recipient_team_id,
+                    "initiated_by_agent_id": row.initiated_by_agent_id,
+                    "agreement_id": row.agreement_id,
+                    "content": row.content,
+                    "delivery_state": row.delivery_state,
+                    "created_at": row.created_at,
+                    "consumed_at": row.consumed_at,
+                    "invocation_id": row.invocation_id,
+                }
+                for row in session.query(PeerMessageModel).all()
             ]
 
             return {
@@ -399,7 +499,11 @@ class DatabaseStore:
                 "libraries": libraries,
                 "permissions": permissions,
                 "links": links,
-                "agreements": agreements,
+                "communication_requests": communication_requests,
+                "communication_approvals": communication_approvals,
+                "communication_ballots": communication_ballots,
+                "communication_agreements": communication_agreements,
+                "peer_messages": peer_messages,
             }
         finally:
             session.close()
@@ -410,7 +514,11 @@ class DatabaseStore:
             AgentMessageModel,
             TeamInboxModel,
             TeamProposalModel,
-            BrokerAgreementModel,
+            PeerMessageModel,
+            CommunicationBallotModel,
+            CommunicationAgreementModel,
+            CommunicationApprovalModel,
+            CommunicationRequestModel,
             LibraryPermissionModel,
             DocLibFileModel,
             DocLibLinkModel,
@@ -515,7 +623,6 @@ class DatabaseStore:
                         if team["creator_type"] == "team"
                         else None
                     ),
-                    communication_rules=team["communication_rules"],
                     status_map=team["status_map"],
                     system_instructions=team["system_instructions"],
                 )
@@ -593,17 +700,131 @@ class DatabaseStore:
                 )
 
     @staticmethod
-    def _write_agreements(
-        session: Any, agreements: Optional[List[List[str]]]
+    def _write_communication_requests(
+        session: Any, requests: Iterable[Dict[str, Any]]
     ) -> None:
-        if agreements is None:
-            return
-        session.query(BrokerAgreementModel).delete(synchronize_session=False)
-        for sender_id, recipient_id in agreements:
+        for request in requests:
+            session.merge(
+                CommunicationRequestModel(
+                    request_id=request["request_id"],
+                    sender_team_id=request["sender_team_id"],
+                    recipient_team_id=request["recipient_team_id"],
+                    initiated_by_agent_id=request.get(
+                        "initiated_by_agent_id"
+                    ),
+                    rationale=request["rationale"],
+                    direction=request["direction"],
+                    policy_snapshot=request["policy_snapshot"],
+                    approval_principals=request["approval_principals"],
+                    route_fingerprint=request["route_fingerprint"],
+                    status=request["status"],
+                    decision_reason=request.get("decision_reason", ""),
+                    created_at=request["created_at"],
+                    resolved_at=request.get("resolved_at"),
+                    superseded_by_request_id=request.get(
+                        "superseded_by_request_id"
+                    ),
+                    supersedes_request_id=request.get(
+                        "supersedes_request_id"
+                    ),
+                )
+            )
+
+    @staticmethod
+    def _write_communication_approvals(
+        session: Any,
+        approvals: Iterable[Dict[str, Any]],
+        ballots: Iterable[Dict[str, Any]],
+    ) -> None:
+        request_ids = {approval["request_id"] for approval in approvals}
+        for request_id in request_ids:
+            session.query(CommunicationBallotModel).filter_by(
+                request_id=request_id
+            ).delete(synchronize_session=False)
+            session.query(CommunicationApprovalModel).filter_by(
+                request_id=request_id
+            ).delete(synchronize_session=False)
+        for approval in approvals:
+            principal = approval["principal"]
             session.add(
-                BrokerAgreementModel(
-                    sender_team_id=sender_id,
-                    recipient_team_id=recipient_id,
+                CommunicationApprovalModel(
+                    request_id=approval["request_id"],
+                    principal_kind=principal["kind"],
+                    principal_id=principal["principal_id"],
+                    sequence=approval["sequence"],
+                    status=approval["status"],
+                    reason=approval.get("reason", ""),
+                    created_at=approval["created_at"],
+                    resolved_at=approval.get("resolved_at"),
+                )
+            )
+        session.flush()
+        for ballot in ballots:
+            if ballot["request_id"] not in request_ids:
+                continue
+            principal = ballot["principal"]
+            session.add(
+                CommunicationBallotModel(
+                    request_id=ballot["request_id"],
+                    principal_kind=principal["kind"],
+                    principal_id=principal["principal_id"],
+                    voter_agent_id=ballot["voter_agent_id"],
+                    approved=int(ballot["approved"]),
+                    reason=ballot.get("reason", ""),
+                    created_at=ballot["created_at"],
+                )
+            )
+
+    @staticmethod
+    def _write_communication_agreements(
+        session: Any, agreements: Iterable[Dict[str, Any]]
+    ) -> None:
+        for agreement in agreements:
+            session.merge(
+                CommunicationAgreementModel(
+                    agreement_id=agreement["agreement_id"],
+                    source_team_id=agreement["source_team_id"],
+                    target_team_id=agreement["target_team_id"],
+                    direction=agreement["direction"],
+                    allowed_message_types=agreement[
+                        "allowed_message_types"
+                    ],
+                    created_from_request_id=agreement[
+                        "created_from_request_id"
+                    ],
+                    policy_snapshot=agreement["policy_snapshot"],
+                    active=int(agreement["active"]),
+                    created_at=agreement["created_at"],
+                    revoked_at=agreement.get("revoked_at"),
+                    revoked_by_team_id=agreement.get(
+                        "revoked_by_team_id"
+                    ),
+                    revoke_reason=agreement.get("revoke_reason"),
+                    superseded_by_agreement_id=agreement.get(
+                        "superseded_by_agreement_id"
+                    ),
+                )
+            )
+
+    @staticmethod
+    def _write_peer_messages(
+        session: Any, messages: Iterable[Dict[str, Any]]
+    ) -> None:
+        for message in messages:
+            session.merge(
+                PeerMessageModel(
+                    message_id=message["message_id"],
+                    sender_team_id=message["sender_team_id"],
+                    recipient_team_id=message["recipient_team_id"],
+                    initiated_by_agent_id=message.get(
+                        "initiated_by_agent_id"
+                    ),
+                    agreement_id=message.get("agreement_id"),
+                    content=message["content"],
+                    delivery_state=message["delivery_state"],
+                    created_at=message["created_at"],
+                    consumed_at=message.get("consumed_at"),
+                    invocation_id=message.get("invocation_id"),
                 )
             )
 
@@ -871,13 +1092,13 @@ class PersistenceCoordinator:
         )
         if later.get("configs") is not None:
             merged["configs"] = later["configs"]
-        if later.get("agreements") is not None:
-            merged["agreements"] = later["agreements"]
-
         for key, identity in (
             ("agents", "agent_id"),
             ("teams", "team_id"),
             ("libraries", "lib_id"),
+            ("communication_requests", "request_id"),
+            ("communication_agreements", "agreement_id"),
+            ("peer_messages", "message_id"),
         ):
             records = {
                 record[identity]: record
@@ -890,6 +1111,26 @@ class PersistenceCoordinator:
                 }
             )
             merged[key] = list(records.values())
+
+        # Approval deltas always contain the complete Approval and ballot set
+        # for each affected request. Replace that request as a unit so a retry
+        # with no valid ballots can clear an earlier ballot set while writes
+        # are being coalesced.
+        replaced_approval_requests = {
+            record["request_id"]
+            for record in later.get("communication_approvals", [])
+        }
+        for key in (
+            "communication_approvals",
+            "communication_ballots",
+        ):
+            records = [
+                record
+                for record in earlier.get(key, [])
+                if record["request_id"] not in replaced_approval_requests
+            ]
+            records.extend(later.get(key, []))
+            merged[key] = records
 
         for key in ("inboxes", "proposals", "permissions", "links"):
             records = dict(earlier.get(key, {}))

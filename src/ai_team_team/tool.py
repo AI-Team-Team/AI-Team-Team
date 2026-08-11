@@ -1,7 +1,11 @@
 import asyncio
 import inspect
+import json
 import logging
+from collections.abc import Mapping
 from typing import Dict, Any, Optional, Callable, List, Tuple, Union, Type, get_type_hints
+
+from pydantic import BaseModel
 
 logger = logging.getLogger("ATT.Tools")
 
@@ -176,6 +180,10 @@ class Tool:
                 res = await self.func(*args, **kwargs)
             else:
                 res = await asyncio.to_thread(self.func, *args, **kwargs)
+            if isinstance(res, BaseModel):
+                return res.model_dump_json()
+            if isinstance(res, Mapping):
+                return json.dumps(dict(res), sort_keys=True)
             return str(res)
         except Exception as e:
             from .core import ATTException
@@ -199,11 +207,36 @@ def _resolve_actual_team(caller_node: Any, att_manager: Any) -> Any:
 def _resolve_actual_agent(caller_node: Any, att_manager: Any) -> Any:
     from .core import Agent
 
+    if att_manager is not None and hasattr(att_manager, "_active_tool_agent"):
+        active_agent = att_manager._active_tool_agent.get()
+        if active_agent is not None:
+            return active_agent
     if isinstance(caller_node, Agent):
         return caller_node
-    if att_manager is not None and hasattr(att_manager, "_active_tool_agent"):
-        return att_manager._active_tool_agent.get()
     return None
+
+
+def _resolve_communication_context(att_manager: Any) -> Tuple[Any, Any]:
+    """Resolves a fail-closed invocation-scoped AgentTeam and actor Agent."""
+    if att_manager is None:
+        raise RuntimeError("ATTManager is not available.")
+    team = att_manager._active_team.get()
+    agent = att_manager._active_tool_agent.get()
+    if team is None or agent is None:
+        raise RuntimeError(
+            "Peer communication requires an active AgentTeam invocation context."
+        )
+    if att_manager.teams.get(team.team_id) is not team:
+        raise RuntimeError("The active AgentTeam is not registered.")
+    if (
+        att_manager._agents_by_id.get(agent.agent_id) is not agent
+        or agent.lifecycle_state != "active"
+        or all(member.agent_id != agent.agent_id for member in team.members)
+    ):
+        raise RuntimeError(
+            "The active Agent is not an active member of the current AgentTeam."
+        )
+    return team, agent
 
 def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, Tool]:
     """
@@ -219,12 +252,10 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         team_purpose: str,
         member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
         system_instructions: str = "",
-        allow_sibling_talk: bool = False,
-        sibling_talk_rules: str = "",
         is_public_visible: bool = False,
         initial_documents: Optional[Dict[str, str]] = None
     ) -> str:
-        """Spawns a recursive child AT under the ATT tree. Each AT (AI-Team) must have at least 3 Agents. Arguments: task (str), team_purpose (str), member_configs (dict), system_instructions (str), allow_sibling_talk (bool), sibling_talk_rules (str), is_public_visible (bool), initial_documents (dict - mapping file paths to their content strings to be populated in the child team's default DocLib)"""
+        """Spawns a recursive child AT under the ATT tree. Arguments: task, team_purpose, member_configs, system_instructions, is_public_visible, initial_documents."""
         if not att_manager:
             return "Error: ATTManager not available in tools context."
         
@@ -270,11 +301,6 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
                 initial_docs=initial_documents
             )
             
-            # Setup communication rules
-            child_team.communication_rules["allow_sibling_talk"] = bool(allow_sibling_talk)
-            if sibling_talk_rules:
-                child_team.communication_rules["rules"].append(sibling_talk_rules)
-
             return await att_manager.execute_team_discussion(
                 child_team,
                 task,
@@ -310,30 +336,6 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         except Exception as e:
             return f"Escalation Error: {e}"
 
-    async def set_sibling_talk(child_id: str, allow: bool = True) -> str:
-        """Sets sibling talk permission for a child team. Arguments: child_id (str), allow (bool)"""
-        if not att_manager:
-            return "Error: ATTManager not available in tools context."
-        
-        if child_id not in att_manager.teams:
-            return f"Error: Child team '{child_id}' is not registered."
-            
-        child = att_manager.teams[child_id]
-        
-        actual_team = _resolve_actual_team(caller_node, att_manager)
-                    
-        if not actual_team:
-            return "Error: Could not resolve the active AgentTeam for the caller."
-            
-        parent = child.parent_team or att_manager.find_parent_team(child)
-        if not parent or parent.team_id != actual_team.team_id:
-            return f"Error: Caller team '{actual_team.team_id}' is not the parent of child '{child_id}'."
-            
-        async with child.state_lock:
-            child.communication_rules["allow_sibling_talk"] = bool(allow)
-        att_manager._auto_save(teams={child.team_id})
-        return f"Successfully set sibling talk for child team '{child_id}' to {allow}."
-
     async def update_team_purpose(new_purpose: str) -> str:
         """Updates the purpose string of the caller's team. Arguments: new_purpose (str)"""
         actual_team = _resolve_actual_team(caller_node, att_manager)
@@ -359,56 +361,115 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
         return f"Successfully updated team purpose to '{purpose}' and progress to '{progress}'."
 
     async def send_peer_message(team_id: str, message: str) -> str:
-        """Sends a message to the inbox of a peer team using their Team ID. Arguments: team_id (str), message (str)"""
-        if not att_manager:
-            return "Error: ATTManager not available."
+        """Sends a message through the ATT-configured communication regime."""
+        try:
+            actual_team, actual_agent = _resolve_communication_context(
+                att_manager
+            )
+        except RuntimeError as exc:
+            return json.dumps(
+                {"status": "NO_AGREEMENT", "reason": str(exc)},
+                sort_keys=True,
+            )
         if team_id not in att_manager.teams:
-            return f"Error: Team '{team_id}' not found."
-            
+            return json.dumps(
+                {"status": "NO_AGREEMENT", "reason": f"Unknown AgentTeam {team_id!r}."}
+            )
         target = att_manager.teams[team_id]
-        
-        actual_team = _resolve_actual_team(caller_node, att_manager)
-                    
-        if not actual_team:
-            return "Error: Could not resolve the active AgentTeam."
+        result = await att_manager.broker.send_peer_message(
+            actual_team,
+            target,
+            actual_agent.agent_id,
+            message,
+            invocation_id=att_manager._active_tool_invocation_id.get(),
+        )
+        return result.model_dump_json()
 
-        # Check sibling or peer communication permission
-        allowed = await att_manager.broker.negotiate_communication(actual_team, target)
-        if not allowed:
-            sender_parent = actual_team.parent_team or att_manager.find_parent_team(actual_team)
-            recipient_parent = target.parent_team or att_manager.find_parent_team(target)
-            if sender_parent == recipient_parent:
-                return f"Error: Permission Denied. Sibling talk is not authorized. You must call set_sibling_talk(child_id='{target.team_id}', allow=True) via your parent to request access."
-            else:
-                return f"Error: Permission Denied. Cross-lineage agreement does not exist. You must call negotiate_peer_talk(target_team_id='{target.team_id}', rationale='...') first to establish a tunnel."
-            
-        sender_id = actual_team.team_id if actual_team else "Unknown"
-        target.receive_message({
-            "type": "peer_message",
-            "from": sender_id,
-            "objective": message
-        })
-        return f"Message successfully delivered to team '{team_id}'."
+    async def request_peer_communication(
+        team_id: str, rationale: str
+    ) -> str:
+        """Requests a persistent channel under ATT communication policy."""
+        try:
+            actual_team, actual_agent = _resolve_communication_context(
+                att_manager
+            )
+        except RuntimeError as exc:
+            return json.dumps(
+                {"status": "DENIED", "reason": str(exc)}, sort_keys=True
+            )
+        if team_id not in att_manager.teams:
+            return json.dumps(
+                {"status": "DENIED", "reason": f"Unknown AgentTeam {team_id!r}."}
+            )
+        result = await att_manager.broker.request_peer_communication(
+            actual_team,
+            att_manager.teams[team_id],
+            actual_agent.agent_id,
+            rationale,
+        )
+        return result.model_dump_json()
 
-    async def negotiate_peer_talk(target_team_id: str, rationale: str, mode: str = None) -> str:
-        """Requests parents to negotiate a cross-lineage communication channel with a target team. Arguments: target_team_id (str), rationale (str), mode (str)"""
-        if not att_manager:
-            return "Error: ATTManager not available."
-        if target_team_id not in att_manager.teams:
-            return f"Error: Target team '{target_team_id}' not found."
-            
-        target = att_manager.teams[target_team_id]
-        
-        actual_team = _resolve_actual_team(caller_node, att_manager)
-                    
-        if not actual_team:
-            return "Error: Could not resolve the active AgentTeam."
-            
-        success = await att_manager.broker.establish_peer_agreement(actual_team, target, rationale, mode)
-        if success:
-            return f"Success: Cross-lineage peer channel established with team '{target_team_id}'."
-        else:
-            return f"Negotiation Rejected: Parents could not agree on establishing communication with team '{target_team_id}'."
+    async def revoke_peer_agreement(
+        agreement_id: str, reason: str
+    ) -> str:
+        """Revokes a channel when the current AgentTeam is an endpoint."""
+        try:
+            actual_team, _ = _resolve_communication_context(att_manager)
+        except RuntimeError as exc:
+            return json.dumps(
+                {"status": "FORBIDDEN", "reason": str(exc)},
+                sort_keys=True,
+            )
+        result = await att_manager.broker.revoke_agreement(
+            agreement_id, actual_team.team_id, reason
+        )
+        return result.model_dump_json()
+
+    async def list_peer_requests(status: str = "pending") -> str:
+        """Lists communication requests visible to the current AgentTeam."""
+        try:
+            actual_team, _ = _resolve_communication_context(att_manager)
+        except RuntimeError as exc:
+            return json.dumps(
+                {"status": "FORBIDDEN", "reason": str(exc)},
+                sort_keys=True,
+            )
+        normalized = status.upper()
+        rows = []
+        for request in att_manager.broker.communication_requests.values():
+            is_endpoint = actual_team.team_id in {
+                request.sender_team_id,
+                request.recipient_team_id,
+            }
+            is_approver = any(
+                principal.kind == "agent_team"
+                and principal.principal_id == actual_team.team_id
+                for principal in request.approval_principals
+            )
+            if not (is_endpoint or is_approver):
+                continue
+            if normalized not in {"ALL", request.status.value}:
+                continue
+            rows.append(request.model_dump(mode="json"))
+        return json.dumps(rows, sort_keys=True)
+
+    async def list_peer_agreements(active_only: bool = True) -> str:
+        """Lists agreements whose endpoint is the current AgentTeam."""
+        try:
+            actual_team, _ = _resolve_communication_context(att_manager)
+        except RuntimeError as exc:
+            return json.dumps(
+                {"status": "FORBIDDEN", "reason": str(exc)},
+                sort_keys=True,
+            )
+        rows = [
+            agreement.model_dump(mode="json")
+            for agreement in att_manager.broker.agreements.values()
+            if actual_team.team_id
+            in {agreement.source_team_id, agreement.target_team_id}
+            and (agreement.active or not active_only)
+        ]
+        return json.dumps(rows, sort_keys=True)
 
     async def add_team_member(team_id: str, role_name: str, model_name: str, role_description: str, system_instructions: str) -> str:
         """Administratively adds a new member to a child team. Arguments: team_id (str), role_name (str), model_name (str), role_description (str), system_instructions (str)"""
@@ -1155,13 +1216,15 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
             return f"Error moving library file: {exc}"
 
     base_tools = {
-        "dispatch_subagent": Tool("dispatch_subagent", "Spawns a child AT. Each AT (AI-Team) must have at least 3 Agents. Arguments: task (str), team_purpose (str), member_configs (dict), system_instructions (str), allow_sibling_talk (bool), sibling_talk_rules (str), is_public_visible (bool), initial_documents (dict - mapping file paths to their content strings to be populated in the child team's default DocLib).", dispatch_subagent),
+        "dispatch_subagent": Tool("dispatch_subagent", "Spawns a child AT. Each AT must have at least 3 Agents. Arguments: task, team_purpose, member_configs, system_instructions, is_public_visible, initial_documents.", dispatch_subagent),
         "delegate_escalation": Tool("delegate_escalation", "Escalates objective upward in the ATT lineage tree with objective (str) and rationale (str).", delegate_escalation),
-        "set_sibling_talk": Tool("set_sibling_talk", "Allows parent teams to dynamically set sibling communication permission for their child team. Arguments: child_id (str), allow (bool).", set_sibling_talk),
         "update_team_purpose": Tool("update_team_purpose", "Updates the purpose string of the caller's team. Arguments: new_purpose (str)", update_team_purpose),
         "update_team_status": Tool("update_team_status", "Updates the purpose and progress string of the caller's team. Arguments: purpose (str), progress (str)", update_team_status),
         "send_peer_message": Tool("send_peer_message", "Sends a message to a peer team's inbox using their Team ID. Arguments: team_id (str), message (str)", send_peer_message),
-        "negotiate_peer_talk": Tool("negotiate_peer_talk", "Requests parents to negotiate a cross-lineage communication channel with a target team. Arguments: target_team_id (str), rationale (str)", negotiate_peer_talk),
+        "request_peer_communication": Tool("request_peer_communication", "Requests a persistent peer communication channel. Arguments: team_id (str), rationale (str)", request_peer_communication),
+        "revoke_peer_agreement": Tool("revoke_peer_agreement", "Revokes an endpoint communication agreement. Arguments: agreement_id (str), reason (str)", revoke_peer_agreement),
+        "list_peer_requests": Tool("list_peer_requests", "Lists communication requests visible to the current AgentTeam. Arguments: status (str)", list_peer_requests),
+        "list_peer_agreements": Tool("list_peer_agreements", "Lists communication agreements visible to the current AgentTeam. Arguments: active_only (bool)", list_peer_agreements),
         "add_team_member": Tool("add_team_member", "Administratively adds a new member to a child team. Arguments: team_id (str), role_name (str), model_name (str), role_description (str), system_instructions (str)", add_team_member),
         "remove_team_member": Tool("remove_team_member", "Administratively removes a member from a child team. Arguments: team_id (str), agent_name (str)", remove_team_member),
         "request_migration": Tool("request_migration", "Requests to migrate the caller's team to a new parent team in the hierarchy. Arguments: target_parent_id (str), rationale (str)", request_migration),

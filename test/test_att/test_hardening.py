@@ -41,7 +41,6 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
 
     def test_config_rejects_unknown_policies(self):
         cases = {
-            "communication_policy": "open",
             "migration_policy": "silent",
             "failover_policy": "random",
             "tool_calling_mode": "maybe",
@@ -52,6 +51,26 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             with self.subTest(name=name):
                 with self.assertRaises(ValueError):
                     ATTConfig(**{name: value})
+        with self.assertRaises(ValueError):
+            ATTConfig(communication={"policy": "open"})
+        for invalid in (False, 0, ""):
+            with self.subTest(communication=invalid):
+                with self.assertRaises(ValueError):
+                    ATTConfig(communication=invalid)
+        with self.assertRaises(ValueError):
+            ATTConfig(
+                communication={
+                    "policy": "parent_approval",
+                    "request_delivery": "queue",
+                    "direction": "bidirectional",
+                    "unexpected": True,
+                }
+            )
+        config = ATTConfig(
+            communication={"policy": "parent_approval"}
+        )
+        with self.assertRaises(ValueError):
+            config.communication.direction = "both"
 
     def test_builtin_tools_have_manager_context_immediately(self):
         team = self.manager.create_agent_team(self.root)
@@ -84,6 +103,44 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(success)
         self.assertEqual(moving.depth, 3)
         self.assertEqual(descendant.depth, 4)
+
+    async def test_migration_rejects_changed_approval_path(self):
+        left = self.manager.create_agent_team(self.root)
+        right = self.manager.create_agent_team(self.root)
+        moving = self.manager.create_agent_team(left)
+        self.manager.config.migration_policy = "ancestor_approval"
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingApproval:
+            async def authorize_migration(
+                self, team, target_parent, manager, rationale
+            ):
+                started.set()
+                await release.wait()
+                return True, "approved on old path"
+
+        with patch(
+            "ai_team_team.core.policies.resolve_migration_policy",
+            return_value=BlockingApproval(),
+        ):
+            task = asyncio.create_task(
+                self.manager.negotiate_and_execute_migration(
+                    moving, right, "path changes"
+                )
+            )
+            await started.wait()
+            with self.manager._topology_lock:
+                left.add_child_team(right)
+                right._parent_team = left
+                self.manager._team_parent_map[right.team_id] = left.team_id
+                right.invalidate_depth_cache(recursive=True)
+            release.set()
+            success, reason = await task
+
+        self.assertFalse(success)
+        self.assertIn("approval path changed", reason)
+        self.assertIs(moving.parent_team, left)
 
     async def test_parallel_votes_are_atomic_and_execute_once(self):
         team = self.manager.create_agent_team(self.root)
@@ -297,7 +354,7 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
         proposal_id = response.split("'")[1]
         team.receive_message(
             {
-                "type": "peer_message",
+                "type": "status_update",
                 "from": "peer",
                 "objective": "incremental inbox",
             }

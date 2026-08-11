@@ -1,183 +1,247 @@
 # Team Governance, Policies & Protocols
 
-This document details how the ATT (AI-Team-Team) framework governs inter-team communication, hierarchical restructuring, dynamic token budgeting, and preemptive emergency wakeups via configurable policy objects.
+This document explains how ATT governs AgentTeam communication, topology migration, token budgeting, model failover, and emergency wakeups.
+
+ATT separates institutional authority from model execution.
+
+`ATTConfig` defines the communication institution, an `AgentTeam` owns communication requests and agreements, and an `Agent` invokes tools with the authority of its current invocation-scoped AgentTeam.
+
+Member order, creator identity, role names, and fallback selection never create governance authority.
 
 ## 1. The Team Inbox & Communication Protocols
 
-The ATT framework relies heavily on asynchronous event queues to decouple multi-agent systems and prevent blocking locks. Inter-team communication is entirely achieved through the **Inbox Queue** and the **NegotiationBroker**.
+Every `AgentTeam` maintains a `message_inbox` for incoming messages, governance requests, and escalation events.
 
-Every `AgentTeam` maintains an internal `message_inbox (List[Dict])`. This acts as a mailbox for incoming payloads. Messages are never forced directly into an agent's memory window mid-thought, preventing catastrophic ReAct logic interruptions.
+Messages are not inserted into an Agent's active reasoning turn.
 
-Instead, the `manager.execute_team_discussion()` cycle polls the inbox at the very beginning of a debate round. If messages exist, the manager compiles them into a unified alert and appends them to the team's system prompt context.
+`manager.execute_team_discussion()` reads the current inbox at the start of a discussion and adds the relevant items to the discussion context.
 
-Each team owns one discussion-session lock. Normal and emergency discussions
-for the same team wait and execute serially; discussions for different teams
-can continue concurrently.
+Each AgentTeam owns one discussion-session lock.
 
-### Inbox Overflows & Summarization
+Normal, emergency, audit, and communication-governance discussions for the same AgentTeam execute serially, while different AgentTeams may continue concurrently unless they share an Agent whose invocation lock is in use.
 
-To prevent prompt length limits, the inbox utilizes `inbox_summarize_threshold_chars`.
+Peer messages are acknowledged only after a successful discussion.
 
-If unread messages exceed this threshold during polling, the `ATTManager` utilizes its `critic_client` to automatically compress the raw payloads into a dense, bulleted summary before injecting it into the debate.
+Failed or cancelled discussions leave peer messages and pending communication approvals available for a later retry.
 
-UNKNOWN audit alerts are not subject to TTL or a hard capacity.
+### Inbox Summarization
 
-Stable fingerprints merge repeats and retain occurrence counts and timestamps.
+`inbox_summarize_threshold_chars` controls when a large inbox is summarized before prompt injection.
 
-The discussion marks them `processing`, acknowledges them only on success, and returns them to `pending` after failure or cancellation. A configurable soft threshold emits operational warnings without discarding unique alerts.
+UNKNOWN audit alerts have no TTL and no hard capacity limit.
 
-## 2. Peer-to-Peer Communication & Negotiation Broker
+Stable fingerprints merge repeated UNKNOWN alerts while preserving occurrence counts and first/last timestamps.
 
-Dynamic sub-teams often need to collaborate across lineage boundaries. Calling `send_peer_message(team_id, message)` routes the payload to the target team's inbox.
+A discussion marks an UNKNOWN alert as processing and removes it only after success; failure or cancellation returns it to pending.
 
-However, all cross-team communication is gated by the **NegotiationBroker**, ensuring isolated execution chains cannot maliciously interact without parent authorization.
+## 2. Peer Communication & Negotiation Broker
 
-### Sibling Routing (Common Parents)
+`NegotiationBroker` coordinates the communication policy, persistent requests, approvals, agreements, delivery records, and audit events.
 
-If `Team_A` messages `Team_B` and they share the exact same `parent_team`, the Broker routes the check upwards to the shared parent. It evaluates the parent's `allow_sibling_talk` rule.
+The broker never uses member order, creator identity, or Root AI fallback to infer AgentTeam authority.
 
-### Cross-Lineage Negotiation
+Any active member may invoke a communication tool for its current invocation-scoped AgentTeam.
 
-If `Team_A` messages `Team_C` located in an entirely different subtree, the Broker checks the SQLite-backed `peer_talk_agreements` registry. If no bidirectional tunnel exists, `Team_A` must explicitly call `negotiate_peer_talk()`, triggering the parent representatives to utilize the configured Communication Policy to negotiate an agreement.
+The public tools do not accept sender, policy, direction, mode, or approval-principal overrides.
+
+The available tools are:
+
+* `send_peer_message(team_id, message)`
+* `request_peer_communication(team_id, rationale)`
+* `revoke_peer_agreement(agreement_id, reason)`
+* `list_peer_requests(status="pending")`
+* `list_peer_agreements(active_only=True)`
+
+Under an approval policy, `send_peer_message()` returns `NO_AGREEMENT` until a matching active channel exists and does not create a request implicitly.
+
+Under the permissive policy, `send_peer_message()` delivers directly without creating an implicit Agreement.
+
+Durable message and inbox records commit before `DELIVERED` is returned.
+
+Communication Agreements do not grant DocLib, managed-link, or file access.
 
 ## 3. Inter-Team Communication Policies
 
-The specific strategy the Negotiation Broker uses to approve or deny requests is configured via `communication_policy` in `ATTConfig`:
+`ATTConfig.communication` is a strict Pydantic discriminated union with `extra="forbid"` and assignment validation.
+
+The selected policy applies to every AgentTeam at every topology depth.
 
 ### A. Permissive Policy (`"permissive"`)
 
-- **Behavior**: Freely permits any team to message or establish tunnels with any other team.
+Authenticated AgentTeam members may deliver peer messages directly.
 
-### B. Rule-Gated Policy (`"rule_gated"`)
+No approval request or Agreement is required.
 
-- **Behavior**: Evaluates communication rules defined inside the parent teams of the sender and recipient. Both directions must satisfy the rules.
-- **Rule Syntax**:
-  Parent teams can define specific strings under `team.communication_rules["rules"]` (e.g., `allow_all`, `allow_team:<team_id>`, `allow_parent:<parent_id>`, `allow_purpose:<regex>`).
+### B. Parent Approval Policy (`"parent_approval"`)
 
-### C. Proxied Policy (`"proxied"`)
+The sender and recipient parent principals must all approve a persistent channel.
 
-- **Behavior**: Instead of static rules, the parent team leaders of both the sender and recipient are consulted dynamically. The representatives evaluate the request details and rationale via their own **LLM client** and return a JSON approval (`{"approved": true|false, "reason": "..."}`).
+An ordinary parent is an `ApprovalPrincipal(kind="agent_team", ...)`.
 
-All LLM governance gates fail closed through the same strict schema. Only the JSON boolean literal `true` grants authority. Strings, numbers, null, and a missing `approved` field are format errors, are audited, and are rejected.
+The parent of a top-level AgentTeam is the Root AI as an explicit `ApprovalPrincipal(kind="agent", ...)`.
 
-### D. Guided Observation Feedback
+Duplicate parent principals are removed.
 
-When a communication attempt is blocked by a non-permissive policy, instead of raising a terminal error, the tool returns a structured observation guiding the caller agent on how to correctly request authorization (e.g. instructing them to call `negotiate_peer_talk()`).
+### C. Lineage Approval Policy (`"lineage_approval"`)
+
+The sender's request is the sender AgentTeam's consent.
+
+The recipient, every intermediate AgentTeam on the unique route, and the Root AI Agent when the route crosses top-level branches must approve.
+
+### D. Request Delivery and Direction
+
+`request_delivery="queue"` places AgentTeam approvals in their inboxes for the next normal discussion.
+
+Agent principals have no AgentTeam inbox, so their approvals always enter the Agent's serial approval worker immediately.
+
+`request_delivery="wake"` schedules an AgentTeam governance discussion immediately while still respecting that AgentTeam's discussion lock.
+
+`direction="one_way"` creates a source-to-target channel.
+
+`direction="bidirectional"` creates a channel usable by both endpoints.
+
+### E. Approval Decisions
+
+An AgentTeam decision freezes the active membership at discussion start and requires one valid ballot from every frozen member.
+
+Strictly more than half JSON literal `true` ballots approve, and strictly more than half JSON literal `false` ballots deny.
+
+A tie, membership change, missing ballot, invalid ballot, model error, incomplete discussion, or cancellation keeps the Approval pending.
+
+An Agent principal decides under that Agent's invocation lock and cannot be replaced by another Agent.
+
+Only the JSON literal `true` grants approval.
+
+Strings, numbers, null, missing fields, and extra fields are invalid governance results.
+
+### F. Request and Agreement Lifecycle
+
+`request_peer_communication()` creates a durable `CommunicationRequest` under an approval policy.
+
+Each request stores its endpoint AgentTeams, initiating Agent audit metadata, rationale, direction, immutable policy snapshot, ordered principals, individual Approvals, ballots, route fingerprint, state, and timestamps.
+
+Equivalent pending requests reuse the existing request ID.
+
+An explicit denial marks the request `DENIED` and cancels unfinished Approvals.
+
+Temporary failures and cancellations return the affected Approval to `PENDING`.
+
+Before final approval, ATT recomputes the relevant route fingerprint.
+
+A changed route marks the old request `STALE` and creates a successor using the stored policy snapshot.
+
+An approved request creates one durable `CommunicationAgreement` in the same persistence transaction.
+
+An Agreement remains active across later policy and topology changes until either endpoint revokes it.
+
+For the detailed state machine, see [Autonomous Communication Governance](flowcharts/Autonomous_Communication_Governance.md).
 
 ## 4. Migration & Reorganization Policies
 
-Dynamic parent-hierarchy migrations are triggered when a team requests to move under a new parent (e.g., `negotiate_and_execute_migration()`). The strategy is resolved from `migration_policy`:
+Dynamic topology migration is requested through `request_migration()` and governed by `migration_policy`.
 
 ### A. Permissive Policy (`"permissive"`)
 
-- **Behavior**: Restructures the hierarchy immediately without requesting approvals or running audits.
+The manager may commit the migration after topology validation without a governance decision.
 
-### B. Ancestor Approval Policy (`"ancestor_approval"`) - *Default*
+### B. Ancestor Approval Policy (`"ancestor_approval"`)
 
-- **Behavior**: Requests evaluations and approvals from the current parent, the target parent, and the Least Common Ancestor (LCA) representative. If any reject the restructure, the migration fails.
+The explicit current-parent, target-parent, and Least Common Ancestor principals decide, with duplicates removed.
 
 ### C. Lineage Path Policy (`"lineage_path"`)
 
-- **Behavior**: Similar to `ancestor_approval`, but queries **every team representative** along the traversal path from the current parent up to the LCA, and from the target parent up to the LCA.
+Every explicit principal along the affected lineage path decides.
+
+Ordinary topology authorities are AgentTeam principals, while a root-level authority is the Root AI Agent principal.
+
+AgentTeam principals use full-member structured ballots, and the Root AI Agent decides directly.
+
+Authorization runs outside the topology lock.
+
+Before committing, the manager reacquires the topology lock and revalidates the parent relationship, cycle constraints, migration count, and authorized path.
 
 ## 5. Token Budget & Failover Policies
 
-To ensure stability in high-overhead multi-agent environments, the framework provides token budgeting circuit breakers and dynamic model failover strategies.
+Configured model token limits are hard quotas.
 
-Configured limits are hard quotas. Before every model attempt, ATT atomically reserves the estimated prompt plus the maximum permitted output.
+Before each model attempt, ATT atomically reserves the estimated prompt tokens and maximum output budget.
 
-Provider usage is used for settlement when available; otherwise ATT uses its tokenizer estimate.
+Settlement charges reported usage when available, refunds unused output capacity, and conservatively accounts for sent failures or cancellations.
 
-Unused output capacity is returned, while sent failures and cancellations charge reported usage or at least the prompt. Failover reads the same ledger, including active reservations.
+Failover reads the same atomic ledger, including active reservations.
 
-Because a quota is hard, a bound client must accept `max_output_tokens` or `max_tokens` (or explicitly advertise that capability); ATT fails closed before dispatch when it cannot enforce the reserved output ceiling.
-
-Setting a model's token limit to `0` hard-disables that model. Failover only selects aliases that have an explicit runtime binding.
+A token limit of `0` disables the model alias.
 
 ### A. Failover Routing Strategies
 
-When an agent's client hits a token limit, it resolves via `failover_policy`:
+* **Auto (`"auto"`)**: Selects an explicitly bound compatible alias with available quota.
+* **Parent (`"parent"`)**: Requests a model choice from the explicit parent principal.
+* **None (`"none"`)**: Performs no model failover.
 
-1. **Auto-Fallback (`"auto"`)**: Automatically hot-swaps to the first alternative registered model that is under budget and supports the required tool calling mode.
-2. **Parent-Representative Delegation (`"parent"`)**: The child team awaits the parent representative's model recommendation, hot-swaps the client, and retries.
+For parent failover, an AgentTeam principal discusses the choice and every member submits a valid model-alias ballot.
+
+Strictly more than half of the ballots must select the same eligible alias.
+
+At the top level, the Root AI Agent selects the eligible alias directly.
+
+Timeout, lock conflict, invalid output, missing majority, model failure, or unavailable authority fails closed without falling back to `auto`.
+
+`parent_failover_timeout_seconds` defaults to `120` and must be positive.
 
 ## 6. Code Configuration Example
 
-To configure the communication and migration policies, define them during the `ATTConfig` initialization:
+Communication policy is configured once in `ATTConfig` and cannot be changed by a communication tool invocation.
 
 ```python
-from ai_team_team import ATTManager, Agent, ATTConfig
-
-# 1. Configure the policies
-config = ATTConfig(
-    communication_policy="rule_gated",
-    migration_policy="lineage_path",
-    failover_policy="parent",
-    model_token_limits={"gpt-5.5": 50000},
-    model_max_output_tokens={"gpt-5.5": 2048}
+from ai_team_team import (
+    ATTConfig,
+    ATTManager,
+    Agent,
+    ParentApprovalCommunicationConfig,
 )
 
-# 2. Instantiate the manager
+config = ATTConfig(
+    communication=ParentApprovalCommunicationConfig(
+        request_delivery="queue",
+        direction="bidirectional",
+    ),
+    migration_policy="lineage_path",
+    failover_policy="parent",
+    parent_failover_timeout_seconds=120,
+    model_token_limits={"reasoning": 50_000},
+    model_max_output_tokens={"reasoning": 2_048},
+)
+
 root_agent = Agent(name="Root_AI", role="Architect")
 manager = ATTManager(root_ai=root_agent, config=config)
-
-# 3. Define rule constraints on a parent team
-parent_team = manager.create_agent_team(creator=root_agent, preset_name="generic")
-parent_team.communication_rules["rules"] = ["allow_purpose:.*analyst.*"]
 ```
 
 ## 7. Emergency Wakeup Protocol
 
-The ATT framework implements a preemptive event-driven "Emergency Wakeup" system. This ensures that critical child failures or supervisory anomalies can instantly interrupt an idle parent team, forcing them to resolve the issue before continuing standard operations.
+Emergency wakeups allow critical child failures and supervisory anomalies to schedule a parent AgentTeam discussion.
 
-### A. The Trigger Condition
+Emergency discussions use the same discussion-session lock as normal and communication-governance discussions.
 
-Emergency Wakeups are triggered when a team's asynchronous `receive_message` method ingests a payload with a type of either:
+### A. Trigger Conditions
 
-- `"child_failure_escalation"`
-- `"escalation_spawn"`
-- `"audit_unknown_escalation"` when `audit_unknown_escalation_mode="wake"`
+Emergency wakeups may be triggered by:
 
-If the global configuration flag `enable_emergency_wakeup` is set to `True`, the system evaluates the target team's execution state:
+* `"child_failure_escalation"`
+* `"escalation_spawn"`
+* `"audit_unknown_escalation"` when `audit_unknown_escalation_mode="wake"`
 
-1. **If the team is currently in a discussion loop (`is_running == True`)**: The alert remains in `message_inbox`. UNKNOWN repeats merge by fingerprint; other alerts wait for the next round/session.
-2. **If the team is idle (`is_running == False`)**: The system initiates an immediate preemptive `asyncio` context switch to wake the team up by scanning the inbox post-discussion:
+When `enable_emergency_wakeup=True`, an idle AgentTeam is scheduled immediately and a running AgentTeam keeps the alert queued.
 
-   ```python
-   emergency_msg = next((msg for msg in team.message_inbox if msg.get("type") in {"child_failure_escalation", "escalation_spawn"}), None)
-   ```
+### B. Active and Deferred Scheduling
 
-### B. Event-Loop Execution vs Deferred Queuing
+With an active event loop, ATT schedules `execute_emergency_discussion()` as an asynchronous task.
 
-Waking up a team requires triggering `manager.execute_emergency_discussion()`, which is an `async` coroutine. Because ATT supports both strict asynchronous runtime environments (like FastAPI) and synchronous blocking scripts, the protocol handles both gracefully:
+Without an active event loop, ATT stores a plain deferred call specification for `flush_deferred_tasks()` and does not retain an un-awaited coroutine object.
 
-- **Active Event Loop (`asyncio.create_task`)**: If an event loop is currently active in the thread, the manager schedules the wakeup immediately:
+### C. UNKNOWN Audit Failures
 
-  ```python
-  asyncio.create_task(self.execute_emergency_discussion(team, emergency_msg))
-  ```
+`audit_unknown_escalation_mode="wake"` schedules an immediate parent discussion, while `"queue"` waits for the next normal discussion.
 
-- **Missing Event Loop (`deferred_emergency_tasks`)**: If no loop is running, the manager stores a plain call specification for later scheduling:
+Emergency discussions created by UNKNOWN audit failures skip that round's supervision to prevent an audit-service failure from creating a recursive audit storm.
 
-  ```python
-  except RuntimeError as e:
-      self.deferred_emergency_tasks.put_nowait(
-      (team, emergency_msg, skip_audit)
-      )
-  ```
-
-  `await manager.flush_deferred_tasks()` schedules those specifications when a loop is available. No un-awaited coroutine object is retained.
-
-### C. The Emergency Discussion Round
-
-When the wakeup executes, it bypasses standard ReAct scheduling and initiates a dedicated, high-priority debate round defined by `emergency_discussion_rounds` (default: 1).
-
-The agents are injected with a system override prompt detailing the anomaly:
-
-```text
-EMERGENCY MEETING: An anomaly or escalation was reported from your child team or supervisor.
-Alert details: {alert_reason}
-Please evaluate this issue and decide on corrective actions or escalate further.
-```
-
-If the team fails to resolve the emergency, the 3-AI Supervisory Team will catch the deadlock during the post-discussion audit and cascade the emergency alert one level higher up the lineage tree, eventually escalating to the `Root_AI` if the entire tree collapses.
+Root-level anomalies are emitted through system events and callbacks.
