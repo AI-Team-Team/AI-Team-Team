@@ -32,14 +32,16 @@ ATT is backend-agnostic. To connect your LLM provider (e.g., Google GenAI, OpenA
 The adapter class must implement a `generate` method with the following signature:
 
 ```python
-from typing import Any, List, Optional
+from typing import List, Optional
+
+from ai_team_team import Tool
 
 class MyLLMClient:
     async def generate(
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
-        tools: Optional[List[Any]] = None,
+        tools: Optional[List[Tool]] = None,
         max_output_tokens: Optional[int] = None,
         temperature: float = 0.3,
         require_json: bool = False,
@@ -68,10 +70,12 @@ You can extend agents' capabilities by registering custom tools and committees.
 
 ### Defining Tools
 
-When registering a custom tool, **always specify parameter names and types in the description**. ReAct agents parse this description to discover how to formulate their actions.
+When registering a custom tool, provide precise type hints and a concise description.
+
+ATT generates and validates the tool schema from the callable, and Text ReAct prompts display that schema according to `text_tool_schema_mode`.
 
 ```python
-from ai_team_team import ATTManager, Agent, ATTConfig
+from ai_team_team import ATTManager, Agent, ATTConfig, Tool
 
 # 1. Initialize configuration
 config = ATTConfig(
@@ -88,7 +92,7 @@ async def my_generator_handler(
     model_name: str,
     prompt: str,
     system_instruction: Optional[str] = None,
-    tools: Optional[List[Any]] = None,
+    tools: Optional[List[Tool]] = None,
     max_output_tokens: Optional[int] = None,
     temperature: float = 0.3,
     require_json: bool = False
@@ -255,7 +259,7 @@ async def my_generator_handler(
     model_name: str,
     prompt: str,
     system_instruction: Optional[str] = None,
-    tools: Optional[List[Any]] = None,
+    tools: Optional[List[Tool]] = None,
     max_output_tokens: Optional[int] = None,
     temperature: float = 0.3,
     require_json: bool = False

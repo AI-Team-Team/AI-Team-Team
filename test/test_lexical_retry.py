@@ -10,7 +10,7 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from ai_team_team import ATTConfig, ATTManager, Agent, Tool, ATTException, LLMGenerationError
+from ai_team_team import AgentTurnStatus, ATTConfig, ATTManager, Agent, Tool, DiscussionStatus, OperationalStatus
 
 class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -32,10 +32,22 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         received_args = []
         received_kwargs = {}
 
-        def mock_tool(*args, **kwargs):
+        def mock_tool(
+            sql: str | None = None,
+            limit: int | None = None,
+            configs: dict[str, dict[str, str]] | None = None,
+        ):
             nonlocal received_args, received_kwargs
-            received_args = list(args)
-            received_kwargs = kwargs
+            received_args = []
+            received_kwargs = {
+                key: value
+                for key, value in {
+                    "sql": sql,
+                    "limit": limit,
+                    "configs": configs,
+                }.items()
+                if value is not None
+            }
             return "Success"
 
         team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
@@ -95,8 +107,8 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res, "Worked after retry")
         self.assertEqual(call_count, 2) # 1 fail + 1 success
 
-    async def test_exception_isolation_propagation(self):
-        """Verify that permanent LLM failures raise LLMGenerationError and escalate anomaly without polluting history."""
+    async def test_permanent_llm_failure_isolates_member_turn(self):
+        """Verify that permanent LLM failures produce partial discussions and operational events."""
         class DeadClient:
             async def generate(self, prompt, system_instruction=None, temperature=0.3, require_json=False):
                 raise RuntimeError("Permanent API Error")
@@ -110,30 +122,32 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         manager.register_agent(agent)
         team.members[0] = agent
 
-        anomaly_reported = False
-        original_report = manager.supervisor.report_anomaly
+        result = await manager.execute_team_discussion_detailed(
+            team, "run", rounds=1, skip_audit=True
+        )
 
-        async def mock_report_anomaly(failed_team, reason, mgr):
-            nonlocal anomaly_reported
-            anomaly_reported = True
-            await original_report(failed_team, reason, mgr)
-
-        manager.supervisor.report_anomaly = mock_report_anomaly
-
-        with self.assertRaises(LLMGenerationError):
-            await manager.execute_team_discussion(team, "run", rounds=1)
-
-        self.assertTrue(anomaly_reported)
+        self.assertIs(result.status, DiscussionStatus.PARTIAL)
+        self.assertIs(result.rounds[0].turns[0].status, AgentTurnStatus.INCOMPLETE)
+        self.assertEqual(
+            result.rounds[0].turns[0].error_kind,
+            "llm_generation_failed",
+        )
+        self.assertIs(
+            result.audit.operational_status, OperationalStatus.DEGRADED
+        )
 
     async def test_robust_action_parser(self):
         """Verify that XML-style actions, Markdown fences, and multiline parameter blocks are parsed correctly."""
         received_args = []
         received_kwargs = {}
 
-        def mock_tool(*args, **kwargs):
+        def mock_tool(sql_command: str, limit: int | None = None):
             nonlocal received_args, received_kwargs
-            received_args = list(args)
-            received_kwargs = kwargs
+            received_args = []
+            received_kwargs = {
+                "sql_command": sql_command,
+                **({"limit": limit} if limit is not None else {}),
+            }
             return "Success"
 
         team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
@@ -169,15 +183,20 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
         self.assertEqual(received_kwargs, {"sql_command": "SELECT * FROM characters", "limit": 5})
 
-    async def test_unquoted_argument_parsing_with_commas(self):
-        """Verify that tool arguments containing commas inside unquoted strings (like SQL) are parsed correctly."""
+    async def test_quoted_argument_parsing_with_commas(self):
+        """Verify that quoted tool arguments may contain commas."""
         received_args = []
         received_kwargs = {}
 
-        def mock_tool(*args, **kwargs):
+        def mock_tool(sql_command: str, limit: int | None = None):
             nonlocal received_args, received_kwargs
-            received_args = list(args)
-            received_kwargs = kwargs
+            received_args = (
+                [sql_command, limit] if limit is not None else [sql_command]
+            )
+            received_kwargs = {
+                "sql_command": sql_command,
+                **({"limit": limit} if limit is not None else {}),
+            }
             return "Success"
 
         team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
@@ -186,7 +205,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         }
         agent = team.members[0]
 
-        # 1. Unquoted keyword argument with comma
+        # 1. Quoted keyword argument with comma
         self.mock_client.generate.side_effect = [
             'Thought: Run tool.\nAction: query_db(sql_command="SELECT name, status FROM users", limit=10)',
             'Final Answer: Done'
@@ -194,7 +213,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
         self.assertEqual(received_kwargs, {"sql_command": "SELECT name, status FROM users", "limit": 10})
 
-        # 2. Unquoted positional argument with comma
+        # 2. Quoted positional argument with comma
         received_args, received_kwargs = [], {}
         self.mock_client.generate.side_effect = [
             'Thought: Run tool.\nAction: query_db("SELECT name, status FROM users", 5)',

@@ -130,7 +130,7 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
         # Step 1: LLM decides to call Action
         # Step 2: LLM produces Final Answer
         self.mock_client.generate.side_effect = [
-            "Thought: Let's run the dummy tool first.\nAction: dummy_tool(hello_world)",
+            "Thought: Let's run the dummy tool first.\nAction: dummy_tool('hello_world')",
             "Thought: I got the observation. We are done.\nFinal Answer: Success!"
         ]
         

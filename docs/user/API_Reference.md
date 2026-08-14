@@ -31,7 +31,15 @@ config = ATTConfig(
     emergency_discussion_rounds: int = 1,
     tool_calling_mode: str = "auto",
     max_tool_rounds: int = 5,
-    max_tool_retries: int = 3,
+    max_tool_argument_retries: int = 3,
+    max_tool_execution_retries: int = 2,
+    tool_execution_retry_policy: str = "never",
+    tool_execution_retry_backoff_factor: float = 0.5,
+    text_tool_schema_mode: str = "compact",
+    tool_prompt_modes: Optional[dict] = None,
+    turn_failure_policy: TurnFailurePolicyConfig = TurnFailurePolicyConfig(),
+    operational_status_decision_mode: str = "framework",
+    operational_degraded_escalation_mode: str = "none",
     model_token_limits: Optional[dict] = None,
     model_max_output_tokens: Optional[dict] = None,
     default_max_output_tokens: int = 1024,
@@ -63,7 +71,15 @@ config = ATTConfig(
 * **`emergency_discussion_rounds`**: The number of emergency discussion rounds executed when a team is woken up (default: `1`).
 * **`tool_calling_mode`**: The strategy used for tool calling and reasoning steps. Options: `"text_react"`, `"native"`, `"auto"` (default: `"auto"`).
 * **`max_tool_rounds`**: The maximum reasoning loop steps allowed for the native strategy execution round (default: `5`).
-* **`max_tool_retries`**: Tool retries after the initial failed attempt. `0` disables retries.
+* **`max_tool_argument_retries`**: Model correction opportunities after the first unknown-tool, parse, signature, or input-validation failure. A Native parallel batch consumes at most one opportunity.
+* **`max_tool_execution_retries`**: Additional attempts for eligible `RetryableToolError` failures.
+* **`tool_execution_retry_policy`**: Execution replay policy: `"never"`, `"retry_safe"`, or `"typed_transient"`.
+* **`tool_execution_retry_backoff_factor`**: Initial exponential delay for eligible execution retries. `0` retries immediately.
+* **`text_tool_schema_mode`**: Text prompt rendering mode: `"compact"`, `"full"`, or `"compact_with_examples"`.
+* **`tool_prompt_modes`**: Per-tool prompt rendering overrides.
+* **`turn_failure_policy`**: Strict `TurnFailurePolicyConfig` with independent `tool` and `llm` values of `"isolate"` or `"abort"`; both default to `"isolate"`.
+* **`operational_status_decision_mode`**: Runtime-health authority: `"framework"`, `"supervisor"`, or `"framework_then_supervisor"`.
+* **`operational_degraded_escalation_mode`**: Degraded runtime handling: `"none"`, `"queue"`, or `"wake"`.
 * **`model_token_limits`**: Hard per-model token quotas. Active reservations and settled usage both consume availability; `0` disables the model quota.
 * **`model_max_output_tokens`**: Optional per-model maximum output reservations and request caps. Clients governed by a hard quota must accept `max_output_tokens` or `max_tokens`; unsupported clients fail before dispatch.
 * **`default_max_output_tokens`**: Default maximum output reservation when a model-specific value is absent (default: `1024`).
@@ -116,6 +132,10 @@ Represents a dynamic team of agents executing discussions and tasks in a parent-
 
 * **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
   Allows this team to recursively spawn a child dynamic sub-team (Level $N+1$), propagating visibility and context docs to the subteam's DocLib.
+* **`await execute_reasoning_step(...) -> str`**
+  Returns the completed answer, or a stable `[Turn incomplete: ...]` placeholder when the configured isolate policy contains a member-scoped failure.
+* **`await execute_reasoning_step_detailed(...) -> AgentTurnResult`**
+  Returns Agent/team/discussion provenance, completion status, answer or privacy-safe failure metadata, and structured tool failure summaries.
 
 ## 🏛️ `ATTManager`
 
@@ -158,6 +178,8 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 
 * **`await execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
   Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits. Sessions for the same team, including emergency sessions, wait on one serial lock; different teams may run concurrently.
+* **`await execute_team_discussion_detailed(team: AgentTeam, prompt: str, rounds: int = 2, skip_audit: bool = False) -> DiscussionResult`**
+  Returns the structured discussion ID, `COMPLETED` or `PARTIAL` status, transcript, per-round `AgentTurnResult` values, and dual-axis `AuditResult`.
 * **`render_topology_tree() -> str`**
   Renders the active hierarchical agent team lineage as an indented ASCII tree.
 * **`negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`**
@@ -282,7 +304,7 @@ A non-participating 3-AI committee (comprising Integrity, Continuity, and Deadlo
 
 The Supervisory Team is managed and called automatically by `ATTManager` at the end of each debate session. External users do not typically interact with this class directly, but it coordinates dialogue health audits using the manager's `critic_client` or falls back to the manager's global `generator_handler` under the `"critic"` model alias.
 
-* Audits return `AuditResult` with `HEALTHY`, `UNHEALTHY`, or `UNKNOWN`. Confirmed anomalies use emergency escalation. Operationally unknown audits wake or queue at the parent according to `audit_unknown_escalation_mode`; wakeups skip one audit cycle and are deduplicated.
+* Audits separate content health (`AuditStatus.HEALTHY`, `UNHEALTHY`, or `UNKNOWN`) from runtime health (`OperationalStatus.HEALTHY`, `DEGRADED`, or `UNKNOWN`). Confirmed content anomalies preserve emergency escalation. UNKNOWN audits use `audit_unknown_escalation_mode`; degraded runtime alerts emit structured events and optionally queue or wake through `operational_degraded_escalation_mode`.
 
 ## 🔌 `LLMClientProto`
 
@@ -290,13 +312,14 @@ Protocol definition for integration of custom LLM backends (adapters).
 
 ```python
 from typing import Optional, Protocol
+from ai_team_team import Tool
 
 class LLMClientProto(Protocol):
     async def generate(
         self,
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
-        tools: Optional[List[Any]] = None,
+        tools: Optional[List[Tool]] = None,
         max_output_tokens: Optional[int] = None,
         temperature: float = 0.7,
         require_json: bool = False
@@ -316,7 +339,7 @@ class LLMClientProto(Protocol):
 
     def supports_native_tool_calling(self) -> bool:
         """
-        Returns True if the client/model configuration natively supports structured function calling.
+        Returns the literal boolean True only when the client supports native structured function calling. Auto mode treats probe exceptions, awaitables, and non-boolean values as Text ReAct fallback.
         """
         ...
 

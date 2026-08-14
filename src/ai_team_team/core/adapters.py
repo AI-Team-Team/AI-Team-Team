@@ -1,7 +1,10 @@
 import inspect
 import json
-from typing import Union, List, Dict, Optional, Any, Callable
+from typing import TYPE_CHECKING, Union, List, Dict, Optional, Any, Callable
 from ai_team_team.core.response import ToolCall, LLMResponse
+
+if TYPE_CHECKING:
+    from ai_team_team.tool import Tool
 
 class HandlerClientAdapter:
     """Wraps a global generator handler callback to conform to LLMClientProto."""
@@ -41,7 +44,7 @@ class HandlerClientAdapter:
         self,
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
-        tools: Optional[List[Any]] = None,
+        tools: Optional[List["Tool"]] = None,
         max_output_tokens: Optional[int] = None,
         temperature: float = 0.3,
         require_json: bool = False
@@ -172,7 +175,7 @@ class ManagerDefaultClientAdapter:
         self,
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
-        tools: Optional[List[Any]] = None,
+        tools: Optional[List["Tool"]] = None,
         max_output_tokens: Optional[int] = None,
         temperature: float = 0.3,
         require_json: bool = False

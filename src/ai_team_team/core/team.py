@@ -1,13 +1,18 @@
 import uuid
 import asyncio
+import inspect
 import logging
 import threading
-from typing import List, Dict, Optional, Tuple, Any, Union
+from typing import TYPE_CHECKING, List, Dict, Optional, Tuple, Any, Union
 from ai_team_team.tool import Tool
 from ai_team_team.doc_library import DocumentLibrary
 from .agent import Agent
 from .exceptions import ATTException
 from .utils import generate_with_retry
+
+if TYPE_CHECKING:
+    from .manager import ATTManager
+    from .response import AgentTurnResult
 
 class AgentTeam:
     """Represents a recursive team panel of Agents collaborating to debate/solve goals."""
@@ -129,8 +134,11 @@ class AgentTeam:
 
     def receive_message(self, message: Dict[str, Any]):
         manager = getattr(self, "manager", None)
-        if manager and message.get("type") == "audit_unknown_escalation":
-            message = manager._merge_unknown_alert(self, message)
+        if manager and message.get("type") in {
+            "audit_unknown_escalation",
+            "operational_degraded_escalation",
+        }:
+            message = manager._merge_durable_alert(self, message)
         else:
             with self._inbox_lock:
                 self.message_inbox.append(message)
@@ -145,6 +153,12 @@ class AgentTeam:
             if message_type == "audit_unknown_escalation":
                 should_wake = (
                     manager.config.audit_unknown_escalation_mode == "wake"
+                )
+                skip_audit = True
+            elif message_type == "operational_degraded_escalation":
+                should_wake = (
+                    manager.config.operational_degraded_escalation_mode
+                    == "wake"
                 )
                 skip_audit = True
 
@@ -175,7 +189,25 @@ class AgentTeam:
         max_steps: int = 5,
         manager: Optional['ATTManager'] = None
     ) -> str:
-        """Executes a reasoning step (ReAct or Native tool calling) for a single agent inside the AT."""
+        """Executes one Agent turn and returns its text-compatible result."""
+        result = await self.execute_reasoning_step_detailed(
+            agent,
+            prompt,
+            system_instruction,
+            max_steps=max_steps,
+            manager=manager,
+        )
+        return result.text
+
+    async def execute_reasoning_step_detailed(
+        self,
+        agent: Agent,
+        prompt: str,
+        system_instruction: str,
+        max_steps: int = 5,
+        manager: Optional['ATTManager'] = None,
+    ) -> "AgentTurnResult":
+        """Executes one Agent turn and returns a structured outcome."""
         manager = manager if manager is not None else getattr(self, "manager", None)
         if (
             not isinstance(max_steps, int)
@@ -183,8 +215,33 @@ class AgentTeam:
             or max_steps < 1
         ):
             raise ValueError("max_steps must be a positive integer.")
+        from .response import AgentTurnResult, AgentTurnStatus
+        from .exceptions import AgentTurnIncompleteError, LLMGenerationError
+
+        def incomplete(kind: str, reason: str) -> AgentTurnResult:
+            result = AgentTurnResult(
+                agent_id=agent.agent_id,
+                team_id=self.team_id,
+                discussion_id=(
+                    manager._active_discussion_id.get() if manager else None
+                ),
+                status=AgentTurnStatus.INCOMPLETE,
+                error_kind=kind,
+                reason=reason,
+            )
+            policy = (
+                manager.config.turn_failure_policy.llm
+                if manager
+                else "isolate"
+            )
+            if policy == "abort":
+                raise AgentTurnIncompleteError(result)
+            return result
+
         if not agent.llm_client:
-            return "Error: Agent has no LLM client configured."
+            return incomplete(
+                "llm_client_missing", "Agent has no LLM client configured."
+            )
 
         from .exceptions import TokenLimitExceededError
 
@@ -220,12 +277,25 @@ class AgentTeam:
                             is AgentTeam.execute_react_step
                         )
                         if not is_react_default:
-                            return await self.execute_react_step(
+                            custom_result = await self.execute_react_step(
                                 agent=agent,
                                 prompt=prompt,
                                 system_instruction=system_instruction,
                                 max_steps=max_steps,
                                 manager=manager,
+                            )
+                            if isinstance(custom_result, AgentTurnResult):
+                                return custom_result
+                            return AgentTurnResult(
+                                agent_id=agent.agent_id,
+                                team_id=self.team_id,
+                                discussion_id=(
+                                    manager._active_discussion_id.get()
+                                    if manager
+                                    else None
+                                ),
+                                status=AgentTurnStatus.COMPLETED,
+                                answer=str(custom_result),
                             )
 
                         from .strategies import (
@@ -245,8 +315,15 @@ class AgentTeam:
                                 None,
                             )
                             is_native = (
-                                callable(native_check)
-                                and native_check() is True
+                                manager.probe_native_tool_capability(
+                                    agent.llm_client,
+                                    agent=agent,
+                                    team=self,
+                                )
+                                if manager
+                                else self._probe_native_without_manager(
+                                    native_check
+                                )
                             )
                             strategy = (
                                 NativeReasoningStrategy()
@@ -258,7 +335,7 @@ class AgentTeam:
                         else:
                             strategy = TextReactReasoningStrategy()
 
-                        return await strategy.execute(
+                        result = await strategy.execute(
                             team=self,
                             agent=agent,
                             prompt=prompt,
@@ -266,6 +343,14 @@ class AgentTeam:
                             max_steps=max_steps,
                             manager=manager,
                         )
+                        if (
+                            result.status is AgentTurnStatus.INCOMPLETE
+                            and manager
+                            and manager.config.turn_failure_policy.tool
+                            == "abort"
+                        ):
+                            raise AgentTurnIncompleteError(result)
+                        return result
                     except TokenLimitExceededError as e:
                         if manager and failover_attempts < max_failovers:
                             swapped = await manager.handle_failover(agent, self, e)
@@ -274,12 +359,30 @@ class AgentTeam:
                                 if agent.messages and agent.messages[-1].get("role") == "user":
                                     agent.messages.pop()
                                 continue
-                        raise e
+                        return incomplete("token_limit_exhausted", str(e))
+                    except LLMGenerationError as exc:
+                        return incomplete("llm_generation_failed", str(exc))
             finally:
                 if manager and discussion_token is not None:
                     manager._active_discussion_id.reset(discussion_token)
                 if manager and team_token is not None:
                     manager._active_team.reset(team_token)
+
+    @staticmethod
+    def _probe_native_without_manager(probe: Any) -> bool:
+        """Safely probes native capability when no manager can emit events."""
+        if not callable(probe):
+            return False
+        try:
+            result = probe()
+            if inspect.isawaitable(result):
+                close = getattr(result, "close", None)
+                if callable(close):
+                    close()
+                return False
+            return result is True
+        except Exception:
+            return False
 
     async def execute_react_step(
         self,

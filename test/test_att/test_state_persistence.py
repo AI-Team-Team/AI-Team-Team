@@ -245,11 +245,21 @@ class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
 
     async def test_global_expert_listing(self):
         """Verify that all global experts are injected into the agent's identity profile header."""
-        expert_a = Agent(name="Expert_A", role="Database Analyst", role_description="Handles DB queries")
-        expert_b = Agent(name="Expert_B", role="Security Auditor", role_description="Inspects vulnerabilities")
+        expert_a = Agent(
+            name="Expert_A",
+            role="Database Analyst",
+            role_description="Handles DB queries",
+            llm_client=self.mock_react_client,
+        )
+        expert_b = Agent(
+            name="Expert_B",
+            role="Security Auditor",
+            role_description="Inspects vulnerabilities",
+            llm_client=self.mock_react_client,
+        )
         
-        self.manager.agents["Expert_A"] = expert_a
-        self.manager.agents["Expert_B"] = expert_b
+        self.manager.register_agent(expert_a)
+        self.manager.register_agent(expert_b)
         
         captured_sys_instruction = []
         async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):

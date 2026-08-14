@@ -24,7 +24,7 @@ The ATT framework abstracts reasoning execution into distinct strategies to deco
 
 1. **Text ReAct Mode (`"text_react"`)**: A classic **Reasoning & Action (ReAct)** loop. The loop alternates between `Thought`, `Action` (tool call), and `Observation` until a `Final Answer` is reached or the step limit is hit (default: 5).
 2. **Native Tool Calling Mode (`"native"`)**: A native structured tool execution loop. The framework gathers tool schemas (derived from functions, Pydantic, or TypedDict), registers them with the LLM, parses the returning native `tool_calls` payloads, executes all tool calls **concurrently in parallel** using `asyncio.gather`, and resumes the loop until the final answer text is generated or `max_tool_rounds` is reached.
-3. **Auto Mode (`"auto"`)**: Dynamically queries the client capability `agent.llm_client.supports_native_tool_calling() -> bool`. If supported, routes to Native Mode; otherwise, falls back to Text ReAct Mode.
+3. **Auto Mode (`"auto"`)**: Uses the manager's safe capability probe. Only a synchronous literal `True` selects Native Mode; exceptions, awaitables, and other values emit a system event and fall back to Text ReAct.
 
 ### Prompt Sequence Protocol
 
@@ -32,7 +32,7 @@ The ATT framework abstracts reasoning execution into distinct strategies to deco
 
    ```text
    Thought: Analyzing rule constraints in database.
-   Action: query_sqlite(SELECT status FROM characters WHERE name = 'Iris')
+   Action: query_sqlite("SELECT status FROM characters WHERE name = 'Iris'")
    Observation: [('dead',)]
    
    Thought: The character Iris is dead in the DB.
@@ -45,8 +45,8 @@ The ATT framework abstracts reasoning execution into distinct strategies to deco
    To ensure high parsing resilience under varying LLM temperatures or when using smaller models, the ReAct parser supports multiple action parsing strategies:
    * **Alternative XML Tag Format**: The parser natively extracts actions structured as XML tags, e.g. `<action name="tool_name">arguments</action>`. If the arguments inside the XML block are wrapped in Markdown code fences (e.g., ` ```python ... ``` `), the parser automatically strips them.
    * **Standard Action Format with Markdown Code Block Stripping**: The parser supports the classic `Action: tool_name(arguments)` pattern and handles wrapping inside Markdown code blocks (e.g., `Action: ```python tool_name(arguments) ``` `).
-   * **Multiline Argument Lists**: Regex patterns are compiled with `re.DOTALL` to support multiline argument inputs.
-   * **Safe Lexical Scanner**: Once the argument string is extracted, a custom character-by-character tokenizing scanner parses individual parameters. This scanner splits arguments by commas only at the top level (ignoring commas within quotes, or nesting structures like parentheses, brackets, and braces). It evaluates arguments using Python's safe literal evaluation (`ast.literal_eval`) with a robust heuristic merger that recombines split chunks if a top-level comma occurs inside unquoted string values (such as SQL statements or multi-line text), preventing parser crashes when tools accept complex unquoted parameters.
+   * **Balanced Python-Call Scanner**: The standard Action scanner tracks `()`, `[]`, `{}`, single and double quotes, triple quotes, escapes, multiline content, Markdown fences, and Unicode. It closes the invocation only when the outer call delimiter closes, so parentheses inside string values cannot truncate the call.
+   * **Literal-Only Arguments**: Arguments must be valid Python literals or keyword assignments. Truncated expressions, duplicate keywords, expanded `*args`/`**kwargs`, identifiers, unknown parameters, and type mismatches become `invalid_arguments` observations and never execute the tool. There is no positional-string fallback.
 
 3. **Hierarchical Topology Map**:
    To support organizational awareness and structural modifications, the ReAct prompt's `identity_header` dynamically injects a rendered indented ASCII tree topology map representing all active teams (`manager.render_topology_tree()`). Agents use this map to discover sibling and peer teams and locate potential migration parents.
@@ -74,6 +74,8 @@ AgentTeam-to-AgentTeam messaging follows the single communication institution in
 
 ## 4. Consolidated Autonomy Tools
 
+The available tool set is resolved for every invocation. `dispatch_subagent` is hidden when dynamic delegation is disabled or the current depth reaches `max_delegation_depth`; `delegate_escalation` is hidden without a parent; voting tools follow the live voting configuration. Identity prompts describe only tools that are actually available, so configuration changes and migrations affect the next model call immediately.
+
 * **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: dict = None) -> str`**: Spawns a recursive child AT under the ATT tree. Each AT must have at least 3 Agents, specified inside `member_configs`. Optional `initial_documents` pre-populate the child team's built-in DocLib.
 * **`delegate_escalation(objective: str, rationale: str) -> str`**: Escalates task objectives upward in the lineage tree to the direct parent.
 * **`update_team_purpose(new_purpose: str) -> str`**: Updates the purpose string of the caller's team.
@@ -100,7 +102,19 @@ AgentTeam-to-AgentTeam messaging follows the single communication institution in
 * **`list_library_files(lib_id: str, path: str) -> str`**: Lists files and directories under a path in a library (requires READ permission).
 * Custom tools (e.g. database query, semantic search) can be registered dynamically by the host application on `ATTManager`.
 
-## 5. Team Governance & Democratic Voting System
+## 5. Atomic Team Creation
+
+`create_agent_team()` validates the creator, team size, member configuration, model aliases, initial document paths and bodies, and mutually exclusive fields before registration.
+
+New Agent identities, Private DocLibs, the Team DocLib, and initial files are created under a detached staging directory.
+
+The topology lock then revalidates and commits registry and parent/child state while DocLib directories are atomically published.
+
+A failure at validation, construction, or publication restores existing Agent fields, registries, pointers, dirty state, and filesystem directories; callbacks, logging, and auto-save begin only after commit.
+
+A failure in the team's later first discussion does not roll back the successfully created AgentTeam.
+
+## 6. Team Governance & Democratic Voting System
 
 To ensure team autonomy and collaborative membership management, the ATT framework introduces an optional, asynchronous democratic voting system:
 

@@ -151,7 +151,8 @@ class TestATTSupervision(unittest.IsolatedAsyncioTestCase):
         
         self.assertIs(result.status, AuditStatus.UNKNOWN)
         self.assertIn("could not determine", result.reason)
-        self.assertIn("API Connection Timeout", result.cause)
+        self.assertIn("RuntimeError", result.cause)
+        self.assertNotIn("API Connection Timeout", result.cause)
 
     async def test_supervisory_audit_transcript_compression(self):
         """Verify that a large transcript (>8000 chars) triggers compression."""

@@ -43,9 +43,11 @@ Represents a dynamic team of at least 3 agents ($N \ge 3$) executing discussions
   * `launch_att(...) -> AgentTeam`: Allows the active team to recursively spawn a child team.
   * `receive_message(message: Dict[str, Any])`: Appends incoming signals or parent alerts to the team's inbox queue.
   * `execute_reasoning_step(agent: Agent, prompt: str, system_instruction: str, max_steps: int = 5, manager: Optional[ATTManager] = None) -> str`
-        Routes reasoning step to either Native structured tool calling strategy or classic Text ReAct strategy. Executes concurrent/parallel tool calls when in Native mode.
+        Routes the reasoning step to Native or Text ReAct and returns a completed answer or stable incomplete placeholder.
+  * `execute_reasoning_step_detailed(...) -> AgentTurnResult`
+        Returns structured provenance, completion state, privacy-safe failure metadata, and `ToolFailureSummary` values. Native calls remain concurrent, but a failed parallel batch consumes at most one argument-correction opportunity.
   * `execute_react_step(agent: Agent, prompt: str, system_instruction: str, max_steps: int = 5, manager: Optional[ATTManager] = None) -> str`
-        Alias wrapper around `execute_reasoning_step` preserved for backward compatibility.
+        Text-compatible convenience wrapper around `execute_reasoning_step`.
 
 ### `ATTManager`
 
@@ -83,11 +85,13 @@ Synchronous and asynchronous callbacks share one ordered background dispatcher; 
   * `register_tools_context(context: Dict[str, Any])`
     Registers additional runtime resources and rebinds coordination tools. The reserved `att_manager` reference is installed automatically and cannot be overwritten.
   * `create_agent_team(...) -> AgentTeam`
-    Spawns a new team of size $N \ge 3$, establishes parent-child lineages, and binds generic/custom tools.
+    Validates inputs before mutation, stages new identities and DocLibs outside their final paths, atomically publishes files and topology under the mutation lock, and rolls back all runtime and filesystem state on failure.
   * `suppress_auto_save() -> AsyncContextManager`
     Nested, task-local batching context that merges dirty deltas and submits one write when the outer scope exits.
   * `await execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`
     Executes a multi-agent debate session under the team's serial session lock. Normal and emergency sessions share the lock; separate teams remain concurrent.
+  * `await execute_team_discussion_detailed(...) -> DiscussionResult`
+    Returns per-round turns, transcript, dual-axis audit, and `COMPLETED` or `PARTIAL`. Isolated member failures do not cancel peers or prevent the member from rejoining the next round.
   * `find_parent_team(target: AgentTeam) -> Optional[AgentTeam]`
     Locates the parent team in the active team topology using child references and creator pointers.
   * `check_library_access(team_id: str, lib_id: str, path: str, required_permission: str) -> bool`
@@ -139,7 +143,17 @@ Configuration options for tuning the ATT multi-agent framework.
       migration_policy: str = "ancestor_approval",
       enable_emergency_wakeup: bool = True,
       emergency_discussion_rounds: int = 1,
-      max_tool_retries: int = 3,
+      tool_calling_mode: str = "auto",
+      max_tool_rounds: int = 5,
+      max_tool_argument_retries: int = 3,
+      max_tool_execution_retries: int = 2,
+      tool_execution_retry_policy: str = "never",
+      tool_execution_retry_backoff_factor: float = 0.5,
+      text_tool_schema_mode: str = "compact",
+      tool_prompt_modes: Optional[dict] = None,
+      turn_failure_policy: TurnFailurePolicyConfig = TurnFailurePolicyConfig(),
+      operational_status_decision_mode: str = "framework",
+      operational_degraded_escalation_mode: str = "none",
       model_token_limits: Optional[dict] = None,
       model_max_output_tokens: Optional[dict] = None,
       default_max_output_tokens: int = 1024,
@@ -173,9 +187,17 @@ A 3-AI supervisory committee checking transcripts for logical deadlocks, circula
 
 * **Methods**:
   * `audit_team_dialog(team: AgentTeam, transcript: str) -> AuditResult`
-    Returns `HEALTHY`, `UNHEALTHY`, or `UNKNOWN` with a reason and optional operational cause.
+    Returns independent content and runtime health. `AuditResult.status` is `HEALTHY`, `UNHEALTHY`, or `UNKNOWN`; `operational_status` is `HEALTHY`, `DEGRADED`, or `UNKNOWN` and follows the configured framework/supervisor authority mode.
   * `report_anomaly(failed_team: AgentTeam, reason: str, manager: ATTManager)`
     Escalates failure alerts recursively up ancestors or directly to the Level 0 Root AI.
+
+### `Tool` and `ToolExecutor`
+
+`Tool` owns the provider-neutral callable contract, validated JSON Schema, prompt rendering metadata, examples, and `retry_safe` declaration. Automatic schemas support `Annotated`, `Literal`, Enum, Pydantic models, `TypedDict`, containers, unions, and nesting. Registration validates handwritten schemas against Draft 2020-12.
+
+`ToolExecutor.execute()` is shared by Text and Native strategies. It binds the invocation signature, applies strict Pydantic JSON validation, validates the original argument object against the generated or handwritten Draft 2020-12 schema, runs the auditor and callable under Agent/AgentTeam ContextVars, and returns `ToolResult` with a structured status, error kind, and attempt count. It recognizes typed `ToolArgumentError`, `ToolPermissionError`, `ToolBusinessError`, and `RetryableToolError`; custom result strings are never classified by prefix.
+
+Native provider interfaces receive `Optional[List[Tool]]`. The provider adapter converts `Tool.json_schema` into its SDK's concrete function-calling shape and converts responses back to `LLMResponse` and `ToolCall`.
 
 ### `GatedFileReader`
 

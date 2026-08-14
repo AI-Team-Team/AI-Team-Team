@@ -11,7 +11,7 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from ai_team_team import ATTManager, Agent, ATTConfig, TokenLimitExceededError
+from ai_team_team import AgentTurnStatus, ATTManager, Agent, ATTConfig, DiscussionStatus, TokenLimitExceededError
 
 class TestATTFailover(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -30,8 +30,8 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         )
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
 
-    async def test_token_limit_exceeded_error(self):
-        """Verify that TokenLimitExceededError is raised when session token budget is exceeded."""
+    async def test_token_limit_exceeded_is_isolated_by_default(self):
+        """Verify that a hard token limit produces incomplete member turns by default."""
         config = ATTConfig(
             model_token_limits={"default": 2}  # Set very small limit to guarantee immediate circuit breaker
         )
@@ -41,8 +41,17 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         # Disable failover to let exception propagate directly
         manager.config.failover_policy = "none"
 
-        with self.assertRaises(TokenLimitExceededError):
-            await manager.execute_team_discussion(team, "Let's debate", rounds=1)
+        result = await manager.execute_team_discussion_detailed(
+            team, "Let's debate", rounds=1, skip_audit=True
+        )
+        self.assertIs(result.status, DiscussionStatus.PARTIAL)
+        self.assertTrue(
+            all(
+                turn.status is AgentTurnStatus.INCOMPLETE
+                and turn.error_kind == "token_limit_exhausted"
+                for turn in result.rounds[0].turns
+            )
+        )
 
     async def test_auto_fallback_failover(self):
         """Verify that agent automatically falls back to another model under budget when auto failover is set."""

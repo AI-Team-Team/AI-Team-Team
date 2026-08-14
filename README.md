@@ -43,7 +43,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 ### 🧠 ReAct Loops & Execution Engine
 
 * **Bounded ReAct Loops**: Executes standard Thought/Action/Observation reasoning cycles, capped by max steps to prevent runaway API tokens.
-* **Robust Argument Parser**: A safe literal lexical parser (`ast.literal_eval`) with multiline XML support, code block stripping, and a comma-merging heuristic to handle unquoted complex strings (like SQL queries).
+* **Strict Balanced Action Parser**: A character-level scanner handles nested delimiters, quotes, triple quotes, escapes, multiline input, Markdown fences, and Unicode before literal-only argument parsing; malformed or unquoted expressions never execute a tool.
 * **[Bounded Memory Compression](docs/State_Persistence.md)**: Automates memory pruning by extracting early conversation turns, calling the agent's LLM to generate a `*** HISTORICAL SUMMARY ARCHIVE ***`, and retaining a bounded high-fidelity window.
 * **[LLM Adapter Architecture](docs/Tool_System.md)**: Unifies sync, async, and streaming LLM payloads from various providers (Google, OpenAI, Anthropic) into standard `LLMResponse` and `ToolCall` formats via the `ManagerDefaultClientAdapter`.
 * **[Atomic Token Budget Circuit Breakers](docs/Team_Governance.md#5-token-budget--failover-policies)**: Enforces hard per-model quotas by atomically reserving prompt and maximum output capacity before each request, settling provider usage, refunding unused capacity, and routing failover through the same ledger.
@@ -140,8 +140,11 @@ flowchart TB
         TextReAct --> ToolRuntime["Built-in & Custom Tool Runtime"]
         Native --> ToolRuntime
         ToolRuntime --> ToolAudit["ToolAuditor Gate"]
-        ToolAudit --> ToolResult["Structured Observation / ToolResult"]
-        ToolResult --> SharedMemory
+        ToolAudit --> ToolValidation["Signature, Pydantic & JSON Schema Validation"]
+        ToolValidation --> ToolResult["Structured ToolResult<br/>status, error kind, attempts"]
+        ToolResult --> TurnResult["AgentTurnResult<br/>completed or incomplete"]
+        TurnResult --> RoundResult["DiscussionRoundResult"]
+        RoundResult --> SharedMemory
         MemoryWindow["Bounded Model Window<br/>compression, team-aware retrieval"] --> AgentTurn
         SharedMemory --> MemoryWindow
     end
@@ -198,12 +201,15 @@ flowchart TB
     end
 
     subgraph Supervision["Supervision, Alerts & Emergency Handling"]
-        Audit["3-Agent Supervisory Audit"] --> AuditStatus{"AuditStatus"}
+        Audit["3-Agent Supervisory Audit"] --> AuditStatus{"Content AuditStatus"}
+        Discussion --> OperationalStatus{"OperationalStatus<br/>healthy, degraded, unknown"}
         AuditStatus -->|HEALTHY| Complete["Discussion Result"]
         AuditStatus -->|UNHEALTHY| Alert["Confirmed Anomaly Alert"]
         AuditStatus -->|UNKNOWN| Unknown["Deduplicated Persistent UNKNOWN Alert"]
         Alert --> ParentInbox["Parent AgentTeam Inbox"]
         Unknown --> ParentInbox
+        OperationalStatus -->|degraded| OperationalAlert["Deduplicated Operational Alert"]
+        OperationalAlert --> ParentInbox
         ParentInbox --> AlertMode{"Queue or Wake"}
         AlertMode -->|queue| NextDiscussion["Next Normal Discussion"]
         AlertMode -->|wake| Emergency["Serialized Emergency Discussion"]
@@ -280,10 +286,10 @@ flowchart TB
 
     class Manager,Config,Bindings,CallbackQueue coordinator;
     class Root,AgentRegistry,TeamRegistry,Delegation,TopTeam,ChildTeam,Descendant,SharedAgent,SharedMemory,Lifecycle identity;
-    class Discussion,TeamLock,AgentTurn,ActiveContext,AgentLock,Strategy,TextReAct,Native,Adapter,TokenLedger,ModelCall,ToolRuntime,ToolAudit,ToolResult,MemoryWindow execution;
+    class Discussion,TeamLock,AgentTurn,ActiveContext,AgentLock,Strategy,TextReAct,Native,Adapter,TokenLedger,ModelCall,ToolRuntime,ToolAudit,ToolValidation,ToolResult,TurnResult,RoundResult,MemoryWindow execution;
     class Membership,CommConfig,Broker,CommRequest,CommDecision,Agreement,PeerDelivery,RecipientInbox,Migration,MigrationDecision,TopologyCommit,Failover,ResourceDecision governance;
     class TeamDocLib,PrivateDocLib,ACL,PrivateOwner,GatedReader,ManagedLinks,Publish knowledge;
-    class Audit,AuditStatus,Complete,Alert,Unknown,ParentInbox,AlertMode,NextDiscussion,Emergency,RootEvent supervision;
+    class Audit,AuditStatus,OperationalStatus,OperationalAlert,Complete,Alert,Unknown,ParentInbox,AlertMode,NextDiscussion,Emergency,RootEvent supervision;
     class DomainChanges,Coordinator,Lease,SQLite,Restore,Validation,PublishState persistence;
 ```
 
@@ -369,6 +375,7 @@ To integrate custom LLM backends (e.g., Google GenAI, OpenAI, Anthropic, or loca
 
 ```python
 from typing import Optional, Protocol, Union, List, Dict, Any
+from ai_team_team import Tool
 
 class LLMResponse:
     text: str
@@ -379,7 +386,7 @@ class LLMClientProto(Protocol):
         self,
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List[Tool]] = None,
         max_output_tokens: Optional[int] = None,
         temperature: float = 0.7,
         require_json: bool = False
@@ -533,6 +540,14 @@ transcript = await manager.execute_team_discussion(
     rounds=2
 )
 print("Debate result:", transcript)
+
+# Use the detailed API when the host needs partial-turn and audit metadata.
+detailed = await manager.execute_team_discussion_detailed(
+    team=team,
+    prompt="Audit the system logic mapping for project A.",
+    rounds=2,
+)
+print(detailed.status, detailed.rounds, detailed.audit)
 ```
 
 ### 6. Dynamic Team Migration & Topology Tree
@@ -570,7 +585,11 @@ config = ATTConfig(
 
 ### 8. Native Strategy (Structured Tool Calling)
 
-By default, ATT uses `tool_calling_mode="auto"`, which falls back to Text-ReAct XML parsing. If your LLM supports native JSON schema function calling (e.g., OpenAI `tools` array), you can force Native parallel execution:
+By default, ATT uses `tool_calling_mode="auto"`.
+
+Only a literal `True` from the synchronous capability probe selects Native mode; probe errors, awaitables, and non-boolean values emit a system event and fall back to Text ReAct.
+
+Provider adapters receive `List[Tool]` and are responsible for converting each `Tool.json_schema` to the provider SDK format.
 
 ```python
 # 1. Force native structured tool calling
@@ -612,7 +631,15 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `emergency_discussion_rounds` | `int` | `1` | The number of emergency discussion rounds executed when a team is woken up. |
 | `tool_calling_mode` | `str` | `"auto"` | Strategy for invoking tools. `"native"`, `"react"`, or `"auto"`. |
 | `max_tool_rounds` | `int` | `5` | Max depth of native parallel tool calls during a reasoning step. |
-| `max_tool_retries` | `int` | `3` | Number of tool retries after the initial failed attempt. `0` disables retries. |
+| `max_tool_argument_retries` | `int` | `3` | Model correction opportunities after the first unknown-tool, parse, or validation failure. A Native parallel batch consumes at most one opportunity. |
+| `max_tool_execution_retries` | `int` | `2` | Extra execution attempts available to eligible typed transient failures. |
+| `tool_execution_retry_policy` | `str` | `"never"` | Execution replay policy: `"never"`, `"retry_safe"`, or `"typed_transient"`. |
+| `tool_execution_retry_backoff_factor` | `float` | `0.5` | Initial exponential delay for eligible execution retries; `0` retries immediately. |
+| `text_tool_schema_mode` | `str` | `"compact"` | Text prompt schema rendering: `"compact"`, `"full"`, or `"compact_with_examples"`. |
+| `tool_prompt_modes` | `dict` | `{}` | Per-tool prompt schema mode overrides. |
+| `turn_failure_policy` | `TurnFailurePolicyConfig` | `tool="isolate", llm="isolate"` | Controls whether member-scoped tool or LLM failures isolate the current turn or abort the discussion. |
+| `operational_status_decision_mode` | `str` | `"framework"` | Chooses framework, supervisor, or framework-then-supervisor runtime-health determination. |
+| `operational_degraded_escalation_mode` | `str` | `"none"` | Routes degraded runtime alerts as no parent escalation, queue, or wake. |
 | `model_token_limits` | `dict` | `None` | Mapping of model aliases to hard token quotas; `0` disables that model's quota entirely. |
 | `model_max_output_tokens` | `dict` | `None` | Per-model maximum output reservation/request cap used by the atomic hard-quota ledger. |
 | `default_max_output_tokens` | `int` | `1024` | Default maximum output reservation when a model-specific cap is absent. |

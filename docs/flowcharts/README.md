@@ -40,8 +40,11 @@ flowchart TD
     Governance --> Topology["Lock, revalidate, and atomically mutate topology"]
     Topology --> Persist
     ToolCall --> Strategy{"Native tools or Text ReAct?"}
-    Strategy --> Discussion["Serialized AgentTeam discussion"]
-    Discussion --> Audit["Supervisory audit"]
-    Audit -- "HEALTHY" --> Done["Return result"]
-    Audit -- "UNHEALTHY or UNKNOWN" --> Escalate["Persist and route parent/root event"]
+    Strategy --> Executor["Shared parser, schema validator, auditor, and classified ToolExecutor"]
+    Executor --> Turn["AgentTurnResult: completed or incomplete"]
+    Turn --> Discussion["Serialized AgentTeam discussion with concurrent member turns"]
+    Discussion --> Detailed["DiscussionResult: completed or partial"]
+    Detailed --> Audit["Independent content and operational health"]
+    Audit -- "healthy" --> Done["Return structured result or transcript wrapper"]
+    Audit -- "content anomaly, unknown, or configured degradation" --> Escalate["Persist, deduplicate, and route parent/root event"]
 ```

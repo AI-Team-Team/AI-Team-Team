@@ -11,7 +11,8 @@ import tempfile
 import uuid
 import hashlib
 from contextlib import asynccontextmanager
-from typing import List, Dict, Optional, Tuple, Any, Callable
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, List, Dict, Optional, Tuple, Any, Callable
 
 from ai_team_team.doc_library import DocumentLibrary
 from ai_team_team.tool import Tool
@@ -22,14 +23,19 @@ from .team import AgentTeam
 from .broker import NegotiationBroker
 from .config import ATTConfig
 from .exceptions import (
+    AgentTurnIncompleteError,
     AmbiguousTeamContextError,
     ATTException,
     TokenLimitExceededError,
+    StatePersistenceError,
     StateRestoreError,
 )
 from .utils import generate_with_retry
 from .adapters import ManagerDefaultClientAdapter, HandlerClientAdapter
 from .token_budget import TokenBudgetLedger
+
+if TYPE_CHECKING:
+    from .response import DiscussionResult
 
 from ai_team_team.database.persistence import (
     PersistenceCoordinator,
@@ -45,7 +51,7 @@ class ATTManager:
         db_path: Optional[str] = None,
         *,
         _restore_mode: bool = False,
-    ):
+    ) -> None:
         self.root_ai = root_ai
         self.config = config or ATTConfig()
         self.db_path = db_path
@@ -311,6 +317,12 @@ class ATTManager:
             # is delivered to the caller only after durability is known.
             await asyncio.shield(wrapped)
             raise
+        except ATTException:
+            raise
+        except Exception as exc:
+            raise StatePersistenceError(
+                "The authoritative state delta could not be committed."
+            ) from exc
 
     def _submit_dirty_state(self, dirty: Dict[str, Any]) -> None:
         with self._snapshot_lock:
@@ -1167,7 +1179,8 @@ class ATTManager:
         """Validates every persisted reference before staging side effects."""
         try:
             configs = state["configs"]
-            config = ATTConfig(**json.loads(configs["att_config"]))
+            restored_config = json.loads(configs["att_config"])
+            config = ATTConfig(**restored_config)
             persisted_model_configs = json.loads(
                 configs.get("model_configs", "{}")
             )
@@ -2185,6 +2198,28 @@ class ATTManager:
             self._rollback_published_libraries(published)
             raise
 
+    def _publish_new_staged_libraries(
+        self,
+        libraries: Dict[str, DocumentLibrary],
+        managed_root: str,
+    ) -> List[Tuple[str, Optional[str]]]:
+        """Atomically publishes only newly created DocLib directories."""
+        published: List[Tuple[str, Optional[str]]] = []
+        try:
+            for lib_id, library in libraries.items():
+                final_root = os.path.join(managed_root, lib_id)
+                if os.path.lexists(final_root):
+                    raise FileExistsError(
+                        f"DocLib storage already exists for {lib_id!r}."
+                    )
+                os.replace(library.root_dir, final_root)
+                library.root_dir = final_root
+                published.append((final_root, None))
+            return published
+        except Exception:
+            self._rollback_published_libraries(published)
+            raise
+
     @staticmethod
     def _rollback_published_libraries(
         published: List[Tuple[str, Optional[str]]]
@@ -2217,6 +2252,32 @@ class ATTManager:
         storage_dir: Optional[str] = None,
     ) -> DocumentLibrary:
         self._library_files.setdefault(lib_id, {})
+        return self._build_document_library(
+            lib_id=lib_id,
+            name=name,
+            owner_team_id=owner_team_id,
+            owner_agent_id=owner_agent_id,
+            library_kind=library_kind,
+            lifecycle_state=lifecycle_state,
+            description=description,
+            is_public_visible=is_public_visible,
+            storage_dir=storage_dir,
+        )
+
+    def _build_document_library(
+        self,
+        *,
+        lib_id: str,
+        name: str,
+        owner_team_id: Optional[str] = None,
+        owner_agent_id: Optional[str] = None,
+        library_kind: str = "team",
+        lifecycle_state: str = "active",
+        description: str,
+        is_public_visible: bool,
+        storage_dir: Optional[str] = None,
+    ) -> DocumentLibrary:
+        """Builds a DocLib without publishing it in manager registries."""
         return DocumentLibrary(
             lib_id=lib_id,
             name=name,
@@ -2937,6 +2998,70 @@ class ATTManager:
             # Also bind globally registered tools
             team.tools.update(self.global_tools)
 
+    def get_available_tools(
+        self, team: AgentTeam, agent: Optional[Agent] = None
+    ) -> Dict[str, Any]:
+        """Returns the invocation-time tool view for one AgentTeam."""
+        tools = dict(getattr(team, "tools", {}) or {})
+        if (
+            not self.config.enable_dynamic_delegation
+            or team.depth >= self.config.max_delegation_depth
+        ):
+            tools.pop("dispatch_subagent", None)
+        if team.parent_team is None and self.find_parent_team(team) is None:
+            tools.pop("delegate_escalation", None)
+        if not self.config.enable_membership_voting:
+            for name in {
+                "initiate_membership_vote",
+                "cast_vote",
+                "retract_membership_vote",
+            }:
+                tools.pop(name, None)
+        return tools
+
+    def probe_native_tool_capability(
+        self,
+        client: Any,
+        *,
+        agent: Optional[Agent] = None,
+        team: Optional[AgentTeam] = None,
+    ) -> bool:
+        """Safely probes a synchronous native-tool capability contract."""
+        probe = getattr(client, "supports_native_tool_calling", None)
+        if not callable(probe):
+            return False
+        try:
+            result = probe()
+            if inspect.isawaitable(result):
+                close = getattr(result, "close", None)
+                if callable(close):
+                    close()
+                raise TypeError(
+                    "supports_native_tool_calling() must be synchronous."
+                )
+            if result is True:
+                return True
+            if result is False:
+                return False
+            raise TypeError(
+                "supports_native_tool_calling() must return a literal boolean."
+            )
+        except Exception as exc:
+            payload = {
+                "agent_id": agent.agent_id if agent else None,
+                "team_id": team.team_id if team else None,
+                "error_type": type(exc).__name__,
+            }
+            self.logger.info(
+                "Native tool capability probe failed for Agent %s: %s",
+                payload["agent_id"],
+                exc,
+            )
+            self._emit_callback(
+                "on_system_event", "tool_capability_probe_failed", payload
+            )
+            return False
+
     def unique_agent_name(self, base_name: str, team: AgentTeam) -> str:
         """Returns a registry-safe agent name for a team."""
         if base_name not in self.agents:
@@ -2960,13 +3085,38 @@ class ATTManager:
         roles_and_models: Optional[Dict[str, str]] = None,
         member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
         is_public_visible: bool = False,
-        initial_docs: Optional[Dict[str, str]] = None
+        initial_docs: Optional[Dict[str, str]] = None,
     ) -> AgentTeam:
-        """Creates a team while holding the topology mutation lock."""
+        """Stages off-registry objects and atomically publishes one AgentTeam."""
         if self._closing:
             raise RuntimeError("ATTManager is closing and rejects new teams.")
-        with self._topology_lock:
-            return self._create_agent_team(
+        self._validate_team_creation_inputs(
+            creator=creator,
+            member_count=member_count,
+            roles_and_presets=roles_and_presets,
+            roles_and_models=roles_and_models,
+            member_configs=member_configs,
+            initial_docs=initial_docs,
+            preset_name=preset_name,
+            system_instructions=system_instructions,
+            team_purpose=team_purpose,
+            is_public_visible=is_public_visible,
+        )
+        managed_root = os.path.join(
+            os.path.realpath(os.path.abspath(self.config.workspace_root)),
+            ".att_doc_libs",
+        )
+        if os.path.lexists(managed_root) and os.path.islink(managed_root):
+            raise PermissionError("The managed DocLib root cannot be a symlink.")
+        os.makedirs(managed_root, exist_ok=True)
+        staging_root = tempfile.mkdtemp(
+            prefix=".att-team-stage-", dir=managed_root
+        )
+        published: List[Tuple[str, Optional[str]]] = []
+        snapshot: Optional[Dict[str, Any]] = None
+        stage: Optional[Dict[str, Any]] = None
+        try:
+            stage = self._create_agent_team(
                 creator=creator,
                 member_count=member_count,
                 roles_and_presets=roles_and_presets,
@@ -2977,7 +3127,229 @@ class ATTManager:
                 member_configs=member_configs,
                 is_public_visible=is_public_visible,
                 initial_docs=initial_docs,
+                staging_root=staging_root,
             )
+            with self._topology_lock:
+                self._validate_team_creation_commit(stage)
+                snapshot = self._team_creation_snapshot()
+                published = self._publish_new_staged_libraries(
+                    stage["libraries"], managed_root
+                )
+                self.libraries.update(stage["libraries"])
+                self._library_files.update(stage["library_files"])
+                for agent in stage["new_agents"]:
+                    self.register_agent(agent, auto_save=False)
+                for agent, role, _original_role in stage["role_updates"]:
+                    agent.role = role
+                team = stage["team"]
+                self.teams[team.team_id] = team
+                parent = stage["parent"]
+                if parent is not None:
+                    self._team_parent_map[team.team_id] = parent.team_id
+                    parent.add_child_team(team)
+            self._discard_library_backups(published)
+        except Exception:
+            if stage is not None:
+                for agent, _role, original_role in stage["role_updates"]:
+                    agent.role = original_role
+            if published:
+                self._rollback_published_libraries(published)
+            if snapshot is not None:
+                with self._topology_lock:
+                    self._rollback_team_creation(snapshot)
+            raise
+        finally:
+            shutil.rmtree(staging_root, ignore_errors=True)
+
+        self.logger.info(
+            "Successfully spawned AgentTeam %s with %s members.",
+            team.team_id,
+            len(team.members),
+        )
+        self._auto_save(
+            configs=True,
+            agents={agent.agent_id for agent in stage["registered_agents"]},
+            teams={team.team_id}
+            | ({team.parent_team.team_id} if team.parent_team else set()),
+            libraries=set(stage["libraries"])
+            | {
+                agent.private_doc_library_id
+                for agent in stage["registered_agents"]
+                if agent.private_doc_library_id
+            },
+        )
+        return team
+
+    def _validate_team_creation_inputs(
+        self,
+        *,
+        creator: Any,
+        member_count: int,
+        roles_and_presets: Optional[List[Tuple[str, str]]],
+        roles_and_models: Optional[Dict[str, str]],
+        member_configs: Optional[Dict[str, Dict[str, Any]]],
+        initial_docs: Optional[Dict[str, str]],
+        preset_name: str,
+        system_instructions: str,
+        team_purpose: str,
+        is_public_visible: bool,
+    ) -> None:
+        if not isinstance(creator, (Agent, AgentTeam)):
+            raise TypeError("creator must be an Agent or AgentTeam.")
+        if isinstance(creator, AgentTeam) and self.teams.get(creator.team_id) is not creator:
+            raise ValueError("The creator AgentTeam must be registered.")
+        if isinstance(creator, Agent) and creator.lifecycle_state != "active":
+            raise ValueError("The creator Agent must be active.")
+        for name, value in {
+            "preset_name": preset_name,
+            "system_instructions": system_instructions,
+            "team_purpose": team_purpose,
+        }.items():
+            if not isinstance(value, str):
+                raise TypeError(f"{name} must be a string.")
+        if not preset_name:
+            raise ValueError("preset_name must be non-empty.")
+        if not isinstance(is_public_visible, bool):
+            raise TypeError("is_public_visible must be a boolean.")
+        if member_configs is not None and not isinstance(member_configs, dict):
+            raise TypeError("member_configs must be a dictionary.")
+        effective_count = len(member_configs) if member_configs else member_count
+        if (
+            not isinstance(effective_count, int)
+            or isinstance(effective_count, bool)
+            or effective_count < self.config.min_subagent_team_size
+        ):
+            raise ValueError(
+                f"An AgentTeam requires at least {self.config.min_subagent_team_size} members."
+            )
+        available_models = set(self.llm_clients) | set(self.model_configs)
+        if roles_and_models is not None:
+            if not isinstance(roles_and_models, dict):
+                raise TypeError("roles_and_models must be a dictionary.")
+            for role, alias in roles_and_models.items():
+                if not isinstance(role, str) or not role:
+                    raise ValueError("roles_and_models keys must be non-empty strings.")
+                if not isinstance(alias, str) or not alias:
+                    raise ValueError("roles_and_models aliases must be non-empty strings.")
+                if alias != "default" and alias not in available_models:
+                    raise ValueError(f"Model {alias!r} is not registered.")
+        if roles_and_presets is not None:
+            if not isinstance(roles_and_presets, list) or any(
+                not isinstance(item, tuple)
+                or len(item) != 2
+                or not all(
+                    isinstance(value, str) and bool(value)
+                    for value in item
+                )
+                for item in roles_and_presets
+            ):
+                raise TypeError(
+                    "roles_and_presets must contain non-empty (name, role) string tuples."
+                )
+            if len(roles_and_presets) < self.config.min_subagent_team_size:
+                raise ValueError(
+                    f"roles_and_presets must define at least {self.config.min_subagent_team_size} members."
+                )
+        for role, config in (member_configs or {}).items():
+            if not isinstance(role, str) or not role:
+                raise ValueError("Member role names must be non-empty strings.")
+            if isinstance(config, Agent):
+                continue
+            if not isinstance(config, dict):
+                raise TypeError(
+                    f"Member configuration for {role!r} must be a mapping or Agent."
+                )
+            allowed = {
+                "model",
+                "hire_agent",
+                "role_description",
+                "system_instructions",
+            }
+            unknown = set(config) - allowed
+            if unknown:
+                raise ValueError(
+                    f"Unknown member configuration fields for {role!r}: {sorted(unknown)}."
+                )
+            if config.get("model") and config.get("hire_agent"):
+                raise ValueError("model and hire_agent are mutually exclusive.")
+            hired = config.get("hire_agent")
+            if hired is not None and hired not in self.agents:
+                raise ValueError(f"Agent {hired!r} is not registered.")
+            alias = config.get("model")
+            if (
+                alias
+                and alias != "default"
+                and alias not in available_models
+                and alias not in self.agents
+            ):
+                raise ValueError(f"Model {alias!r} is not registered.")
+            for field in {"role_description", "system_instructions"}:
+                if field in config and not isinstance(config[field], str):
+                    raise TypeError(f"{field} for {role!r} must be a string.")
+        if initial_docs is not None:
+            if not isinstance(initial_docs, dict):
+                raise TypeError("initial_docs must be a dictionary.")
+            for path, content in initial_docs.items():
+                if not isinstance(path, str) or not path.strip():
+                    raise ValueError("Initial document paths must be non-empty strings.")
+                try:
+                    DocumentLibrary._normalize_path(path, allow_root=False)
+                except PermissionError as exc:
+                    raise ValueError(
+                        f"Invalid initial document path {path!r}."
+                    ) from exc
+                if not isinstance(content, str):
+                    raise TypeError(
+                        f"Initial document content for {path!r} must be a string."
+                    )
+
+    def _team_creation_snapshot(self) -> Dict[str, Any]:
+        return {
+            "agents": dict(self.agents),
+            "agents_by_id": dict(self._agents_by_id),
+            "teams": dict(self.teams),
+            "libraries": dict(self.libraries),
+            "library_files": dict(self._library_files),
+            "parent_map": dict(self._team_parent_map),
+            "children": {
+                team_id: list(team.child_teams)
+                for team_id, team in self.teams.items()
+            },
+            "private_ids": {
+                id(agent): agent.private_doc_library_id
+                for agent in self._agents_by_id.values()
+            },
+            "agent_fields": {
+                id(agent): {
+                    "role": agent.role,
+                    "role_description": agent.role_description,
+                    "system_instructions": agent.system_instructions,
+                }
+                for agent in self._agents_by_id.values()
+            },
+        }
+
+    def _rollback_team_creation(self, snapshot: Dict[str, Any]) -> None:
+        prior_library_ids = set(snapshot["libraries"])
+        for lib_id, library in list(self.libraries.items()):
+            if lib_id not in prior_library_ids:
+                shutil.rmtree(library.root_dir, ignore_errors=True)
+        for agent in self._agents_by_id.values():
+            if id(agent) not in snapshot["private_ids"]:
+                agent._private_doc_library_id = None
+            elif id(agent) in snapshot["agent_fields"]:
+                fields = snapshot["agent_fields"][id(agent)]
+                agent.role = fields["role"]
+                agent.role_description = fields["role_description"]
+                agent.system_instructions = fields["system_instructions"]
+        self.agents = snapshot["agents"]
+        self._agents_by_id = snapshot["agents_by_id"]
+        self.teams = snapshot["teams"]
+        self.libraries = snapshot["libraries"]
+        self._library_files = snapshot["library_files"]
+        self._team_parent_map = snapshot["parent_map"]
+        for team_id, children in snapshot["children"].items():
+            self.teams[team_id].child_teams = children
 
     def _create_agent_team(
         self,
@@ -2990,175 +3362,233 @@ class ATTManager:
         roles_and_models: Optional[Dict[str, str]] = None,
         member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
         is_public_visible: bool = False,
-        initial_docs: Optional[Dict[str, str]] = None
-    ) -> AgentTeam:
-
-        """Dynamically spawns a new recursive Agent Team (AT)."""
-        if isinstance(creator, Agent):
-            self.register_agent(creator, auto_save=False)
+        initial_docs: Optional[Dict[str, str]] = None,
+        *,
+        staging_root: str,
+    ) -> Dict[str, Any]:
+        """Builds a complete AgentTeam transaction without live registration."""
         if member_configs:
             member_count = len(member_configs)
-            
-        min_size = self.config.min_subagent_team_size
-        if (
-            not isinstance(member_count, int)
-            or isinstance(member_count, bool)
-            or member_count < min_size
-        ):
-            raise ValueError(
-                f"An Agent Team must contain at least {min_size} members "
-                "to debate properly."
-            )
-        
-        team = AgentTeam(creator=creator, preset_name=preset_name, team_purpose=team_purpose)
+        team = AgentTeam(
+            creator=creator,
+            preset_name=preset_name,
+            team_purpose=team_purpose,
+        )
         team.manager = self
-        if isinstance(creator, AgentTeam):
-            team._parent_team = creator
-        else:
-            team._parent_team = self.find_parent_team(team)
-            
-        if team._parent_team:
-            self._team_parent_map[team.team_id] = team._parent_team.team_id
-        
+        parent = (
+            creator
+            if isinstance(creator, AgentTeam)
+            else self.get_agent_team(creator)
+        )
+        team._parent_team = parent
         if isinstance(creator, AgentTeam):
             team.chapter_num = creator.chapter_num
-        elif isinstance(creator, Agent):
-            if team._parent_team is not None:
-                team.chapter_num = team._parent_team.chapter_num
+        elif parent is not None:
+            team.chapter_num = parent.chapter_num
 
-        def get_agent_client_by_name(client_name: Optional[str]) -> Any:
-            default_wrapper = ManagerDefaultClientAdapter(self)
-            if client_name and client_name != "default":
-                if client_name in self.llm_clients:
-                    return self.llm_clients[client_name]
-                elif client_name in self.model_configs and self.generator_handler:
-                    adapter = HandlerClientAdapter(client_name, self.generator_handler)
-                    config = self.model_configs.get(client_name)
-                    if config:
-                        adapter._supports_native = config.get("supports_native_tool_calling", False)
+        def client_by_alias(alias: Optional[str]) -> Any:
+            if alias and alias != "default":
+                if alias in self.llm_clients:
+                    return self.llm_clients[alias]
+                if alias in self.model_configs and self.generator_handler:
+                    adapter = HandlerClientAdapter(
+                        alias, self.generator_handler
+                    )
+                    adapter._supports_native = (
+                        self.model_configs.get(alias, {}).get(
+                            "supports_native_tool_calling"
+                        )
+                        is True
+                    )
                     return adapter
-                else:
-                    available = list(self.model_configs.keys()) + list(self.llm_clients.keys())
-                    raise ValueError(f"Model '{client_name}' is not registered. Available models are: {available}.")
+                raise ValueError(f"Model {alias!r} is not registered.")
             if "default" in self.llm_clients:
                 return self.llm_clients["default"]
             if self.root_ai.llm_client:
                 return self.root_ai.llm_client
-            return default_wrapper
+            return ManagerDefaultClientAdapter(self)
 
-        def get_agent_client(role_name: str, agent_name: str) -> Any:
-            client_name = None
+        def client_for_role(role: str, name: str) -> Any:
+            alias = None
             if roles_and_models:
-                client_name = roles_and_models.get(role_name) or roles_and_models.get(agent_name)
-            return get_agent_client_by_name(client_name)
+                alias = roles_and_models.get(role) or roles_and_models.get(name)
+            return client_by_alias(alias)
 
-        members = []
+        members: List[Agent] = []
+        role_updates: List[Tuple[Agent, str, str]] = []
         if member_configs:
             for role_name, config in member_configs.items():
                 if isinstance(config, Agent):
                     agent = config
-                    agent.role = role_name
-                    self.register_agent(agent, auto_save=False)
-                    members.append(agent)
-                elif isinstance(config, dict) and config.get("hire_agent") in self.agents:
+                    role_updates.append((agent, role_name, agent.role))
+                elif config.get("hire_agent") in self.agents:
                     agent = self.agents[config["hire_agent"]]
-                    members.append(agent)
-                elif isinstance(config, dict) and config.get("model") in self.agents:
+                elif config.get("model") in self.agents:
                     agent = self.agents[config["model"]]
-                    members.append(agent)
                 else:
-                    model_alias = config.get("model")
-                    role_desc = config.get("role_description", "")
-                    sys_inst = config.get("system_instructions", "")
-                    agent_name = f"Dynamic_{role_name}_{team.team_id.split('-')[1]}"
-                    client = get_agent_client_by_name(model_alias)
                     agent = Agent(
-                        name=agent_name,
+                        name=(
+                            f"Dynamic_{role_name}_"
+                            f"{team.team_id.split('-', 1)[1]}"
+                        ),
                         role=role_name,
-                        llm_client=client,
-                        role_description=role_desc,
-                        system_instructions=sys_inst
+                        llm_client=client_by_alias(config.get("model")),
+                        role_description=config.get("role_description", ""),
+                        system_instructions=config.get(
+                            "system_instructions", ""
+                        ),
                     )
-                    self.register_agent(agent, auto_save=False)
-                    members.append(agent)
+                members.append(agent)
         elif roles_and_presets:
             for name, role in roles_and_presets:
-                agent_name = self.unique_agent_name(name, team)
-                agent = Agent(name=agent_name, role=role, llm_client=get_agent_client(role, name))
-                self.register_agent(agent, auto_save=False)
-                members.append(agent)
+                members.append(
+                    Agent(
+                        name=self.unique_agent_name(name, team),
+                        role=role,
+                        llm_client=client_for_role(role, name),
+                    )
+                )
         else:
-            preset = self.get_preset(preset_name)
-            roles = preset.get("roles", [])
+            roles = self.get_preset(preset_name).get("roles", [])
             if len(roles) >= member_count:
                 for name, role in roles[:member_count]:
-                    agent_name = self.unique_agent_name(name, team)
-                    agent = Agent(name=agent_name, role=role, llm_client=get_agent_client(role, name))
-                    self.register_agent(agent, auto_save=False)
-                    members.append(agent)
+                    members.append(
+                        Agent(
+                            name=self.unique_agent_name(name, team),
+                            role=role,
+                            llm_client=client_for_role(role, name),
+                        )
+                    )
             else:
-                for i in range(member_count):
-                    m_name = f"{team.team_id}_member_{i+1}"
-                    agent = Agent(name=m_name, role="Specialist", llm_client=get_agent_client("Specialist", m_name))
-                    self.register_agent(agent, auto_save=False)
-                    members.append(agent)
-
+                for index in range(member_count):
+                    name = f"{team.team_id}_member_{index + 1}"
+                    members.append(
+                        Agent(
+                            name=name,
+                            role="Specialist",
+                            llm_client=client_for_role("Specialist", name),
+                        )
+                    )
+        if len({agent.agent_id for agent in members}) != len(members):
+            raise ValueError("An AgentTeam cannot contain duplicate Agent identities.")
+        if len({agent.name for agent in members}) != len(members):
+            raise ValueError("An AgentTeam cannot contain duplicate Agent names.")
         team.members = members
-        team.system_instructions = system_instructions or self.get_preset(preset_name).get("system_instructions", "")
-        
-        # Bind generic tools
-        from ai_team_team.tool import get_default_tools
-        team.tools.update(get_default_tools(self.tools_context, team))
-        
-        # Bind globally registered custom tools
-        team.tools.update(self.global_tools)
-            
-        self.teams[team.team_id] = team
-        
-        # Instantiate and associate default built-in DocLib for the team
-        lib_id = f"DL-{team.team_id}"
-        lib_name = f"{team.team_id} Built-in Library"
-        lib_desc = f"Default document library for team {team.team_id}."
-        
-        lib = self._new_document_library(
-            lib_id=lib_id,
-            name=lib_name,
-            owner_team_id=team.team_id,
-            description=lib_desc,
-            is_public_visible=is_public_visible,
+        team.system_instructions = (
+            system_instructions
+            or self.get_preset(preset_name).get("system_instructions", "")
         )
-        self.libraries[lib_id] = lib
-        team.doc_library = lib
-        
-        # Write initial_docs if any
-        if initial_docs:
-            for file_path, content in initial_docs.items():
-                lib.write_file(file_path, content)
 
-        
-        if isinstance(creator, AgentTeam):
-            creator.add_child_team(team)
-        elif isinstance(creator, Agent):
-            parent_t = self.find_parent_team(team)
-            if parent_t:
-                parent_t.add_child_team(team)
-            
-        self.logger.info(f"Successfully spawned Agent Team {team.team_id} (N={len(members)}, Preset: {preset_name}) spawned by {creator.name if hasattr(creator, 'name') else creator.team_id}")
-        self._auto_save(
-            configs=True,
-            agents={self.root_ai.agent_id}
-            | {member.agent_id for member in members},
-            teams={team.team_id}
-            | ({team.parent_team.team_id} if team.parent_team else set()),
-            libraries={lib_id}
-            | {
-                member.private_doc_library_id
-                for member in members
-                if member.private_doc_library_id
-            }
-            | {self.root_ai.private_doc_library_id},
+        from ai_team_team.tool import get_default_tools
+
+        team.tools.update(get_default_tools(self.tools_context, team))
+        team.tools.update(self.global_tools)
+
+        registered_agents: List[Agent] = []
+        for agent in [creator, *members]:
+            if not isinstance(agent, Agent):
+                continue
+            if all(existing is not agent for existing in registered_agents):
+                registered_agents.append(agent)
+        new_agents = [
+            agent
+            for agent in registered_agents
+            if self._agents_by_id.get(agent.agent_id) is not agent
+        ]
+
+        libraries: Dict[str, DocumentLibrary] = {}
+        library_files: Dict[str, Dict[str, str]] = {}
+        for agent in new_agents:
+            expected_id = f"PDL-{agent.agent_id}"
+            if (
+                agent.private_doc_library_id is not None
+                and agent.private_doc_library_id != expected_id
+            ):
+                raise ValueError(
+                    f"Private DocLib ID must be {expected_id!r}."
+                )
+            if expected_id in self.libraries:
+                raise ValueError(
+                    f"Private DocLib {expected_id!r} is already registered."
+                )
+            library = self._build_document_library(
+                lib_id=expected_id,
+                name=f"{agent.name} Private Library",
+                owner_agent_id=agent.agent_id,
+                library_kind="agent_private",
+                lifecycle_state="active",
+                description=(
+                    f"Persistent private workspace for agent {agent.name}."
+                ),
+                is_public_visible=False,
+                storage_dir=os.path.join(staging_root, expected_id),
+            )
+            libraries[expected_id] = library
+            library_files[expected_id] = {}
+
+        team_lib_id = f"DL-{team.team_id}"
+        team_library = self._build_document_library(
+            lib_id=team_lib_id,
+            name=f"{team.team_id} Built-in Library",
+            owner_team_id=team.team_id,
+            description=f"Default document library for team {team.team_id}.",
+            is_public_visible=is_public_visible,
+            storage_dir=os.path.join(staging_root, team_lib_id),
         )
-        return team
+        libraries[team_lib_id] = team_library
+        library_files[team_lib_id] = {}
+        team.doc_library = team_library
+        if initial_docs:
+            for path, content in initial_docs.items():
+                clean_path = team_library._write_staged_file(path, content)
+                library_files[team_lib_id][clean_path] = content
+
+        return {
+            "team": team,
+            "parent": parent,
+            "new_agents": new_agents,
+            "registered_agents": registered_agents,
+            "role_updates": role_updates,
+            "libraries": libraries,
+            "library_files": library_files,
+        }
+
+    def _validate_team_creation_commit(
+        self, stage: Dict[str, Any]
+    ) -> None:
+        """Revalidates all live references immediately before publication."""
+        if self._closing:
+            raise RuntimeError("ATTManager is closing and rejects new teams.")
+        team = stage["team"]
+        creator = team.creator
+        if isinstance(creator, AgentTeam):
+            if self.teams.get(creator.team_id) is not creator:
+                raise ValueError(
+                    "The creator AgentTeam changed during team staging."
+                )
+            current_parent = creator
+        else:
+            if creator.lifecycle_state != "active":
+                raise ValueError("The creator Agent is no longer active.")
+            current_parent = self.get_agent_team(creator)
+        if current_parent is not stage["parent"]:
+            raise ValueError(
+                "The proposed parent changed during team staging."
+            )
+        if team.team_id in self.teams:
+            raise ValueError(f"AgentTeam ID {team.team_id!r} is already registered.")
+        for lib_id in stage["libraries"]:
+            if lib_id in self.libraries:
+                raise ValueError(
+                    f"Document library {lib_id!r} is already registered."
+                )
+        for agent in stage["new_agents"]:
+            existing_id = self._agents_by_id.get(agent.agent_id)
+            existing_name = self.agents.get(agent.name)
+            if existing_id is not None or existing_name is not None:
+                raise ValueError(
+                    f"Agent identity {agent.name!r} changed during team staging."
+                )
 
     def find_parent_team(self, target: AgentTeam) -> Optional[AgentTeam]:
         if target._parent_team is not None:
@@ -3879,13 +4309,29 @@ class ATTManager:
         skip_audit: bool = False,
     ) -> str:
         """Queues one discussion behind any active session for the same team."""
-        transcript, _ = await self._execute_team_discussion_with_members(
+        result = await self.execute_team_discussion_detailed(
             team,
             prompt,
             rounds=rounds,
             skip_audit=skip_audit,
         )
-        return transcript
+        return result.transcript
+
+    async def execute_team_discussion_detailed(
+        self,
+        team: AgentTeam,
+        prompt: str,
+        rounds: int = 2,
+        skip_audit: bool = False,
+    ) -> "DiscussionResult":
+        """Runs one serialized discussion and returns all structured turns."""
+        result, _ = await self._execute_team_discussion_with_members(
+            team,
+            prompt,
+            rounds=rounds,
+            skip_audit=skip_audit,
+        )
+        return result
 
     async def _execute_team_discussion_with_members(
         self,
@@ -3894,7 +4340,7 @@ class ATTManager:
         rounds: int = 2,
         skip_audit: bool = False,
         require_complete: bool = False,
-    ) -> Tuple[str, List[Agent]]:
+    ) -> Tuple[Any, List[Agent]]:
         """Runs one serialized session and captures membership after locking."""
         if self._closing:
             raise RuntimeError("ATTManager is closing and rejects new discussions.")
@@ -3923,10 +4369,32 @@ class ATTManager:
                 }
                 if require_complete:
                     session_kwargs["require_complete"] = True
-                transcript = await self._execute_team_discussion_session(
+                result = await self._execute_team_discussion_session(
                     team, prompt, **session_kwargs
                 )
-                return transcript, member_snapshot
+                if isinstance(result, str):
+                    from .response import (
+                        AuditResult,
+                        AuditStatus,
+                        DiscussionResult,
+                        DiscussionStatus,
+                    )
+
+                    result = DiscussionResult(
+                        team_id=team.team_id,
+                        discussion_id=(
+                            self._active_discussion_id.get()
+                            or f"DISC-{uuid.uuid4().hex}"
+                        ),
+                        status=DiscussionStatus.COMPLETED,
+                        transcript=result,
+                        rounds=[],
+                        audit=AuditResult(
+                            status=AuditStatus.HEALTHY,
+                            reason="Compatibility session result.",
+                        ),
+                    )
+                return result, member_snapshot
             finally:
                 team.is_running = False
 
@@ -3946,7 +4414,16 @@ class ATTManager:
         
         dialog_history = []
         last_round_answers = {}
-        from ai_team_team.supervision import AuditResult, AuditStatus
+        from .response import (
+            AgentTurnResult,
+            AgentTurnStatus,
+            AuditResult,
+            AuditStatus,
+            DiscussionResult,
+            DiscussionRoundResult,
+            DiscussionStatus,
+            OperationalStatus,
+        )
 
         audit_result = AuditResult(
             status=AuditStatus.HEALTHY,
@@ -3956,11 +4433,13 @@ class ATTManager:
             f"DISC-{uuid.uuid4().hex}"
         )
         processed_unknown_fingerprints: set[str] = set()
+        processed_operational_fingerprints: set[str] = set()
         processed_communication_request_ids: set[str] = set()
         processed_peer_message_ids: set[str] = set()
         communication_member_snapshot = list(team.members)
         discussion_had_member_errors = False
         discussion_succeeded = False
+        structured_rounds: List[DiscussionRoundResult] = []
         
         auto_save_context = self.suppress_auto_save()
         await auto_save_context.__aenter__()
@@ -3982,6 +4461,20 @@ class ATTManager:
                                 )
                                 pending_inbox.append(message)
                                 processed_unknown_fingerprints.add(
+                                    message["fingerprint"]
+                                )
+                            retained_inbox.append(message)
+                        elif (
+                            message.get("type")
+                            == "operational_degraded_escalation"
+                        ):
+                            if message.get("state", "pending") == "pending":
+                                message["state"] = "processing"
+                                message["processing_count"] = message.get(
+                                    "occurrence_count", 1
+                                )
+                                pending_inbox.append(message)
+                                processed_operational_fingerprints.add(
                                     message["fingerprint"]
                                 )
                             retained_inbox.append(message)
@@ -4063,34 +4556,103 @@ class ATTManager:
                         )
 
                     async def _run_agent(ag=agent, pr=round_prompt):
-                        return await team.execute_reasoning_step(
+                        public_method = team.execute_reasoning_step
+                        if (
+                            getattr(public_method, "__func__", None)
+                            is not AgentTeam.execute_reasoning_step
+                        ):
+                            raw = await public_method(
+                                agent=ag,
+                                prompt=pr,
+                                system_instruction=team.system_instructions,
+                                max_steps=self.config.react_max_steps,
+                                manager=self,
+                            )
+                            if isinstance(raw, AgentTurnResult):
+                                return raw
+                            return AgentTurnResult(
+                                agent_id=ag.agent_id,
+                                team_id=team.team_id,
+                                discussion_id=self._active_discussion_id.get(),
+                                status=AgentTurnStatus.COMPLETED,
+                                answer=str(raw),
+                            )
+                        return await team.execute_reasoning_step_detailed(
                             agent=ag,
                             prompt=pr,
                             system_instruction=team.system_instructions,
                             max_steps=self.config.react_max_steps,
-                            manager=self
+                            manager=self,
                         )
                     tasks.append(_run_agent())
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
+                round_turns: List[AgentTurnResult] = []
                 for agent, result in zip(round_members, results):
                     if isinstance(result, asyncio.CancelledError):
                         raise result
+                    if isinstance(result, AgentTurnIncompleteError):
+                        aborted_turn = result.result
+                        await self._report_operational_degraded(
+                            team,
+                            AuditResult(
+                                status=AuditStatus.UNKNOWN,
+                                reason=(
+                                    "The discussion aborted before content "
+                                    "supervision completed."
+                                ),
+                                operational_status=(
+                                    OperationalStatus.DEGRADED
+                                ),
+                                operational_reason=(
+                                    "A configured member failure policy "
+                                    "aborted the discussion: "
+                                    f"agent_id={aborted_turn.agent_id}, "
+                                    f"error_kind={aborted_turn.error_kind or 'unknown'}."
+                                ),
+                            ),
+                        )
+                        raise result
                     if isinstance(result, ATTException):
-                        self.logger.error(f"Failed to execute discussion step due to ATT error: {result}")
-                        if not skip_audit:
-                            await self.supervisor.report_anomaly(team, f"LLM client invocation error: {result}", self)
+                        self.logger.error(
+                            "Discussion aborted by framework error: %s", result
+                        )
                         raise result
                     elif isinstance(result, Exception):
-                        self.logger.error(f"Agent {agent.name} encountered an error: {result}")
+                        self.logger.error(
+                            "Agent %s encountered an unclassified member error "
+                            "of type %s.",
+                            agent.name,
+                            type(result).__name__,
+                        )
                         discussion_had_member_errors = True
-                        ans = f"Error: {result}"
+                        turn = AgentTurnResult(
+                            agent_id=agent.agent_id,
+                            team_id=team.team_id,
+                            discussion_id=self._active_discussion_id.get(),
+                            round_number=r,
+                            status=AgentTurnStatus.INCOMPLETE,
+                            error_kind="member_exception",
+                            reason=(
+                                f"{type(result).__name__}: member execution "
+                                "failed before producing a structured result."
+                            ),
+                        )
                     else:
-                        ans = str(result)
-                    
+                        turn = result.model_copy(update={"round_number": r})
+                        if turn.status is AgentTurnStatus.INCOMPLETE:
+                            discussion_had_member_errors = True
+                    ans = turn.text
+                    round_turns.append(turn)
                     last_round_answers[(r, agent.name)] = ans
                     dialog_history.append(f"{agent.name}: {ans}")
+
+                structured_rounds.append(
+                    DiscussionRoundResult(
+                        round_number=r, turns=round_turns
+                    )
+                )
 
                 if self.config.enable_membership_voting:
                     await self._apply_deferred_membership_changes(team)
@@ -4104,9 +4666,46 @@ class ATTManager:
                 )
 
             # Run supervisory audit
+            operational_status = (
+                OperationalStatus.DEGRADED
+                if discussion_had_member_errors
+                else OperationalStatus.HEALTHY
+            )
+            incomplete_metadata = []
+            for round_result in structured_rounds:
+                for turn in round_result.turns:
+                    if turn.status is AgentTurnStatus.INCOMPLETE:
+                        incomplete_metadata.append(
+                            {
+                                "agent_id": turn.agent_id,
+                                "round_number": turn.round_number,
+                                "error_kind": turn.error_kind,
+                                "reason": turn.reason,
+                                "tool_failures": [
+                                    failure.model_dump(mode="json")
+                                    for failure in turn.tool_failures
+                                ],
+                            }
+                        )
+            operational_reason = (
+                "One or more Agent turns were incomplete: "
+                + json.dumps(incomplete_metadata, sort_keys=True)
+                if incomplete_metadata
+                else "All member turns completed."
+            )
+            audit_transcript = transcript
+            if incomplete_metadata:
+                audit_transcript += (
+                    "\n\n[ATT OPERATIONAL METADATA]\n"
+                    + json.dumps(incomplete_metadata, sort_keys=True)
+                )
+
             if not skip_audit:
                 audit_result = await self.supervisor.audit_team_dialog(
-                    team, transcript
+                    team,
+                    audit_transcript,
+                    operational_status=operational_status,
+                    operational_reason=operational_reason,
                 )
                 if audit_result.status is AuditStatus.UNHEALTHY:
                     await self.supervisor.report_anomaly(
@@ -4125,6 +4724,20 @@ class ATTManager:
                     await self.supervisor.report_unknown(
                         team, audit_result, self
                     )
+                if (
+                    audit_result.operational_status
+                    is OperationalStatus.DEGRADED
+                ):
+                    await self._report_operational_degraded(
+                        team, audit_result
+                    )
+            else:
+                audit_result = AuditResult(
+                    status=AuditStatus.HEALTHY,
+                    reason="Audit skipped.",
+                    operational_status=operational_status,
+                    operational_reason=operational_reason,
+                )
                 
             # Log debate transcript using logger callback
             if self.on_log_append:
@@ -4139,6 +4752,8 @@ class ATTManager:
                     f"--- SYNTHESIZED TRANSCRIPT END ---\n"
                     f"AUDIT STATUS: {audit_result.status.value}\n"
                     f"AUDIT REASON: {audit_result.reason}\n"
+                    f"OPERATIONAL STATUS: {audit_result.operational_status.value}\n"
+                    f"OPERATIONAL REASON: {audit_result.operational_reason}\n"
                 )
                 self._emit_callback(
                     "on_log_append",
@@ -4167,7 +4782,18 @@ class ATTManager:
                 teams={team.team_id},
             )
             discussion_succeeded = True
-            return transcript
+            return DiscussionResult(
+                team_id=team.team_id,
+                discussion_id=self._active_discussion_id.get(),
+                status=(
+                    DiscussionStatus.PARTIAL
+                    if discussion_had_member_errors
+                    else DiscussionStatus.COMPLETED
+                ),
+                transcript=transcript,
+                rounds=structured_rounds,
+                audit=audit_result,
+            )
         finally:
             if processed_peer_message_ids and discussion_succeeded:
                 consumed_at = time.time()
@@ -4226,6 +4852,13 @@ class ATTManager:
                                 message["state"] = "pending"
                                 message.pop("processing_count", None)
                 self._auto_save(inboxes={team.team_id})
+            if processed_operational_fingerprints:
+                self._finish_durable_alert_processing(
+                    team,
+                    "operational_degraded_escalation",
+                    processed_operational_fingerprints,
+                    discussion_succeeded,
+                )
             await auto_save_context.__aexit__(None, None, None)
             self._active_discussion_id.reset(discussion_token)
             team.is_running = False
@@ -4236,6 +4869,11 @@ class ATTManager:
                 }
                 if self.config.audit_unknown_escalation_mode == "wake":
                     wake_types.add("audit_unknown_escalation")
+                if (
+                    self.config.operational_degraded_escalation_mode
+                    == "wake"
+                ):
+                    wake_types.add("operational_degraded_escalation")
                 emergency_msg = next(
                     (
                         msg
@@ -4250,7 +4888,10 @@ class ATTManager:
                         emergency_msg,
                         skip_audit=(
                             emergency_msg.get("type")
-                            == "audit_unknown_escalation"
+                            in {
+                                "audit_unknown_escalation",
+                                "operational_degraded_escalation",
+                            }
                         ),
                     )
 
@@ -4275,7 +4916,10 @@ class ATTManager:
         if self._closing:
             return
         dedupe_key = None
-        if alert.get("type") == "audit_unknown_escalation":
+        if alert.get("type") in {
+            "audit_unknown_escalation",
+            "operational_degraded_escalation",
+        }:
             dedupe_key = self._unknown_audit_wakeup_key(team, alert)
             if dedupe_key in self._unknown_audit_wakeups:
                 return
@@ -4312,6 +4956,7 @@ class ATTManager:
     def _unknown_alert_fingerprint(alert: Dict[str, Any]) -> str:
         payload = json.dumps(
             {
+                "type": alert.get("type"),
                 "failed_team_id": alert.get("failed_team_id"),
                 "reason": alert.get("reason"),
                 "cause": alert.get("cause"),
@@ -4324,8 +4969,20 @@ class ATTManager:
     def _merge_unknown_alert(
         self, team: AgentTeam, alert: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Persistently coalesces one UNKNOWN alert without dropping uniques."""
+        """Compatibility wrapper for UNKNOWN audit alerts."""
+        return self._merge_durable_alert(team, alert)
+
+    def _merge_durable_alert(
+        self, team: AgentTeam, alert: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Persistently coalesces one operational alert without dropping uniques."""
         now = time.time()
+        alert_type = alert.get("type")
+        if alert_type not in {
+            "audit_unknown_escalation",
+            "operational_degraded_escalation",
+        }:
+            raise ValueError("Unsupported durable alert type.")
         fingerprint = alert.get("fingerprint") or self._unknown_alert_fingerprint(
             alert
         )
@@ -4334,7 +4991,7 @@ class ATTManager:
                 (
                     item
                     for item in team.message_inbox
-                    if item.get("type") == "audit_unknown_escalation"
+                    if item.get("type") == alert_type
                     and item.get("fingerprint") == fingerprint
                 ),
                 None,
@@ -4358,21 +5015,87 @@ class ATTManager:
                 )
                 team.message_inbox.append(merged)
             unique_count = sum(
-                item.get("type") == "audit_unknown_escalation"
+                item.get("type") == alert_type
                 for item in team.message_inbox
             )
         if unique_count >= self.config.audit_unknown_soft_threshold:
+            event_name = (
+                "audit_unknown_soft_threshold"
+                if alert_type == "audit_unknown_escalation"
+                else "operational_degraded_soft_threshold"
+            )
             self.logger.warning(
-                "Team %s has %s unique pending UNKNOWN audit alerts.",
+                "Team %s has %s unique pending %s alerts.",
                 team.team_id,
                 unique_count,
+                alert_type,
             )
             self._emit_callback(
                 "on_system_event",
-                "audit_unknown_soft_threshold",
-                {"team_id": team.team_id, "unique_alerts": unique_count},
+                event_name,
+                {
+                    "team_id": team.team_id,
+                    "alert_type": alert_type,
+                    "unique_alerts": unique_count,
+                },
             )
         return merged
+
+    def _finish_durable_alert_processing(
+        self,
+        team: AgentTeam,
+        alert_type: str,
+        fingerprints: set[str],
+        succeeded: bool,
+    ) -> None:
+        with team.inbox_lock:
+            retained = []
+            for message in team.message_inbox:
+                selected = (
+                    message.get("type") == alert_type
+                    and message.get("fingerprint") in fingerprints
+                )
+                if not selected:
+                    retained.append(message)
+                    continue
+                processing_count = message.pop(
+                    "processing_count", message.get("occurrence_count", 1)
+                )
+                if not succeeded or message.get(
+                    "occurrence_count", 1
+                ) > processing_count:
+                    message["state"] = "pending"
+                    retained.append(message)
+            team.message_inbox = retained
+        self._auto_save(inboxes={team.team_id})
+
+    async def _report_operational_degraded(
+        self, team: AgentTeam, audit_result: Any
+    ) -> None:
+        """Records and optionally propagates one operational degradation."""
+        message = {
+            "type": "operational_degraded_escalation",
+            "from": "Supervisor",
+            "failed_team_id": team.team_id,
+            "reason": audit_result.operational_reason,
+        }
+        message["fingerprint"] = self._unknown_alert_fingerprint(message)
+        self._emit_callback(
+            "on_system_event", "operational_degraded", dict(message)
+        )
+        mode = self.config.operational_degraded_escalation_mode
+        if mode == "none":
+            return
+        parent = team.parent_team or self.find_parent_team(team)
+        if parent is None:
+            self._emit_callback(
+                "on_emergency_escalation",
+                team.team_id,
+                message["type"],
+                message["reason"],
+            )
+            return
+        parent.receive_message(message)
 
     def acknowledge_unknown_alert(
         self, team_id: str, fingerprint: str
@@ -4425,7 +5148,7 @@ class ATTManager:
         fingerprint = alert.get("fingerprint") or ATTManager._unknown_alert_fingerprint(
             alert
         )
-        return f"{team.team_id}:{fingerprint}"
+        return f"{team.team_id}:{alert.get('type')}:{fingerprint}"
 
     def is_unknown_audit_wakeup_active(
         self, team: AgentTeam, alert: Dict[str, Any]

@@ -93,6 +93,19 @@ class DocumentLibrary:
             logger.info(f"Written file '{path}' in library '{self.lib_id}'.")
             self._notify_change(normalized_path, content)
 
+    def _write_staged_file(self, path: str, content: str) -> str:
+        """Writes validated staging content without runtime logs or callbacks."""
+        with self._lock:
+            self._ensure_writable()
+            normalized_path = self._normalize_path(path, allow_root=False)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            fd = self._open_file_descriptor(
+                normalized_path, flags, create_parents=True
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(content)
+            return normalized_path
+
     def read_file(self, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str:
         """Reads a file path within the library, routing through GatedFileReader."""
         with self._lock:

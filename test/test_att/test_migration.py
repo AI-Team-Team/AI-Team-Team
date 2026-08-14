@@ -22,7 +22,14 @@ class TestATTMigration(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(shutil.rmtree, self._test_tmpdir, ignore_errors=True)
 
         self.mock_client = MagicMock()
-        self.mock_client.generate = AsyncMock(return_value='{"approved": true, "reason": "Approved by Arbiter"}')
+        async def governance_generate(prompt=None, require_json=False, **kwargs):
+            if require_json:
+                if "is_healthy" in str(prompt):
+                    return '{"is_healthy": true, "reason": "Healthy"}'
+                return '{"approved": true, "reason": "Approved by Arbiter"}'
+            return "Final Answer: The migration is appropriate."
+
+        self.mock_client.generate = governance_generate
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
         self.manager = ATTManager(root_ai=self.root_ai)
 

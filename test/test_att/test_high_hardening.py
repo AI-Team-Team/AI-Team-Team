@@ -82,7 +82,8 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         config = ATTConfig(
             max_migrations_per_team_discussion=0,
             llm_max_retries=0,
-            max_tool_retries=0,
+            max_tool_argument_retries=0,
+            max_tool_execution_retries=0,
             llm_retry_backoff_factor=0,
             model_token_limits={"disabled": 0},
         )
@@ -525,7 +526,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         shared = Agent("Shared", "Analyst", client)
         manager = ATTManager(root, ATTConfig(workspace_root=self.tmpdir))
         manager.register_llm_client("shared-model", client)
-        manager.agents[shared.name] = shared
+        manager.register_agent(shared)
         configs_a = {
             "Analyst": {"hire_agent": shared.name},
             "HelperA": {"model": "shared-model"},

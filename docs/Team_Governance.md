@@ -24,6 +24,12 @@ Peer messages are acknowledged only after a successful discussion.
 
 Failed or cancelled discussions leave peer messages and pending communication approvals available for a later retry.
 
+Normal discussions collect `AgentTurnResult` values.
+
+With the default isolate policy, a member-scoped tool or LLM failure produces an incomplete placeholder, preserves every peer result, marks the discussion `PARTIAL`, and lets that Agent rejoin the next round with a fresh tool-correction budget.
+
+Strict communication, migration, full-member ballot, and parent-failover discussions require complete turns; any incomplete member keeps the governance action pending and cannot authorize from a partial transcript.
+
 ### Inbox Summarization
 
 `inbox_summarize_threshold_chars` controls when a large inbox is summarized before prompt injection.
@@ -33,6 +39,10 @@ UNKNOWN audit alerts have no TTL and no hard capacity limit.
 Stable fingerprints merge repeated UNKNOWN alerts while preserving occurrence counts and first/last timestamps.
 
 A discussion marks an UNKNOWN alert as processing and removes it only after success; failure or cancellation returns it to pending.
+
+Operational degradation alerts use the same durable lifecycle when `operational_degraded_escalation_mode` is `"queue"` or `"wake"`.
+
+Content health and runtime health are independent, so an otherwise healthy transcript may still produce operational `DEGRADED` because one member turn was incomplete.
 
 ## 2. Peer Communication & Negotiation Broker
 
@@ -229,6 +239,7 @@ Emergency wakeups may be triggered by:
 * `"child_failure_escalation"`
 * `"escalation_spawn"`
 * `"audit_unknown_escalation"` when `audit_unknown_escalation_mode="wake"`
+* `"operational_degraded_escalation"` when `operational_degraded_escalation_mode="wake"`
 
 When `enable_emergency_wakeup=True`, an idle AgentTeam is scheduled immediately and a running AgentTeam keeps the alert queued.
 
@@ -242,6 +253,6 @@ Without an active event loop, ATT stores a plain deferred call specification for
 
 `audit_unknown_escalation_mode="wake"` schedules an immediate parent discussion, while `"queue"` waits for the next normal discussion.
 
-Emergency discussions created by UNKNOWN audit failures skip that round's supervision to prevent an audit-service failure from creating a recursive audit storm.
+Emergency discussions created by UNKNOWN audit failures or operational degradation skip that round's supervision, and identical active wakeups are deduplicated, preventing recursive supervision or failure storms.
 
 Root-level anomalies are emitted through system events and callbacks.

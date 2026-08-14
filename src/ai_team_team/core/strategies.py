@@ -1,16 +1,22 @@
 import abc
 import asyncio
 import inspect
-import logging
-import json
 import re
-import ast
-import time
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Tuple
 from ai_team_team.core.agent import Agent
-from ai_team_team.core.response import ToolCall, ToolResult, LLMResponse
-from ai_team_team.core.exceptions import ATTException
+from ai_team_team.core.response import (
+    AgentTurnResult,
+    AgentTurnStatus,
+    LLMResponse,
+    ToolFailureSummary,
+    ToolResult,
+    ToolResultStatus,
+)
+from ai_team_team.core.exceptions import ATTException, ToolArgumentError
 from ai_team_team.core.utils import generate_with_retry
+from ai_team_team.core.text_action import parse_text_action, parse_tool_arguments
+from ai_team_team.core.tool_runtime import ToolExecutor
+from ai_team_team.tool import render_tool_prompt
 
 
 _PRIVATE_TOOL_NAMES = {
@@ -167,6 +173,30 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
         if experts_lines:
             experts_str = f"## GLOBAL EXPERTS AVAILABLE FOR HIRE\n" + "\n".join(experts_lines) + "\n\n"
 
+    visible_tools = (
+        manager.get_available_tools(team, agent)
+        if manager and hasattr(manager, "get_available_tools")
+        else dict(getattr(team, "tools", {}) or {})
+    )
+    autonomy_lines = ["### AUTONOMY RULES"]
+    if "dispatch_subagent" in visible_tools:
+        autonomy_lines.append(
+            "- You can dynamically spawn child ATs using the `dispatch_subagent` tool to solve sub-problems."
+        )
+    if "delegate_escalation" in visible_tools:
+        autonomy_lines.append(
+            "- You can use `delegate_escalation` to ask your parent AgentTeam for help."
+        )
+    autonomy_lines.extend(
+        [
+            f"- A valid AT MUST have at least {min_size} members.",
+            "- You may use only the tools shown in the current AVAILABLE TOOLS section.",
+            "- When creating an AT, choose only registered models. Available models:",
+            model_options,
+        ]
+    )
+    autonomy_text = "\n".join(autonomy_lines) + "\n"
+
     identity_header = (
         f"## AGENT IDENTITY PROFILE\n"
         f"- **Role Name**: {agent.role}\n"
@@ -178,13 +208,7 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
         f"- **AT Delegation Depth**: {team.depth} / {max_depth}\n"
         f"{peer_context}"
         f"{experts_str}"
-        f"### AUTONOMY RULES\n"
-        f"1. You can dynamically spawn child ATs using the `dispatch_subagent` tool to solve sub-problems.\n"
-        f"2. You MUST NOT spawn child ATs if your Delegation Depth is already at the maximum ({max_depth}). If you need help at max depth, use `delegate_escalation` to ask your parent.\n"
-        f"3. A valid AT MUST have at least {min_size} members.\n"
-        f"4. You can dynamically request to migrate your team to a different parent team in the topology using the `request_migration` tool if it helps in task routing.\n"
-        f"5. When creating an AT, you can assign models based on task complexity. Available models:\n"
-        f"{model_options}\n"
+        f"{autonomy_text}"
     )
 
     current_context = {
@@ -194,7 +218,7 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
         "role": agent.role,
         "role_description": getattr(agent, "role_description", ""),
         "system_instructions": getattr(agent, "system_instructions", ""),
-        "tools": sorted(list(team.tools.keys())) if getattr(team, "tools", None) else []
+        "tools": sorted(visible_tools)
     }
     if agent.last_context and agent.last_context.get("team_id") != team.team_id:
         notice = (
@@ -271,33 +295,83 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
     return identity_header
 
 def parse_tool_args(args_str: str) -> Tuple[List[Any], Dict[str, Any]]:
-    """Robustly parse string arguments into Python args and kwargs using AST."""
-    if not args_str or not args_str.strip():
-        return [], {}
-    try:
-        tree = ast.parse(f"dummy_func({args_str})", mode='eval')
-        call = tree.body
-        
-        args = []
-        for arg in call.args:
-            args.append(ast.literal_eval(arg))
-            
-        kwargs = {}
-        for kw in call.keywords:
-            kwargs[kw.arg] = ast.literal_eval(kw.value)
-            
-        return args, kwargs
-    except Exception as e:
-        # Fallback for LLM string hallucinations
-        try:
-            parsed_vals = ast.literal_eval(f"({args_str})")
-            if isinstance(parsed_vals, tuple):
-                return list(parsed_vals), {}
-            else:
-                return [parsed_vals], {}
-        except Exception:
-            pass
-        return [args_str.strip()], {}
+    """Compatibility export for the strict literal argument parser."""
+    return parse_tool_arguments(args_str)
+
+
+def _extract_final_answer(text: str) -> Optional[str]:
+    """Returns a line-delimited final answer without matching tool payloads."""
+    if re.search(r"(?im)^\s*Action\s*:", text) or re.search(
+        r"<action\s+name=", text, re.IGNORECASE
+    ):
+        return None
+    matches = list(re.finditer(r"(?im)^\s*Final Answer\s*:\s*", text))
+    if len(matches) != 1:
+        return None
+    return text[matches[0].end() :].strip()
+
+
+def _turn_result(
+    team: Any,
+    agent: Agent,
+    manager: Any,
+    *,
+    answer: Optional[str] = None,
+    error_kind: Optional[str] = None,
+    reason: Optional[str] = None,
+    failures: Optional[List[ToolFailureSummary]] = None,
+) -> AgentTurnResult:
+    return AgentTurnResult(
+        agent_id=agent.agent_id,
+        team_id=team.team_id,
+        discussion_id=(
+            manager._active_discussion_id.get() if manager else None
+        ),
+        status=(
+            AgentTurnStatus.COMPLETED
+            if error_kind is None
+            else AgentTurnStatus.INCOMPLETE
+        ),
+        answer=answer,
+        error_kind=error_kind,
+        reason=reason,
+        tool_failures=list(failures or []),
+    )
+
+
+def _available_tools(team: Any, agent: Agent, manager: Any) -> Dict[str, Any]:
+    if manager and hasattr(manager, "get_available_tools"):
+        return manager.get_available_tools(team, agent)
+    return dict(getattr(team, "tools", {}) or {})
+
+
+def _record_tool_result(
+    manager: Any,
+    team: Any,
+    agent: Agent,
+    result: ToolResult,
+) -> None:
+    """Emits privacy-safe invocation metadata for structured tool failures."""
+    if manager is None or not result.failed:
+        return
+    payload = {
+        "agent_id": agent.agent_id,
+        "team_id": team.team_id,
+        "discussion_id": manager._active_discussion_id.get(),
+        "tool_name": result.name,
+        "status": result.status.value,
+        "error_kind": result.error_kind or result.status.value,
+        "attempts": result.attempts,
+    }
+    manager.logger.info(
+        "Tool invocation failed: agent=%s team=%s tool=%s status=%s attempts=%s",
+        agent.agent_id,
+        team.team_id,
+        result.name,
+        result.status.value,
+        result.attempts,
+    )
+    manager._emit_callback("on_system_event", "tool_execution_failed", payload)
 
 
 class BaseReasoningStrategy(metaclass=abc.ABCMeta):
@@ -311,11 +385,13 @@ class BaseReasoningStrategy(metaclass=abc.ABCMeta):
         system_instruction: str,
         max_steps: int,
         manager: Any
-    ) -> str:
+    ) -> AgentTurnResult:
         pass
 
+
 class TextReactReasoningStrategy(BaseReasoningStrategy):
-    """Implements the standard text-based Thought/Action/Observation ReAct reasoning loop."""
+    """Strict text ReAct loop backed by the shared tool runtime."""
+
     async def execute(
         self,
         team: Any,
@@ -323,792 +399,443 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
         prompt: str,
         system_instruction: str,
         max_steps: int,
-        manager: Any
-    ) -> str:
+        manager: Any,
+    ) -> AgentTurnResult:
+        failures: List[ToolFailureSummary] = []
+        argument_failures = 0
         try:
-            identity_header = await _prepare_agent_context(team, agent, prompt, manager)
-
-            if getattr(team, "tools", None):
-                tools_desc = []
-                for t_name, tool in team.tools.items():
-                    tools_desc.append(f"- **{t_name}**: {tool.description}")
-                tools_list_str = "\n".join(tools_desc)
-
-                agent_sys_inst = f"### YOUR INDIVIDUAL MISSION\n{agent.system_instructions}\n\n" if getattr(agent, "system_instructions", "") else ""
-                
-                voting_context = ""
-                if manager and manager.config.enable_membership_voting and team.proposals:
-                    voting_lines = ["### ACTIVE MEMBERSHIP VOTES:"]
-                    for vp_id, prop in team.proposals.items():
-                        if prop.get("status") == "active":
-                            voted_list = []
-                            member_names = {
-                                member.agent_id: member.name
-                                for member in team.members
-                            }
-                            for voter_id, v_data in prop["votes"].items():
-                                if v_data["public"]:
-                                    voter_name = member_names.get(
-                                        voter_id, "Former member"
-                                    )
-                                    voted_list.append(
-                                        f"{voter_name}: {v_data['vote']} (Public)"
-                                    )
-                                else:
-                                    voted_list.append(f"Anonymous Voter: {v_data['vote']}")
-                            voted_str = ", ".join(voted_list) if voted_list else "None"
-                            remaining = [
-                                member.name
-                                for member in team.members
-                                if member.agent_id not in prop["votes"]
-                            ]
-                            remaining_str = ", ".join(remaining) if remaining else "None"
-                            voting_lines.append(
-                                f"- Proposal [{vp_id}]: {prop['action'].upper()} '{prop['target']}'\n"
-                                f"  - Initiator: {prop['initiator_type'].capitalize()} ({prop['initiator_name']})\n"
-                                f"  - Rationale: {prop['rationale']}\n"
-                                f"  - Current Votes: {voted_str}\n"
-                                f"  - Remaining Voters: {remaining_str} (You can cast your vote using the 'cast_vote' tool)"
-                            )
-                    if len(voting_lines) > 1:
-                        voting_context = "\n" + "\n".join(voting_lines) + "\n"
-
-                react_system_instruction = (
-                    f"{system_instruction}\n\n"
-                    f"{agent_sys_inst}"
-                    f"{identity_header}"
-                    f"{voting_context}"
-                    f"### AVAILABLE TOOLS\n"
-                    f"{tools_list_str}\n\n"
-                    f"### REACT FORMAT INSTRUCTIONS\n"
-                    f"When executing your task, you can reason and use tools step-by-step. Use the following format:\n"
-                    f"Thought: <your reasoning about the next step>\n"
-                    f"Action: <tool_name>(<arguments_separated_by_commas_or_kwargs>)\n"
-                    f"Observation: <the tool output will appear here>\n\n"
-                    f"You can repeat the Thought/Action/Observation loop multiple times if needed. "
-                    f"Once you have all the necessary information, or if you do not need to use any tools, output exactly:\n"
-                    f"Final Answer: <your final answer here>"
-                )
-
-                tool_retry_count = 0
-                for step in range(max_steps):
-                    try:
-                        team.set_status(agent.name, f"Thinking (Step {step+1}/{max_steps})...")
-                        if manager:
-                            manager._emit_callback(
-                                "on_status_change",
-                                agent.name,
-                                f"Thinking (Step {step+1}/{max_steps})...",
-                            )
-
-                        retries = manager.config.llm_max_retries if manager else 3
-                        backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
-                        
-                        resp_obj = await generate_with_retry(
-                            llm_client=agent.llm_client,
-                            prompt=agent.messages,
-                            system_instruction=react_system_instruction,
-                            temperature=0.3,
-                            retries=retries,
-                            backoff_factor=backoff,
-                            manager=manager
-                        )
-                        
-                        response = resp_obj.text if isinstance(resp_obj, LLMResponse) else str(resp_obj)
-                        response = response.strip()
-
-                        team.logger.info(
-                            "Agent %s ReAct step %s response:\n%s",
-                            agent.name,
-                            step + 1,
-                            _privacy_safe_agent_output(agent, response),
-                        )
-
-                        _append_agent_message(
-                            agent,
-                            {
-                                "role": "assistant",
-                                "content": _privacy_safe_agent_output(
-                                    agent, response
-                                ),
-                            },
-                            team,
-                            manager,
-                        )
-
-                        if manager and manager.on_log_append:
-                            formatted_prompt = json.dumps(agent.messages[:-1], indent=2, ensure_ascii=False)
-                            log_content = (
-                                f"AGENT: {agent.name}\n"
-                                f"ROLE: {agent.role}\n"
-                                f"STEP: {step+1}\n"
-                                f"--- SYSTEM INSTRUCTION BEGIN ---\n"
-                                f"{react_system_instruction}\n"
-                                f"--- SYSTEM INSTRUCTION END ---\n"
-                                f"--- PROMPT BEGIN ---\n"
-                                f"{_redact_private_log(formatted_prompt)}\n"
-                                f"--- PROMPT END ---\n"
-                                f"--- RESPONSE BEGIN ---\n"
-                                f"{_privacy_safe_agent_output(agent, response)}\n"
-                                f"--- RESPONSE END ---\n"
-                            )
-                            manager._emit_callback(
-                                "on_log_append",
-                                team.team_id,
-                                f"ReAct LLM Step | {agent.name} ({agent.role}) Step {step+1}",
-                                log_content,
-                                team.chapter_num
-                            )
-
-                        if "Final Answer:" in response:
-                            final_ans_content = response.split("Final Answer:", 1)[1].strip()
-                            if manager:
-                                callback_answer = (
-                                    "[private-derived final answer redacted]"
-                                    if _has_private_window_content(agent)
-                                    else final_ans_content
-                                )
-                                manager._emit_callback(
-                                    "on_activity_added",
-                                    agent.name,
-                                    "Final Answer",
-                                    callback_answer,
-                                )
-                            return final_ans_content
-
-                        thought_match = re.search(r"Thought:\s*(.*)", response, re.IGNORECASE)
-                        if thought_match:
-                            thought_content = thought_match.group(1).split("Action:")[0].strip()
-                            if manager:
-                                callback_thought = (
-                                    "[private-derived thought redacted]"
-                                    if _has_private_window_content(agent)
-                                    else thought_content
-                                )
-                                manager._emit_callback(
-                                    "on_activity_added",
-                                    agent.name,
-                                    "Thought",
-                                    callback_thought,
-                                )
-
-                        tool_name = None
-                        tool_args_str = None
-
-                        xml_match = re.search(r'<action\s+name="(\w+)"\s*>(.*?)</action>', response, re.DOTALL | re.IGNORECASE)
-                        if xml_match:
-                            tool_name = xml_match.group(1).strip()
-                            tool_args_str = xml_match.group(2).strip()
-                            if tool_args_str.startswith("```") and tool_args_str.endswith("```"):
-                                lines = tool_args_str.splitlines()
-                                if lines[0].startswith("```"):
-                                    lines = lines[1:]
-                                if lines and lines[-1].endswith("```"):
-                                    lines = lines[:-1]
-                                tool_args_str = "\n".join(lines).strip()
-                        else:
-                            react_match = re.search(r'Action:\s*(?:```(?:python)?\s*)?(\w+)\((.*?)\)(?:\s*```)?', response, re.DOTALL | re.IGNORECASE)
-                            if react_match:
-                                tool_name = react_match.group(1).strip()
-                                tool_args_str = react_match.group(2).strip()
-
-                        if tool_name is not None:
-                            args, kwargs = parse_tool_args(tool_args_str)
-                            private_tool = tool_name in _PRIVATE_TOOL_NAMES
-                            action_metadata = f"{tool_name}({tool_args_str})"
-
-                            if tool_name in team.tools:
-                                tool_obj = team.tools[tool_name]
-                                action_metadata = (
-                                    _private_action_metadata(
-                                        tool_name, tool_obj, args, kwargs
-                                    )
-                                    if private_tool
-                                    else f"{tool_name}({tool_args_str})"
-                                )
-                                team.logger.info(
-                                    "Executing tool: %s",
-                                    action_metadata,
-                                )
-                                
-                                team.set_status(agent.name, f"Executing Tool: {tool_name}")
-                                if manager:
-                                    manager._emit_callback(
-                                        "on_status_change",
-                                        agent.name,
-                                        f"Executing Tool: {tool_name}",
-                                    )
-                                    manager._emit_callback(
-                                        "on_activity_added",
-                                        agent.name,
-                                        "Action",
-                                        action_metadata,
-                                    )
-
-                                active_agent_token = (
-                                    manager._active_tool_agent.set(agent)
-                                    if manager
-                                    else None
-                                )
-                                invocation_token = (
-                                    manager._active_tool_invocation_id.set(
-                                        f"{manager._active_discussion_id.get() or 'runtime'}:"
-                                        f"{agent.agent_id}:{step}:{tool_name}"
-                                    )
-                                    if manager
-                                    else None
-                                )
-                                try:
-                                    if (
-                                        manager
-                                        and tool_name
-                                        in manager.tool_auditors
-                                    ):
-                                        auditor = manager.tool_auditors[
-                                            tool_name
-                                        ]
-                                        if inspect.iscoroutinefunction(
-                                            auditor
-                                        ):
-                                            approved, audit_reason = (
-                                                await auditor(
-                                                    *args, **kwargs
-                                                )
-                                            )
-                                        else:
-                                            approved, audit_reason = (
-                                                await asyncio.to_thread(
-                                                    auditor,
-                                                    *args,
-                                                    **kwargs,
-                                                )
-                                            )
-                                        if not approved:
-                                            observation = (
-                                                "Error: Tool execution "
-                                                "rejected by auditor: "
-                                                f"{audit_reason}"
-                                            )
-                                        else:
-                                            observation = await tool_obj(
-                                                *args, **kwargs
-                                            )
-                                    else:
-                                        observation = await tool_obj(*args, **kwargs)
-                                finally:
-                                    if (
-                                        manager
-                                        and active_agent_token is not None
-                                    ):
-                                        manager._active_tool_agent.reset(
-                                            active_agent_token
-                                        )
-                                    if manager and invocation_token is not None:
-                                        manager._active_tool_invocation_id.reset(
-                                            invocation_token
-                                        )
-                                
-                                team.set_status(agent.name, "Thinking...")
-                                if manager:
-                                    manager._emit_callback(
-                                        "on_status_change",
-                                        agent.name,
-                                        "Thinking...",
-                                    )
-                                if manager:
-                                    manager._auto_save(
-                                        agents={agent.agent_id},
-                                        teams={team.team_id},
-                                    )
-                                if manager:
-                                    obs_summary = (
-                                        "[private tool result redacted]"
-                                        if private_tool
-                                        else str(observation)
-                                    )
-                                    if len(obs_summary) > 80:
-                                        obs_summary = obs_summary[:77] + "..."
-                                    manager._emit_callback(
-                                        "on_activity_added",
-                                        agent.name,
-                                        "Observation",
-                                        obs_summary,
-                                    )
-                            else:
-                                observation = f"Error: Tool '{tool_name}' is not registered."
-                                if manager:
-                                    manager._emit_callback(
-                                        "on_activity_added",
-                                        agent.name,
-                                        "Observation",
-                                        observation,
-                                    )
-
-                            logged_observation = (
-                                "[private tool result redacted]"
-                                if private_tool
-                                else observation
-                            )
-                            team.logger.info(
-                                "Tool %s observation: %s",
-                                tool_name,
-                                logged_observation,
-                            )
-                            
-                            if manager and manager.on_log_append:
-                                log_content = (
-                                    f"AGENT: {agent.name}\n"
-                                    f"ROLE: {agent.role}\n"
-                                    f"ACTION: "
-                                    f"{action_metadata if private_tool else f'{tool_name}({tool_args_str})'}\n"
-                                    f"OBSERVATION:\n{logged_observation}\n"
-                                )
-                                manager._emit_callback(
-                                    "on_log_append",
-                                    team.team_id,
-                                    f"ReAct Tool Call | {agent.name} ({agent.role})",
-                                    log_content,
-                                    team.chapter_num
-                                )
-
-                            if observation.startswith("Error:") or observation.startswith("Error "):
-                                tool_retry_count += 1
-                                max_retries = manager.config.max_tool_retries if manager else 3
-                                if tool_retry_count > max_retries:
-                                    raise ATTException(f"Tool execution failed {tool_retry_count} times in this step. Maximum tool retries ({max_retries}) exceeded. Last error: {observation}")
-
-                            observation_message = {
-                                "role": "user",
-                                "content": f"Observation: {observation}",
-                            }
-                            if private_tool:
-                                _append_private_window_message(
-                                    agent,
-                                    observation_message,
-                                    team,
-                                    manager,
-                                )
-                            else:
-                                _append_agent_message(
-                                    agent,
-                                    observation_message,
-                                    team,
-                                    manager,
-                                )
-                        else:
-                            if step == max_steps - 1:
-                                return response
-                            _append_agent_message(
-                                agent,
-                                {
-                                    "role": "user",
-                                    "content": "Observation: Please output either 'Action: tool_name(args)' or 'Final Answer: <content>'.",
-                                },
-                                team,
-                                manager,
-                            )
-                    except ATTException as e:
-                        raise e
-                    except Exception as e:
-                        team.logger.error(f"Error in ReAct step {step+1} for agent {agent.name}: {e}")
-                        return f"Error executing task during ReAct loop: {e}"
-
-                return "Error: ReAct loop exceeded maximum steps without producing a Final Answer."
-
-            else:
-                agent_sys_inst = f"### YOUR INDIVIDUAL MISSION\n{agent.system_instructions}\n\n" if getattr(agent, "system_instructions", "") else ""
-                full_system_instruction = (
-                    f"{system_instruction}\n\n"
-                    f"{agent_sys_inst}"
-                    f"{identity_header}\n"
-                    f"Output exactly 'Final Answer: <content>' when complete."
-                )
-
-                try:
-                    retries = manager.config.llm_max_retries if manager else 3
-                    backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
-                    resp_obj = await generate_with_retry(
-                        llm_client=agent.llm_client,
-                        prompt=agent.messages,
-                        system_instruction=full_system_instruction,
-                        temperature=0.3,
-                        retries=retries,
-                        backoff_factor=backoff,
-                        manager=manager
-                    )
-                    
-                    response = resp_obj.text if isinstance(resp_obj, LLMResponse) else str(resp_obj)
-                    response = response.strip()
-                    _append_agent_message(
-                        agent,
-                        {
-                            "role": "assistant",
-                            "content": _privacy_safe_agent_output(
-                                agent, response
-                            ),
-                        },
-                        team,
-                        manager,
-                    )
-
-                    if manager and manager.on_log_append:
-                        formatted_prompt = json.dumps(agent.messages[:-1], indent=2, ensure_ascii=False)
-                        log_content = (
-                            f"AGENT: {agent.name}\n"
-                            f"ROLE: {agent.role}\n"
-                            f"--- SYSTEM INSTRUCTION BEGIN ---\n"
-                            f"{full_system_instruction}\n"
-                            f"--- SYSTEM INSTRUCTION END ---\n"
-                            f"--- PROMPT BEGIN ---\n"
-                            f"{_redact_private_log(formatted_prompt)}\n"
-                            f"--- PROMPT END ---\n"
-                            f"--- RESPONSE BEGIN ---\n"
-                            f"{_privacy_safe_agent_output(agent, response)}\n"
-                            f"--- RESPONSE END ---\n"
-                        )
-                        manager._emit_callback(
-                            "on_log_append",
-                            team.team_id,
-                            f"Direct LLM Call | {agent.name} ({agent.role})",
-                            log_content,
-                            team.chapter_num
-                        )
-
-                    if "Final Answer:" in response:
-                        final_ans_content = response.split("Final Answer:", 1)[1].strip()
-                        if manager:
-                            callback_answer = (
-                                "[private-derived final answer redacted]"
-                                if _has_private_window_content(agent)
-                                else final_ans_content
-                            )
-                            manager._emit_callback(
-                                "on_activity_added",
-                                agent.name,
-                                "Final Answer",
-                                callback_answer,
-                            )
-                        return final_ans_content
-                    return response
-                except ATTException as e:
-                    raise e
-                except Exception as e:
-                    team.logger.error(f"Agent {agent.name} execution error: {e}")
-                    return f"Error executing task: {e}"
-        finally:
-            _scrub_private_window_messages(agent)
-            team.set_status(agent.name, "Idle")
-            if manager:
-                manager._emit_callback(
-                    "on_status_change", agent.name, "Idle"
-                )
-            if manager:
-                manager._auto_save(
-                    agents={agent.agent_id},
-                    teams={team.team_id},
-                )
-
-class NativeReasoningStrategy(BaseReasoningStrategy):
-    """Implements modern API-level parallel native tool calling reasoning loop."""
-    async def execute(
-        self,
-        team: Any,
-        agent: Agent,
-        prompt: str,
-        system_instruction: str,
-        max_steps: int,
-        manager: Any
-    ) -> str:
-        try:
-            tool_retry_count = 0
-            identity_header = await _prepare_agent_context(team, agent, prompt, manager)
-
-            # Prepare native tools
-            native_tools = []
-            if getattr(team, "tools", None):
-                native_tools = list(team.tools.values())
-
-            agent_sys_inst = f"### YOUR INDIVIDUAL MISSION\n{agent.system_instructions}\n\n" if getattr(agent, "system_instructions", "") else ""
-            native_system_instruction = (
-                f"{system_instruction}\n\n"
-                f"{agent_sys_inst}"
-                f"{identity_header}"
+            identity_header = await _prepare_agent_context(
+                team, agent, prompt, manager
             )
-
-            max_tool_rounds = manager.config.max_tool_rounds if manager else 5
-
-            for round_idx in range(max_tool_rounds):
-                team.set_status(agent.name, f"Thinking (Round {round_idx+1}/{max_tool_rounds})...")
-                if manager:
-                    manager._emit_callback(
-                        "on_status_change",
-                        agent.name,
-                        f"Thinking (Round {round_idx+1}/{max_tool_rounds})...",
-                    )
-
-                retries = manager.config.llm_max_retries if manager else 3
-                backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
-
+            tools = _available_tools(team, agent, manager)
+            if not tools:
+                agent_mission = (
+                    f"\n\n### YOUR INDIVIDUAL MISSION\n{agent.system_instructions}"
+                    if getattr(agent, "system_instructions", "")
+                    else ""
+                )
                 response = await generate_with_retry(
                     llm_client=agent.llm_client,
                     prompt=agent.messages,
-                    system_instruction=native_system_instruction,
-                    temperature=0.3,
-                    require_json=False,
-                    retries=retries,
-                    backoff_factor=backoff,
-                    tools=native_tools if native_tools else None,
-                    return_response_obj=True,
-                    manager=manager
-                )
-
-                if isinstance(response, str):
-                    response = LLMResponse(text=response)
-
-                team.logger.info(
-                    "Agent %s Native response round %s: text=%s, tool_calls=%s",
-                    agent.name,
-                    round_idx + 1,
-                    (
-                        "[private-derived response redacted]"
-                        if _has_private_window_content(agent)
-                        else response.text
+                    system_instruction=(
+                        f"{system_instruction}{agent_mission}\n\n{identity_header}\n"
+                        "Output exactly 'Final Answer: <content>' when complete."
                     ),
-                    len(response.tool_calls),
+                    temperature=0.3,
+                    retries=manager.config.llm_max_retries if manager else 3,
+                    backoff_factor=(
+                        manager.config.llm_retry_backoff_factor
+                        if manager
+                        else 1.5
+                    ),
+                    manager=manager,
                 )
-
-                # Convert to LLM message formats
-                if response.tool_calls:
-                    # Append assistant message with structured tool calls
-                    tool_calls_dict = _redact_private_tool_calls(
-                        [tc.to_dict() for tc in response.tool_calls]
+                text = response.text if isinstance(response, LLMResponse) else str(response)
+                answer = _extract_final_answer(text)
+                if answer is None:
+                    answer = text.strip()
+                _append_agent_message(
+                    agent,
+                    {"role": "assistant", "content": answer},
+                    team,
+                    manager,
+                )
+                if manager:
+                    manager._emit_callback(
+                        "on_activity_added",
+                        agent.name,
+                        "Final Answer",
+                        _privacy_safe_agent_output(agent, answer),
                     )
-                    _append_agent_message(
-                        agent,
-                        {
-                            "role": "assistant",
-                            "content": _privacy_safe_agent_output(
-                                agent, response.text
-                            ),
-                            "tool_calls": tool_calls_dict,
-                        },
-                        team,
-                        manager,
-                    )
+                return _turn_result(team, agent, manager, answer=answer)
 
-                    # Concurrently execute tools
-                    tasks = []
-                    for tc in response.tool_calls:
-                        tasks.append(self._execute_single_tool(tc, team, agent, manager))
-                    
-                    results: List[ToolResult] = await asyncio.gather(*tasks)
-
-                    # Append tool result messages
-                    for tr in results:
-                        result_message = {
-                            "role": "tool",
-                            "tool_call_id": tr.tool_call_id,
-                            "name": tr.name,
-                            "content": tr.content,
-                        }
-                        if tr.name in _PRIVATE_TOOL_NAMES:
-                            _append_private_window_message(
-                                agent, result_message, team, manager
-                            )
-                        else:
-                            _append_agent_message(
-                                agent, result_message, team, manager
-                            )
-
-                        # Trigger callbacks
-                        if manager:
-                            manager._emit_callback(
-                                "on_activity_added",
-                                agent.name,
-                                "Action",
-                                f"{tr.name}(id={tr.tool_call_id})",
-                            )
-                            obs_summary = (
-                                "[private tool result redacted]"
-                                if tr.name in _PRIVATE_TOOL_NAMES
-                                else str(tr.content)
-                            )
-                            if len(obs_summary) > 80:
-                                obs_summary = obs_summary[:77] + "..."
-                            manager._emit_callback(
-                                "on_activity_added",
-                                agent.name,
-                                "Observation",
-                                obs_summary,
-                            )
-
-                        if manager and manager.on_log_append:
-                            log_content = (
-                                f"AGENT: {agent.name}\n"
-                                f"ROLE: {agent.role}\n"
-                                f"TOOL CALL ID: {tr.tool_call_id}\n"
-                                f"ACTION: {tr.name}\n"
-                                f"OBSERVATION:\n"
-                                f"{'[private tool result redacted]' if tr.name in _PRIVATE_TOOL_NAMES else tr.content}\n"
-                            )
-                            manager._emit_callback(
-                                "on_log_append",
-                                team.team_id,
-                                f"Native Tool Result | {agent.name} ({agent.role})",
-                                log_content,
-                                team.chapter_num
-                            )
-                    
-                    has_error = False
-                    for tr in results:
-                        if tr.content.startswith("Error:") or tr.content.startswith("Error "):
-                            has_error = True
-                            tool_retry_count += 1
-                    
-                    if has_error:
-                        max_retries = manager.config.max_tool_retries if manager else 3
-                        if tool_retry_count > max_retries:
-                            raise ATTException(f"Tool execution failed {tool_retry_count} times in this step. Maximum tool retries ({max_retries}) exceeded.")
-
+            rendered_tools = []
+            for name, tool in tools.items():
+                mode = (
+                    manager.config.tool_prompt_modes.get(name)
+                    if manager
+                    else None
+                ) or tool.prompt_schema_mode or (
+                    manager.config.text_tool_schema_mode
+                    if manager
+                    else "compact"
+                )
+                rendered_tools.append(render_tool_prompt(tool, mode))
+            react_instruction = (
+                f"{system_instruction}\n\n"
+                + (
+                    f"### YOUR INDIVIDUAL MISSION\n{agent.system_instructions}\n\n"
+                    if getattr(agent, "system_instructions", "")
+                    else ""
+                )
+                + f"{identity_header}"
+                "### AVAILABLE TOOLS\n"
+                + "\n".join(rendered_tools)
+                + "\n\n### REACT FORMAT INSTRUCTIONS\n"
+                "Use exactly one Action per response when invoking a tool.\n"
+                "Thought: <brief reasoning>\n"
+                "Action: tool_name(<literal positional or keyword arguments>)\n"
+                "When complete, output exactly Final Answer: <content>."
+            )
+            executor = ToolExecutor(team, agent, manager)
+            max_argument_retries = (
+                manager.config.max_tool_argument_retries if manager else 3
+            )
+            for step in range(max_steps):
+                response = await generate_with_retry(
+                    llm_client=agent.llm_client,
+                    prompt=agent.messages,
+                    system_instruction=react_instruction,
+                    temperature=0.3,
+                    retries=manager.config.llm_max_retries if manager else 3,
+                    backoff_factor=(
+                        manager.config.llm_retry_backoff_factor
+                        if manager
+                        else 1.5
+                    ),
+                    manager=manager,
+                )
+                text = response.text if isinstance(response, LLMResponse) else str(response)
+                text = text.strip()
+                _append_agent_message(
+                    agent,
+                    {
+                        "role": "assistant",
+                        "content": _privacy_safe_agent_output(agent, text),
+                    },
+                    team,
+                    manager,
+                )
+                answer = _extract_final_answer(text)
+                if answer is not None:
                     if manager:
-                        manager._auto_save(
-                            agents={agent.agent_id},
-                            teams={team.team_id},
-                        )
-                else:
-                    # Final answer received (no tool calls requested)
-                    _append_agent_message(
-                        agent,
-                        {
-                            "role": "assistant",
-                            "content": _privacy_safe_agent_output(
-                                agent, response.text
-                            ),
-                        },
-                        team,
-                        manager,
-                    )
-                    
-                    if manager:
-                        callback_answer = (
-                            "[private-derived final answer redacted]"
-                            if _has_private_window_content(agent)
-                            else (response.text or "")
-                        )
                         manager._emit_callback(
                             "on_activity_added",
                             agent.name,
                             "Final Answer",
-                            callback_answer,
+                            _privacy_safe_agent_output(agent, answer),
                         )
-                        
-                    if manager and manager.on_log_append:
-                        formatted_prompt = json.dumps(agent.messages[:-1], indent=2, ensure_ascii=False)
-                        log_content = (
-                            f"AGENT: {agent.name}\n"
-                            f"ROLE: {agent.role}\n"
-                            f"--- SYSTEM INSTRUCTION BEGIN ---\n"
-                            f"{native_system_instruction}\n"
-                            f"--- SYSTEM INSTRUCTION END ---\n"
-                            f"--- PROMPT BEGIN ---\n"
-                            f"{_redact_private_log(formatted_prompt)}\n"
-                            f"--- PROMPT END ---\n"
-                            f"--- RESPONSE BEGIN ---\n"
-                            f"{_privacy_safe_agent_output(agent, response.text)}\n"
-                            f"--- RESPONSE END ---\n"
-                        )
-                        manager._emit_callback(
-                            "on_log_append",
-                            team.team_id,
-                            f"Native Final Response | {agent.name} ({agent.role})",
-                            log_content,
-                            team.chapter_num
-                        )
-                    
-                    return response.text or ""
+                    return _turn_result(
+                        team, agent, manager, answer=answer, failures=failures
+                    )
 
-            return "Error: Native tool calling exceeded maximum tool rounds without producing a text final answer."
+                try:
+                    action = parse_text_action(text)
+                    args, kwargs = parse_tool_arguments(action.arguments)
+                    call_id = (
+                        f"{manager._active_discussion_id.get() or 'runtime'}:"
+                        f"{agent.agent_id}:{step}:{action.name}"
+                        if manager
+                        else f"{agent.agent_id}:{step}:{action.name}"
+                    )
+                    result = await executor.execute(
+                        action.name,
+                        args,
+                        kwargs,
+                        call_id=call_id,
+                        tools=tools,
+                    )
+                    if manager:
+                        manager._emit_callback(
+                            "on_activity_added",
+                            agent.name,
+                            "Action",
+                            f"{action.name}(...)"
+                        )
+                except ToolArgumentError as exc:
+                    result = ToolResult(
+                        f"{agent.agent_id}:{step}:parse",
+                        "<action>",
+                        str(exc),
+                        status=ToolResultStatus.INVALID_ARGUMENTS,
+                        error_kind="action_parse",
+                    )
+
+                _record_tool_result(manager, team, agent, result)
+
+                summary = result.failure_summary()
+                if summary is not None:
+                    failures.append(summary)
+                observation = {
+                    "role": "user",
+                    "content": (
+                        f"Observation [{result.status.value}]: {result.content}"
+                    ),
+                }
+                if result.name in _PRIVATE_TOOL_NAMES:
+                    _append_private_window_message(
+                        agent, observation, team, manager
+                    )
+                else:
+                    _append_agent_message(agent, observation, team, manager)
+                if manager:
+                    manager._emit_callback(
+                        "on_activity_added",
+                        agent.name,
+                        "Observation",
+                        (
+                            "[private tool result redacted]"
+                            if result.name in _PRIVATE_TOOL_NAMES
+                            else (
+                                f"{result.name}: {result.status.value}"
+                            )
+                        ),
+                    )
+
+                if result.status in {
+                    ToolResultStatus.INVALID_ARGUMENTS,
+                    ToolResultStatus.UNKNOWN_TOOL,
+                }:
+                    argument_failures += 1
+                    if argument_failures > max_argument_retries:
+                        return _turn_result(
+                            team,
+                            agent,
+                            manager,
+                            error_kind="tool_argument_retries_exhausted",
+                            reason=(
+                                "Tool arguments remained invalid after "
+                                f"{argument_failures} attempts."
+                            ),
+                            failures=failures,
+                        )
+                elif result.status in {
+                    ToolResultStatus.TRANSIENT_ERROR,
+                    ToolResultStatus.INTERNAL_ERROR,
+                }:
+                    return _turn_result(
+                        team,
+                        agent,
+                        manager,
+                        error_kind=result.error_kind or result.status.value,
+                        reason=(
+                            f"Tool {result.name!r} did not complete after "
+                            f"{result.attempts} attempt(s) with "
+                            f"{result.status.value}."
+                        ),
+                        failures=failures,
+                    )
+            return _turn_result(
+                team,
+                agent,
+                manager,
+                error_kind="reasoning_step_limit",
+                reason=(
+                    "Text ReAct reached its step limit without a final answer."
+                ),
+                failures=failures,
+            )
         finally:
             _scrub_private_window_messages(agent)
             team.set_status(agent.name, "Idle")
             if manager:
-                manager._emit_callback(
-                    "on_status_change", agent.name, "Idle"
-                )
-            if manager:
+                manager._emit_callback("on_status_change", agent.name, "Idle")
                 manager._auto_save(
-                    agents={agent.agent_id},
-                    teams={team.team_id},
+                    agents={agent.agent_id}, teams={team.team_id}
                 )
 
-    async def _execute_single_tool(self, tool_call: ToolCall, team: Any, agent: Agent, manager: Any) -> ToolResult:
-        tool_name = tool_call.name
-        args = []
-        kwargs = tool_call.arguments or {}
-        if isinstance(kwargs, str):
-            try:
-                kwargs = json.loads(kwargs)
-            except json.JSONDecodeError as exc:
-                return ToolResult(
-                    tool_call_id=tool_call.call_id,
-                    name=tool_name,
-                    content=(
-                        f"Error: Tool '{tool_name}' arguments are invalid "
-                        f"JSON: {exc}"
+
+class NativeReasoningStrategy(BaseReasoningStrategy):
+    """Native parallel tool loop backed by the shared tool runtime."""
+
+    async def execute(
+        self,
+        team: Any,
+        agent: Agent,
+        prompt: str,
+        system_instruction: str,
+        max_steps: int,
+        manager: Any,
+    ) -> AgentTurnResult:
+        failures: List[ToolFailureSummary] = []
+        argument_failure_rounds = 0
+        try:
+            identity_header = await _prepare_agent_context(
+                team, agent, prompt, manager
+            )
+            tools = _available_tools(team, agent, manager)
+            native_tools = list(tools.values())
+            executor = ToolExecutor(team, agent, manager)
+            max_rounds = manager.config.max_tool_rounds if manager else 5
+            max_argument_retries = (
+                manager.config.max_tool_argument_retries if manager else 3
+            )
+            for round_index in range(max_rounds):
+                response = await generate_with_retry(
+                    llm_client=agent.llm_client,
+                    prompt=agent.messages,
+                    system_instruction=f"{system_instruction}\n\n{identity_header}",
+                    temperature=0.3,
+                    require_json=False,
+                    retries=manager.config.llm_max_retries if manager else 3,
+                    backoff_factor=(
+                        manager.config.llm_retry_backoff_factor
+                        if manager
+                        else 1.5
                     ),
-                    raw=tool_call.raw,
+                    tools=native_tools or None,
+                    return_response_obj=True,
+                    manager=manager,
                 )
-        if not isinstance(kwargs, dict):
-            return ToolResult(
-                tool_call_id=tool_call.call_id,
-                name=tool_name,
-                content=(
-                    f"Error: Tool '{tool_name}' arguments must be an object."
+                if isinstance(response, str):
+                    response = LLMResponse(text=response)
+                if not response.tool_calls:
+                    answer = response.text or ""
+                    _append_agent_message(
+                        agent,
+                        {"role": "assistant", "content": answer},
+                        team,
+                        manager,
+                    )
+                    if manager:
+                        manager._emit_callback(
+                            "on_activity_added",
+                            agent.name,
+                            "Final Answer",
+                            _privacy_safe_agent_output(agent, answer),
+                        )
+                    return _turn_result(
+                        team, agent, manager, answer=answer, failures=failures
+                    )
+
+                _append_agent_message(
+                    agent,
+                    {
+                        "role": "assistant",
+                        "content": _privacy_safe_agent_output(
+                            agent, response.text or ""
+                        ),
+                        "tool_calls": _redact_private_tool_calls(
+                            [call.to_dict() for call in response.tool_calls]
+                        ),
+                    },
+                    team,
+                    manager,
+                )
+                results = await asyncio.gather(
+                    *(
+                        executor.execute(
+                            call.name,
+                            kwargs=(
+                                call.arguments
+                                if isinstance(call.arguments, dict)
+                                else {}
+                            ),
+                            call_id=call.call_id,
+                            raw=call.raw,
+                            tools=tools,
+                        )
+                        if isinstance(call.arguments, dict)
+                        else asyncio.sleep(
+                            0,
+                            result=ToolResult(
+                                call.call_id,
+                                call.name,
+                                "Native tool arguments must be an object.",
+                                call.raw,
+                                status=ToolResultStatus.INVALID_ARGUMENTS,
+                                error_kind="native_arguments_not_object",
+                            ),
+                        )
+                        for call in response.tool_calls
+                    )
+                )
+                invalid_batch = False
+                fatal_tool_result = None
+                for result in results:
+                    _record_tool_result(manager, team, agent, result)
+                    summary = result.failure_summary()
+                    if summary is not None:
+                        failures.append(summary)
+                    message = {
+                        "role": "tool",
+                        "tool_call_id": result.tool_call_id,
+                        "name": result.name,
+                        "content": (
+                            f"[{result.status.value}] {result.content}"
+                        ),
+                    }
+                    if result.name in _PRIVATE_TOOL_NAMES:
+                        _append_private_window_message(
+                            agent, message, team, manager
+                        )
+                    else:
+                        _append_agent_message(agent, message, team, manager)
+                    if manager:
+                        manager._emit_callback(
+                            "on_activity_added",
+                            agent.name,
+                            "Action",
+                            f"{result.name}(id={result.tool_call_id})",
+                        )
+                        manager._emit_callback(
+                            "on_activity_added",
+                            agent.name,
+                            "Observation",
+                            (
+                                "[private tool result redacted]"
+                                if result.name in _PRIVATE_TOOL_NAMES
+                                else (
+                                    f"{result.name}: {result.status.value}"
+                                )
+                            ),
+                        )
+                    if result.status in {
+                        ToolResultStatus.INVALID_ARGUMENTS,
+                        ToolResultStatus.UNKNOWN_TOOL,
+                    }:
+                        invalid_batch = True
+                    elif result.status in {
+                        ToolResultStatus.TRANSIENT_ERROR,
+                        ToolResultStatus.INTERNAL_ERROR,
+                    }:
+                        fatal_tool_result = fatal_tool_result or result
+                if fatal_tool_result is not None:
+                    return _turn_result(
+                        team,
+                        agent,
+                        manager,
+                        error_kind=(
+                            fatal_tool_result.error_kind
+                            or fatal_tool_result.status.value
+                        ),
+                        reason=(
+                            f"Tool {fatal_tool_result.name!r} did not complete "
+                            f"after {fatal_tool_result.attempts} attempt(s): "
+                            f"{fatal_tool_result.status.value}."
+                        ),
+                        failures=failures,
+                    )
+                if invalid_batch:
+                    argument_failure_rounds += 1
+                    if argument_failure_rounds > max_argument_retries:
+                        return _turn_result(
+                            team,
+                            agent,
+                            manager,
+                            error_kind="tool_argument_retries_exhausted",
+                            reason=(
+                                "Native tool arguments remained invalid after "
+                                f"{argument_failure_rounds} tool rounds."
+                            ),
+                            failures=failures,
+                        )
+            return _turn_result(
+                team,
+                agent,
+                manager,
+                error_kind="reasoning_round_limit",
+                reason=(
+                    "Native tool calling reached its round limit without a "
+                    "final answer."
                 ),
-                raw=tool_call.raw,
+                failures=failures,
             )
-        active_agent_token = (
-            manager._active_tool_agent.set(agent) if manager else None
-        )
-        invocation_token = (
-            manager._active_tool_invocation_id.set(
-                tool_call.call_id
-                or f"{manager._active_discussion_id.get() or 'runtime'}:"
-                f"{agent.agent_id}:{tool_name}"
-            )
-            if manager
-            else None
-        )
-
-        def finish(result: ToolResult) -> ToolResult:
-            if manager and active_agent_token is not None:
-                manager._active_tool_agent.reset(active_agent_token)
-            if manager and invocation_token is not None:
-                manager._active_tool_invocation_id.reset(invocation_token)
-            return result
-
-        # Audit check
-        if manager and tool_name in manager.tool_auditors:
-            auditor = manager.tool_auditors[tool_name]
-            try:
-                if inspect.iscoroutinefunction(auditor):
-                    approved, audit_reason = await auditor(*args, **kwargs)
-                else:
-                    approved, audit_reason = await asyncio.to_thread(auditor, *args, **kwargs)
-                if not approved:
-                    content = f"Error: Tool execution rejected by auditor: {audit_reason}"
-                    return finish(ToolResult(tool_call_id=tool_call.call_id, name=tool_name, content=content, raw=tool_call.raw))
-            except Exception as e:
-                content = f"Error auditing tool '{tool_name}': {e}"
-                return finish(ToolResult(tool_call_id=tool_call.call_id, name=tool_name, content=content, raw=tool_call.raw))
-
-        if tool_name in team.tools:
-            tool_obj = team.tools[tool_name]
-            try:
-                content = await tool_obj(*args, **kwargs)
-            except Exception as e:
-                content = f"Error executing tool '{tool_name}': {e}"
-        else:
-            content = f"Error: Tool '{tool_name}' is not registered."
-
-        return finish(ToolResult(tool_call_id=tool_call.call_id, name=tool_name, content=content, raw=tool_call.raw))
+        finally:
+            _scrub_private_window_messages(agent)
+            team.set_status(agent.name, "Idle")
+            if manager:
+                manager._emit_callback("on_status_change", agent.name, "Idle")
+                manager._auto_save(
+                    agents={agent.agent_id}, teams={team.team_id}
+                )

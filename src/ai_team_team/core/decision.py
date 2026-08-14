@@ -202,7 +202,7 @@ class TeamDecisionProvider:
         if team is None:
             return DecisionOutcome("pending", "The approval AgentTeam is missing.")
         try:
-            transcript, members = (
+            discussion, members = (
                 await self.manager._execute_team_discussion_with_members(
                     team,
                     prompt,
@@ -221,7 +221,7 @@ class TeamDecisionProvider:
                 "pending", "The approval AgentTeam has no active members."
             )
         return await self.ballot_team_boolean(
-            principal, request_id, prompt, transcript, members
+            principal, request_id, prompt, discussion.transcript, members
         )
 
     async def decide_principal_boolean(
@@ -285,7 +285,7 @@ class TeamDecisionProvider:
                 "pending", "The approval AgentTeam has no active members."
             )
         try:
-            transcript, members = (
+            discussion, members = (
                 await self.manager._execute_team_discussion_with_members(
                     team,
                     prompt
@@ -311,7 +311,7 @@ class TeamDecisionProvider:
                 agent,
                 prompt
                 + "\n\nDiscussion transcript:\n"
-                + transcript
+                + discussion.transcript
                 + "\n\nAllowed aliases: "
                 + json.dumps(list(candidates))
                 + '\nReturn exactly JSON: {"model_alias": "...", "reason": "..."}',

@@ -2,7 +2,7 @@ import asyncio
 import inspect
 import json
 import logging
-from typing import Union, List, Dict, Optional, Any
+from typing import TYPE_CHECKING, Union, List, Dict, Optional, Any
 from .exceptions import (
     LLMGenerationError,
     TokenLimitExceededError,
@@ -10,6 +10,9 @@ from .exceptions import (
 )
 
 logger = logging.getLogger("ATT.CoreUtils")
+
+if TYPE_CHECKING:
+    from ai_team_team.tool import Tool
 
 
 _RETRYABLE_PROVIDER_ERROR_NAMES = {
@@ -143,7 +146,7 @@ async def generate_with_retry(
     require_json: bool = False,
     retries: int = 3,
     backoff_factor: float = 1.5,
-    tools: Optional[List[Dict[str, Any]]] = None,
+    tools: Optional[List["Tool"]] = None,
     return_response_obj: bool = False,
     manager: Optional[Any] = None,
     model_alias: Optional[str] = None
@@ -192,7 +195,7 @@ async def generate_with_retry(
                 if reservation is not None and output_parameter is None:
                     manager.token_budget.release(reservation)
                     reservation = None
-                    raise ValueError(
+                    raise LLMGenerationError(
                         "Hard token budgets require an LLM client that "
                         "accepts max_output_tokens or max_tokens."
                     )
@@ -290,20 +293,29 @@ async def generate_with_retry(
                     manager.token_budget.release(reservation)
             if isinstance(e, TokenLimitExceededError):
                 raise e
+            if isinstance(e, LLMGenerationError):
+                raise e
             is_transient = _is_retryable_llm_error(e)
 
             if attempt == attempts or not is_transient:
                 logger.error(
-                    "LLM generation failed on attempt %s: %s", attempt, e
+                    "LLM generation failed on attempt %s with error type %s.",
+                    attempt,
+                    type(e).__name__,
                 )
                 raise LLMGenerationError(
-                    f"LLM generation failed after {attempt} attempt(s): {e}"
+                    "LLM generation failed after "
+                    f"{attempt} attempt(s) with {type(e).__name__}."
                 ) from e
 
             sleep_time = float(backoff_factor) * (2 ** (attempt - 1))
             logger.warning(
-                f"LLM generation failed (attempt {attempt}/{attempts}): {e}. "
-                f"Retrying in {sleep_time:.2f}s..."
+                "LLM generation failed (attempt %s/%s) with error type %s; "
+                "retrying in %.2fs.",
+                attempt,
+                attempts,
+                type(e).__name__,
+                sleep_time,
             )
             if sleep_time:
                 await asyncio.sleep(sleep_time)

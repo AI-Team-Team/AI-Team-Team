@@ -11,7 +11,7 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from ai_team_team import ATTManager, Agent, Tool, ATTConfig, ATTException
+from ai_team_team import AgentTurnStatus, ATTManager, Agent, Tool, ATTConfig
 from ai_team_team.core.strategies import TextReactReasoningStrategy, NativeReasoningStrategy
 
 class TestValidationAndRetry(unittest.IsolatedAsyncioTestCase):
@@ -28,7 +28,9 @@ class TestValidationAndRetry(unittest.IsolatedAsyncioTestCase):
         self.mock_client.supports_native_tool_calling = MagicMock(return_value=False)
         
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
-        self.config = ATTConfig(tool_calling_mode="react", max_tool_retries=2)
+        self.config = ATTConfig(
+            tool_calling_mode="react", max_tool_argument_retries=2
+        )
         self.manager = ATTManager(root_ai=self.root_ai, config=self.config)
 
     async def test_create_agent_team_invalid_model(self):
@@ -95,74 +97,90 @@ class TestValidationAndRetry(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("Error: Model 'invalid-model-name' is not registered", observation)
 
-    async def test_react_max_tool_retries_limit(self):
-        """Verify that TextReactReasoningStrategy raises an exception when max_tool_retries limit is exceeded."""
+    async def test_react_argument_correction_limit_isolates_turn(self):
+        """Verify that repeated invalid Text arguments produce an incomplete turn."""
         self.manager.register_tools_context({"att_manager": self.manager})
         team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
         
-        # We register a tool that fails/returns an error
-        def failing_tool():
-            return "Error: Database connection lost."
-        self.manager.register_tool("fail_tool", "Fails always", failing_tool)
+        call_count = 0
+
+        def typed_tool(value: int):
+            nonlocal call_count
+            call_count += 1
+            return value
+
+        self.manager.register_tool("typed_tool", "Requires an integer", typed_tool)
         
         # Inject side effect where the LLM repeatedly calls the failing tool
         self.mock_client.generate.side_effect = [
-            "Thought: Try fail_tool.\nAction: fail_tool()",
-            "Thought: Try fail_tool again.\nAction: fail_tool()",
-            "Thought: Try one more time.\nAction: fail_tool()",
+            "Thought: Try.\nAction: typed_tool(value='bad')",
+            "Thought: Correct.\nAction: typed_tool(value='still bad')",
+            "Thought: Correct again.\nAction: typed_tool(value='bad again')",
             "Final Answer: Unreachable"
         ]
         
         agent = team.members[0]
-        # Two retries allow three total attempts; the third failure closes it.
-        with self.assertRaises(ATTException) as ctx:
-            await team.execute_react_step(
-                agent=agent,
-                prompt="Start task",
-                system_instruction="Do it",
-                max_steps=5,
-                manager=self.manager
-            )
-        self.assertIn("Maximum tool retries (2) exceeded", str(ctx.exception))
-        self.assertIn("Database connection lost", str(ctx.exception))
+        result = await team.execute_reasoning_step_detailed(
+            agent=agent,
+            prompt="Start task",
+            system_instruction="Do it",
+            max_steps=5,
+            manager=self.manager,
+        )
+        self.assertIs(result.status, AgentTurnStatus.INCOMPLETE)
+        self.assertEqual(result.error_kind, "tool_argument_retries_exhausted")
+        self.assertEqual(call_count, 0)
 
-    async def test_native_max_tool_retries_limit(self):
-        """Verify that NativeReasoningStrategy raises an exception when max_tool_retries limit is exceeded."""
+    async def test_native_argument_correction_counts_once_per_batch(self):
+        """Verify that a parallel invalid Native batch consumes one correction opportunity."""
         self.manager.register_tools_context({"att_manager": self.manager})
         self.mock_client.supports_native_tool_calling = MagicMock(return_value=True)
         self.manager.config.tool_calling_mode = "native"
         
         team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
         
-        def failing_tool():
-            return "Error: API Timeout."
-        self.manager.register_tool("fail_tool", "Fails always", failing_tool)
+        call_count = 0
+
+        def typed_tool(value: int):
+            nonlocal call_count
+            call_count += 1
+            return value
+
+        self.manager.register_tool("typed_tool", "Requires an integer", typed_tool)
         
         # Mock structured LLM Response with tool calls
         from ai_team_team.core.response import ToolCall, LLMResponse
-        tool_call_1 = ToolCall(call_id="call_1", name="fail_tool", arguments={})
-        tool_call_2 = ToolCall(call_id="call_2", name="fail_tool", arguments={})
-        tool_call_3 = ToolCall(call_id="call_3", name="fail_tool", arguments={})
+        def invalid_batch(index):
+            return LLMResponse(
+                text="Executing tools",
+                tool_calls=[
+                    ToolCall(
+                        call_id=f"call_{index}_{item}",
+                        name="typed_tool",
+                        arguments={"value": "bad"},
+                    )
+                    for item in range(3)
+                ],
+            )
         
         self.mock_client.generate.side_effect = [
-            LLMResponse(
-                text="Executing tools",
-                tool_calls=[tool_call_1, tool_call_2, tool_call_3],
-            ),
-            LLMResponse(text="Final Answer: Done")
+            invalid_batch(1),
+            invalid_batch(2),
+            invalid_batch(3),
+            LLMResponse(text="Final Answer: Unreachable"),
         ]
         
         agent = team.members[0]
-        # Two retries allow three total attempts; the third failure closes it.
-        with self.assertRaises(ATTException) as ctx:
-            await team.execute_react_step(
-                agent=agent,
-                prompt="Start task",
-                system_instruction="Do it",
-                max_steps=5,
-                manager=self.manager
-            )
-        self.assertIn("Maximum tool retries (2) exceeded", str(ctx.exception))
+        result = await team.execute_reasoning_step_detailed(
+            agent=agent,
+            prompt="Start task",
+            system_instruction="Do it",
+            max_steps=5,
+            manager=self.manager,
+        )
+        self.assertIs(result.status, AgentTurnStatus.INCOMPLETE)
+        self.assertEqual(result.error_kind, "tool_argument_retries_exhausted")
+        self.assertEqual(call_count, 0)
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,27 +1,9 @@
 import json
 import logging
-from dataclasses import dataclass
-from enum import Enum
 from typing import Any, Optional
 
 from .core import Agent, generate_with_retry
-
-
-class AuditStatus(str, Enum):
-    """The outcome category of a supervisory audit."""
-
-    HEALTHY = "healthy"
-    UNHEALTHY = "unhealthy"
-    UNKNOWN = "unknown"
-
-
-@dataclass(frozen=True)
-class AuditResult:
-    """A structured audit result that preserves operational failures."""
-
-    status: AuditStatus
-    reason: str
-    cause: Optional[str] = None
+from .core.response import AuditResult, AuditStatus, OperationalStatus
 
 
 class SupervisoryTeam:
@@ -95,7 +77,12 @@ class SupervisoryTeam:
         )
 
     async def audit_team_dialog(
-        self, team: Any, dialog_transcript: str
+        self,
+        team: Any,
+        dialog_transcript: str,
+        *,
+        operational_status: OperationalStatus = OperationalStatus.HEALTHY,
+        operational_reason: str = "All member turns completed.",
     ) -> AuditResult:
         """Audits a transcript without treating audit outages as healthy."""
         for auditor in self.auditors:
@@ -131,17 +118,42 @@ class SupervisoryTeam:
                 f"--- TARGET TRANSCRIPT BEGIN ---\n{working_transcript}\n"
                 "--- TARGET TRANSCRIPT END ---\n"
             )
-            debate_transcript = await self.manager.execute_team_discussion(
+            debate = await self.manager.execute_team_discussion_detailed(
                 supervisor_team,
                 prompt=audit_prompt,
                 rounds=2,
                 skip_audit=True,
             )
+            from .core.response import DiscussionStatus
+
+            if debate.status is DiscussionStatus.PARTIAL:
+                failures = [
+                    turn.reason
+                    for round_result in debate.rounds
+                    for turn in round_result.turns
+                    if turn.reason
+                ]
+                raise RuntimeError(
+                    "The supervisory committee discussion was incomplete: "
+                    + "; ".join(failures)
+                )
+            debate_transcript = debate.transcript
+            decision_mode = (
+                self.manager.config.operational_status_decision_mode
+                if self.manager
+                else "framework"
+            )
+            operational_instruction = ""
+            if decision_mode in {"supervisor", "framework_then_supervisor"}:
+                operational_instruction = (
+                    " Also output `operational_status` as exactly `healthy` "
+                    "or `degraded`, plus a non-empty `operational_reason`."
+                )
             consensus_prompt = (
                 "Extract the supervisory committee's consensus from the "
                 "following debate. Output exactly a JSON object with a "
-                "boolean `is_healthy` and string `reason`.\n\n"
-                f"{debate_transcript}"
+                "boolean `is_healthy` and string `reason`."
+                f"{operational_instruction}\n\n{debate_transcript}"
             )
             retries = (
                 self.manager.config.llm_max_retries
@@ -190,7 +202,33 @@ class SupervisoryTeam:
                 if data["is_healthy"]
                 else AuditStatus.UNHEALTHY
             )
-            result = AuditResult(status=status, reason=reason)
+            decided_operational_status = operational_status
+            decided_operational_reason = operational_reason
+            if decision_mode in {"supervisor", "framework_then_supervisor"}:
+                try:
+                    decided_operational_status = OperationalStatus(
+                        data.get("operational_status")
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "Audit consensus must contain operational_status as "
+                        "healthy or degraded."
+                    ) from exc
+                decided_operational_reason = data.get("operational_reason")
+                if (
+                    not isinstance(decided_operational_reason, str)
+                    or not decided_operational_reason.strip()
+                ):
+                    raise ValueError(
+                        "Audit consensus must contain a non-empty "
+                        "operational_reason."
+                    )
+            result = AuditResult(
+                status=status,
+                reason=reason,
+                operational_status=decided_operational_status,
+                operational_reason=decided_operational_reason,
+            )
             self.logger.info(
                 "Consensus audit for team %s: status=%s, reason=%s",
                 team.team_id,
@@ -202,11 +240,28 @@ class SupervisoryTeam:
             self.logger.error(
                 "Supervisory audit could not determine a result: %s", exc
             )
+            fallback_operational = (
+                operational_status
+                if self.manager
+                and self.manager.config.operational_status_decision_mode
+                == "framework_then_supervisor"
+                else OperationalStatus.UNKNOWN
+                if self.manager
+                and self.manager.config.operational_status_decision_mode
+                == "supervisor"
+                else operational_status
+            )
             return AuditResult(
                 status=AuditStatus.UNKNOWN,
                 reason="The supervisory audit service could not determine "
                 "the discussion's health.",
                 cause=f"{type(exc).__name__}: {exc}",
+                operational_status=fallback_operational,
+                operational_reason=(
+                    operational_reason
+                    if fallback_operational is not OperationalStatus.UNKNOWN
+                    else "The supervisor could not determine runtime health."
+                ),
             )
 
     async def report_anomaly(

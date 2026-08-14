@@ -107,6 +107,30 @@ Direct mock clients used by persisted agents must be registered with `manager.re
 
 Callbacks are background observations. Call `await manager.flush_callbacks()` before asserting their effects. Retry tests must use typed transient failures such as `ConnectionError` or an exception with `retryable=True`; arbitrary `RuntimeError` instances intentionally do not retry.
 
+Tool execution tests should separately cover argument correction and execution replay.
+
+Use malformed syntax, unknown tools, strict type mismatches, or JSON Schema violations for `max_tool_argument_retries`; assert that the callable was never invoked.
+
+Use `RetryableToolError` for `max_tool_execution_retries`, select the intended `tool_execution_retry_policy`, and opt into `Tool(retry_safe=True)` when testing the `retry_safe` policy.
+
+A custom result string beginning with `Error:` is a successful ordinary string unless the callable raises a typed exception.
+
+Text parser tests must include nested containers, parentheses inside strings, escaped and triple quotes, multiline content, Markdown fences, Unicode, truncation, duplicate keywords, expanded arguments, and multiple actions.
+
+Native parallel invalid-call tests must assert that the batch consumes one correction opportunity rather than one per failed call.
+
+Discussion tests should use `execute_reasoning_step_detailed()` and `execute_team_discussion_detailed()` when asserting failure semantics.
+
+Default isolate policies produce `AgentTurnStatus.INCOMPLETE` and `DiscussionStatus.PARTIAL`, preserve peer results, and let the failed member rejoin the next round with a reset correction budget.
+
+Abort-policy tests should assert `AgentTurnIncompleteError`.
+
+Strict governance tests must prove that any incomplete turn leaves requests and approvals pending.
+
+Operational audit tests must cover framework, supervisor, and framework-then-supervisor authority; content and runtime status combinations; and none/queue/wake degraded escalation. Durable operational alerts must be tested for stable fingerprint merging, occurrence timestamps/counts, active-wake deduplication, success removal, and failure/cancellation requeue without private tool arguments or bodies.
+
+Team creation fault-injection tests should fail before validation, during Agent/DocLib staging, and during final publication, then compare the complete Agent, team, library, parent/child, private-library, dirty-state, and filesystem snapshots. A successfully committed team must remain registered if its first later discussion fails.
+
 Reliability changes should cover schema preflight without mutation, competing processes, abrupt writer termination, pending-delta coalescing, cancellation, shared-agent context/tool scope, durable UNKNOWN alert states, callback ordering and isolation, and hanging-provider shutdown behavior. The suite's `test_high_hardening.py` contains reference patterns for these cases.
 
 Private Agent DocLib tests must create agents through `register_agent` or a supported team-creation path.

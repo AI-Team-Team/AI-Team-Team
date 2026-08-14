@@ -35,6 +35,17 @@ class LineageApprovalCommunicationConfig(_StrictCommunicationConfig):
     direction: Literal["one_way", "bidirectional"] = "bidirectional"
 
 
+class TurnFailurePolicyConfig(BaseModel):
+    """Controls whether member-scoped failures abort a whole discussion."""
+
+    model_config = ConfigDict(
+        extra="forbid", validate_assignment=True, strict=True
+    )
+
+    tool: Literal["isolate", "abort"] = "isolate"
+    llm: Literal["isolate", "abort"] = "isolate"
+
+
 CommunicationConfig = Annotated[
     Union[
         PermissiveCommunicationConfig,
@@ -120,6 +131,26 @@ class ATTConfig:
         "tool_calling_mode": {"auto", "native", "react", "text_react"},
         "audit_unknown_escalation_mode": {"wake", "queue"},
         "agent_private_data_policy": {"retain", "archive", "delete"},
+        "text_tool_schema_mode": {
+            "compact",
+            "full",
+            "compact_with_examples",
+        },
+        "tool_execution_retry_policy": {
+            "never",
+            "retry_safe",
+            "typed_transient",
+        },
+        "operational_status_decision_mode": {
+            "framework",
+            "supervisor",
+            "framework_then_supervisor",
+        },
+        "operational_degraded_escalation_mode": {
+            "none",
+            "queue",
+            "wake",
+        },
     }
     _POSITIVE_INTS = {
         "max_delegation_depth",
@@ -135,7 +166,8 @@ class ATTConfig:
     _NON_NEGATIVE_INTS = {
         "max_migrations_per_team_discussion",
         "llm_max_retries",
-        "max_tool_retries",
+        "max_tool_argument_retries",
+        "max_tool_execution_retries",
     }
     _BOOL_FIELDS = {
         "enable_dynamic_delegation",
@@ -148,6 +180,7 @@ class ATTConfig:
         "model_token_limits": "_validate_token_limit",
         "model_max_output_tokens": "_validate_output_limit",
         "model_tokenizer_configs": "_validate_string_mapping",
+        "tool_prompt_modes": "_validate_tool_prompt_mode",
     }
 
     def __setattr__(self, name: str, value: object) -> None:
@@ -164,14 +197,17 @@ class ATTConfig:
             self._require_int(name, value, minimum=0)
         elif name == "min_subagent_team_size":
             self._require_int(name, value, minimum=3)
-        elif name == "llm_retry_backoff_factor":
+        elif name in {
+            "llm_retry_backoff_factor",
+            "tool_execution_retry_backoff_factor",
+        }:
             if (
                 not isinstance(value, (int, float))
                 or isinstance(value, bool)
                 or value < 0
             ):
                 raise ValueError(
-                    "llm_retry_backoff_factor must be a non-negative number."
+                    f"{name} must be a non-negative number."
                 )
             value = float(value)
         elif name == "parent_failover_timeout_seconds":
@@ -186,6 +222,15 @@ class ATTConfig:
             value = float(value)
         elif name == "communication":
             value = _parse_communication_config(value)
+        elif name == "turn_failure_policy":
+            if isinstance(value, TurnFailurePolicyConfig):
+                pass
+            elif isinstance(value, Mapping):
+                value = TurnFailurePolicyConfig.model_validate(dict(value))
+            else:
+                raise ValueError(
+                    "turn_failure_policy must be a TurnFailurePolicyConfig or mapping."
+                )
         elif name in self._BOOL_FIELDS and not isinstance(value, bool):
             raise ValueError(f"{name} must be a boolean.")
         elif name == "workspace_root":
@@ -236,6 +281,17 @@ class ATTConfig:
                 f"Maximum output tokens for {key!r} must be a positive integer."
             )
 
+    @staticmethod
+    def _validate_tool_prompt_mode(key: str, value: Any) -> None:
+        if not isinstance(key, str) or not key:
+            raise ValueError("Tool names must be non-empty strings.")
+        allowed = {"compact", "full", "compact_with_examples"}
+        if value not in allowed:
+            raise ValueError(
+                f"Prompt mode for {key!r} must be one of: "
+                "compact, compact_with_examples, full."
+            )
+
     def __init__(
         self,
         enable_dynamic_delegation: bool = True,
@@ -258,7 +314,15 @@ class ATTConfig:
         emergency_discussion_rounds: int = 1,
         tool_calling_mode: str = "auto",
         max_tool_rounds: int = 5,
-        max_tool_retries: int = 3,
+        max_tool_argument_retries: int = 3,
+        max_tool_execution_retries: int = 2,
+        tool_execution_retry_policy: str = "never",
+        tool_execution_retry_backoff_factor: float = 0.5,
+        text_tool_schema_mode: str = "compact",
+        tool_prompt_modes: Optional[Dict[str, str]] = None,
+        turn_failure_policy: Optional[TurnFailurePolicyConfig] = None,
+        operational_status_decision_mode: str = "framework",
+        operational_degraded_escalation_mode: str = "none",
         model_token_limits: Optional[Dict[str, int]] = None,
         model_max_output_tokens: Optional[Dict[str, int]] = None,
         default_max_output_tokens: int = 1024,
@@ -293,7 +357,25 @@ class ATTConfig:
         self.emergency_discussion_rounds = emergency_discussion_rounds
         self.tool_calling_mode = tool_calling_mode
         self.max_tool_rounds = max_tool_rounds
-        self.max_tool_retries = max_tool_retries
+        self.max_tool_argument_retries = max_tool_argument_retries
+        self.max_tool_execution_retries = max_tool_execution_retries
+        self.tool_execution_retry_policy = tool_execution_retry_policy
+        self.tool_execution_retry_backoff_factor = (
+            tool_execution_retry_backoff_factor
+        )
+        self.text_tool_schema_mode = text_tool_schema_mode
+        self.tool_prompt_modes = tool_prompt_modes or {}
+        self.turn_failure_policy = (
+            TurnFailurePolicyConfig()
+            if turn_failure_policy is None
+            else turn_failure_policy
+        )
+        self.operational_status_decision_mode = (
+            operational_status_decision_mode
+        )
+        self.operational_degraded_escalation_mode = (
+            operational_degraded_escalation_mode
+        )
         self.model_token_limits = model_token_limits or {}
         self.model_max_output_tokens = model_max_output_tokens or {}
         self.default_max_output_tokens = default_max_output_tokens

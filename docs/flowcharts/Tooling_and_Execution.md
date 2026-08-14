@@ -50,6 +50,8 @@ sequenceDiagram
     participant Manager as ATTManager
     participant Strategy as Strategy (Native/ReAct)
     participant LLM as LLM Provider Adapter
+    participant Executor as Shared ToolExecutor
+    participant Validator as Signature / Pydantic / JSON Schema
     participant Auditor as ToolAuditor
     
     %% Phase 1: Registration
@@ -69,19 +71,26 @@ sequenceDiagram
     
     %% Phase 3: Execution & Audit
     Note over Strategy,Auditor: Phase 3: Execution & Interception
-    Strategy->>Strategy: Parses JSON into tool_name & arguments
-    
-    Strategy->>Auditor: pre-execution intercept: audit_drop_db(args)
+    Strategy->>Executor: execute(tool_name, arguments)
+    Executor->>Validator: bind signature and validate strict nested input
+
+    alt Invalid or unknown arguments
+        Validator-->>Executor: invalid_arguments / unknown_tool
+        Executor-->>Strategy: ToolResult(status, error_kind, attempts)
+    else Valid arguments
+        Validator-->>Executor: validated args and kwargs
+        Executor->>Auditor: pre-execution intercept under invocation ContextVars
+    end
     
     alt Auditor Returns False
         Auditor-->>Strategy: (False, "Security Violation: Destructive command")
-        Strategy->>Strategy: Execution Blocked
-        Strategy-->>Manager: Returns observation string = "Security Violation"
+        Auditor-->>Executor: denied ToolResult
+        Executor-->>Strategy: Structured observation
     else Auditor Returns True
         Auditor-->>Strategy: (True, "Approved")
-        Strategy->>Dev: Execute actual python func(args)
-        Dev-->>Strategy: Return result string
-        Strategy-->>Manager: Returns actual observation string
+        Executor->>Dev: Execute typed Python callable
+        Dev-->>Executor: Value or typed Tool exception
+        Executor-->>Strategy: Classified ToolResult
     end
 ```
 
@@ -92,36 +101,29 @@ This flowchart sequences the multi-round cooperative debate process executed whe
 ```mermaid
 flowchart TD
     Start["Call manager.execute_team_discussion(team, prompt, rounds)"] --> SessionLock["Wait for team.discussion_lock\n(normal and emergency sessions)"]
-    SessionLock --> Init["1. Setup transcript logs\n2. Initialize discussion round = 1"]
+    SessionLock --> Init["Create discussion ID and structured round collection"]
     
     Init --> SuppressIOGate["async with manager.suppress_auto_save():\n(Task-local dirty-delta batching)"]
     SuppressIOGate --> LoopRounds{"round <= total_rounds?"}
     
-    LoopRounds -- "Yes" --> MemberIteration["Iterate through each member (Agent) in team"]
-    
-    MemberIteration --> RunAgentStep["Call team.execute_reasoning_step(agent, prompt)"]
-    
-    RunAgentStep --> NextMember{"All members finished turn?"}
-    NextMember -- "No" --> MemberIteration
-    
-    NextMember -- "Yes" --> SupervisoryAudit["3-AI Supervisory Team audits round transcript"]
-    
-    SupervisoryAudit --> AuditResult{"AuditStatus?"}
-    
-    AuditResult -- "No (Anomaly)" --> ReportAnomaly["Call report_anomaly()\nRoute failure alert to parent inbox\n(or escalate to Level 0 Root AI)"]
-    ReportAnomaly --> IncrementRound["Increment round by 1"]
-    
-    AuditResult -- "Yes (Healthy)" --> IncrementRound
+    LoopRounds -- "Yes" --> MemberIteration["Freeze current members and run their detailed turns concurrently"]
+    MemberIteration --> CollectTurns["Collect AgentTurnResult values and preserve incomplete placeholders"]
+    CollectTurns --> GovernanceGate{"Strict governance requires complete turns?"}
+    GovernanceGate -- "Yes, any incomplete" --> Pending["Fail closed; request or approval remains PENDING"]
+    GovernanceGate -- "No" --> IncrementRound["Apply deferred membership changes and continue"]
     
     IncrementRound --> LoopRounds
     
-    LoopRounds -- "No" --> FinalizeState["1. Save final snapshot to SQLite\n2. Log debate completion metrics"]
-    FinalizeState --> End["Return compiled debate transcript"]
+    LoopRounds -- "No" --> SupervisoryAudit["Audit complete transcript plus privacy-safe failure metadata"]
+    SupervisoryAudit --> AuditResult["Produce independent AuditStatus and OperationalStatus"]
+    AuditResult --> Escalation["Route configured content, UNKNOWN, or degraded alerts"]
+    Escalation --> FinalizeState["Submit incremental dirty delta and structured callbacks"]
+    FinalizeState --> End["Return DiscussionResult or transcript wrapper"]
 ```
 
 ## 4. Granular Agent Turn (`execute_reasoning_step`)
 
-This flowchart outlines the prompt compilation, strategy routing, execution loops, memory compression, and robust AST parsing mechanisms during a single agent's reasoning turn. It highlights token failover hot-swaps (`messages.pop()`) and AST fallback mechanics.
+This flowchart outlines prompt compilation, invocation-time tool visibility, strategy routing, strict parsing and validation, classified retries, and structured member failure isolation during one Agent turn.
 
 ```mermaid
 flowchart TD
@@ -152,25 +154,24 @@ flowchart TD
     FailoverPop --> ModelSwap["Hot-swap client via Failover Policy\n(e.g., query parent for lightweight fallback model)"]
     ModelSwap --> LLMCall
     
-    CatchFailover -- "No" --> ParseAction["Parse response for actions (XML tags or Action: tool_name)"]
+    CatchFailover -- "No" --> ParseAction["Balanced scan of XML or Action: tool_name(...) syntax"]
     ParseAction --> ActionType{"Action found?"}
     ActionType -- "No (Final Answer)" --> SetFinalAnswer["Append Final Answer to memory\nBreak Loop"]
-    ActionType -- "Yes (Tool Call)" --> SafeASTParse["Evaluate args using ast.parse(f'dummy_func({args_str})')"]
-    
-    SafeASTParse --> ASTCheck{"ast.parse successful?"}
-    ASTCheck -- "No" --> ASTFallback["Fallback 1: ast.literal_eval(tuple)\nFallback 2: Regex string strip extraction"]
-    ASTCheck -- "Yes" --> ExtractKwargs["Extract list comprehension of args and kwargs"]
-    
-    ASTFallback --> ToolAuditor
-    ExtractKwargs --> ToolAuditor{"Tool Auditor registered for tool?"}
+    ActionType -- "Yes (Tool Call)" --> SafeASTParse["Parse literal positional and keyword arguments; reject expansion and ambiguity"]
+    SafeASTParse --> ASTCheck{"Parse, signature, and strict schema valid?"}
+    ASTCheck -- "No" --> InvalidArgs["Append invalid_arguments observation and consume one correction opportunity"]
+    ASTCheck -- "Yes" --> ToolAuditor{"Tool Auditor registered for tool?"}
     
     ToolAuditor -- "Yes" --> RunAuditor["Invoke pre-execution auditor callback"]
     RunAuditor --> AuditorApprove{"Auditor approved?"}
-    AuditorApprove -- "No" --> BlockTool["Set observation = 'Blocked by auditor'\nAppend to memory"]
-    AuditorApprove -- "Yes" --> RunTool["Execute Tool function\n(e.g., GatedFileReader, DocLib, P2P Message)"]
+    AuditorApprove -- "No" --> BlockTool["Append denied ToolResult; do not retry"]
+    AuditorApprove -- "Yes" --> RunTool["Execute through shared ToolExecutor and typed retry policy"]
     ToolAuditor -- "No" --> RunTool
     RunTool --> SaveObservation["Append Thought, Action, and Observation to memory"]
     BlockTool --> NextReActStep["Increment step by 1"]
+    InvalidArgs --> ArgumentBudget{"Correction budget exhausted?"}
+    ArgumentBudget -- "No" --> NextReActStep
+    ArgumentBudget -- "Yes" --> Incomplete["Return INCOMPLETE member turn"]
     SaveObservation --> NextReActStep
     NextReActStep --> ReActLoop
     ReActLoop -- "No" --> CheckMemory
@@ -189,7 +190,7 @@ flowchart TD
     
     NativeResponse -- "Yes (Structured calls)" --> SaveToolCall["Save Assistant message with tool_calls (JSON) to DB"]
     SaveToolCall --> ParallelExecute["Execute all tool calls concurrently via asyncio.gather()"]
-    ParallelExecute --> SaveToolResults["Save ToolResult messages to DB\n(tool_call_id, name, content)\nIncrement round counter"]
+    ParallelExecute --> SaveToolResults["Classify through shared ToolExecutor; an invalid batch consumes at most one correction opportunity"]
     SaveToolResults --> NativeLoop
     
     NativeResponse -- "No (Text response)" --> SaveTextResponse["Save Assistant final text to memory\nBreak Loop"]
@@ -199,5 +200,5 @@ flowchart TD
     SetFinalAnswer --> CheckMemory
     SaveTextResponse --> CheckMemory
     
-    CheckMemory["Call Memory Pruning (Summarize Early Turns)"] --> EndStep["Invoke manager._auto_save() to SQLite\nReturn agent step result"]
+    CheckMemory["Call Memory Pruning (Summarize Early Turns)"] --> EndStep["Submit incremental state delta and return AgentTurnResult"]
 ```

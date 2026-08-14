@@ -1,5 +1,8 @@
-from typing import Protocol, Optional, Union, List, Dict, Any
+from typing import Protocol, Optional, Union, List, Dict, Any, TYPE_CHECKING
 from .core import ToolCall, ToolResult, LLMResponse
+
+if TYPE_CHECKING:
+    from .tool import Tool
 
 class LLMClientProto(Protocol):
     """Protocol defining the standard interface for LLM client generation."""
@@ -7,7 +10,7 @@ class LLMClientProto(Protocol):
         self,
         prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List["Tool"]] = None,
         max_output_tokens: Optional[int] = None,
         temperature: float = 0.7,
         require_json: bool = False
@@ -41,6 +44,15 @@ from .core import (
     LineageApprovalCommunicationConfig,
     ParentApprovalCommunicationConfig,
     PermissiveCommunicationConfig,
+    TurnFailurePolicyConfig,
+    AgentTurnResult,
+    AgentTurnStatus,
+    DiscussionResult,
+    DiscussionRoundResult,
+    DiscussionStatus,
+    OperationalStatus,
+    ToolFailureSummary,
+    ToolResultStatus,
     PeerMessage,
     ATTException,
     LLMGenerationError,
@@ -50,9 +62,15 @@ from .core.exceptions import (
     DatabaseOwnershipError,
     LLMRateLimitError,
     LLMServiceError,
+    StatePersistenceError,
     StateRestoreError,
     TokenLimitExceededError,
     TransientLLMError,
+    AgentTurnIncompleteError,
+    ToolArgumentError,
+    ToolBusinessError,
+    ToolPermissionError,
+    RetryableToolError,
 )
 from .supervision import AuditResult, AuditStatus
 from .tool import Tool
@@ -77,6 +95,7 @@ __all__ = [
     "CommunicationOperationResult",
     "PeerMessage",
     "CommunicationConfig",
+    "TurnFailurePolicyConfig",
     "ATTManager",
     "Tool",
     "GatedFileReader",
@@ -85,13 +104,27 @@ __all__ = [
     "LLMGenerationError",
     "TokenLimitExceededError",
     "StateRestoreError",
+    "StatePersistenceError",
     "DatabaseOwnershipError",
     "AmbiguousTeamContextError",
     "TransientLLMError",
+    "AgentTurnIncompleteError",
+    "ToolArgumentError",
+    "ToolBusinessError",
+    "ToolPermissionError",
+    "RetryableToolError",
     "LLMRateLimitError",
     "LLMServiceError",
     "AuditResult",
     "AuditStatus",
+    "OperationalStatus",
+    "AgentTurnResult",
+    "AgentTurnStatus",
+    "DiscussionResult",
+    "DiscussionRoundResult",
+    "DiscussionStatus",
+    "ToolFailureSummary",
+    "ToolResultStatus",
     "DocumentLibrary",
     "ToolCall",
     "ToolResult",
