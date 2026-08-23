@@ -10,10 +10,10 @@ The test suite is located in the `test/` directory. You can run all tests using 
 ./venv/bin/python -m unittest discover -s test
 ```
 
-For individual test files:
+For an individual test package:
 
 ```bash
-./venv/bin/python -m unittest test/test_state_persistence.py
+./venv/bin/python -m unittest discover -s test/test_att/test_state_persistence
 ```
 
 ## 2. Asynchronous Execution
@@ -131,10 +131,12 @@ Operational audit tests must cover framework, supervisor, and framework-then-sup
 
 Team creation fault-injection tests should fail before validation, during Agent/DocLib staging, and during final publication, then compare the complete Agent, team, library, parent/child, private-library, dirty-state, and filesystem snapshots. A successfully committed team must remain registered if its first later discussion fails.
 
-Reliability changes should cover schema preflight without mutation, competing processes, abrupt writer termination, pending-delta coalescing, cancellation, shared-agent context/tool scope, durable UNKNOWN alert states, callback ordering and isolation, and hanging-provider shutdown behavior. The suite's `test_high_hardening.py` contains reference patterns for these cases.
+Reliability changes should cover schema preflight without mutation, competing processes, abrupt writer termination, pending-delta coalescing, cancellation, shared-agent context/tool scope, durable UNKNOWN alert states, callback ordering and isolation, and hanging-provider shutdown behavior.
+
+The suite's `test/test_att/test_high_hardening/` package contains reference patterns for these cases.
 
 Private Agent DocLib tests must create agents through `register_agent` or a supported team-creation path.
 
-Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, schema 6 corruption, and the absence of private body text from transcripts, callbacks, and message history. `test_private_doclib.py` contains the baseline end-to-end cases.
+Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, schema 6 corruption, and the absence of private body text from transcripts, callbacks, and message history. The `test/test_att/test_private_doclib/` package contains the baseline end-to-end cases.
 
 Communication changes must cover strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes, full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation, idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations. Schema 5 must be rejected before DDL.

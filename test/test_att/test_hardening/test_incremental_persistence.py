@@ -18,7 +18,6 @@ from ai_team_team import (
 from ai_team_team.database.persistence import DatabaseStore
 from ai_team_team.tool import get_default_tools
 
-
 class TestATTHardening(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="att_hardening_")
@@ -38,158 +37,6 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.manager.close()
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-
-    def test_config_rejects_unknown_policies(self):
-        cases = {
-            "migration_policy": "silent",
-            "failover_policy": "random",
-            "tool_calling_mode": "maybe",
-            "audit_unknown_escalation_mode": "ignore",
-            "agent_private_data_policy": "expose",
-        }
-        for name, value in cases.items():
-            with self.subTest(name=name):
-                with self.assertRaises(ValueError):
-                    ATTConfig(**{name: value})
-        with self.assertRaises(ValueError):
-            ATTConfig(communication={"policy": "open"})
-        for invalid in (False, 0, ""):
-            with self.subTest(communication=invalid):
-                with self.assertRaises(ValueError):
-                    ATTConfig(communication=invalid)
-        with self.assertRaises(ValueError):
-            ATTConfig(
-                communication={
-                    "policy": "parent_approval",
-                    "request_delivery": "queue",
-                    "direction": "bidirectional",
-                    "unexpected": True,
-                }
-            )
-        config = ATTConfig(
-            communication={"policy": "parent_approval"}
-        )
-        with self.assertRaises(ValueError):
-            config.communication.direction = "both"
-
-    def test_builtin_tools_have_manager_context_immediately(self):
-        team = self.manager.create_agent_team(self.root)
-        self.assertIs(
-            self.manager.tools_context["att_manager"], self.manager
-        )
-        self.assertIn("dispatch_subagent", team.tools)
-        self.manager.register_tools_context(
-            {"att_manager": object(), "service": "value"}
-        )
-        self.assertIs(
-            self.manager.tools_context["att_manager"], self.manager
-        )
-
-    async def test_migration_invalidates_all_descendant_depths(self):
-        left = self.manager.create_agent_team(self.root)
-        moving = self.manager.create_agent_team(left)
-        descendant = self.manager.create_agent_team(moving)
-        right = self.manager.create_agent_team(self.root)
-        right_child = self.manager.create_agent_team(right)
-
-        self.assertEqual(moving.depth, 2)
-        self.assertEqual(descendant.depth, 3)
-        self.assertEqual(right_child.depth, 2)
-
-        success, _ = await self.manager.negotiate_and_execute_migration(
-            moving, right_child, "Move the complete branch."
-        )
-
-        self.assertTrue(success)
-        self.assertEqual(moving.depth, 3)
-        self.assertEqual(descendant.depth, 4)
-
-    async def test_migration_rejects_changed_approval_path(self):
-        left = self.manager.create_agent_team(self.root)
-        right = self.manager.create_agent_team(self.root)
-        moving = self.manager.create_agent_team(left)
-        self.manager.config.migration_policy = "ancestor_approval"
-        started = asyncio.Event()
-        release = asyncio.Event()
-
-        class BlockingApproval:
-            async def authorize_migration(
-                self, team, target_parent, manager, rationale
-            ):
-                started.set()
-                await release.wait()
-                return True, "approved on old path"
-
-        with patch(
-            "ai_team_team.core.policies.resolve_migration_policy",
-            return_value=BlockingApproval(),
-        ):
-            task = asyncio.create_task(
-                self.manager.negotiate_and_execute_migration(
-                    moving, right, "path changes"
-                )
-            )
-            await started.wait()
-            with self.manager._topology_lock:
-                left.add_child_team(right)
-                right._parent_team = left
-                self.manager._team_parent_map[right.team_id] = left.team_id
-                right.invalidate_depth_cache(recursive=True)
-            release.set()
-            success, reason = await task
-
-        self.assertFalse(success)
-        self.assertIn("approval path changed", reason)
-        self.assertIs(moving.parent_team, left)
-
-    async def test_parallel_votes_are_atomic_and_execute_once(self):
-        team = self.manager.create_agent_team(self.root)
-        first, second, third = team.members
-        first_tools = get_default_tools(
-            {"att_manager": self.manager}, first
-        )
-        response = await first_tools["initiate_membership_vote"](
-            action="add",
-            target="Verifier",
-            rationale="Need independent verification.",
-            proposed_details={"model": "default"},
-        )
-        proposal_id = response.split("'")[1]
-        second_vote = get_default_tools(
-            {"att_manager": self.manager}, second
-        )["cast_vote"]
-        third_vote = get_default_tools(
-            {"att_manager": self.manager}, third
-        )["cast_vote"]
-
-        await asyncio.gather(
-            second_vote(proposal_id, "Agree"),
-            third_vote(proposal_id, "Agree"),
-        )
-
-        self.assertEqual(
-            sum(
-                member.name == "Dynamic_Verifier"
-                for member in team.members
-            ),
-            1,
-        )
-        self.assertTrue(
-            team.proposals[proposal_id]["proposed_details"]["executed"]
-        )
-        duplicate = await second_vote(proposal_id, "Agree")
-        self.assertIn("already closed", duplicate)
-
-        outsider = Agent("Outsider", "Observer", llm_client=self.client)
-        outsider_vote = get_default_tools(
-            {"att_manager": self.manager}, team
-        )["cast_vote"]
-        token = self.manager._active_tool_agent.set(outsider)
-        try:
-            rejected = await outsider_vote(proposal_id, "Agree")
-        finally:
-            self.manager._active_tool_agent.reset(token)
-        self.assertIn("Only an active team member", rejected)
 
     async def test_concurrent_nested_suppression_keeps_batches_separate(self):
         first = self.manager.create_agent_team(self.root)
@@ -222,7 +69,6 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
                 frozenset({second.team_id}),
             },
         )
-
     async def test_incremental_agent_write_preserves_other_messages(self):
         db_path = os.path.join(self.tmpdir, "state.db")
         manager = ATTManager(
@@ -253,7 +99,6 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             ).fetchall()
         self.assertEqual(before, after)
         await manager.close()
-
     async def test_slow_database_write_does_not_block_heartbeat(self):
         db_path = os.path.join(self.tmpdir, "slow.db")
         manager = ATTManager(
@@ -284,7 +129,6 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(heartbeats, 5)
             await manager.flush_state()
         await manager.close()
-
     async def test_incremental_doc_file_restore_and_missing_binding(self):
         db_path = os.path.join(self.tmpdir, "files.db")
         manager = ATTManager(
@@ -331,7 +175,6 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(StateRestoreError, "named"):
             await missing.load_state(db_path)
         await missing.close()
-
     async def test_incremental_inbox_and_proposal_restore(self):
         db_path = os.path.join(self.tmpdir, "governance.db")
         manager = ATTManager(
@@ -375,73 +218,6 @@ class TestATTHardening(unittest.IsolatedAsyncioTestCase):
             "incremental inbox",
         )
         await restored.close()
-
-    async def test_unknown_wake_queue_and_deduplication(self):
-        parent = self.manager.create_agent_team(self.root)
-        child = self.manager.create_agent_team(parent)
-        self.manager.execute_emergency_discussion = AsyncMock(
-            return_value="handled"
-        )
-        result = AuditResult(
-            AuditStatus.UNKNOWN,
-            "Audit unavailable.",
-            "TimeoutError: timeout",
-        )
-
-        await asyncio.gather(
-            self.manager.supervisor.report_unknown(
-                child, result, self.manager
-            ),
-            self.manager.supervisor.report_unknown(
-                child, result, self.manager
-            ),
-        )
-        await asyncio.sleep(0)
-        self.manager.execute_emergency_discussion.assert_awaited_once()
-        self.assertTrue(
-            self.manager.execute_emergency_discussion.await_args.kwargs[
-                "skip_audit"
-            ]
-        )
-
-        self.manager.execute_emergency_discussion.reset_mock()
-        self.manager.config.audit_unknown_escalation_mode = "queue"
-        await self.manager.supervisor.report_unknown(
-            child, result, self.manager
-        )
-        await asyncio.sleep(0)
-        self.manager.execute_emergency_discussion.assert_not_awaited()
-        self.assertTrue(
-            any(
-                message.get("type") == "audit_unknown_escalation"
-                for message in parent.message_inbox
-            )
-        )
-
-    async def test_unhealthy_keeps_emergency_escalation(self):
-        parent = self.manager.create_agent_team(self.root)
-        child = self.manager.create_agent_team(parent)
-        self.manager.execute_emergency_discussion = AsyncMock(
-            return_value="handled"
-        )
-
-        await self.manager.supervisor.report_anomaly(
-            child, "Confirmed deadlock.", self.manager
-        )
-        await asyncio.sleep(0)
-
-        self.manager.execute_emergency_discussion.assert_awaited_once()
-        alert = (
-            self.manager.execute_emergency_discussion
-            .await_args.args[1]
-        )
-        self.assertEqual(alert["type"], "child_failure_escalation")
-        self.assertFalse(
-            self.manager.execute_emergency_discussion.await_args.kwargs[
-                "skip_audit"
-            ]
-        )
-
     async def test_async_context_flushes_and_closes(self):
         db_path = os.path.join(self.tmpdir, "context.db")
         scoped = ATTManager(
