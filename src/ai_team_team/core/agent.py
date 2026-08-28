@@ -1,7 +1,11 @@
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from typing import List, Dict, Optional, Tuple, Any
+from typing import TYPE_CHECKING, List, Dict, Optional, Tuple, Any
+
+if TYPE_CHECKING:
+    from .manager import ATTManager
+    from .team import AgentTeam
 
 class Agent:
     """Represents an autonomous AI participant holding private conversation histories."""

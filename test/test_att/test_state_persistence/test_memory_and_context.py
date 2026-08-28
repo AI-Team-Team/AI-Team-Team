@@ -1,80 +1,28 @@
-import os
-import shutil
-import sys
-import tempfile
-import unittest
-import sqlite3
-import json
-import time
-from unittest.mock import MagicMock, AsyncMock
-
-# Setup paths
-CURRENT_DIR = os.path.dirname(__file__)
-ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
-SRC_DIR = os.path.join(ROOT_DIR, "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
-
-from ai_team_team import (
+from test.test_att.test_state_persistence._support import (
+    ATTConfig,
     ATTManager,
     Agent,
     AgentTeam,
-    ATTConfig,
-    DocumentLibrary,
+    AgreementDirection,
     ApprovalPrincipal,
+    AsyncMock,
     CommunicationAgreement,
     CommunicationApproval,
-    CommunicationRequest,
-)
-from ai_team_team.core.communication import (
-    AgreementDirection,
     CommunicationApprovalStatus,
+    CommunicationRequest,
     CommunicationRequestStatus,
+    DocumentLibrary,
+    MagicMock,
+    StatePersistenceTestCase,
+    json,
+    os,
     route_fingerprint,
+    sqlite3,
+    time,
 )
 
-class TestStatePersistence(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        self.old_cwd = os.getcwd()
-        self.tmpdir = tempfile.mkdtemp(prefix="att_persistence_test_")
-        os.chdir(self.tmpdir)
-        
-        self.db_path = os.path.join(self.tmpdir, "att_state.db")
 
-        # Setup mock client that will produce ReAct final answer
-        self.mock_react_client = MagicMock()
-        async def mock_generate(
-            prompt,
-            system_instruction=None,
-            temperature=0.3,
-            require_json=False,
-            **kwargs,
-        ):
-            if require_json:
-                return (
-                    '{"is_healthy": true, '
-                    '"reason": "Dialogue approved."}'
-                )
-            return (
-                "Thought: We are doing the task.\n"
-                "Final Answer: Task complete!"
-            )
-
-        self.mock_react_client.generate = mock_generate
-        
-        self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_react_client)
-        self.manager = ATTManager(
-            root_ai=self.root_ai,
-            db_path=self.db_path
-        )
-        self.manager.register_llm_client("critic", self.mock_react_client)
-        self.manager.register_tools_context({"att_manager": self.manager})
-
-    async def asyncTearDown(self):
-        await self.manager.close()
-        os.chdir(self.old_cwd)
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
-
+class TestStatePersistence(StatePersistenceTestCase):
     async def test_multi_turn_memory_format(self):
         """Verify that agent stores memory as list of dict turns, not concatenated string."""
         self.root_ai.messages.append({"role": "system", "content": "Initial System Instructions"})

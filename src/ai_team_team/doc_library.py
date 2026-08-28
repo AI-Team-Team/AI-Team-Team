@@ -294,6 +294,10 @@ class DocumentLibrary:
         create_parents: bool,
     ) -> int:
         clean_path = self._normalize_path(clean_path, allow_root=False)
+        if not self._supports_secure_dir_fd():
+            return self._open_file_descriptor_portable(
+                clean_path, flags, create_parents=create_parents
+            )
         nofollow = getattr(os, "O_NOFOLLOW", 0)
         directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
         current_fd = os.open(self.root_dir, directory_flags)
@@ -324,6 +328,26 @@ class DocumentLibrary:
             raise
         finally:
             os.close(current_fd)
+
+    @staticmethod
+    def _supports_secure_dir_fd() -> bool:
+        """Returns whether this runtime supports descriptor-relative traversal."""
+        supported = getattr(os, "supports_dir_fd", set())
+        return os.open in supported and os.mkdir in supported
+
+    def _open_file_descriptor_portable(
+        self,
+        clean_path: str,
+        flags: int,
+        *,
+        create_parents: bool,
+    ) -> int:
+        """Uses checked absolute paths on platforms without ``dir_fd``."""
+        if create_parents:
+            self._ensure_parent_directories_portable(clean_path)
+        target = self._resolve_path(clean_path, allow_root=False)
+        self._reject_native_symlinks(clean_path)
+        return os.open(target, flags, 0o600)
 
     def path_exists(self, path: str) -> bool:
         with self._lock:
@@ -408,6 +432,9 @@ class DocumentLibrary:
             self._notify_change(normalized, content)
 
     def _ensure_parent_directories(self, clean_path: str) -> None:
+        if not self._supports_secure_dir_fd():
+            self._ensure_parent_directories_portable(clean_path)
+            return
         nofollow = getattr(os, "O_NOFOLLOW", 0)
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
         current_fd = os.open(self.root_dir, flags)
@@ -422,3 +449,24 @@ class DocumentLibrary:
                 current_fd = next_fd
         finally:
             os.close(current_fd)
+
+    def _ensure_parent_directories_portable(self, clean_path: str) -> None:
+        """Creates checked parent directories without descriptor-relative APIs."""
+        current = self.root_dir
+        for part in PurePosixPath(clean_path).parts[:-1]:
+            current = os.path.join(current, part)
+            if os.path.lexists(current) and os.path.islink(current):
+                raise PermissionError(
+                    "Access denied: Native filesystem symlinks are not allowed."
+                )
+            os.makedirs(current, mode=0o700, exist_ok=True)
+            resolved = os.path.realpath(current)
+            try:
+                if os.path.commonpath([self.root_dir, resolved]) != self.root_dir:
+                    raise PermissionError(
+                        "Access denied: Path traversal attempted."
+                    )
+            except ValueError as exc:
+                raise PermissionError(
+                    "Access denied: Path traversal attempted."
+                ) from exc

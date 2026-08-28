@@ -4,7 +4,7 @@ This document serves as the architectural data dictionary for the AI-Team-Team (
 
 ## 1. `ATTManager`: The Master Orchestrator
 
-The `ATTManager` is the singleton-like global event bus and state coordinator. It manages the top-level references to all `AgentTeam` instances and handles deferred async operations.
+The `ATTManager` is the public orchestration facade exported by the `ai_team_team.core.manager` package. Its implementation lives in the `manager/facade/` package, while bounded manager-owned packages implement communication validation, serialized discussions, DocLib operations, restore, state validation, and team creation. Additional focused services implement Agent lifecycle, persistence, topology mutation, migration, failover, durable alerts, runtime registries, and ordered callbacks. SQLite work remains coordinated by the single-writer `PersistenceCoordinator` behind `StateCoordinator`.
 
 ### Key Internal State
 
@@ -16,6 +16,16 @@ The `ATTManager` is the singleton-like global event bus and state coordinator. I
 - **`tools_context (Dict[str, Any])`**: A shared memory space injected into ReAct tools containing references like `{"att_manager": self}`.
 - **Invocation Context (`ContextVar`)**: Carries the active agent, team, and discussion ID through nested model and tool calls without caching a shared agent to one owner team.
 - **Persistence Coordinator**: Holds one cross-process writer lease, one active delta, and one coalesced pending delta. Snapshot materialization and SQLite work execute off the event loop.
+- **State Coordinator**: Owns task-local dirty-state batching, authoritative delta submission, flush operations, and the `PersistenceCoordinator` instance.
+- **Agent Registry**: Owns active-name and immutable-ID indexes together with private DocLib lifecycle transitions.
+- **Topology Service**: Owns the parent index and topology mutation lock used by lookups, rendering, creation, and migration.
+- **Alert Service**: Owns durable alert coalescing, acknowledgement, deferred emergency work, and wakeup deduplication.
+- **Callback Dispatcher**: Owns the ordered background callback queue and isolates observer failures from core state changes.
+- **Library Service**: Owns runtime ACL resolution, managed-link traversal, private DocLib access, publication, and file movement.
+- **Discussion Coordinator**: Owns per-team session serialization, round execution, inbox consumption, structured turn collection, supervision, and post-discussion delivery handling.
+- **Snapshot and Restore Services**: Build immutable persistence snapshots, validate state and communication references, stage DocLib files, and publish a restore only after every validation succeeds.
+- **Team Creation, Migration, Membership, and Failover Services**: Own their respective governance workflows while the facade preserves the public manager API.
+- **Runtime Registry**: Owns model bindings, tool registration, tokenizer selection, presets, capability probes, and invocation-time tool visibility.
 
 ## 2. `AgentTeam`: The Dynamic Group Unit
 

@@ -3,7 +3,7 @@ import shutil
 import sys
 import tempfile
 import unittest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 
 # Setup paths
 CURRENT_DIR = os.path.dirname(__file__)
@@ -192,6 +192,29 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
             with self.subTest(path=root_path):
                 with self.assertRaises(PermissionError):
                     lib.delete_file(root_path)
+
+    async def test_portable_file_operations_without_dir_fd(self):
+        """Verify the checked fallback used on platforms without dir_fd."""
+        team = self.manager.create_agent_team(
+            creator=self.root_ai,
+            member_count=3,
+        )
+        library = team.doc_library
+        with patch.object(
+            DocumentLibrary,
+            "_supports_secure_dir_fd",
+            return_value=False,
+        ):
+            library.write_file("portable/note.txt", "portable content")
+            self.assertIn(
+                "portable content",
+                library.read_file("portable/note.txt"),
+            )
+            library.move_file(
+                "portable/note.txt",
+                "portable/moved.txt",
+            )
+            self.assertTrue(library.is_file("portable/moved.txt"))
 
 if __name__ == "__main__":
     unittest.main()

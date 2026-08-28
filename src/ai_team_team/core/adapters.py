@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Union, List, Dict, Optional, Any, Callable
 from ai_team_team.core.response import ToolCall, LLMResponse
 
 if TYPE_CHECKING:
+    from ai_team_team.core.manager import ATTManager
     from ai_team_team.tool import Tool
 
 class HandlerClientAdapter:

@@ -4,7 +4,7 @@ The `AI-Team-Team` project has an extensive suite of `unittest` test cases to en
 
 ## 1. Running Tests
 
-The test suite is located in the `test/` directory. You can run all tests using standard standard module discovery from the project root:
+The test suite is located in the `test/` directory. You can run all tests using standard module discovery from the project root:
 
 ```bash
 ./venv/bin/python -m unittest discover -s test
@@ -14,6 +14,18 @@ For an individual test package:
 
 ```bash
 ./venv/bin/python -m unittest discover -s test/test_att/test_state_persistence
+```
+
+The repository CI runs the suite on Python 3.10 through 3.13 across Linux, macOS, and Windows. The quality job also runs Ruff, the public consumer mypy contract, branch coverage with a 70 percent baseline, and a wheel build/install smoke test.
+
+Run the same quality checks locally with:
+
+```bash
+./venv/bin/ruff check src test typecheck
+./venv/bin/mypy typecheck/consumer_contract.py
+./venv/bin/coverage run -m unittest discover -s test
+./venv/bin/coverage report
+./venv/bin/python -m build
 ```
 
 ## 2. Asynchronous Execution
@@ -52,6 +64,8 @@ if SRC_DIR not in sys.path:
 ## 4. Test Isolation (Sandbox Environments)
 
 Because `ATTManager` and `DocumentLibrary` dynamically generate directories (e.g. `.att_doc_libs`, `DL-AT-xxx`) and persist SQLite databases, **you must ensure tests run in an isolated sandbox** to prevent polluting the project root.
+
+Directory-based suites may place shared clients and fixture base classes in a package-local `_support.py`. Keep assertions and behavior-specific setup in the individual test module so changes to one support fixture do not silently alter unrelated test domains.
 
 To achieve this, inject a temporary directory sandbox into the `setUp()` method of every test class. This guarantees that `workspace_root` (which defaults to the current working directory) points to an ephemeral folder that is cleanly destroyed after the test.
 

@@ -1,51 +1,24 @@
-import asyncio
-from contextlib import closing
-import os
-import shutil
-import sqlite3
-import tempfile
-import unittest
-from unittest.mock import patch
-
-from ai_team_team import ATTConfig, ATTManager, Agent, StateRestoreError
-from ai_team_team.core.exceptions import TokenLimitExceededError
-from ai_team_team.core.adapters import HandlerClientAdapter
-from ai_team_team.core.policies import parse_governance_decision
-from ai_team_team.core.response import LLMResponse
-from ai_team_team.core.utils import generate_with_retry
-from ai_team_team.tool import get_default_tools
-
-
-class SimpleClient:
-    async def generate(
-        self,
-        prompt,
-        system_instruction=None,
-        temperature=0.3,
-        require_json=False,
-        **kwargs,
-    ):
-        return "Final Answer: complete"
+from test.test_att.test_critical_hardening._support import (
+    ATTConfig,
+    ATTManager,
+    Agent,
+    CriticalHardeningTestCase,
+    HandlerClientAdapter,
+    LLMResponse,
+    StateRestoreError,
+    TokenLimitExceededError,
+    asyncio,
+    closing,
+    generate_with_retry,
+    get_default_tools,
+    os,
+    parse_governance_decision,
+    patch,
+    sqlite3,
+)
 
 
-class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmpdir = tempfile.mkdtemp(prefix="att_critical_")
-        self.client = SimpleClient()
-        self.root = Agent("Root", "Architect", self.client)
-        self.manager = ATTManager(
-            self.root,
-            ATTConfig(
-                workspace_root=self.tmpdir,
-                migration_policy="permissive",
-            ),
-        )
-        self.manager.register_llm_client("test", self.client)
-
-    async def asyncTearDown(self):
-        await self.manager.close()
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
-
+class TestCriticalHardening(CriticalHardeningTestCase):
     async def test_managed_doclib_link_enforces_live_target_acl(self):
         team_a = self.manager.create_agent_team(self.root)
         team_b = self.manager.create_agent_team(self.root)
@@ -211,7 +184,10 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
                     raise OSError("simulated publication failure")
             return real_replace(src, dst)
 
-        with patch("ai_team_team.core.manager.os.replace", fail_second_publication):
+        with patch(
+            "ai_team_team.core.manager.restore.publication.os.replace",
+            fail_second_publication,
+        ):
             with self.assertRaisesRegex(
                 StateRestoreError, "simulated publication failure"
             ):
@@ -237,8 +213,3 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
             team.doc_library.write_file("escape.txt", "overwrite")
         with open(outside, "r", encoding="utf-8") as stream:
             self.assertEqual(stream.read(), "outside")
-
-
-if __name__ == "__main__":
-    unittest.main()
-

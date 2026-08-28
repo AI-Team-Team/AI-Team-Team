@@ -1,15 +1,18 @@
 import os
 from collections.abc import Mapping
-from typing import Annotated, Any, Callable, Dict, Literal, Optional, Union
+from typing import Annotated, Any, Callable, ClassVar, Dict, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
 class _StrictCommunicationConfig(BaseModel):
     """Base class for immutable-shape, assignment-validated communication rules."""
 
     model_config = ConfigDict(
-        extra="forbid", validate_assignment=True, strict=True
+        extra="forbid",
+        validate_assignment=True,
+        strict=True,
+        validate_default=True,
     )
 
 
@@ -39,7 +42,10 @@ class TurnFailurePolicyConfig(BaseModel):
     """Controls whether member-scoped failures abort a whole discussion."""
 
     model_config = ConfigDict(
-        extra="forbid", validate_assignment=True, strict=True
+        extra="forbid",
+        validate_assignment=True,
+        strict=True,
+        validate_default=True,
     )
 
     tool: Literal["isolate", "abort"] = "isolate"
@@ -57,6 +63,8 @@ CommunicationConfig = Annotated[
 
 
 def _parse_communication_config(value: Any) -> CommunicationConfig:
+    """Parses a strict communication institution without compatibility fallback."""
+
     if isinstance(
         value,
         (
@@ -87,7 +95,7 @@ def _parse_communication_config(value: Any) -> CommunicationConfig:
 
 
 class ValidatedDict(dict):
-    """A mutable mapping that validates every runtime mutation."""
+    """A mutable mapping that validates every inserted runtime value."""
 
     def __init__(
         self,
@@ -118,64 +126,76 @@ class ValidatedDict(dict):
         return self
 
 
-class ATTConfig:
-    """Validated runtime configuration for ATT execution and governance."""
+class ATTConfig(BaseModel):
+    """Strict, assignment-validated runtime configuration for ATT."""
 
-    _CHOICES = {
-        "migration_policy": {
-            "permissive",
-            "ancestor_approval",
-            "lineage_path",
-        },
-        "failover_policy": {"auto", "parent", "none"},
-        "tool_calling_mode": {"auto", "native", "react", "text_react"},
-        "audit_unknown_escalation_mode": {"wake", "queue"},
-        "agent_private_data_policy": {"retain", "archive", "delete"},
-        "text_tool_schema_mode": {
-            "compact",
-            "full",
-            "compact_with_examples",
-        },
-        "tool_execution_retry_policy": {
-            "never",
-            "retry_safe",
-            "typed_transient",
-        },
-        "operational_status_decision_mode": {
-            "framework",
-            "supervisor",
-            "framework_then_supervisor",
-        },
-        "operational_degraded_escalation_mode": {
-            "none",
-            "queue",
-            "wake",
-        },
-    }
-    _POSITIVE_INTS = {
-        "max_delegation_depth",
-        "subagent_discussion_rounds",
-        "react_max_steps",
-        "inbox_summarize_threshold_chars",
-        "max_memory_turns",
-        "emergency_discussion_rounds",
-        "max_tool_rounds",
-        "default_max_output_tokens",
-        "audit_unknown_soft_threshold",
-    }
-    _NON_NEGATIVE_INTS = {
-        "max_migrations_per_team_discussion",
-        "llm_max_retries",
-        "max_tool_argument_retries",
-        "max_tool_execution_retries",
-    }
-    _BOOL_FIELDS = {
-        "enable_dynamic_delegation",
-        "enable_membership_voting",
-        "enable_memory_compression",
-        "enable_emergency_wakeup",
-    }
-    _MAPPING_VALIDATORS = {
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+        validate_default=True,
+        strict=True,
+    )
+
+    enable_dynamic_delegation: bool = True
+    max_delegation_depth: Annotated[int, Field(ge=1)] = 2
+    min_subagent_team_size: Annotated[int, Field(ge=3)] = 3
+    subagent_discussion_rounds: Annotated[int, Field(ge=1)] = 2
+    react_max_steps: Annotated[int, Field(ge=1)] = 5
+    inbox_summarize_threshold_chars: Annotated[int, Field(ge=1)] = 1500
+    model_registry: Dict[str, str] = Field(default_factory=dict)
+    max_migrations_per_team_discussion: Annotated[int, Field(ge=0)] = 1
+    enable_membership_voting: bool = False
+    llm_max_retries: Annotated[int, Field(ge=0)] = 3
+    llm_retry_backoff_factor: Annotated[float, Field(ge=0)] = 1.5
+    enable_memory_compression: bool = True
+    workspace_root: str = "."
+    max_memory_turns: Annotated[int, Field(ge=1)] = 20
+    communication: CommunicationConfig = Field(
+        default_factory=PermissiveCommunicationConfig
+    )
+    migration_policy: Literal[
+        "permissive", "ancestor_approval", "lineage_path"
+    ] = "ancestor_approval"
+    enable_emergency_wakeup: bool = True
+    emergency_discussion_rounds: Annotated[int, Field(ge=1)] = 1
+    tool_calling_mode: Literal[
+        "auto", "native", "react", "text_react"
+    ] = "auto"
+    max_tool_rounds: Annotated[int, Field(ge=1)] = 5
+    max_tool_argument_retries: Annotated[int, Field(ge=0)] = 3
+    max_tool_execution_retries: Annotated[int, Field(ge=0)] = 2
+    tool_execution_retry_policy: Literal[
+        "never", "retry_safe", "typed_transient"
+    ] = "never"
+    tool_execution_retry_backoff_factor: Annotated[
+        float, Field(ge=0)
+    ] = 0.5
+    text_tool_schema_mode: Literal[
+        "compact", "full", "compact_with_examples"
+    ] = "compact"
+    tool_prompt_modes: Dict[str, str] = Field(default_factory=dict)
+    turn_failure_policy: TurnFailurePolicyConfig = Field(
+        default_factory=TurnFailurePolicyConfig
+    )
+    operational_status_decision_mode: Literal[
+        "framework", "supervisor", "framework_then_supervisor"
+    ] = "framework"
+    operational_degraded_escalation_mode: Literal[
+        "none", "queue", "wake"
+    ] = "none"
+    model_token_limits: Dict[str, int] = Field(default_factory=dict)
+    model_max_output_tokens: Dict[str, int] = Field(default_factory=dict)
+    default_max_output_tokens: Annotated[int, Field(ge=1)] = 1024
+    model_tokenizer_configs: Dict[str, str] = Field(default_factory=dict)
+    failover_policy: Literal["auto", "parent", "none"] = "auto"
+    parent_failover_timeout_seconds: Annotated[float, Field(gt=0)] = 120.0
+    audit_unknown_escalation_mode: Literal["wake", "queue"] = "wake"
+    audit_unknown_soft_threshold: Annotated[int, Field(ge=1)] = 100
+    agent_private_data_policy: Literal[
+        "retain", "archive", "delete"
+    ] = "archive"
+
+    _MAPPING_VALIDATORS: ClassVar[Dict[str, str]] = {
         "model_registry": "_validate_string_mapping",
         "model_token_limits": "_validate_token_limit",
         "model_max_output_tokens": "_validate_output_limit",
@@ -183,76 +203,66 @@ class ATTConfig:
         "tool_prompt_modes": "_validate_tool_prompt_mode",
     }
 
-    def __setattr__(self, name: str, value: object) -> None:
-        choices = self._CHOICES.get(name)
-        if choices is not None:
-            if value not in choices:
-                choice_text = ", ".join(sorted(choices))
-                raise ValueError(
-                    f"Invalid {name}={value!r}. Expected one of: {choice_text}."
-                )
-        elif name in self._POSITIVE_INTS:
-            self._require_int(name, value, minimum=1)
-        elif name in self._NON_NEGATIVE_INTS:
-            self._require_int(name, value, minimum=0)
-        elif name == "min_subagent_team_size":
-            self._require_int(name, value, minimum=3)
-        elif name in {
-            "llm_retry_backoff_factor",
-            "tool_execution_retry_backoff_factor",
-        }:
-            if (
-                not isinstance(value, (int, float))
-                or isinstance(value, bool)
-                or value < 0
-            ):
-                raise ValueError(
-                    f"{name} must be a non-negative number."
-                )
-            value = float(value)
-        elif name == "parent_failover_timeout_seconds":
-            if (
-                not isinstance(value, (int, float))
-                or isinstance(value, bool)
-                or value <= 0
-            ):
-                raise ValueError(
-                    "parent_failover_timeout_seconds must be a positive number."
-                )
-            value = float(value)
-        elif name == "communication":
-            value = _parse_communication_config(value)
-        elif name == "turn_failure_policy":
-            if isinstance(value, TurnFailurePolicyConfig):
-                pass
-            elif isinstance(value, Mapping):
-                value = TurnFailurePolicyConfig.model_validate(dict(value))
-            else:
-                raise ValueError(
-                    "turn_failure_policy must be a TurnFailurePolicyConfig or mapping."
-                )
-        elif name in self._BOOL_FIELDS and not isinstance(value, bool):
-            raise ValueError(f"{name} must be a boolean.")
-        elif name == "workspace_root":
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError("workspace_root must be a non-empty string.")
-            value = os.path.expanduser(value)
-        elif name in self._MAPPING_VALIDATORS:
-            if not isinstance(value, Mapping):
-                raise ValueError(f"{name} must be a mapping.")
-            validator = getattr(self, self._MAPPING_VALIDATORS[name])
-            value = ValidatedDict(value, validator)
-        super().__setattr__(name, value)
+    @field_validator("communication", mode="before")
+    @classmethod
+    def _validate_communication(cls, value: Any) -> CommunicationConfig:
+        if value is None:
+            return PermissiveCommunicationConfig()
+        return _parse_communication_config(value)
 
-    @staticmethod
-    def _require_int(name: str, value: object, minimum: int) -> None:
-        if (
-            not isinstance(value, int)
-            or isinstance(value, bool)
-            or value < minimum
-        ):
-            qualifier = "positive" if minimum == 1 else "non-negative"
-            raise ValueError(f"{name} must be a {qualifier} integer.")
+    @field_validator("turn_failure_policy", mode="before")
+    @classmethod
+    def _validate_turn_failure_policy(
+        cls, value: Any
+    ) -> TurnFailurePolicyConfig:
+        if value is None:
+            return TurnFailurePolicyConfig()
+        if isinstance(value, TurnFailurePolicyConfig):
+            return value
+        if isinstance(value, Mapping):
+            return TurnFailurePolicyConfig.model_validate(dict(value))
+        raise ValueError(
+            "turn_failure_policy must be a TurnFailurePolicyConfig or mapping."
+        )
+
+    @field_validator("workspace_root", mode="before")
+    @classmethod
+    def _validate_workspace_root(cls, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("workspace_root must be a non-empty string.")
+        return os.path.expanduser(value)
+
+    @field_validator(
+        "model_registry",
+        "model_token_limits",
+        "model_max_output_tokens",
+        "model_tokenizer_configs",
+        "tool_prompt_modes",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_mapping(cls, value: Any) -> Dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, Mapping):
+            raise ValueError("Configuration values must be mappings.")
+        return dict(value)
+
+    @field_validator(
+        "model_registry",
+        "model_token_limits",
+        "model_max_output_tokens",
+        "model_tokenizer_configs",
+        "tool_prompt_modes",
+        mode="after",
+    )
+    @classmethod
+    def _wrap_validated_mapping(
+        cls, value: Dict[str, Any], info: ValidationInfo
+    ) -> ValidatedDict:
+        validator_name = cls._MAPPING_VALIDATORS[info.field_name]
+        validator = getattr(cls, validator_name)
+        return ValidatedDict(value, validator)
 
     @staticmethod
     def _validate_string_mapping(key: str, value: Any) -> None:
@@ -292,109 +302,7 @@ class ATTConfig:
                 "compact, compact_with_examples, full."
             )
 
-    def __init__(
-        self,
-        enable_dynamic_delegation: bool = True,
-        max_delegation_depth: int = 2,
-        min_subagent_team_size: int = 3,
-        subagent_discussion_rounds: int = 2,
-        react_max_steps: int = 5,
-        inbox_summarize_threshold_chars: int = 1500,
-        model_registry: Optional[Dict[str, str]] = None,
-        max_migrations_per_team_discussion: int = 1,
-        enable_membership_voting: bool = False,
-        llm_max_retries: int = 3,
-        llm_retry_backoff_factor: float = 1.5,
-        enable_memory_compression: bool = True,
-        workspace_root: str = ".",
-        max_memory_turns: int = 20,
-        communication: Optional[CommunicationConfig] = None,
-        migration_policy: str = "ancestor_approval",
-        enable_emergency_wakeup: bool = True,
-        emergency_discussion_rounds: int = 1,
-        tool_calling_mode: str = "auto",
-        max_tool_rounds: int = 5,
-        max_tool_argument_retries: int = 3,
-        max_tool_execution_retries: int = 2,
-        tool_execution_retry_policy: str = "never",
-        tool_execution_retry_backoff_factor: float = 0.5,
-        text_tool_schema_mode: str = "compact",
-        tool_prompt_modes: Optional[Dict[str, str]] = None,
-        turn_failure_policy: Optional[TurnFailurePolicyConfig] = None,
-        operational_status_decision_mode: str = "framework",
-        operational_degraded_escalation_mode: str = "none",
-        model_token_limits: Optional[Dict[str, int]] = None,
-        model_max_output_tokens: Optional[Dict[str, int]] = None,
-        default_max_output_tokens: int = 1024,
-        model_tokenizer_configs: Optional[Dict[str, str]] = None,
-        failover_policy: str = "auto",
-        parent_failover_timeout_seconds: float = 120,
-        audit_unknown_escalation_mode: str = "wake",
-        audit_unknown_soft_threshold: int = 100,
-        agent_private_data_policy: str = "archive",
-    ) -> None:
-        self.enable_dynamic_delegation = enable_dynamic_delegation
-        self.max_delegation_depth = max_delegation_depth
-        self.min_subagent_team_size = min_subagent_team_size
-        self.subagent_discussion_rounds = subagent_discussion_rounds
-        self.react_max_steps = react_max_steps
-        self.inbox_summarize_threshold_chars = inbox_summarize_threshold_chars
-        self.model_registry = model_registry or {}
-        self.max_migrations_per_team_discussion = max_migrations_per_team_discussion
-        self.enable_membership_voting = enable_membership_voting
-        self.llm_max_retries = llm_max_retries
-        self.llm_retry_backoff_factor = llm_retry_backoff_factor
-        self.enable_memory_compression = enable_memory_compression
-        self.workspace_root = workspace_root
-        self.max_memory_turns = max_memory_turns
-        self.communication = (
-            PermissiveCommunicationConfig()
-            if communication is None
-            else communication
-        )
-        self.migration_policy = migration_policy
-        self.enable_emergency_wakeup = enable_emergency_wakeup
-        self.emergency_discussion_rounds = emergency_discussion_rounds
-        self.tool_calling_mode = tool_calling_mode
-        self.max_tool_rounds = max_tool_rounds
-        self.max_tool_argument_retries = max_tool_argument_retries
-        self.max_tool_execution_retries = max_tool_execution_retries
-        self.tool_execution_retry_policy = tool_execution_retry_policy
-        self.tool_execution_retry_backoff_factor = (
-            tool_execution_retry_backoff_factor
-        )
-        self.text_tool_schema_mode = text_tool_schema_mode
-        self.tool_prompt_modes = tool_prompt_modes or {}
-        self.turn_failure_policy = (
-            TurnFailurePolicyConfig()
-            if turn_failure_policy is None
-            else turn_failure_policy
-        )
-        self.operational_status_decision_mode = (
-            operational_status_decision_mode
-        )
-        self.operational_degraded_escalation_mode = (
-            operational_degraded_escalation_mode
-        )
-        self.model_token_limits = model_token_limits or {}
-        self.model_max_output_tokens = model_max_output_tokens or {}
-        self.default_max_output_tokens = default_max_output_tokens
-        self.model_tokenizer_configs = model_tokenizer_configs or {}
-        self.failover_policy = failover_policy
-        self.parent_failover_timeout_seconds = parent_failover_timeout_seconds
-        self.audit_unknown_escalation_mode = audit_unknown_escalation_mode
-        self.audit_unknown_soft_threshold = audit_unknown_soft_threshold
-        self.agent_private_data_policy = agent_private_data_policy
-
     def to_dict(self) -> Dict[str, Any]:
         """Returns a plain JSON-serializable configuration mapping."""
-        return {
-            key: (
-                dict(value)
-                if isinstance(value, ValidatedDict)
-                else value.model_dump(mode="json")
-                if isinstance(value, BaseModel)
-                else value
-            )
-            for key, value in self.__dict__.items()
-        }
+
+        return self.model_dump(mode="json")

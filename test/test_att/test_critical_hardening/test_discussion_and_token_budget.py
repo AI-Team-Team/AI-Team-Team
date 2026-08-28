@@ -1,50 +1,61 @@
-import asyncio
-from contextlib import closing
-import os
-import shutil
-import sqlite3
-import tempfile
-import unittest
-from unittest.mock import patch
-
-from ai_team_team import ATTConfig, ATTManager, Agent, StateRestoreError
-from ai_team_team.core.exceptions import TokenLimitExceededError
-from ai_team_team.core.adapters import HandlerClientAdapter
-from ai_team_team.core.policies import parse_governance_decision
-from ai_team_team.core.response import LLMResponse
-from ai_team_team.core.utils import generate_with_retry
-from ai_team_team.tool import get_default_tools
-
-
-class SimpleClient:
-    async def generate(
-        self,
-        prompt,
-        system_instruction=None,
-        temperature=0.3,
-        require_json=False,
-        **kwargs,
-    ):
-        return "Final Answer: complete"
+from test.test_att.test_critical_hardening._support import (
+    ATTConfig,
+    ATTManager,
+    Agent,
+    CriticalHardeningTestCase,
+    HandlerClientAdapter,
+    LLMResponse,
+    StateRestoreError,
+    TokenLimitExceededError,
+    asyncio,
+    closing,
+    generate_with_retry,
+    get_default_tools,
+    os,
+    parse_governance_decision,
+    patch,
+    sqlite3,
+)
+from ai_team_team.core.manager.discussions.cleanup import (
+    finalize_discussion_session,
+)
 
 
-class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmpdir = tempfile.mkdtemp(prefix="att_critical_")
-        self.client = SimpleClient()
-        self.root = Agent("Root", "Architect", self.client)
-        self.manager = ATTManager(
-            self.root,
-            ATTConfig(
-                workspace_root=self.tmpdir,
-                migration_policy="permissive",
-            ),
+class TestCriticalHardening(CriticalHardeningTestCase):
+    async def test_discussion_cleanup_always_releases_session_state(self):
+        team = self.manager.create_agent_team(self.root)
+        team.is_running = True
+        discussion_token = self.manager._active_discussion_id.set(
+            "DISC-cleanup"
         )
-        self.manager.register_llm_client("test", self.client)
 
-    async def asyncTearDown(self):
-        await self.manager.close()
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        class AutoSaveContext:
+            exited = False
+
+            async def __aexit__(self, exc_type, exc, tb):
+                self.exited = True
+
+        auto_save_context = AutoSaveContext()
+        with patch.object(
+            self.manager,
+            "_finish_durable_alert_processing",
+            side_effect=RuntimeError("cleanup failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "cleanup failure"):
+                await finalize_discussion_session(
+                    self.manager,
+                    team,
+                    set(),
+                    set(),
+                    {"operational-alert"},
+                    False,
+                    auto_save_context,
+                    discussion_token,
+                )
+
+        self.assertTrue(auto_save_context.exited)
+        self.assertFalse(team.is_running)
+        self.assertIsNone(self.manager._active_discussion_id.get())
 
     async def test_discussions_serialize_per_team_but_not_across_teams(self):
         team_a = self.manager.create_agent_team(self.root)
@@ -200,4 +211,3 @@ class TestCriticalHardening(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(observed, [("bounded", 4)])
         await manager.close()
-

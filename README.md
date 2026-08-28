@@ -6,7 +6,7 @@ Instead of treating AI as isolated chatbots, ATT treats them as members of a liv
 
 AI can freely form teams, define how they discuss things with each other, how AI teams discuss things, and create all sorts of incredibly complex hierarchical (or dynamic) relationships.
 
-Hundreds, thousands, even tens of thousands of AIs work together in an orderly manner.
+ATT aims to enable hundreds, thousands, or even tens of thousands of AIs to work together in an orderly manner.
 
 <details>
 <summary>More</summary>
@@ -283,6 +283,14 @@ flowchart TB
     classDef knowledge fill:#e8f5e9,stroke:#388e3c,stroke-width:1.5px;
     classDef supervision fill:#fff3e0,stroke:#ef6c00,stroke-width:1.5px;
     classDef persistence fill:#ede7f6,stroke:#5e35b1,stroke-width:1.5px;
+
+    style Host fill:#f4f7f9,stroke:#455a64,stroke-width:2px,color:#1f2937;
+    style Organization fill:#eff6ff,stroke:#1976d2,stroke-width:2px,color:#1f2937;
+    style Execution fill:#fffbeb,stroke:#f9a825,stroke-width:2px,color:#1f2937;
+    style Governance fill:#fff1f2,stroke:#c2185b,stroke-width:2px,color:#1f2937;
+    style Knowledge fill:#f0fdf4,stroke:#388e3c,stroke-width:2px,color:#1f2937;
+    style Supervision fill:#fff7ed,stroke:#ef6c00,stroke-width:2px,color:#1f2937;
+    style Persistence fill:#f5f3ff,stroke:#5e35b1,stroke-width:2px,color:#1f2937;
 
     class Manager,Config,Bindings,CallbackQueue coordinator;
     class Root,AgentRegistry,TeamRegistry,Delegation,TopTeam,ChildTeam,Descendant,SharedAgent,SharedMemory,Lifecycle identity;
@@ -643,6 +651,7 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `model_token_limits` | `dict` | `None` | Mapping of model aliases to hard token quotas; `0` disables that model's quota entirely. |
 | `model_max_output_tokens` | `dict` | `None` | Per-model maximum output reservation/request cap used by the atomic hard-quota ledger. |
 | `default_max_output_tokens` | `int` | `1024` | Default maximum output reservation when a model-specific cap is absent. |
+| `model_tokenizer_configs` | `dict` | `{}` | Mapping of model aliases to tokenizer names or tokenizer JSON files used for prompt-token accounting. The `tokenizers` package is a required runtime dependency. |
 | `failover_policy` | `str` | `"auto"` | Fallback strategy on token exhaustion: `"auto"` (next available) or `"parent"` (explicit parent AgentTeam/Root Agent governance). |
 | `parent_failover_timeout_seconds` | `float` | `120` | Positive timeout for parent-governed model selection; failures close without automatic fallback. |
 | `audit_unknown_escalation_mode` | `str` | `"wake"` | Handling for indeterminate audits: immediately `"wake"` the parent or only `"queue"` the alert. |

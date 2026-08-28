@@ -1,43 +1,24 @@
-import asyncio
-from contextlib import closing
-import os
-import shutil
-import sqlite3
-import tempfile
-import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
-
-from ai_team_team import (
+from test.test_att.test_hardening._support import (
     ATTConfig,
     ATTManager,
+    ATTHardeningTestCase,
     Agent,
+    AsyncMock,
     AuditResult,
     AuditStatus,
+    DatabaseStore,
+    MagicMock,
     StateRestoreError,
+    asyncio,
+    closing,
+    get_default_tools,
+    os,
+    patch,
+    sqlite3,
 )
-from ai_team_team.database.persistence import DatabaseStore
-from ai_team_team.tool import get_default_tools
 
-class TestATTHardening(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmpdir = tempfile.mkdtemp(prefix="att_hardening_")
-        self.client = MagicMock()
-        self.client.generate = AsyncMock(return_value="Final Answer: Done")
-        self.root = Agent("Root", "Architect", llm_client=self.client)
-        self.manager = ATTManager(
-            self.root,
-            ATTConfig(
-                max_delegation_depth=6,
-                migration_policy="permissive",
-                enable_membership_voting=True,
-                workspace_root=self.tmpdir,
-            ),
-        )
 
-    async def asyncTearDown(self):
-        await self.manager.close()
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
-
+class TestATTHardening(ATTHardeningTestCase):
     async def test_migration_invalidates_all_descendant_depths(self):
         left = self.manager.create_agent_team(self.root)
         moving = self.manager.create_agent_team(left)

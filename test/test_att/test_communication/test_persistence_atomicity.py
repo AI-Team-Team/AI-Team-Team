@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from ai_team_team import (
@@ -13,8 +14,13 @@ from ai_team_team import (
     LineageApprovalCommunicationConfig,
     ParentApprovalCommunicationConfig,
     PermissiveCommunicationConfig,
+    StateRestoreError,
 )
+from ai_team_team.core.communication import CommunicationRequestStatus
 from ai_team_team.core.decision import DecisionOutcome
+from ai_team_team.core.manager.communication_validation.successors import (
+    validate_successors_and_ballots,
+)
 
 
 class GovernanceClient:
@@ -76,6 +82,28 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
         async with asyncio.timeout(timeout):
             while request.status.value != expected:
                 await asyncio.sleep(0.01)
+
+    async def test_missing_nested_successor_is_reported_as_corrupt_state(self):
+        first = SimpleNamespace(
+            request_id="REQ-first",
+            status=CommunicationRequestStatus.STALE,
+            superseded_by_request_id="REQ-second",
+            supersedes_request_id=None,
+        )
+        second = SimpleNamespace(
+            request_id="REQ-second",
+            status=CommunicationRequestStatus.STALE,
+            superseded_by_request_id="REQ-missing",
+            supersedes_request_id="REQ-first",
+        )
+        with self.assertRaisesRegex(StateRestoreError, "missing successor"):
+            validate_successors_and_ballots(
+                [first, second],
+                [],
+                [],
+                {first.request_id: first, second.request_id: second},
+                set(),
+            )
 
     async def test_schema_six_restores_pending_request_and_delivery(self):
         db_path = os.path.join(self.workspace, "communication.db")

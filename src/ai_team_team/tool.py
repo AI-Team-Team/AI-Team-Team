@@ -160,6 +160,16 @@ def _resolve_schema(func: Callable[..., Any], description: str, schema_source: O
 
 class Tool:
     """Encapsulates an AI tool with name, description, and execution logic."""
+
+    name: str
+    description: str
+    func: Callable[..., Any]
+    schema_source: Optional[Any]
+    json_schema: Dict[str, Any]
+    prompt_schema_mode: Optional[str]
+    examples: List[Dict[str, Any]]
+    retry_safe: bool
+
     def __init__(
         self,
         name: Any = None,

@@ -122,6 +122,8 @@ Synchronous and asynchronous callbacks share one ordered background dispatcher; 
 
 Configuration options for tuning the ATT multi-agent framework.
 
+`ATTConfig` is a strict Pydantic model with forbidden extra fields and assignment validation. Runtime updates to scalar fields and supported mutable configuration mappings are validated by the same rules used during construction.
+
 * **Constructor**:
 
   ```python
