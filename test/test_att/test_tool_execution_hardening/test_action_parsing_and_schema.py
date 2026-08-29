@@ -242,7 +242,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             "Use typing_extensions.TypedDict on Python < 3.12.",
             code="typed-dict-version",
         )
-        with patch("ai_team_team.tool.create_model", side_effect=error):
+        with patch("ai_team_team.tool.schema.create_model", side_effect=error):
             with self.assertRaisesRegex(ValueError, "typing_extensions"):
                 Tool("configured", "Configured tool", configured)
 
@@ -250,7 +250,9 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             "Use typing_extensions.TypedDict on Python < 3.12.",
             code="typed-dict-version",
         )
-        with patch("ai_team_team.tool.TypeAdapter", side_effect=explicit_error):
+        with patch(
+            "ai_team_team.tool.schema.TypeAdapter", side_effect=explicit_error
+        ):
             with self.assertRaisesRegex(ValueError, "typing_extensions"):
                 Tool(
                     "configured",
