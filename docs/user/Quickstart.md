@@ -243,14 +243,14 @@ Instead of passing raw API keys or client instances directly to the framework, r
 # 1. Register model configurations (metadata/descriptions for the AI)
 manager.register_model("gemini-123", {
     "model_type": "llm",
-    "model_name": "gemini-3.5-flash",
-    "ai_note": "gemini-3.5-flash - A very impressive large model"
+    "model_name": "gemini-3.7-flash",
+    "ai_note": "gemini-3.7-flash - A very impressive large model"
 })
 
 manager.register_model("openai-123", {
     "model_type": "llm",
-    "model_name": "gpt-5.5",
-    "ai_note": "gpt-5.5 - A very impressive large model"
+    "model_name": "gpt-5.6-sol",
+    "ai_note": "gpt-5.6-sol - A very impressive large model"
 })
 
 # 2. Register a single global callback handler to execute LLM calls
@@ -268,9 +268,9 @@ async def my_generator_handler(
     config = manager.model_configs.get(model_name)
     real_name = config.get("model_name") if config else model_name
 
-    if real_name == "gemini-3.5-flash":
+    if real_name == "gemini-3.7-flash":
         return await call_gemini_sdk(prompt, system_instruction, tools, max_output_tokens, temperature, require_json)
-    elif real_name == "gpt-5.5":
+    elif real_name == "gpt-5.6-sol":
         return await call_openai_sdk(prompt, system_instruction, tools, max_output_tokens, temperature, require_json)
     
     # Fallback default model

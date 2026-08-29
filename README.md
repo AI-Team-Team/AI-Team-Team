@@ -604,7 +604,7 @@ Provider adapters receive `List[Tool]` and are responsible for converting each `
 config.tool_calling_mode = "native"
 
 # 2. Ensure your model is registered as supporting native tools
-manager.register_model("gpt-4o", {
+manager.register_model("gpt-5.6-sol", {
     "supports_native_tool_calling": True
 })
 
