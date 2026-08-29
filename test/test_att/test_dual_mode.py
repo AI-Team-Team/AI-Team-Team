@@ -2,9 +2,10 @@ import os
 import sys
 import unittest
 import asyncio
-from typing import Dict, Any, List, Optional, TypedDict
+from typing import Dict, Any, List, Optional
 from unittest.mock import MagicMock, AsyncMock
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 
 # Setup paths
 CURRENT_DIR = os.path.dirname(__file__)

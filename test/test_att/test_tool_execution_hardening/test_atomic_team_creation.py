@@ -5,10 +5,11 @@ import shutil
 import tempfile
 import unittest
 from enum import Enum
-from typing import Annotated, Literal, NotRequired, TypedDict
+from typing import Annotated, Literal
 from unittest.mock import patch
 
 from pydantic import BaseModel, ConfigDict
+from typing_extensions import NotRequired, TypedDict
 
 from ai_team_team import (
     Agent,
@@ -221,4 +222,3 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             )
         self.assertIs(self.manager.teams[team.team_id], team)
         self.assertTrue(os.path.isdir(team.doc_library.root_dir))
-

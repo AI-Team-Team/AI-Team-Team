@@ -9,7 +9,16 @@ from typing import Annotated, Dict, Any, Optional, Callable, List, Tuple, Union,
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError as JSONSchemaValidationError
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, create_model, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PydanticUserError,
+    TypeAdapter,
+    ValidationError,
+    create_model,
+    model_validator,
+)
 
 from .core.exceptions import (
     ATTException,
@@ -71,12 +80,10 @@ class MembershipProposalArguments(BaseModel):
 def _type_to_schema_type(hint: Any) -> Dict[str, Any]:
     if hint is Any:
         return {}
-    try:
-        return TypeAdapter(hint).json_schema()
-    except Exception:
-        return {}
+    return TypeAdapter(hint).json_schema()
 
 def _schema_from_typeddict(tp: Any, description: str) -> Dict[str, Any]:
+    TypeAdapter(tp)
     hints = get_type_hints(tp)
     properties = {}
     required = []
@@ -203,7 +210,16 @@ class Tool:
         self.description = description
         self.func = func
         self.schema_source = schema
-        self.json_schema = _resolve_schema(func, description, schema)
+        try:
+            self.json_schema = _resolve_schema(func, description, schema)
+        except PydanticUserError as exc:
+            if exc.code == "typed-dict-version":
+                raise ValueError(
+                    f"Tool {name!r} uses typing.TypedDict, which Pydantic does not support "
+                    "on Python 3.10 or 3.11. Import TypedDict, Required, and NotRequired "
+                    "from typing_extensions."
+                ) from exc
+            raise
         try:
             Draft202012Validator.check_schema(self.json_schema)
         except SchemaError as exc:

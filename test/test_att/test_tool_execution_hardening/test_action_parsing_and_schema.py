@@ -5,10 +5,11 @@ import shutil
 import tempfile
 import unittest
 from enum import Enum
-from typing import Annotated, Literal, NotRequired, TypedDict
+from typing import Annotated, Literal
 from unittest.mock import patch
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, PydanticUserError
+from typing_extensions import NotRequired, TypedDict
 
 from ai_team_team import (
     Agent,
@@ -200,6 +201,30 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
         self.assertIs(valid.status, ToolResultStatus.SUCCESS)
         self.assertIs(invalid.status, ToolResultStatus.INVALID_ARGUMENTS)
         self.assertEqual(calls, 1)
+    def test_incompatible_typed_dict_error_is_actionable(self):
+        def configured(options: TypedOptions):
+            return options
+
+        error = PydanticUserError(
+            "Use typing_extensions.TypedDict on Python < 3.12.",
+            code="typed-dict-version",
+        )
+        with patch("ai_team_team.tool.create_model", side_effect=error):
+            with self.assertRaisesRegex(ValueError, "typing_extensions"):
+                Tool("configured", "Configured tool", configured)
+
+        explicit_error = PydanticUserError(
+            "Use typing_extensions.TypedDict on Python < 3.12.",
+            code="typed-dict-version",
+        )
+        with patch("ai_team_team.tool.TypeAdapter", side_effect=explicit_error):
+            with self.assertRaisesRegex(ValueError, "typing_extensions"):
+                Tool(
+                    "configured",
+                    "Configured tool",
+                    configured,
+                    schema=TypedOptions,
+                )
     async def test_complete_dispatch_arguments_parse_and_validate(self):
         action = parse_text_action(
             "Action: dispatch_subagent("
@@ -264,4 +289,3 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
         self.assertIs(result.status, AgentTurnStatus.COMPLETED)
         self.assertEqual(result.answer, "complete")
         self.assertEqual(calls, 1)
-

@@ -224,6 +224,11 @@ Encapsulates an AI tool with name, description, execution logic, and automated s
 
 ```python
 from ai_team_team import Tool
+from typing_extensions import NotRequired, TypedDict
+
+class WeatherArgs(TypedDict):
+    city: str
+    units: NotRequired[str]
 
 # 1. Custom defined name, description and function
 tool = Tool(name="weather", description="Query weather", func=dummy_tool)
@@ -235,6 +240,8 @@ tool = Tool(func=dummy_tool)
 # 3. Explicit schema override (can be dict, Pydantic BaseModel, or TypedDict class)
 tool = Tool(func=dummy_tool, schema=WeatherArgs)
 ```
+
+Use `typing_extensions.TypedDict` for portable schemas across every supported Python version. Pydantic rejects `typing.TypedDict` on Python 3.10 and 3.11.
 
 ## 📁 `GatedFileReader`
 
