@@ -23,7 +23,7 @@ Many thanks to Gemini and GPT for their help!
 > If you notice any issues or have any suggestions and have the time, \
 > please leave them in the Issues section. Thank you.
 
-[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#)
+[![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE.txt)
 [![Documentation](https://img.shields.io/badge/docs-specification-orange.svg)](docs/README.md)
 [![Unit Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#)

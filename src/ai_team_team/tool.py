@@ -77,34 +77,13 @@ class MembershipProposalArguments(BaseModel):
     initiator_type: str = "individual"
     proposed_details: Optional[MembershipProposalDetails] = None
 
-def _type_to_schema_type(hint: Any) -> Dict[str, Any]:
-    if hint is Any:
-        return {}
-    return TypeAdapter(hint).json_schema()
 
 def _schema_from_typeddict(tp: Any, description: str) -> Dict[str, Any]:
-    TypeAdapter(tp)
-    hints = get_type_hints(tp)
-    properties = {}
-    required = []
-    required_keys = getattr(tp, "__required_keys__", None)
-    if required_keys is None:
-        required_keys = (
-            frozenset(hints) if getattr(tp, "__total__", True) else frozenset()
-        )
-    
-    for name, hint in hints.items():
-        properties[name] = _type_to_schema_type(hint)
-        if name in required_keys:
-            required.append(name)
-            
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": required,
-        "additionalProperties": False,
-        "description": description,
-    }
+    schema = TypeAdapter(tp).json_schema()
+    schema["additionalProperties"] = False
+    schema["description"] = description
+    return schema
+
 
 def _schema_from_function(func: Callable[..., Any], description: str) -> Dict[str, Any]:
     sig = inspect.signature(func)
@@ -216,7 +195,7 @@ class Tool:
             if exc.code == "typed-dict-version":
                 raise ValueError(
                     f"Tool {name!r} uses typing.TypedDict, which Pydantic does not support "
-                    "on Python 3.10 or 3.11. Import TypedDict, Required, and NotRequired "
+                    "before Python 3.12. Import TypedDict, Required, and NotRequired "
                     "from typing_extensions."
                 ) from exc
             raise

@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 from unittest.mock import patch
 
 from pydantic import BaseModel, ConfigDict, PydanticUserError
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import NotRequired, Required, TypedDict
 
 from ai_team_team import (
     Agent,
@@ -48,9 +48,20 @@ class TypedOptions(TypedDict):
     tags: list[str]
 
 
+class TypedDetails(TypedDict):
+    labels: list[str]
+
+
 class OptionalTypedOptions(TypedDict):
     threshold: int
     note: NotRequired[str]
+    details: NotRequired[TypedDetails]
+
+
+class PartialTypedOptions(TypedDict, total=False):
+    threshold: Required[int]
+    note: str
+
 
 class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -186,6 +197,13 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             schema=OptionalTypedOptions,
         )
         self.assertEqual(tool.json_schema["required"], ["threshold"])
+        self.assertEqual(tool.json_schema["properties"]["note"]["type"], "string")
+        details_schema = tool.json_schema["properties"]["details"]
+        self.assertEqual(details_schema["$ref"], "#/$defs/TypedDetails")
+        self.assertEqual(
+            tool.json_schema["$defs"]["TypedDetails"]["properties"]["labels"]["type"],
+            "array",
+        )
         self.assertFalse(tool.json_schema["additionalProperties"])
         executor = ToolExecutor(self.team, self.agent, self.manager)
         valid = await executor.execute(
@@ -201,6 +219,21 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
         self.assertIs(valid.status, ToolResultStatus.SUCCESS)
         self.assertIs(invalid.status, ToolResultStatus.INVALID_ARGUMENTS)
         self.assertEqual(calls, 1)
+
+    def test_explicit_typed_dict_schema_preserves_required_context(self):
+        def configured(threshold: int, note: str = ""):
+            return note
+
+        tool = Tool(
+            "configured",
+            "Configured tool",
+            configured,
+            schema=PartialTypedOptions,
+        )
+        self.assertEqual(tool.json_schema["required"], ["threshold"])
+        self.assertEqual(tool.json_schema["properties"]["note"]["type"], "string")
+        self.assertFalse(tool.json_schema["additionalProperties"])
+
     def test_incompatible_typed_dict_error_is_actionable(self):
         def configured(options: TypedOptions):
             return options

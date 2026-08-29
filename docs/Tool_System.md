@@ -73,7 +73,7 @@ The resolver can dynamically build schemas from:
 
 1. **Handwritten Schema**: A standard python dictionary containing raw JSON Schema properties.
 2. **Pydantic Model**: A `BaseModel` subclass.
-3. **TypedDict Class**: A `typing_extensions.TypedDict` class. Portable tool schemas across Python 3.10–3.13 must import `TypedDict`, `Required`, and `NotRequired` from `typing_extensions`; Pydantic does not support `typing.TypedDict` on Python 3.10 or 3.11.
+3. **TypedDict Class**: A `typing_extensions.TypedDict` class. Portable tool schemas across Python 3.11–3.13 must import `TypedDict`, `Required`, and `NotRequired` from `typing_extensions`; Pydantic does not support `typing.TypedDict` on Python 3.11.
 4. **Function Signatures**: If no schema is provided, the resolver parses parameter defaults and type annotations.
 
 Tool registration validates every generated or handwritten schema with JSON Schema Draft 2020-12.

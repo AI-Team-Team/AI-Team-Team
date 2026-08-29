@@ -241,7 +241,7 @@ tool = Tool(func=dummy_tool)
 tool = Tool(func=dummy_tool, schema=WeatherArgs)
 ```
 
-Use `typing_extensions.TypedDict` for portable schemas across every supported Python version. Pydantic rejects `typing.TypedDict` on Python 3.10 and 3.11.
+Use `typing_extensions.TypedDict` for portable schemas across every supported Python version. Pydantic rejects `typing.TypedDict` on Python 3.11.
 
 ## 📁 `GatedFileReader`
 

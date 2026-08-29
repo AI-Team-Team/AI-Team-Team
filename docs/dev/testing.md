@@ -16,7 +16,7 @@ For an individual test package:
 ./venv/bin/python -m unittest discover -s test/test_att/test_state_persistence
 ```
 
-The repository CI runs the suite on Python 3.10 through 3.13 across Linux, macOS, and Windows. The quality job also runs Ruff, the public consumer mypy contract, branch coverage with a 70 percent baseline, and a wheel build/install smoke test.
+The repository CI runs the suite on Python 3.11 through 3.13 across Linux, macOS, and Windows. The quality job also runs Ruff, the public consumer mypy contract, branch coverage with a 70 percent baseline, and a wheel build/install smoke test.
 
 Run the same quality checks locally with:
 

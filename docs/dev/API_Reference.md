@@ -195,7 +195,7 @@ A 3-AI supervisory committee checking transcripts for logical deadlocks, circula
 
 ### `Tool` and `ToolExecutor`
 
-`Tool` owns the provider-neutral callable contract, validated JSON Schema, prompt rendering metadata, examples, and `retry_safe` declaration. Automatic schemas support `Annotated`, `Literal`, Enum, Pydantic models, `TypedDict`, containers, unions, and nesting. Portable `TypedDict` annotations across Python 3.10–3.13 must come from `typing_extensions`; incompatible standard-library definitions fail during tool registration with an actionable error. Registration validates handwritten schemas against Draft 2020-12.
+`Tool` owns the provider-neutral callable contract, validated JSON Schema, prompt rendering metadata, examples, and `retry_safe` declaration. Automatic schemas support `Annotated`, `Literal`, Enum, Pydantic models, `TypedDict`, containers, unions, and nesting. Portable `TypedDict` annotations across Python 3.11–3.13 must come from `typing_extensions`; incompatible standard-library definitions fail during tool registration with an actionable error. Registration validates handwritten schemas against Draft 2020-12.
 
 `ToolExecutor.execute()` is shared by Text and Native strategies. It binds the invocation signature, applies strict Pydantic JSON validation, validates the original argument object against the generated or handwritten Draft 2020-12 schema, runs the auditor and callable under Agent/AgentTeam ContextVars, and returns `ToolResult` with a structured status, error kind, and attempt count. It recognizes typed `ToolArgumentError`, `ToolPermissionError`, `ToolBusinessError`, and `RetryableToolError`; custom result strings are never classified by prefix.
 
