@@ -76,7 +76,7 @@ AgentTeam-to-AgentTeam messaging follows the single communication institution in
 
 The available tool set is resolved for every invocation. `dispatch_subagent` is hidden when dynamic delegation is disabled or the current depth reaches `max_delegation_depth`; `delegate_escalation` is hidden without a parent; voting tools follow the live voting configuration. Identity prompts describe only tools that are actually available, so configuration changes and migrations affect the next model call immediately.
 
-* **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: dict = None) -> str`**: Spawns a recursive child AT under the ATT tree. Each AT must have at least 3 Agents, specified inside `member_configs`. Optional `initial_documents` pre-populate the child team's built-in DocLib.
+* **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, existing_member_ids: list[str] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: dict = None) -> str`**: Spawns a recursive child AT under the ATT tree. `member_configs` creates new Agents and `existing_member_ids` adds active registered Agents through neutral membership references; their combined count must satisfy the configured minimum. Optional `initial_documents` pre-populate the child team's built-in DocLib.
 * **`delegate_escalation(objective: str, rationale: str) -> str`**: Escalates task objectives upward in the lineage tree to the direct parent.
 * **`update_team_purpose(new_purpose: str) -> str`**: Updates the purpose string of the caller's team.
 * **`update_team_status(purpose: str, progress: str) -> str`**: Allows a team to dynamically update its globally broadcasted purpose and progress metrics.
@@ -104,13 +104,13 @@ The available tool set is resolved for every invocation. `dispatch_subagent` is 
 
 ## 5. Atomic Team Creation
 
-`create_agent_team()` validates the creator, team size, member configuration, model aliases, initial document paths and bodies, and mutually exclusive fields before registration.
+`create_agent_team()` validates the creator, team size, new-member configuration, existing active Agent references, duplicate identities, model aliases, initial document paths and bodies, and mutually exclusive fields before registration.
 
-New Agent identities, Private DocLibs, the Team DocLib, and initial files are created under a detached staging directory.
+New Agent identities, their Private DocLibs, the Team DocLib, and initial files are created under a detached staging directory. Existing members retain the same object, UUID, identity fields, model binding, memory, invocation lock, lifecycle state, and Private DocLib.
 
 The topology lock then revalidates and commits registry and parent/child state while DocLib directories are atomically published.
 
-A failure at validation, construction, or publication restores existing Agent fields, registries, pointers, dirty state, and filesystem directories; callbacks, logging, and auto-save begin only after commit.
+A failure at validation, construction, or publication restores registries, pointers, dirty state, and filesystem directories; callbacks, logging, and auto-save begin only after commit. A successful commit adds only `team_id ↔ agent_id` relationships for existing Agents and introduces no framework-level team role.
 
 A failure in the team's later first discussion does not roll back the successfully created AgentTeam.
 

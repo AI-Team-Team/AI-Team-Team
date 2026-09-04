@@ -163,9 +163,20 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
         ), self.assertRaisesRegex(RuntimeError, "registration failed"):
             self.manager.create_agent_team(self.manager.root_ai)
         assert_unchanged(before)
-    def test_external_agent_role_is_restored_after_late_commit_failure(self):
+    def test_existing_agent_identity_is_unchanged_after_late_commit_failure(self):
         external = Agent("External", "Original", self.client)
+        self.manager.register_agent(external)
         parent = self.manager.create_agent_team(self.manager.root_ai)
+        original_fields = {
+            "name": external.name,
+            "role": external.role,
+            "role_description": external.role_description,
+            "system_instructions": external.system_instructions,
+            "llm_client": external.llm_client,
+            "model_alias": external._model_alias,
+            "lifecycle_state": external.lifecycle_state,
+            "private_doc_library_id": external.private_doc_library_id,
+        }
         before = (
             dict(self.manager.agents),
             dict(self.manager.teams),
@@ -181,14 +192,25 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             self.manager.create_agent_team(
                 parent,
                 member_configs={
-                    "Reviewer": external,
                     "Tester": {"model": "default"},
                     "Arbitrator": {"model": "default"},
                 },
+                existing_members=[external],
             )
 
-        self.assertEqual(external.role, "Original")
-        self.assertIsNone(external.private_doc_library_id)
+        self.assertEqual(
+            {
+                "name": external.name,
+                "role": external.role,
+                "role_description": external.role_description,
+                "system_instructions": external.system_instructions,
+                "llm_client": external.llm_client,
+                "model_alias": external._model_alias,
+                "lifecycle_state": external.lifecycle_state,
+                "private_doc_library_id": external.private_doc_library_id,
+            },
+            original_fields,
+        )
         self.assertEqual(self.manager.agents, before[0])
         self.assertEqual(self.manager.teams, before[1])
         self.assertEqual(self.manager.libraries, before[2])

@@ -6,6 +6,7 @@ import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 
+from ...agent import Agent
 from ...team import AgentTeam
 
 
@@ -20,6 +21,8 @@ class TeamCreationTransactionMixin:
         team_purpose: str = "Unspecified team purpose",
         roles_and_models: Optional[Dict[str, str]] = None,
         member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        existing_members: Optional[List[Agent]] = None,
+        existing_member_ids: Optional[List[str]] = None,
         is_public_visible: bool = False,
         initial_docs: Optional[Dict[str, str]] = None,
     ) -> AgentTeam:
@@ -33,6 +36,8 @@ class TeamCreationTransactionMixin:
             roles_and_presets=roles_and_presets,
             roles_and_models=roles_and_models,
             member_configs=member_configs,
+            existing_members=existing_members,
+            existing_member_ids=existing_member_ids,
             initial_docs=initial_docs,
             preset_name=preset_name,
             system_instructions=system_instructions,
@@ -60,6 +65,8 @@ class TeamCreationTransactionMixin:
                 team_purpose=team_purpose,
                 roles_and_models=roles_and_models,
                 member_configs=member_configs,
+                existing_members=existing_members,
+                existing_member_ids=existing_member_ids,
                 is_public_visible=is_public_visible,
                 initial_docs=initial_docs,
                 staging_root=staging_root,
@@ -72,8 +79,6 @@ class TeamCreationTransactionMixin:
                 manager._library_files.update(stage["library_files"])
                 for agent in stage["new_agents"]:
                     manager.register_agent(agent, auto_save=False)
-                for agent, role, _original_role in stage["role_updates"]:
-                    agent.role = role
                 team = stage["team"]
                 manager.teams[team.team_id] = team
                 parent = stage["parent"]
@@ -82,9 +87,6 @@ class TeamCreationTransactionMixin:
                     parent.add_child_team(team)
             manager._discard_library_backups(published)
         except Exception:
-            if stage is not None:
-                for agent, _role, original_role in stage["role_updates"]:
-                    agent.role = original_role
             if published:
                 manager._rollback_published_libraries(published)
             if snapshot is not None:
@@ -101,14 +103,9 @@ class TeamCreationTransactionMixin:
         )
         manager._auto_save(
             configs=True,
-            agents={agent.agent_id for agent in stage["registered_agents"]},
+            agents={agent.agent_id for agent in stage["new_agents"]},
             teams={team.team_id} | ({team.parent_team.team_id} if team.parent_team else set()),
-            libraries=set(stage["libraries"])
-            | {
-                agent.private_doc_library_id
-                for agent in stage["registered_agents"]
-                if agent.private_doc_library_id
-            },
+            libraries=set(stage["libraries"]),
         )
         return team
 
@@ -127,14 +124,6 @@ class TeamCreationTransactionMixin:
             "private_ids": {
                 id(agent): agent.private_doc_library_id for agent in manager._agents_by_id.values()
             },
-            "agent_fields": {
-                id(agent): {
-                    "role": agent.role,
-                    "role_description": agent.role_description,
-                    "system_instructions": agent.system_instructions,
-                }
-                for agent in manager._agents_by_id.values()
-            },
         }
 
     def _rollback_team_creation(self, snapshot: Dict[str, Any]) -> None:
@@ -146,11 +135,6 @@ class TeamCreationTransactionMixin:
         for agent in manager._agents_by_id.values():
             if id(agent) not in snapshot["private_ids"]:
                 agent._private_doc_library_id = None
-            elif id(agent) in snapshot["agent_fields"]:
-                fields = snapshot["agent_fields"][id(agent)]
-                agent.role = fields["role"]
-                agent.role_description = fields["role_description"]
-                agent.system_instructions = fields["system_instructions"]
         manager.agents = snapshot["agents"]
         manager._agents_by_id = snapshot["agents_by_id"]
         manager.teams = snapshot["teams"]

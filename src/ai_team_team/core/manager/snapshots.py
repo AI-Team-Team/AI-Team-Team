@@ -18,6 +18,14 @@ class SnapshotBuilder:
     def __init__(self, manager: "ATTManager") -> None:
         self.manager = manager
 
+    @staticmethod
+    def _peek_agent_history(agent: Agent) -> List[Dict[str, Any]]:
+        """Returns the effective history without mutating Agent-owned compatibility state."""
+        history = list(agent.message_history)
+        seen_ids = set(agent._history_seen_ids)
+        history.extend(message for message in agent.messages if id(message) not in seen_ids)
+        return history
+
     def _capture_state_snapshot(self, dirty: Dict[str, Any]) -> Dict[str, Any]:
         manager = self.manager
         full = dirty["full"]
@@ -50,6 +58,11 @@ class SnapshotBuilder:
         for relevant_team in relevant_teams:
             for member in relevant_team.members:
                 agent_lookup.setdefault(member.agent_id, member)
+            if isinstance(relevant_team.creator, Agent):
+                agent_lookup.setdefault(
+                    relevant_team.creator.agent_id,
+                    relevant_team.creator,
+                )
         agent_ids = set(agent_lookup) if full else set()
         if not full:
             for identifier in dirty["agents"]:
@@ -57,17 +70,22 @@ class SnapshotBuilder:
                     agent_ids.add(identifier)
                 elif identifier in manager.agents:
                     agent_ids.add(manager.agents[identifier].agent_id)
+        agent_dependency_ids: set[str] = set()
         if not full:
             for team_id in dirty["teams"]:
                 team = manager.teams.get(team_id)
                 if team is not None:
-                    agent_ids.update(member.agent_id for member in team.members)
-        agents = []
+                    agent_dependency_ids.update(member.agent_id for member in team.members)
+                    if isinstance(team.creator, Agent):
+                        agent_dependency_ids.add(team.creator.agent_id)
+        agent_dependency_ids.difference_update(agent_ids)
+        serialized_agents: Dict[str, Dict[str, Any]] = {}
         unresolved_agents: List[str] = []
-        for agent_id in sorted(agent_ids):
+        for agent_id in sorted(agent_ids | agent_dependency_ids):
             agent = agent_lookup.get(agent_id)
             if agent is None:
                 continue
+            dependency_error = None
             try:
                 if agent.lifecycle_state == "active":
                     model_alias = manager.resolve_model_alias(agent.llm_client)
@@ -75,31 +93,45 @@ class SnapshotBuilder:
                     model_alias = agent._model_alias
                     if model_alias is None and agent.llm_client is not None:
                         model_alias = manager.resolve_model_alias(agent.llm_client)
-            except ValueError:
-                unresolved_agents.append(agent.name)
-                continue
+            except ValueError as exc:
+                model_alias = None
+                dependency_error = str(exc)
             if agent.lifecycle_state == "active" and model_alias is None:
-                unresolved_agents.append(agent.name)
-                continue
-            agents.append(
-                {
-                    "agent_id": agent.agent_id,
-                    "name": agent.name,
-                    "role": agent.role,
-                    "role_description": getattr(agent, "role_description", ""),
-                    "system_instructions": getattr(agent, "system_instructions", ""),
-                    "model_alias": model_alias,
-                    "lifecycle_state": agent.lifecycle_state,
-                    "last_context": (dict(agent.last_context) if agent.last_context else None),
-                    "messages": tuple(dict(message) for message in manager._agent_history(agent)),
-                    "message_timestamp": now,
-                }
+                if agent_id in agent_ids:
+                    unresolved_agents.append(agent.name)
+                    continue
+                dependency_error = dependency_error or "The active Agent has no model alias."
+            history = (
+                manager._agent_history(agent)
+                if agent_id in agent_ids
+                else self._peek_agent_history(agent)
             )
+            serialized_agent = {
+                "agent_id": agent.agent_id,
+                "name": agent.name,
+                "role": agent.role,
+                "role_description": getattr(agent, "role_description", ""),
+                "system_instructions": getattr(agent, "system_instructions", ""),
+                "model_alias": model_alias,
+                "lifecycle_state": agent.lifecycle_state,
+                "last_context": (dict(agent.last_context) if agent.last_context else None),
+                "messages": tuple(dict(message) for message in history),
+                "message_timestamp": now,
+            }
+            if dependency_error is not None:
+                serialized_agent["_dependency_error"] = dependency_error
+            serialized_agents[agent_id] = serialized_agent
         if unresolved_agents:
             raise ValueError(
                 "Cannot persist agents whose LLM clients have no stable, "
                 "unique registered alias: " + ", ".join(unresolved_agents)
             )
+        agents = [serialized_agents[agent_id] for agent_id in sorted(agent_ids)]
+        agent_dependencies = [
+            serialized_agents[agent_id]
+            for agent_id in sorted(agent_dependency_ids)
+            if agent_id in serialized_agents
+        ]
 
         team_ids = set(manager.teams) if full else set(dirty["teams"])
         teams = []
@@ -163,23 +195,40 @@ class SnapshotBuilder:
         }
 
         library_ids = set(manager.libraries) if full else set(dirty["libraries"])
-        libraries = []
-        for lib_id in sorted(library_ids):
+        library_dependency_ids = {
+            agent_lookup[agent_id].private_doc_library_id
+            for agent_id in agent_dependency_ids
+            if agent_id in agent_lookup and agent_lookup[agent_id].private_doc_library_id
+        }
+        library_dependency_ids.difference_update(library_ids)
+        serialized_libraries: Dict[str, Dict[str, Any]] = {}
+        for lib_id in sorted(library_ids | library_dependency_ids):
             library = manager.libraries.get(lib_id)
             if library is None:
                 continue
-            libraries.append(
-                {
-                    "lib_id": library.lib_id,
-                    "name": library.name,
-                    "owner_team_id": library.owner_team_id,
-                    "owner_agent_id": library.owner_agent_id,
-                    "library_kind": library.library_kind,
-                    "lifecycle_state": library.lifecycle_state,
-                    "description": library.description,
-                    "is_public_visible": library.is_public_visible,
-                }
-            )
+            serialized_libraries[lib_id] = {
+                "lib_id": library.lib_id,
+                "name": library.name,
+                "owner_team_id": library.owner_team_id,
+                "owner_agent_id": library.owner_agent_id,
+                "library_kind": library.library_kind,
+                "lifecycle_state": library.lifecycle_state,
+                "description": library.description,
+                "is_public_visible": library.is_public_visible,
+            }
+        libraries = [
+            serialized_libraries[lib_id]
+            for lib_id in sorted(library_ids)
+            if lib_id in serialized_libraries
+        ]
+        library_dependencies = [
+            {
+                **serialized_libraries[lib_id],
+                "files": dict(manager._library_files.get(lib_id, {})),
+            }
+            for lib_id in sorted(library_dependency_ids)
+            if lib_id in serialized_libraries
+        ]
 
         permission_ids = set(manager.libraries) if full else set(dirty["permissions"])
         permissions = {
@@ -249,6 +298,7 @@ class SnapshotBuilder:
             "full": full,
             "configs": configs,
             "agents": agents,
+            "agent_dependencies": agent_dependencies,
             "teams": teams,
             "inboxes": inboxes,
             "proposals": proposals,
@@ -258,6 +308,7 @@ class SnapshotBuilder:
             "communication_agreements": communication_agreements,
             "peer_messages": peer_messages,
             "libraries": libraries,
+            "library_dependencies": library_dependencies,
             "permissions": permissions,
             "links": links,
             "file_changes": file_changes,

@@ -325,6 +325,37 @@ Action: dispatch_subagent(
 )
 ```
 
+### Reusing an Existing Agent
+
+Register a persistent Agent once, then add the same identity to several AgentTeams through a neutral membership input. `member_configs` continues to create new Agents, while existing membership never changes the shared Agent's role, instructions, model binding, memory, lifecycle state, invocation lock, or Private DocLib.
+
+```python
+shared_client = MyLLMClient()
+manager.register_llm_client("shared-agent", shared_client)
+alice = manager.register_agent(Agent("Alice", "Researcher", shared_client))
+
+team_a = manager.create_agent_team(
+    creator=root_agent,
+    member_configs={
+        "Planner": {"model": "openai-123"},
+        "Reviewer": {"model": "gemini-123"},
+    },
+    existing_members=[alice],
+)
+
+team_b = manager.create_agent_team(
+    creator=root_agent,
+    member_configs={
+        "Analyst": {"model": "openai-123"},
+        "Writer": {"model": "gemini-123"},
+    },
+    existing_member_ids=[alice.agent_id],
+)
+
+assert next(member for member in team_a.members if member.agent_id == alice.agent_id) is alice
+assert next(member for member in team_b.members if member.agent_id == alice.agent_id) is alice
+```
+
 ## 📂 8. Collaborative Document Library (DocLib)
 
 Every Agent Team features a built-in document library (`DocLib`) to store documents, pass context down, and share specs across teams.

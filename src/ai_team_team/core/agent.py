@@ -106,6 +106,8 @@ class Agent:
         team_purpose: str = "Unspecified team purpose",
         roles_and_models: Optional[Dict[str, str]] = None,
         member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        existing_members: Optional[List["Agent"]] = None,
+        existing_member_ids: Optional[List[str]] = None,
         is_public_visible: bool = False,
         initial_docs: Optional[Dict[str, str]] = None
     ) -> 'AgentTeam':
@@ -118,6 +120,8 @@ class Agent:
             team_purpose=team_purpose,
             roles_and_models=roles_and_models,
             member_configs=member_configs,
+            existing_members=existing_members,
+            existing_member_ids=existing_member_ids,
             is_public_visible=is_public_visible,
             initial_docs=initial_docs
         )

@@ -86,17 +86,26 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         manager.register_llm_client("shared-model", client)
         manager.register_agent(shared)
         configs_a = {
-            "Analyst": {"hire_agent": shared.name},
             "HelperA": {"model": "shared-model"},
             "HelperB": {"model": "shared-model"},
         }
         configs_b = {
-            "Expert": {"hire_agent": shared.name},
             "HelperC": {"model": "shared-model"},
             "HelperD": {"model": "shared-model"},
         }
-        team_a = manager.create_agent_team(root, member_configs=configs_a)
-        team_b = manager.create_agent_team(root, member_configs=configs_b)
+        team_a = manager.create_agent_team(
+            root,
+            member_configs=configs_a,
+            existing_members=[shared],
+        )
+        team_b = manager.create_agent_team(
+            root,
+            member_configs=configs_b,
+            existing_member_ids=[shared.agent_id],
+        )
+        self.assertIs(next(member for member in team_a.members if member is shared), shared)
+        self.assertIs(next(member for member in team_b.members if member is shared), shared)
+        self.assertEqual(shared.role, "Analyst")
 
         with self.assertRaises(AmbiguousTeamContextError):
             manager.get_agent_team(shared)

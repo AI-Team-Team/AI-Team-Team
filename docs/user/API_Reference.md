@@ -108,8 +108,8 @@ agent = Agent(name: str, role: str, llm_client: Optional[Any] = None, role_descr
 
 ### Methods
 
-* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
-  Allows this agent to recursively launch a child dynamic `AgentTeam` structure, passing visibility and initial documents.
+* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, existing_members: Optional[List[Agent]] = None, existing_member_ids: Optional[List[str]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
+  Allows this agent to recursively launch a child dynamic `AgentTeam`, create new members from `member_configs`, and add already registered Agents through the role-neutral `existing_members` or `existing_member_ids` inputs.
 
 ## 👥 `AgentTeam`
 
@@ -130,8 +130,8 @@ Represents a dynamic team of agents executing discussions and tasks in a parent-
 
 ### Methods
 
-* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
-  Allows this team to recursively spawn a child dynamic sub-team (Level $N+1$), propagating visibility and context docs to the subteam's DocLib.
+* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, existing_members: Optional[List[Agent]] = None, existing_member_ids: Optional[List[str]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
+  Allows this team to recursively spawn a child dynamic sub-team (Level $N+1$), create new members, reuse existing registered Agent identities, and propagate visibility and context documents to the subteam's DocLib.
 * **`await execute_reasoning_step(...) -> str`**
   Returns the completed answer, or a stable `[Turn incomplete: ...]` placeholder when the configured isolate policy contains a member-scoped failure.
 * **`await execute_reasoning_step_detailed(...) -> AgentTurnResult`**
@@ -173,8 +173,8 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
   Registers a custom dynamic committee preset (e.g. roles and system prompt).
 * **`register_tools_context(context: Dict[str, Any])`**
   Registers additional runtime resources and rebinds tools. `att_manager` is present automatically and cannot be overwritten.
-* **`create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
-  Dynamically spawns a new recursive Agent Team (AT) with a parent-child relationship. `is_public_visible` sets library visibility for discovery, and `initial_docs` maps file paths to initial contents to populate in the team's DocLib.
+* **`create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, existing_members: Optional[List[Agent]] = None, existing_member_ids: Optional[List[str]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
+  Dynamically spawns a recursive AgentTeam. `member_configs` creates new Agent identities, while `existing_members` and `existing_member_ids` add active registered identities without changing their names, roles, instructions, model bindings, memories, lifecycle state, or Private DocLibs. The combined explicit membership must satisfy the configured minimum size, duplicate identities are rejected, `is_public_visible` controls team-library discovery, and `initial_docs` populates that library.
 
 * **`await execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
   Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits. Sessions for the same team, including emergency sessions, wait on one serial lock; different teams may run concurrently.
@@ -361,8 +361,8 @@ These tools are automatically registered and bound to all agent teams by default
 
 ### Spawning & Communication
 
-* **`dispatch_subagent(task: str, team_purpose: str, member_configs: Optional[dict] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: Optional[dict] = None) -> str`**
-  Spawns a recursive child `AgentTeam` (Level $N+1$). Each team must contain at least 3 members. Optional context files can be pre-populated via `initial_documents` (maps file paths to contents).
+* **`dispatch_subagent(task: str, team_purpose: str, member_configs: Optional[dict] = None, existing_member_ids: Optional[List[str]] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: Optional[dict] = None) -> str`**
+  Spawns a recursive child `AgentTeam` (Level $N+1$). `member_configs` creates new Agents and `existing_member_ids` adds active registered Agents without assigning team-specific roles; their combined count must satisfy the configured minimum. Optional context files can be pre-populated via `initial_documents`.
 * **`delegate_escalation(objective: str, rationale: str) -> str`**
   Escalates a task or deadlock upward to the team's direct parent in the lineage hierarchy.
 * **`send_peer_message(team_id: str, message: str) -> str`**

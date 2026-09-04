@@ -23,13 +23,14 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
             ]
         )
         writer = Agent("ReActWriter", "Writer", client)
+        self.manager.register_agent(writer)
         team = self.manager.create_agent_team(
             self.root,
             member_configs={
-                "writer": writer,
-                "peer-c": Agent("PeerC", "Peer", self.client),
-                "peer-d": Agent("PeerD", "Peer", self.client),
+                "PeerC": {"model": "default"},
+                "PeerD": {"model": "default"},
             },
+            existing_members=[writer],
         )
         callbacks = []
         self.manager.on_activity_added = lambda *args: callbacks.append(args)
@@ -58,13 +59,14 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
             ]
         )
         reader = Agent("ReActReader", "Reader", client)
+        self.manager.register_agent(reader)
         team = self.manager.create_agent_team(
             self.root,
             member_configs={
-                "reader": reader,
-                "peer-r1": Agent("PeerR1", "Peer", self.client),
-                "peer-r2": Agent("PeerR2", "Peer", self.client),
+                "PeerR1": {"model": "default"},
+                "PeerR2": {"model": "default"},
             },
+            existing_member_ids=[reader.agent_id],
         )
         self.manager.libraries[reader.private_doc_library_id].write_file(
             "note.txt", secret
@@ -87,4 +89,3 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         self.assertNotIn(secret, repr(callbacks))
         self.assertNotIn(secret, repr(reader.message_history))
         self.assertNotIn(secret, repr(reader.messages))
-

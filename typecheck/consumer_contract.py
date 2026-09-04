@@ -6,6 +6,9 @@ from typing_extensions import assert_type
 
 from ai_team_team import (
     ATTConfig,
+    ATTManager,
+    Agent,
+    AgentTeam,
     DiscussionResult,
     LLMClientProto,
     LLMResponse,
@@ -46,3 +49,23 @@ assert_type(config.model_token_limits["default"], int)
 assert_type(tool.json_schema, Dict[str, Any])
 assert_type(ToolResult("call-1", "noop", "done"), ToolResult)
 assert_type(DiscussionResult, type[DiscussionResult])
+
+
+def create_shared_memberships(
+    manager: ATTManager,
+    creator: Agent,
+    shared: Agent,
+    new_members: Dict[str, Dict[str, Any]],
+) -> tuple[AgentTeam, AgentTeam]:
+    """Exercise both role-neutral shared-membership entry points."""
+    by_object = manager.create_agent_team(
+        creator,
+        member_configs=new_members,
+        existing_members=[shared],
+    )
+    by_id = creator.launch_att(
+        manager,
+        member_configs=new_members,
+        existing_member_ids=[shared.agent_id],
+    )
+    return by_object, by_id

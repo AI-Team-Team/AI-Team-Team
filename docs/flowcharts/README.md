@@ -4,12 +4,13 @@ This directory contains technical flowcharts and Mermaid sequence diagrams for t
 
 ## Flowchart Index
 
-1. **[Autonomous Communication Governance](Autonomous_Communication_Governance.md)**: Shows configuration-owned communication policy, explicit governance principals, request lifecycle, agreements, revocation, and durable peer delivery.
-2. **[Lineage Tree Mutations](Lineage_Tree_Mutations.md)**: Shows dynamic AgentTeam spawning, tool binding, membership voting, explicit-principal migration governance, and atomic topology mutation.
-3. **[Gated FileReader Size Limits](Gated_Reading.md)**: Shows the `read_file` size protection, outline fallback, and line-window behavior.
-4. **[Tooling & Execution Engines](Tooling_and_Execution.md)**: Shows tool auditing, multi-round ReAct execution, native tool calling, and parallel tool execution.
-5. **[State Persistence & Recovery](State_Persistence.md)**: Shows task-local batching, the coalescing single-writer queue, incremental commits, and validated atomic restore.
-6. **[Supervision & Emergencies](Supervision_and_Emergencies.md)**: Shows supervisory audits, UNKNOWN alert lifecycle, parent escalation, and emergency wakeups.
+1. **[ATT System Architecture](System_Architecture.md)**: Shows the complete system map across host integration, identity, topology, discussions, Agent execution, governance, knowledge, supervision, persistence, and recovery.
+2. **[Autonomous Communication Governance](Autonomous_Communication_Governance.md)**: Shows configuration-owned communication policy, explicit governance principals, request lifecycle, agreements, revocation, and durable peer delivery.
+3. **[Lineage Tree Mutations](Lineage_Tree_Mutations.md)**: Shows dynamic AgentTeam spawning, tool binding, membership voting, explicit-principal migration governance, and atomic topology mutation.
+4. **[Gated FileReader Size Limits](Gated_Reading.md)**: Shows the `read_file` size protection, outline fallback, and line-window behavior.
+5. **[Tooling & Execution Engines](Tooling_and_Execution.md)**: Shows tool auditing, multi-round ReAct execution, native tool calling, and parallel tool execution.
+6. **[State Persistence & Recovery](State_Persistence.md)**: Shows task-local batching, the coalescing single-writer queue, incremental commits, and validated atomic restore.
+7. **[Supervision & Emergencies](Supervision_and_Emergencies.md)**: Shows supervisory audits, UNKNOWN alert lifecycle, parent escalation, and emergency wakeups.
 
 ## Unified High-Level Flow Overview
 

@@ -8,15 +8,15 @@ This flowchart outlines the logic executed when an `Agent` or `AgentTeam` launch
 
 ```mermaid
 flowchart TD
-    Start["Call creator.launch_att(manager, member_configs)"] --> EnforceSize{"Configured minimum team size satisfied?"}
+    Start["Call creator.launch_att(manager, member_configs, existing_member_ids)"] --> EnforceSize{"Combined membership satisfies configured minimum?"}
     EnforceSize -- "No" --> RaiseError["Raise ValueError<br/>Spawning blocked"]
     EnforceSize -- "Yes" --> GenerateID["Generate unique team_id: AT-xxxxxx"]
-    GenerateID --> SpawnMembers["Create or reuse member Agents<br/>with stable Agent UUIDs"]
-    SpawnMembers --> RegisterAgents["Register every Agent through ATTManager<br/>Reuse or create one private DocLib each"]
+    GenerateID --> SpawnMembers["Create configured new Agents<br/>Resolve existing registered Agent IDs"]
+    SpawnMembers --> RegisterAgents["Register only new Agents and Private DocLibs<br/>Existing identities remain unchanged"]
     RegisterAgents --> CreateTeam["Instantiate AgentTeam with creator link"]
     CreateTeam --> CreateDocLib["Create and register built-in team DocLib<br/>Populate initial documents"]
     CreateDocLib --> BindTools["Bind default and global tools<br/>att_manager context is already reserved"]
-    BindTools --> RegisterTeam["Register team in manager.teams"]
+    BindTools --> RegisterTeam["Register team and team_id ↔ agent_id memberships"]
     RegisterTeam --> CreatorIsTeam{"Is creator an AgentTeam?"}
     CreatorIsTeam -- "Yes" --> AddChildLink["Add child reference and parent mapping"]
     CreatorIsTeam -- "No" --> Save["Queue incremental entity and file deltas"]

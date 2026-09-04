@@ -34,6 +34,8 @@ class TeamCreationStagingMixin:
         team_purpose: str = "Unspecified team purpose",
         roles_and_models: Optional[Dict[str, str]] = None,
         member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        existing_members: Optional[List[Agent]] = None,
+        existing_member_ids: Optional[List[str]] = None,
         is_public_visible: bool = False,
         initial_docs: Optional[Dict[str, str]] = None,
         *,
@@ -41,8 +43,6 @@ class TeamCreationStagingMixin:
     ) -> Dict[str, Any]:
         """Builds a complete AgentTeam transaction without live registration."""
         manager = self.manager
-        if member_configs:
-            member_count = len(member_configs)
         team = AgentTeam(
             creator=creator,
             preset_name=preset_name,
@@ -80,25 +80,20 @@ class TeamCreationStagingMixin:
                 alias = roles_and_models.get(role) or roles_and_models.get(name)
             return client_by_alias(alias)
 
-        members: List[Agent] = []
-        role_updates: List[Tuple[Agent, str, str]] = []
+        existing_agents = self._resolve_existing_team_members(
+            existing_members,
+            existing_member_ids,
+        )
+        members: List[Agent] = list(existing_agents)
         if member_configs:
             for role_name, config in member_configs.items():
-                if isinstance(config, Agent):
-                    agent = config
-                    role_updates.append((agent, role_name, agent.role))
-                elif config.get("hire_agent") in manager.agents:
-                    agent = manager.agents[config["hire_agent"]]
-                elif config.get("model") in manager.agents:
-                    agent = manager.agents[config["model"]]
-                else:
-                    agent = Agent(
-                        name=(f"Dynamic_{role_name}_{team.team_id.split('-', 1)[1]}"),
-                        role=role_name,
-                        llm_client=client_by_alias(config.get("model")),
-                        role_description=config.get("role_description", ""),
-                        system_instructions=config.get("system_instructions", ""),
-                    )
+                agent = Agent(
+                    name=(f"Dynamic_{role_name}_{team.team_id.split('-', 1)[1]}"),
+                    role=role_name,
+                    llm_client=client_by_alias(config.get("model")),
+                    role_description=config.get("role_description", ""),
+                    system_instructions=config.get("system_instructions", ""),
+                )
                 members.append(agent)
         elif roles_and_presets:
             for name, role in roles_and_presets:
@@ -109,7 +104,7 @@ class TeamCreationStagingMixin:
                         llm_client=client_for_role(role, name),
                     )
                 )
-        else:
+        elif not members:
             roles = manager.get_preset(preset_name).get("roles", [])
             if len(roles) >= member_count:
                 for name, role in roles[:member_count]:
@@ -201,8 +196,7 @@ class TeamCreationStagingMixin:
             "team": team,
             "parent": parent,
             "new_agents": new_agents,
-            "registered_agents": registered_agents,
-            "role_updates": role_updates,
+            "existing_agents": existing_agents,
             "libraries": libraries,
             "library_files": library_files,
         }

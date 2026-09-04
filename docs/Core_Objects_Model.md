@@ -31,6 +31,8 @@ The `ATTManager` is the public orchestration facade exported by the `ai_team_tea
 
 An `AgentTeam` represents a single node in the hierarchy. A team must have at least 3 members to ensure democratic voting validity.
 
+Membership is role-neutral and contains only the relationship between a `team_id` and an `agent_id`. The same `Agent` object may appear in several `team.members` lists; joining or leaving one team does not redefine the Agent or affect any other membership.
+
 ### Structural Pointers
 
 - **`parent_team (Optional[AgentTeam])`**: The dual-linked reference to the parent. None for Level 1 teams spawned by the Root AI.
@@ -64,3 +66,5 @@ The `Agent` encapsulates a single identity and ReAct execution profile.
 The agent does not run its own `while` loop. Instead, the `AgentTeam` invokes `manager.execute_reasoning_step(agent, ...)`, feeding the ReAct output back into the manager's state persistence layer.
 
 Private documents are deliberate artifacts, not hidden reasoning. They enter a model observation only after the owner explicitly invokes `read_private_file`, and enter a team library only after explicit publication.
+
+An Agent's `role`, description, instructions, model binding, memory, lifecycle state, invocation lock, and Private DocLib belong to the Agent identity rather than to any membership. Invocation-scoped team facts are carried through `ContextVar` values and are never persisted as a team-specific Agent identity.

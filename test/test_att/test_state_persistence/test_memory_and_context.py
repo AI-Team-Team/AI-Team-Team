@@ -44,9 +44,13 @@ class TestStatePersistence(StatePersistenceTestCase):
         team_a = self.manager.create_agent_team(
             creator=self.root_ai,
             preset_name="generic",
-            team_purpose="Purpose A"
+            team_purpose="Purpose A",
+            member_configs={
+                "HelperA": {"model": "critic"},
+                "HelperB": {"model": "critic"},
+            },
+            existing_members=[agent],
         )
-        team_a.members.append(agent)
         
         # Initial ReAct step to establish first context
         await team_a.execute_react_step(agent, "Task 1", "Sys 1")
@@ -57,9 +61,13 @@ class TestStatePersistence(StatePersistenceTestCase):
         team_b = self.manager.create_agent_team(
             creator=self.root_ai,
             preset_name="generic",
-            team_purpose="Purpose B"
+            team_purpose="Purpose B",
+            member_configs={
+                "HelperC": {"model": "critic"},
+                "HelperD": {"model": "critic"},
+            },
+            existing_member_ids=[agent.agent_id],
         )
-        team_b.members.append(agent)
         
         # Change role name to trigger switch notice
         agent.role = "Senior Developer"
@@ -75,35 +83,37 @@ class TestStatePersistence(StatePersistenceTestCase):
         self.assertIn(team_b.team_id, notice_content)
         self.assertIn("Senior Developer", notice_content)
 
-    async def test_agent_shared_hiring(self):
-        """Verify that hiring an existing agent shares its message queue across teams."""
+    async def test_agent_shared_membership(self):
+        """Verify that role-neutral membership shares one Agent across teams."""
         agent = Agent(name="Shared_Agent", role="Analyst", llm_client=self.mock_react_client)
         self.manager.register_agent(agent)
         
-        # Spawn team A hiring the existing agent
+        # Spawn team A with the existing Agent object.
         team_a = self.manager.create_agent_team(
             creator=self.root_ai,
             member_configs={
-                "Analyst": {"hire_agent": "Shared_Agent"},
                 "Helper1": {"model": "critic"},
                 "Helper2": {"model": "critic"}
-            }
+            },
+            existing_members=[agent],
         )
         self.assertIn(agent, team_a.members)
+        self.assertEqual(agent.role, "Analyst")
         
         # Execute action in Team A
         await team_a.execute_react_step(agent, "Task A", "Sys A")
         
-        # Spawn team B hiring the same existing agent
+        # Spawn team B with the same stable Agent ID.
         team_b = self.manager.create_agent_team(
             creator=self.root_ai,
             member_configs={
-                "ExpertAnalyst": {"hire_agent": "Shared_Agent"},
                 "Helper3": {"model": "critic"},
                 "Helper4": {"model": "critic"}
-            }
+            },
+            existing_member_ids=[agent.agent_id],
         )
         self.assertIn(agent, team_b.members)
+        self.assertEqual(agent.role, "Analyst")
         
         # Execute action in Team B
         await team_b.execute_react_step(agent, "Task B", "Sys B")
@@ -113,4 +123,3 @@ class TestStatePersistence(StatePersistenceTestCase):
         # Verify Team B step triggered switch notice
         system_notices = [m for m in agent.messages if m.get("role") == "system"]
         self.assertTrue(any("TRANSITION NOTICE: ACTIVE TEAM UPDATE" in m["content"] for m in system_notices))
-

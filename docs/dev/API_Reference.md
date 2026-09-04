@@ -20,8 +20,8 @@ One instance may be shared across teams. Its `lock` serializes complete model tu
   ```
 
 * **Methods**:
-  * `launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None) -> AgentTeam`
-        Allows any active agent to recursively launch their own child dynamic `AgentTeam` structure.
+  * `launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, existing_members: Optional[List[Agent]] = None, existing_member_ids: Optional[List[str]] = None) -> AgentTeam`
+        Allows any active agent to recursively launch a child `AgentTeam`. Existing Agent inputs create only membership references and never mutate Agent-owned identity or runtime state.
 
 `agent_id` is an immutable canonical UUID. `_private_doc_library_id` and `_model_alias` are manager-owned persistence fields; public code reads only `private_doc_library_id`.
 
@@ -52,6 +52,8 @@ Represents a dynamic team of at least 3 agents ($N \ge 3$) executing discussions
 ### `ATTManager`
 
 Master orchestrator managing the overall ATT topology, dynamic presets, tool registrations, and callback events.
+
+`create_agent_team()` accepts `existing_members` or stable `existing_member_ids` for active registered Agents. These inputs are resolved before staging and revalidated under the topology lock; membership stores only the team/Agent relationship, while `member_configs` remains exclusively responsible for creating new Agent entities.
 
 Synchronous and asynchronous callbacks share one ordered background dispatcher; callback failures are logged and never alter core transaction outcomes.
 

@@ -15,17 +15,25 @@ class StoreMaterializationMixin:
                 key: (value if key in {"schema_version", "root_ai_id"} else json.dumps(value))
                 for key, value in configs.items()
             }
-        result["agents"] = [
+        for key in ("agents", "agent_dependencies"):
+            result[key] = [
+                {
+                    **agent,
+                    "last_context": (
+                        json.dumps(agent["last_context"])
+                        if agent.get("last_context") is not None
+                        else None
+                    ),
+                    "messages": json.loads(json.dumps(list(agent["messages"]))),
+                }
+                for agent in snapshot.get(key, ())
+            ]
+        result["library_dependencies"] = [
             {
-                **agent,
-                "last_context": (
-                    json.dumps(agent["last_context"])
-                    if agent.get("last_context") is not None
-                    else None
-                ),
-                "messages": json.loads(json.dumps(list(agent["messages"]))),
+                **library,
+                "files": json.loads(json.dumps(dict(library.get("files", {})))),
             }
-            for agent in snapshot.get("agents", ())
+            for library in snapshot.get("library_dependencies", ())
         ]
         result["teams"] = [
             {

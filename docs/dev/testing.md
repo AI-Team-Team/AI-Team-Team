@@ -145,6 +145,8 @@ Operational audit tests must cover framework, supervisor, and framework-then-sup
 
 Team creation fault-injection tests should fail before validation, during Agent/DocLib staging, and during final publication, then compare the complete Agent, team, library, parent/child, private-library, dirty-state, and filesystem snapshots. A successfully committed team must remain registered if its first later discussion fails.
 
+Shared-membership tests must use `existing_members` or `existing_member_ids`, assert exact object identity across teams and after restore, verify that every Agent-owned field remains unchanged, and confirm that removing one membership leaves every other membership and the Private DocLib intact. `member_configs` is reserved for creating new Agent identities and must reject legacy existing-Agent forms.
+
 Reliability changes should cover schema preflight without mutation, competing processes, abrupt writer termination, pending-delta coalescing, cancellation, shared-agent context/tool scope, durable UNKNOWN alert states, callback ordering and isolation, and hanging-provider shutdown behavior.
 
 The suite's `test/test_att/test_high_hardening/` package contains reference patterns for these cases.

@@ -1,6 +1,6 @@
 """Dynamic delegation, escalation, and AgentTeam status tools."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ..core.exceptions import (
     ATTException,
@@ -19,11 +19,12 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
         task: str,
         team_purpose: str,
         member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        existing_member_ids: Optional[List[str]] = None,
         system_instructions: str = "",
         is_public_visible: bool = False,
         initial_documents: Optional[Dict[str, str]] = None
     ) -> str:
-        """Spawns a recursive child AT under the ATT tree. Arguments: task, team_purpose, member_configs, system_instructions, is_public_visible, initial_documents."""
+        """Spawns a recursive child AT using new member configs and role-neutral existing Agent IDs."""
         if not att_manager:
             raise ToolBusinessError("ATTManager is not available in tools context.")
         
@@ -41,18 +42,36 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                 f"Max delegation depth ({max_depth}) reached; cannot spawn a child AT."
             )
 
+        if existing_member_ids:
+            if not isinstance(existing_member_ids, list) or any(
+                not isinstance(agent_id, str) or not agent_id
+                for agent_id in existing_member_ids
+            ):
+                raise ToolArgumentError(
+                    "existing_member_ids must contain non-empty Agent ID strings."
+                )
+            if len(existing_member_ids) != len(set(existing_member_ids)):
+                raise ToolArgumentError(
+                    "existing_member_ids cannot contain duplicate Agent identities."
+                )
+            unavailable_ids = [
+                agent_id
+                for agent_id in existing_member_ids
+                if agent_id not in att_manager._agents_by_id
+                or att_manager._agents_by_id[agent_id].lifecycle_state != "active"
+            ]
+            if unavailable_ids:
+                raise ToolArgumentError(
+                    "Existing Agents are not actively registered: "
+                    + ", ".join(sorted(unavailable_ids))
+                )
+
         min_size = config.min_subagent_team_size
         if member_configs:
             if not isinstance(member_configs, dict):
                 raise ToolArgumentError(
                     "member_configs must map role names to configurations."
                 )
-            member_count = len(member_configs)
-            if member_count < min_size:
-                raise ToolArgumentError(
-                    f"A delegated AgentTeam MUST have at least {min_size} members."
-                )
-            
             # Validate model names
             for r_name, r_conf in member_configs.items():
                 if isinstance(r_conf, dict):
@@ -63,6 +82,12 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                             raise ToolArgumentError(
                                 f"Model {model_alias!r} is not registered. Available models: {available}."
                             )
+        if member_configs or existing_member_ids:
+            member_count = len(member_configs or {}) + len(existing_member_ids or [])
+            if member_count < min_size:
+                raise ToolArgumentError(
+                    f"A delegated AgentTeam MUST have at least {min_size} members."
+                )
         else:
             member_count = min_size
 
@@ -73,6 +98,7 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                 system_instructions=system_instructions,
                 team_purpose=team_purpose,
                 member_configs=member_configs,
+                existing_member_ids=existing_member_ids,
                 is_public_visible=is_public_visible,
                 initial_docs=initial_documents
             )
@@ -159,6 +185,7 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                         "Tester": {"model": "default"},
                         "Arbitrator": {"model": "default"},
                     },
+                    "existing_member_ids": None,
                     "initial_documents": {"brief.md": "Review scope"},
                 }
             ],
@@ -179,4 +206,3 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
             update_team_status,
         ),
     }
-

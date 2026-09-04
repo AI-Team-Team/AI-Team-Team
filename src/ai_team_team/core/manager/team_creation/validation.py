@@ -9,6 +9,49 @@ from ...team import AgentTeam
 
 
 class TeamCreationValidationMixin:
+    def _resolve_existing_team_members(
+        self,
+        existing_members: Optional[List[Agent]],
+        existing_member_ids: Optional[List[str]],
+    ) -> List[Agent]:
+        """Resolve active registered Agents without assigning team-specific identity."""
+        manager = self.manager
+        if existing_members is not None and not isinstance(existing_members, list):
+            raise TypeError("existing_members must be a list of Agent instances.")
+        if existing_member_ids is not None and not isinstance(existing_member_ids, list):
+            raise TypeError("existing_member_ids must be a list of Agent IDs.")
+
+        resolved: List[Agent] = []
+        for agent in existing_members or []:
+            if not isinstance(agent, Agent):
+                raise TypeError("existing_members must contain only Agent instances.")
+            if (
+                manager._agents_by_id.get(agent.agent_id) is not agent
+                or manager.agents.get(agent.name) is not agent
+                or agent.lifecycle_state != "active"
+            ):
+                raise ValueError(
+                    f"Existing Agent {agent.name!r} must be actively registered with this manager."
+                )
+            resolved.append(agent)
+
+        for agent_id in existing_member_ids or []:
+            if not isinstance(agent_id, str) or not agent_id:
+                raise ValueError("existing_member_ids must contain non-empty strings.")
+            agent = manager._agents_by_id.get(agent_id)
+            if (
+                agent is None
+                or manager.agents.get(agent.name) is not agent
+                or agent.lifecycle_state != "active"
+            ):
+                raise ValueError(f"Existing Agent ID {agent_id!r} is not actively registered.")
+            resolved.append(agent)
+
+        resolved_ids = [agent.agent_id for agent in resolved]
+        if len(resolved_ids) != len(set(resolved_ids)):
+            raise ValueError("An AgentTeam cannot contain duplicate existing Agent identities.")
+        return resolved
+
     def _validate_team_creation_inputs(
         self,
         *,
@@ -17,6 +60,8 @@ class TeamCreationValidationMixin:
         roles_and_presets: Optional[List[Tuple[str, str]]],
         roles_and_models: Optional[Dict[str, str]],
         member_configs: Optional[Dict[str, Dict[str, Any]]],
+        existing_members: Optional[List[Agent]],
+        existing_member_ids: Optional[List[str]],
         initial_docs: Optional[Dict[str, str]],
         preset_name: str,
         system_instructions: str,
@@ -43,7 +88,24 @@ class TeamCreationValidationMixin:
             raise TypeError("is_public_visible must be a boolean.")
         if member_configs is not None and not isinstance(member_configs, dict):
             raise TypeError("member_configs must be a dictionary.")
-        effective_count = len(member_configs) if member_configs else member_count
+        if member_configs and roles_and_presets:
+            raise ValueError("member_configs and roles_and_presets are mutually exclusive.")
+        existing = self._resolve_existing_team_members(
+            existing_members,
+            existing_member_ids,
+        )
+        explicit_new_count = (
+            len(member_configs)
+            if member_configs
+            else len(roles_and_presets)
+            if roles_and_presets
+            else 0
+        )
+        effective_count = (
+            len(existing) + explicit_new_count
+            if existing or explicit_new_count
+            else member_count
+        )
         if (
             not isinstance(effective_count, int)
             or isinstance(effective_count, bool)
@@ -73,20 +135,18 @@ class TeamCreationValidationMixin:
                 raise TypeError(
                     "roles_and_presets must contain non-empty (name, role) string tuples."
                 )
-            if len(roles_and_presets) < manager.config.min_subagent_team_size:
-                raise ValueError(
-                    f"roles_and_presets must define at least {manager.config.min_subagent_team_size} members."
-                )
         for role, config in (member_configs or {}).items():
             if not isinstance(role, str) or not role:
                 raise ValueError("Member role names must be non-empty strings.")
             if isinstance(config, Agent):
-                continue
+                raise TypeError(
+                    "member_configs creates new Agents and cannot contain existing Agent objects; "
+                    "use existing_members instead."
+                )
             if not isinstance(config, dict):
-                raise TypeError(f"Member configuration for {role!r} must be a mapping or Agent.")
+                raise TypeError(f"Member configuration for {role!r} must be a mapping.")
             allowed = {
                 "model",
-                "hire_agent",
                 "role_description",
                 "system_instructions",
             }
@@ -95,18 +155,8 @@ class TeamCreationValidationMixin:
                 raise ValueError(
                     f"Unknown member configuration fields for {role!r}: {sorted(unknown)}."
                 )
-            if config.get("model") and config.get("hire_agent"):
-                raise ValueError("model and hire_agent are mutually exclusive.")
-            hired = config.get("hire_agent")
-            if hired is not None and hired not in manager.agents:
-                raise ValueError(f"Agent {hired!r} is not registered.")
             alias = config.get("model")
-            if (
-                alias
-                and alias != "default"
-                and alias not in available_models
-                and alias not in manager.agents
-            ):
+            if alias and alias != "default" and alias not in available_models:
                 raise ValueError(f"Model {alias!r} is not registered.")
             for field in {"role_description", "system_instructions"}:
                 if field in config and not isinstance(config[field], str):
@@ -151,3 +201,12 @@ class TeamCreationValidationMixin:
             existing_name = manager.agents.get(agent.name)
             if existing_id is not None or existing_name is not None:
                 raise ValueError(f"Agent identity {agent.name!r} changed during team staging.")
+        for agent in stage["existing_agents"]:
+            if (
+                manager._agents_by_id.get(agent.agent_id) is not agent
+                or manager.agents.get(agent.name) is not agent
+                or agent.lifecycle_state != "active"
+            ):
+                raise ValueError(
+                    f"Existing Agent {agent.name!r} changed during team staging."
+                )

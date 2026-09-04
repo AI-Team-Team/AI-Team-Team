@@ -41,6 +41,7 @@ class StoreWriteMixin:
             self._write_deletions(session, snapshot)
 
             self._write_configs(session, snapshot.get("configs"))
+            self._write_agent_dependencies(session, snapshot.get("agent_dependencies", []))
             self._write_agents(session, snapshot.get("agents", []))
             session.flush()
             self._write_teams(session, snapshot.get("teams", []))
@@ -58,6 +59,7 @@ class StoreWriteMixin:
                 session, snapshot.get("communication_agreements", [])
             )
             self._write_peer_messages(session, snapshot.get("peer_messages", []))
+            self._write_library_dependencies(session, snapshot.get("library_dependencies", []))
             self._write_libraries(session, snapshot.get("libraries", []))
             session.flush()
             self._write_permissions(session, snapshot.get("permissions", {}))
@@ -152,6 +154,26 @@ class StoreWriteMixin:
                         created_at=agent["message_timestamp"] + index * 0.001,
                     )
                 )
+
+    @classmethod
+    def _write_agent_dependencies(
+        cls,
+        session: Any,
+        agents: Iterable[Dict[str, Any]],
+    ) -> None:
+        """Inserts missing FK targets without rewriting existing Agent state."""
+        missing = [
+            agent
+            for agent in agents
+            if session.get(AgentModel, agent["agent_id"]) is None
+        ]
+        unresolved = [agent["name"] for agent in missing if agent.get("_dependency_error")]
+        if unresolved:
+            raise ValueError(
+                "Cannot persist agents whose LLM clients have no stable, "
+                "unique registered alias: " + ", ".join(unresolved)
+            )
+        cls._write_agents(session, missing)
 
     @staticmethod
     def _write_teams(session: Any, teams: Iterable[Dict[str, Any]]) -> None:
@@ -353,6 +375,26 @@ class StoreWriteMixin:
                     is_public_visible=int(library["is_public_visible"]),
                 )
             )
+
+    @classmethod
+    def _write_library_dependencies(
+        cls,
+        session: Any,
+        libraries: Iterable[Dict[str, Any]],
+    ) -> None:
+        """Inserts a missing private library dependency without updating an existing one."""
+        for library in libraries:
+            if session.get(LibraryModel, library["lib_id"]) is not None:
+                continue
+            cls._write_libraries(session, (library,))
+            for path, content in library.get("files", {}).items():
+                session.add(
+                    DocLibFileModel(
+                        lib_id=library["lib_id"],
+                        path=path,
+                        content=content,
+                    )
+                )
 
     @staticmethod
     def _write_permissions(

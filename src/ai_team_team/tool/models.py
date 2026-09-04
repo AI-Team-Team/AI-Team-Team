@@ -1,25 +1,18 @@
 """Strict argument models for complex built-in tools."""
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict
 
 
 class DispatchMemberConfig(BaseModel):
-    """Strict model-visible configuration for one delegated Agent."""
+    """Strict configuration for one newly created delegated Agent."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
     model: Optional[str] = None
-    hire_agent: Optional[str] = None
     role_description: str = ""
     system_instructions: str = ""
-
-    @model_validator(mode="after")
-    def validate_source(self):
-        if self.model and self.hire_agent:
-            raise ValueError("model and hire_agent are mutually exclusive.")
-        return self
 
 
 class DispatchSubagentArguments(BaseModel):
@@ -28,6 +21,7 @@ class DispatchSubagentArguments(BaseModel):
     task: str
     team_purpose: str
     member_configs: Optional[Dict[str, DispatchMemberConfig]] = None
+    existing_member_ids: Optional[List[str]] = None
     system_instructions: str = ""
     is_public_visible: bool = False
     initial_documents: Optional[Dict[str, str]] = None
@@ -49,5 +43,4 @@ class MembershipProposalArguments(BaseModel):
     rationale: str
     initiator_type: str = "individual"
     proposed_details: Optional[MembershipProposalDetails] = None
-
 

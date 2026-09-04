@@ -189,6 +189,21 @@ class PersistenceCoordinator:
             records.update({record[identity]: record for record in later.get(key, [])})
             merged[key] = list(records.values())
 
+        for dependency_key, authoritative_key, identity in (
+            ("agent_dependencies", "agents", "agent_id"),
+            ("library_dependencies", "libraries", "lib_id"),
+        ):
+            dependencies = {record[identity]: record for record in earlier.get(dependency_key, [])}
+            dependencies.update(
+                {record[identity]: record for record in later.get(dependency_key, [])}
+            )
+            authoritative_ids = {record[identity] for record in merged.get(authoritative_key, [])}
+            merged[dependency_key] = [
+                record
+                for record_id, record in dependencies.items()
+                if record_id not in authoritative_ids
+            ]
+
         # Approval deltas always contain the complete Approval and ballot set
         # for each affected request. Replace that request as a unit so a retry
         # with no valid ballots can clear an earlier ballot set while writes
@@ -235,6 +250,16 @@ class PersistenceCoordinator:
         merged["libraries"] = [
             record
             for record in merged.get("libraries", [])
+            if record["lib_id"] not in deleted_libraries
+        ]
+        merged["agent_dependencies"] = [
+            record
+            for record in merged.get("agent_dependencies", [])
+            if record["agent_id"] not in deleted_agents
+        ]
+        merged["library_dependencies"] = [
+            record
+            for record in merged.get("library_dependencies", [])
             if record["lib_id"] not in deleted_libraries
         ]
         for key in ("permissions", "links", "file_changes"):

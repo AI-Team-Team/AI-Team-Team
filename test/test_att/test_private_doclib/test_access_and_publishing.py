@@ -26,18 +26,18 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         first = self.manager.create_agent_team(
             self.root,
             member_configs={
-                "shared": shared,
-                "one": Agent("One", "One", self.client),
-                "two": Agent("Two", "Two", self.client),
+                "One": {"model": "default"},
+                "Two": {"model": "default"},
             },
+            existing_members=[shared],
         )
         second = self.manager.create_agent_team(
             self.root,
             member_configs={
-                "shared": shared,
-                "three": Agent("Three", "Three", self.client),
-                "four": Agent("Four", "Four", self.client),
+                "Three": {"model": "default"},
+                "Four": {"model": "default"},
             },
+            existing_member_ids=[shared.agent_id],
         )
         self.assertIn(shared, first.members)
         self.assertIn(shared, second.members)
@@ -114,13 +114,14 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
 
     async def test_publish_collision_move_and_private_events_hide_content(self):
         agent = Agent("Publisher", "Writer", self.client)
+        self.manager.register_agent(agent)
         team = self.manager.create_agent_team(
             self.root,
             member_configs={
-                "publisher": agent,
-                "peer-a": Agent("PeerA", "Peer", self.client),
-                "peer-b": Agent("PeerB", "Peer", self.client),
+                "PeerA": {"model": "default"},
+                "PeerB": {"model": "default"},
             },
+            existing_members=[agent],
         )
         events = []
         self.manager.on_system_event = lambda kind, payload: events.append(
@@ -152,4 +153,3 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         self.assertTrue(events)
         self.assertNotIn("TOP SECRET BODY", repr(events))
         self.assertNotIn("TOP SECRET BODY", repr(agent.message_history))
-

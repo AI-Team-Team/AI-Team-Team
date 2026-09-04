@@ -56,6 +56,7 @@ def _write_and_hold(db_path, workspace, ready, release):
 
     asyncio.run(run())
 
+
 class TestHighHardening(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="att_high_")
@@ -101,9 +102,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
 
         store = manager._persistence._stores[str(Path(db_path).resolve())]
         with store.engine.connect() as connection:
-            self.assertEqual(
-                connection.exec_driver_sql("PRAGMA foreign_keys").scalar(), 1
-            )
+            self.assertEqual(connection.exec_driver_sql("PRAGMA foreign_keys").scalar(), 1)
             self.assertEqual(
                 connection.exec_driver_sql("PRAGMA journal_mode").scalar().lower(),
                 "wal",
@@ -113,6 +112,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 5000,
             )
         await manager.close()
+
     def test_tombstones_dominate_coalesced_entity_updates(self):
         agent_id = "00000000-0000-0000-0000-000000000001"
         lib_id = f"PDL-{agent_id}"
@@ -152,6 +152,46 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(lib_id, merged["permissions"])
         self.assertNotIn(lib_id, merged["links"])
         self.assertNotIn(lib_id, merged["file_changes"])
+
+    def test_authoritative_deltas_dominate_insert_only_dependencies(self):
+        agent_id = "00000000-0000-0000-0000-000000000001"
+        lib_id = f"PDL-{agent_id}"
+        dependencies = {
+            "full": False,
+            "state_version": 1,
+            "agents": [],
+            "agent_dependencies": [{"agent_id": agent_id, "role": "old"}],
+            "teams": [],
+            "libraries": [],
+            "library_dependencies": [{"lib_id": lib_id, "description": "old"}],
+            "inboxes": {},
+            "proposals": {},
+            "permissions": {},
+            "links": {},
+            "file_changes": {},
+            "deleted_agents": [],
+            "deleted_libraries": [],
+        }
+        authoritative = {
+            **dependencies,
+            "state_version": 2,
+            "agents": [{"agent_id": agent_id, "role": "current"}],
+            "agent_dependencies": [],
+            "libraries": [{"lib_id": lib_id, "description": "current"}],
+            "library_dependencies": [],
+        }
+
+        for earlier, later in (
+            (dependencies, authoritative),
+            (authoritative, dependencies),
+        ):
+            with self.subTest(order=(earlier["state_version"], later["state_version"])):
+                merged = PersistenceCoordinator._merge_snapshots(earlier, later)
+                self.assertEqual(merged["agents"][0]["role"], "current")
+                self.assertEqual(merged["libraries"][0]["description"], "current")
+                self.assertEqual(merged["agent_dependencies"], [])
+                self.assertEqual(merged["library_dependencies"], [])
+
     def test_coalesced_approval_delta_replaces_request_ballots(self):
         principal = {"kind": "agent_team", "principal_id": "AT-parent"}
         base = {
@@ -202,10 +242,9 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
 
         merged = PersistenceCoordinator._merge_snapshots(base, retry)
 
-        self.assertEqual(
-            merged["communication_approvals"][0]["status"], "PENDING"
-        )
+        self.assertEqual(merged["communication_approvals"][0]["status"], "PENDING")
         self.assertEqual(merged["communication_ballots"], [])
+
     async def test_persistence_errors_reach_every_explicit_boundary(self):
         db_path = os.path.join(self.tmpdir, "errors.db")
         manager = ATTManager(
@@ -217,9 +256,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         manager.create_agent_team(manager.root_ai)
         await manager.save_state()
 
-        with patch.object(
-            DatabaseStore, "write", side_effect=OSError("disk failed")
-        ):
+        with patch.object(DatabaseStore, "write", side_effect=OSError("disk failed")):
             manager._auto_save(configs=True)
             with self.assertRaisesRegex(OSError, "disk failed"):
                 await manager.flush_state()
@@ -227,6 +264,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 await manager.save_state()
             with self.assertRaisesRegex(OSError, "disk failed"):
                 await manager.close()
+
     async def test_cancellation_does_not_drop_an_accepted_write_or_team_lock(self):
         db_path = os.path.join(self.tmpdir, "cancel-boundaries.db")
         manager = ATTManager(
@@ -263,9 +301,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             await asyncio.Event().wait()
 
         manager._execute_team_discussion_session = hanging_session
-        discussion = asyncio.create_task(
-            manager.execute_team_discussion(team, "cancel me")
-        )
+        discussion = asyncio.create_task(manager.execute_team_discussion(team, "cancel me"))
         await session_started.wait()
         discussion.cancel()
         with self.assertRaises(asyncio.CancelledError):

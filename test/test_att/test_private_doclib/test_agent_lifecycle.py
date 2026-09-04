@@ -18,13 +18,14 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
             await self.manager.retire_agent(self.root.agent_id)
 
         member = Agent("StillMember", "Member", self.client)
+        self.manager.register_agent(member)
         self.manager.create_agent_team(
             self.root,
             member_configs={
-                "member": member,
-                "peer-e": Agent("PeerE", "Peer", self.client),
-                "peer-f": Agent("PeerF", "Peer", self.client),
+                "PeerE": {"model": "default"},
+                "PeerF": {"model": "default"},
             },
+            existing_members=[member],
         )
         with self.assertRaises(ValueError):
             await self.manager.retire_agent(member.agent_id)
@@ -181,10 +182,10 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         team = self.manager.create_agent_team(
             self.root,
             member_configs={
-                "worker": agent,
-                "peer-d1": Agent("PeerD1", "Peer", self.client),
-                "peer-d2": Agent("PeerD2", "Peer", self.client),
+                "PeerD1": {"model": "default"},
+                "PeerD2": {"model": "default"},
             },
+            existing_member_ids=[agent.agent_id],
         )
         release.set()
         with self.assertRaisesRegex(ValueError, "still belongs"):
@@ -192,4 +193,3 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         self.assertIs(self.manager._agents_by_id[agent.agent_id], agent)
         self.assertIn(agent, team.members)
         self.assertIn(agent.private_doc_library_id, self.manager.libraries)
-

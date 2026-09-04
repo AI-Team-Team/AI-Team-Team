@@ -59,6 +59,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 * **[Gated Context Protection](docs/Gated_Reading.md)**: Restricts direct large file reads; falls back to Outline Warnings with a 5-line sample of files exceeding 50 KB, prompting agents to make paginated, sliced chunk requests.
 * **[Collaborative DocLib Storage](docs/Gated_Reading.md#5-document-libraries-doclib)**: Equips teams with built-in document libraries. Access is governed by prefix path ACL permissions (`READ`/`WRITE`) that inherit recursively downward to subdirectories.
 * **Private Agent DocLibs**: Gives every registered AI one persistent private workspace (`PDL-<agent_id>`). Private files follow a shared AI across teams, remain outside team ACLs and prompts, and enter a team library only through an explicit copy/publish tool.
+* **Role-Neutral Shared Membership**: Adds an active registered Agent to multiple AgentTeams through `existing_members` or stable `existing_member_ids`. Each team stores only a membership reference, so joining another team never changes the Agent's identity, role, instructions, model binding, memory, lifecycle, invocation lock, or Private DocLib.
 * **Tool Auditor Interception**: Registers pre-execution interception hooks to audit, vet, approve, or reject specific tool calls (e.g. database safety query check).
 
 ### 💾 Persistence & Diagnostics
@@ -92,191 +93,113 @@ pip install git+https://github.com/AI-Team-Team/AI-Team-Team.git@main
 
 ## 🏛️ System Architecture
 
-The master `ATTManager` coordinates identity, topology, execution, governance, knowledge, supervision, persistence, and host integration:
+`ATTManager` connects the host application to stable Agent identities, recursive AgentTeams, serialized discussions, governed tools and communication, protected knowledge, supervision, and durable state:
 
 ```mermaid
 flowchart TB
-    subgraph Host["Host Runtime & Configuration"]
-        HostApp["Host Application"] --> Manager["ATTManager"]
-        Config["Validated ATTConfig<br/>communication, migration, failover,<br/>limits, tools, audit, workspace"] --> Manager
-        Bindings["Runtime Bindings<br/>LLM clients, model aliases,<br/>generator handler, custom tools"] --> Manager
-        Manager --> CallbackQueue["Ordered Background Callbacks<br/>sync or async observers"]
-        CallbackQueue --> HostApp
+    subgraph Host["Host Integration"]
+        HostApp["Host Application"]
+        Config["Validated ATTConfig"]
+        Bindings["LLM, Tool, Auditor, and Callback Bindings"]
+        Manager["ATTManager"]
+
+        HostApp --> Manager
+        Config --> Manager
+        Bindings --> Manager
     end
 
-    subgraph Organization["Identity & Recursive AgentTeam Topology"]
-        Root["Root AI<br/>Agent identity and root governance principal"]
-        AgentRegistry["Stable Agent UUID Registry<br/>active, retained, archived"]
-        TeamRegistry["AgentTeam Registry<br/>parent/child topology at arbitrary depth"]
-        Delegation["Dynamic Delegation & Child Spawning<br/>bounded by configured depth and team size"]
-        TopTeam["Top-Level AgentTeam"] --> ChildTeam["Child AgentTeam"]
-        ChildTeam --> Descendant["Descendant AgentTeam"]
-        SharedAgent["Shared Agent<br/>one identity across multiple AgentTeams"]
-        SharedMemory["Continuous Agent Memory<br/>team_id and discussion_id provenance"]
-        Lifecycle["Agent Lifecycle<br/>retain, archive, confirmed delete"]
+    subgraph Organization["Identity and Recursive Organization"]
+        Root["Root AI Agent<br/>root governance principal"]
+        Agents["Stable Agent Registry<br/>one identity and memory per Agent"]
+        Membership["Role-Neutral Membership<br/>team_id ↔ agent_id"]
+        Teams["Recursive AgentTeam Tree<br/>dynamic creation and migration"]
+        PrivateDocLib["Private Agent DocLibs"]
+        TeamDocLib["Team DocLibs and Path ACLs"]
 
-        AgentRegistry --> SharedAgent
-        SharedAgent --> TopTeam
-        SharedAgent --> ChildTeam
-        SharedAgent --> SharedMemory
-        AgentRegistry --> Lifecycle
-        Delegation --> TeamRegistry
-        TeamRegistry --> TopTeam
-        Root --> TopTeam
+        Root --> Agents
+        Agents --> Membership
+        Membership --> Teams
+        Agents --> PrivateDocLib
+        Teams --> TeamDocLib
     end
 
-    subgraph Execution["Serialized Discussions & Agent Execution"]
-        Discussion["AgentTeam Discussion<br/>normal, emergency, governance"] --> TeamLock["Per-AgentTeam discussion_lock"]
-        TeamLock --> AgentTurn["Member Reasoning Turns"]
-        ActiveContext["Invocation ContextVars<br/>active Agent, AgentTeam, discussion, tool call"] --> AgentTurn
-        AgentTurn --> AgentLock["Per-Agent invocation lock"]
-        AgentLock --> Strategy{"Reasoning Strategy"}
-        Strategy --> TextReAct["Bounded Text ReAct"]
-        Strategy --> Native["Native Structured Tool Calling"]
-        TextReAct --> Adapter["LLM Adapter Layer"]
-        Native --> Adapter
-        Adapter --> TokenLedger["Atomic Token Reservation & Settlement"]
-        TokenLedger --> ModelCall["Bound Model / Provider Call"]
-        TextReAct --> ToolRuntime["Built-in & Custom Tool Runtime"]
-        Native --> ToolRuntime
-        ToolRuntime --> ToolAudit["ToolAuditor Gate"]
-        ToolAudit --> ToolValidation["Signature, Pydantic & JSON Schema Validation"]
-        ToolValidation --> ToolResult["Structured ToolResult<br/>status, error kind, attempts"]
-        ToolResult --> TurnResult["AgentTurnResult<br/>completed or incomplete"]
-        TurnResult --> RoundResult["DiscussionRoundResult"]
-        RoundResult --> SharedMemory
-        MemoryWindow["Bounded Model Window<br/>compression, team-aware retrieval"] --> AgentTurn
-        SharedMemory --> MemoryWindow
+    subgraph Runtime["Discussion and Agent Execution"]
+        DiscussionLock["Per-AgentTeam Discussion Lock<br/>normal, emergency, and governance sessions"]
+        Rounds["Multi-Round Discussion<br/>frozen membership per round"]
+        Turns["Concurrent Member Turns"]
+        AgentLock["Per-Agent Invocation Lock<br/>shared Agent calls remain serialized"]
+        Strategy["Text ReAct or Native Tool Calling"]
+        Model["LLM Adapter, Atomic Token Budget,<br/>and Configured Failover"]
+        Tools["Validated Tool Runtime<br/>ContextVars, schema, auditor, typed results"]
+        RoundResults["Turn and Round Results<br/>completed or incomplete members"]
+        DiscussionResult["Transcript or Structured Discussion Result"]
+
+        DiscussionLock --> Rounds
+        Rounds --> Turns
+        Turns --> AgentLock
+        AgentLock --> Strategy
+        Strategy --> Model
+        Strategy --> Tools
+        Model --> RoundResults
+        Tools --> RoundResults
+        RoundResults -->|next round| Rounds
+        RoundResults -->|aggregate| DiscussionResult
     end
 
-    subgraph Governance["Autonomous Governance & Resource Control"]
-        Membership["Membership Proposals & Atomic Voting"]
-        CommConfig{"Communication Institution<br/>permissive, parent approval,<br/>lineage approval"}
-        Broker["NegotiationBroker<br/>requests, approvals, agreements, delivery"]
-        CommRequest["Persistent CommunicationRequest<br/>policy snapshot and explicit principals"]
-        CommDecision["Communication Principal Decision<br/>AgentTeam ballot or explicit Agent decision"]
-        Agreement["Directional CommunicationAgreement<br/>active until endpoint revocation"]
-        PeerDelivery["Durable Peer Message<br/>idempotent inbox delivery"]
-        RecipientInbox["Recipient AgentTeam Inbox"]
-        Migration["Migration Policy<br/>permissive, ancestor approval, lineage path"]
-        MigrationDecision["Migration Principal Decision<br/>AgentTeam ballot or Root Agent decision"]
-        TopologyCommit["Topology Lock<br/>revalidate and atomically relink"]
-        Failover["Failover Policy<br/>auto, parent, none"]
-        ResourceDecision["Parent AgentTeam Ballot<br/>or Root Agent Decision"]
+    subgraph Coordination["Autonomous Coordination and Safety"]
+        Governance["Membership, Migration,<br/>and Parent Failover Governance"]
+        Communication["Peer Communication<br/>policy, requests, approvals, agreements, delivery"]
+        Knowledge["Private Publish, Team Files,<br/>Gated Reading, and Managed Links"]
+        Supervision["Content and Operational Audits"]
+        Alerts["Deduplicated Parent or Root Alerts"]
 
-        CommConfig --> Broker
-        Broker -->|permissive| PeerDelivery
-        Broker -->|approval required| CommRequest
-        CommRequest --> CommDecision
-        CommDecision --> Agreement
-        Agreement --> PeerDelivery
-        PeerDelivery --> RecipientInbox
-        Migration -->|governed| MigrationDecision
-        Migration -->|permissive| TopologyCommit
-        MigrationDecision --> TopologyCommit
-        Failover -->|parent| ResourceDecision
-        ResourceDecision --> ModelCall
-        Failover -->|auto| ModelCall
+        Supervision --> Alerts
     end
 
-    subgraph Knowledge["Team Knowledge & Private Agent Workspaces"]
-        TeamDocLib["Built-in Team DocLib"]
-        PrivateDocLib["Private Agent DocLib<br/>one persistent workspace per Agent"]
-        ACL["Real-Time Team Path ACL<br/>READ / WRITE"]
-        PrivateOwner["Active Agent Ownership Check"]
-        GatedReader["Gated Reading<br/>outline and bounded line windows"]
-        ManagedLinks["Managed Cross-Library File Links<br/>live ACL checks"]
-        Publish["Explicit Private-to-Team Publish<br/>copy, never implicit disclosure"]
+    subgraph Durability["Durability and Host Observation"]
+        Dirty["Entity-Level Dirty Deltas"]
+        Writer["Coalescing Single Writer<br/>cross-process lease"]
+        SQLite[(SQLite State)]
+        Restore["Validated Atomic Recovery"]
+        Events["Ordered Background Callbacks and Events"]
 
-        TopTeam --> TeamDocLib
-        ChildTeam --> TeamDocLib
-        SharedAgent --> PrivateDocLib
-        ACL --> TeamDocLib
-        TeamDocLib --> GatedReader
-        TeamDocLib --> ManagedLinks
-        ManagedLinks -->|target access| ACL
-        PrivateOwner --> PrivateDocLib
-        PrivateDocLib --> Publish
-        Publish -->|target access| ACL
-    end
-
-    subgraph Supervision["Supervision, Alerts & Emergency Handling"]
-        Audit["3-Agent Supervisory Audit"] --> AuditStatus{"Content AuditStatus"}
-        Discussion --> OperationalStatus{"OperationalStatus<br/>healthy, degraded, unknown"}
-        AuditStatus -->|HEALTHY| Complete["Discussion Result"]
-        AuditStatus -->|UNHEALTHY| Alert["Confirmed Anomaly Alert"]
-        AuditStatus -->|UNKNOWN| Unknown["Deduplicated Persistent UNKNOWN Alert"]
-        Alert --> ParentInbox["Parent AgentTeam Inbox"]
-        Unknown --> ParentInbox
-        OperationalStatus -->|degraded| OperationalAlert["Deduplicated Operational Alert"]
-        OperationalAlert --> ParentInbox
-        ParentInbox --> AlertMode{"Queue or Wake"}
-        AlertMode -->|queue| NextDiscussion["Next Normal Discussion"]
-        AlertMode -->|wake| Emergency["Serialized Emergency Discussion"]
-        Alert -->|root-level| RootEvent["Root System Event / Callback"]
-        Unknown -->|root-level| RootEvent
-    end
-
-    subgraph Persistence["Asynchronous Incremental Persistence & Recovery"]
-        DomainChanges["Entity-Level Copy-on-Write Deltas<br/>identity, topology, memory, inbox,<br/>governance, DocLib, ACL, token usage"]
-        Coordinator["Single-Writer Coordinator<br/>one active plus one coalesced pending delta"]
-        Lease["Cross-Process Writer Lease"]
-        SQLite[(SQLite Schema 6<br/>foreign keys, WAL, busy timeout)]
-        Restore["Detached Restore Staging"]
-        Validation["Strict Reference & Invariant Validation"]
-        PublishState["Atomic Runtime and DocLib Publication"]
-
-        DomainChanges --> Coordinator
-        Lease --> Coordinator
-        Coordinator --> SQLite
+        Dirty --> Writer
+        Writer --> SQLite
         SQLite --> Restore
-        Restore --> Validation
-        Validation --> PublishState
-        PublishState --> Manager
+        Restore --> Manager
+        Events --> HostApp
     end
 
     Manager --> Root
-    Manager --> AgentRegistry
-    Manager --> TeamRegistry
-    Manager --> Discussion
-    Manager --> ActiveContext
-    Bindings --> Adapter
-    Config --> CommConfig
-    Config --> Migration
-    Config --> Failover
-    ToolRuntime --> Membership
-    ToolRuntime -->|spawn child| Delegation
-    ToolRuntime --> Broker
-    ToolRuntime --> Migration
-    ToolRuntime -->|team files| ACL
-    ToolRuntime -->|private files| PrivateOwner
-    Lifecycle --> PrivateDocLib
-    Discussion --> Audit
-    Descendant -->|task or anomaly escalation| ParentInbox
-    RecipientInbox -->|next scheduled discussion| Discussion
-    Emergency --> Discussion
-    NextDiscussion --> Discussion
-    TokenLedger -->|quota exhausted| Failover
-    Membership --> TeamRegistry
-    TopologyCommit --> TeamRegistry
-    CommDecision -.-> TeamLock
-    CommDecision -.-> AgentLock
-    MigrationDecision -.-> TeamLock
-    MigrationDecision -.-> AgentLock
-    ResourceDecision -.-> TeamLock
-    ResourceDecision -.-> AgentLock
-    TeamRegistry --> DomainChanges
-    AgentRegistry --> DomainChanges
-    SharedMemory --> DomainChanges
-    Membership --> DomainChanges
-    Broker --> DomainChanges
-    TopologyCommit --> DomainChanges
-    TeamDocLib --> DomainChanges
-    PrivateDocLib --> DomainChanges
-    ParentInbox --> DomainChanges
-    TokenLedger --> DomainChanges
+    Manager --> Teams
+    Manager --> DiscussionLock
+    Teams --> DiscussionLock
+    Tools --> Governance
+    Governance -->|governance session| DiscussionLock
+    Model -->|parent failover request| Governance
+    Governance -->|selected model binding| Model
+    Tools --> Communication
+    Communication -->|approval session| DiscussionLock
+    Tools --> Knowledge
+    PrivateDocLib --> Knowledge
+    TeamDocLib --> Knowledge
+    Governance --> Teams
+    Communication --> Teams
+    DiscussionResult --> Supervision
+    Alerts -->|queue| Teams
+    Alerts -->|wake| DiscussionLock
+    Agents --> Dirty
+    Teams --> Dirty
+    RoundResults --> Dirty
+    DiscussionResult --> Dirty
+    Governance --> Dirty
+    Communication --> Dirty
+    Knowledge --> Dirty
+    DiscussionResult --> Events
+    DiscussionResult -->|return| HostApp
+    Alerts --> Events
 
-    classDef coordinator fill:#eceff1,stroke:#37474f,stroke-width:2px;
+    classDef host fill:#eceff1,stroke:#455a64,stroke-width:1.5px;
     classDef identity fill:#e3f2fd,stroke:#1976d2,stroke-width:1.5px;
     classDef execution fill:#fffde7,stroke:#f9a825,stroke-width:1.5px;
     classDef governance fill:#fce4ec,stroke:#c2185b,stroke-width:1.5px;
@@ -286,20 +209,21 @@ flowchart TB
 
     style Host fill:#f4f7f9,stroke:#455a64,stroke-width:2px,color:#1f2937;
     style Organization fill:#eff6ff,stroke:#1976d2,stroke-width:2px,color:#1f2937;
-    style Execution fill:#fffbeb,stroke:#f9a825,stroke-width:2px,color:#1f2937;
-    style Governance fill:#fff1f2,stroke:#c2185b,stroke-width:2px,color:#1f2937;
-    style Knowledge fill:#f0fdf4,stroke:#388e3c,stroke-width:2px,color:#1f2937;
-    style Supervision fill:#fff7ed,stroke:#ef6c00,stroke-width:2px,color:#1f2937;
-    style Persistence fill:#f5f3ff,stroke:#5e35b1,stroke-width:2px,color:#1f2937;
+    style Runtime fill:#fffbeb,stroke:#f9a825,stroke-width:2px,color:#1f2937;
+    style Coordination fill:#fff1f2,stroke:#c2185b,stroke-width:2px,color:#1f2937;
+    style Durability fill:#f5f3ff,stroke:#5e35b1,stroke-width:2px,color:#1f2937;
 
-    class Manager,Config,Bindings,CallbackQueue coordinator;
-    class Root,AgentRegistry,TeamRegistry,Delegation,TopTeam,ChildTeam,Descendant,SharedAgent,SharedMemory,Lifecycle identity;
-    class Discussion,TeamLock,AgentTurn,ActiveContext,AgentLock,Strategy,TextReAct,Native,Adapter,TokenLedger,ModelCall,ToolRuntime,ToolAudit,ToolValidation,ToolResult,TurnResult,RoundResult,MemoryWindow execution;
-    class Membership,CommConfig,Broker,CommRequest,CommDecision,Agreement,PeerDelivery,RecipientInbox,Migration,MigrationDecision,TopologyCommit,Failover,ResourceDecision governance;
-    class TeamDocLib,PrivateDocLib,ACL,PrivateOwner,GatedReader,ManagedLinks,Publish knowledge;
-    class Audit,AuditStatus,OperationalStatus,OperationalAlert,Complete,Alert,Unknown,ParentInbox,AlertMode,NextDiscussion,Emergency,RootEvent supervision;
-    class DomainChanges,Coordinator,Lease,SQLite,Restore,Validation,PublishState persistence;
+    class HostApp,Config,Bindings,Manager host;
+    class Root,Agents,Membership,Teams identity;
+    class DiscussionLock,Rounds,Turns,AgentLock,Strategy,Model,Tools,RoundResults,DiscussionResult execution;
+    class Governance,Communication governance;
+    class PrivateDocLib,TeamDocLib,Knowledge knowledge;
+    class Supervision,Alerts supervision;
+    class Dirty,Writer,SQLite,Restore,Events persistence;
 ```
+
+* [Open the detailed ATT system architecture](docs/flowcharts/System_Architecture.md)
+* [Browse all architecture and control-flow diagrams](docs/flowcharts/)
 
 ## 🛠️ Getting Started
 
@@ -670,6 +594,7 @@ Configure file reading gates to safeguard the prompt context from massive logs o
 
 For visual flowcharts and sequencing diagrams detailing the runtime loops, gated checks, and state serialization flows, refer to:
 
+* **[Detailed ATT System Architecture](docs/flowcharts/System_Architecture.md)**
 * **[ATT Autonomy Suite Flowcharts Index](docs/flowcharts/README.md)**
 * **[Tooling & Execution (Adapters, ReAct, Memory Compression)](docs/flowcharts/Tooling_and_Execution.md)**
 * **[State Persistence (SQLite Recovery & ORM Deletions)](docs/flowcharts/State_Persistence.md)**

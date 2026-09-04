@@ -169,9 +169,15 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
         experts_lines = []
         for name, exp_agent in sorted(manager.agents.items()):
             role_desc = getattr(exp_agent, "role_description", "") or "No description"
-            experts_lines.append(f"  - **{name}** ({exp_agent.role}): {role_desc}")
+            experts_lines.append(
+                f"  - **{name}** (agent_id: `{exp_agent.agent_id}`; identity role: {exp_agent.role}): {role_desc}"
+            )
         if experts_lines:
-            experts_str = f"## GLOBAL EXPERTS AVAILABLE FOR HIRE\n" + "\n".join(experts_lines) + "\n\n"
+            experts_str = (
+                "## ACTIVE REGISTERED AGENTS AVAILABLE FOR MEMBERSHIP\n"
+                + "\n".join(experts_lines)
+                + "\n\n"
+            )
 
     visible_tools = (
         manager.get_available_tools(team, agent)
@@ -199,10 +205,10 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
 
     identity_header = (
         f"## AGENT IDENTITY PROFILE\n"
-        f"- **Role Name**: {agent.role}\n"
+        f"- **Identity Role**: {agent.role}\n"
         f"{role_desc_str}"
         f"- **Agent Name**: {agent.name}\n"
-        f"- **Parent Team**: {team.team_id} (Preset: {team.preset_name})\n"
+        f"- **Current AgentTeam**: {team.team_id} (Preset: {team.preset_name})\n"
         f"- **Team Purpose**: {team.team_purpose}\n"
         f"- **Current Objective**: Cooperate in team tasks.\n"
         f"- **AT Delegation Depth**: {team.depth} / {max_depth}\n"
@@ -226,7 +232,7 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
             f"You have transitioned to work with another team group:\n"
             f"- Active Team: {team.team_id} (Preset: {team.preset_name})\n"
             f"- Team Purpose: {team.team_purpose}\n"
-            f"- Your Assigned Role: {agent.role}\n"
+            f"- Your Identity Role: {agent.role}\n"
             f"Please continue your work and cooperate in this team based on your prior memory."
         )
         _append_agent_message(

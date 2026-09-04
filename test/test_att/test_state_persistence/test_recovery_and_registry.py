@@ -52,17 +52,23 @@ class TestStatePersistence(StatePersistenceTestCase):
         team = self.manager.create_agent_team(
             creator=self.root_ai,
             preset_name="generic",
-            team_purpose="Testing expert discovery"
+            team_purpose="Testing expert discovery",
+            member_configs={
+                "HelperA": {"model": "critic"},
+                "HelperB": {"model": "critic"},
+            },
+            existing_members=[self.root_ai],
         )
-        team.members.append(self.root_ai)
         
         await team.execute_react_step(self.root_ai, "List experts", "System base instructions")
         
         self.assertTrue(len(captured_sys_instruction) > 0)
         sys_inst = captured_sys_instruction[0]
-        self.assertIn("## GLOBAL EXPERTS AVAILABLE FOR HIRE", sys_inst)
+        self.assertIn("## ACTIVE REGISTERED AGENTS AVAILABLE FOR MEMBERSHIP", sys_inst)
         self.assertIn("Expert_A", sys_inst)
         self.assertIn("Expert_B", sys_inst)
+        self.assertIn(expert_a.agent_id, sys_inst)
+        self.assertIn(expert_b.agent_id, sys_inst)
         self.assertIn("Database Analyst", sys_inst)
         self.assertIn("Handles DB queries", sys_inst)
 
