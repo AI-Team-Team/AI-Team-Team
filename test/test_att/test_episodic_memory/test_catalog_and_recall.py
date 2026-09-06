@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shutil
 import sqlite3
 import tempfile
 import time
@@ -377,9 +378,16 @@ class TestCatalogAndRecall(EpisodicMemoryTestCase):
 
 
 class TestOptionalMode(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.workspace = tempfile.mkdtemp(prefix="att-memory-optional-")
+        self.addCleanup(shutil.rmtree, self.workspace, ignore_errors=True)
+
     async def test_disabled_by_default_and_runtime_tool_view_tracks_configuration(self):
         client = ScriptedMemoryClient()
-        manager = ATTManager(Agent("Root", "Architect", client), ATTConfig())
+        manager = ATTManager(
+            Agent("Root", "Architect", client),
+            ATTConfig(workspace_root=self.workspace),
+        )
         manager.register_llm_client("model", client)
         team = manager.create_agent_team(manager.root_ai, member_count=3)
         agent = team.members[0]
@@ -496,7 +504,10 @@ class TestOptionalMode(unittest.IsolatedAsyncioTestCase):
         client = BlockingIndexClient()
         manager = ATTManager(
             Agent("Root", "Architect", client),
-            ATTConfig(episodic_memory={"enabled": True}),
+            ATTConfig(
+                workspace_root=self.workspace,
+                episodic_memory={"enabled": True},
+            ),
         )
         manager.register_llm_client("model", client)
         team = manager.create_agent_team(manager.root_ai, member_count=3)
