@@ -10,7 +10,8 @@ This directory contains technical flowcharts and Mermaid sequence diagrams for t
 4. **[Gated FileReader Size Limits](Gated_Reading.md)**: Shows the `read_file` size protection, outline fallback, and line-window behavior.
 5. **[Tooling & Execution Engines](Tooling_and_Execution.md)**: Shows tool auditing, multi-round ReAct execution, native tool calling, and parallel tool execution.
 6. **[State Persistence & Recovery](State_Persistence.md)**: Shows task-local batching, the coalescing single-writer queue, incremental commits, and validated atomic restore.
-7. **[Supervision & Emergencies](Supervision_and_Emergencies.md)**: Shows supervisory audits, UNKNOWN alert lifecycle, parent escalation, and emergency wakeups.
+7. **[Selective Episodic Memory](Selective_Episodic_Memory.md)**: Shows the optional turn-segmentation, isolated indexing, owner-only search, ephemeral recall, retention, forget, and Journal boundaries.
+8. **[Supervision & Emergencies](Supervision_and_Emergencies.md)**: Shows supervisory audits, UNKNOWN alert lifecycle, parent escalation, and emergency wakeups.
 
 ## Unified High-Level Flow Overview
 
@@ -43,6 +44,11 @@ flowchart TD
     ToolCall --> Strategy{"Native tools or Text ReAct?"}
     Strategy --> Executor["Shared parser, schema validator, auditor, and classified ToolExecutor"]
     Executor --> Turn["AgentTurnResult: completed or incomplete"]
+    Turn --> Journal["Append sanitized Agent-owned Journal events"]
+    Journal --> MemoryGate{"Optional episodic memory enabled?"}
+    MemoryGate -- "yes" --> Catalog["Background card indexing and owner-only recall"]
+    MemoryGate -- "no" --> Discussion
+    Catalog --> Discussion
     Turn --> Discussion["Serialized AgentTeam discussion with concurrent member turns"]
     Discussion --> Detailed["DiscussionResult: completed or partial"]
     Detailed --> Audit["Independent content and operational health"]

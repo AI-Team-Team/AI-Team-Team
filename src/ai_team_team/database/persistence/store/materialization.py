@@ -58,6 +58,10 @@ class StoreMaterializationMixin:
             "communication_ballots",
             "communication_agreements",
             "peer_messages",
+            "memory_events",
+            "memory_segments",
+            "memory_cards",
+            "memory_references",
         ):
             result[key] = json.loads(json.dumps(snapshot.get(key, [])))
         return result

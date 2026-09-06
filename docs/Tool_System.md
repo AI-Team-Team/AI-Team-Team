@@ -144,9 +144,14 @@ def check_server_health(region: str, max_retries: int = 3) -> str:
 manager.register_tool(
     name="check_server_health",
     description="Pings the production cluster to return server health metrics. Arguments: region (str), max_retries (int).",
-    func=check_server_health
+    func=check_server_health,
+    memory_capture="metadata_only",
 )
 ```
+
+`memory_capture="metadata_only"` is the default and prevents observation bodies or tool arguments from becoming episodic recall content.
+
+Only an explicit `memory_capture="content"` opt-in permits a tool observation body to enter the sanitized Journal segment used for a Memory Card.
 
 ### Private workspace tools
 
@@ -157,6 +162,8 @@ They resolve the current Agent from invocation `ContextVar` state and fail close
 `publish_private_file` copies an ordinary private file to the current team's built-in DocLib after a live target `WRITE` check; `move_library_file` requires `WRITE` on both team-library paths.
 
 Tool observations may contain content only when the owner explicitly reads a private file. That observation expires when the current reasoning invocation ends and is replaced by a redacted marker before the shared AI can run for another team.
+
+Optional episodic-memory recall uses the same transient-observation boundary and replaces the body with `[Historical memory recalled: <memory_id>]` at the end of the invocation.
 
 Operational callbacks never contain private file bodies.
 

@@ -83,6 +83,7 @@ class AgentTurnResult(BaseModel):
 
     agent_id: str
     team_id: str
+    turn_id: Optional[str] = None
     discussion_id: Optional[str] = None
     round_number: Optional[int] = None
     status: AgentTurnStatus

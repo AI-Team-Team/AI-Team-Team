@@ -5,7 +5,6 @@ import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-
 from ...agent import Agent
 from ...config import ATTConfig
 from ..state import StateCoordinator
@@ -67,10 +66,15 @@ class StateAPI:
                 raise RuntimeError("ATTManager is closing and cannot restore state.")
             if not os.path.exists(path):
                 raise FileNotFoundError(f"State database file '{path}' not found.")
-            state = await self._persistence.read(path)
-            await self._apply_state_snapshot(state)
-            self.db_path = path
-            self.broker.resume_pending_requests()
+            try:
+                await self._memory.suspend_for_restore()
+                state = await self._persistence.read(path)
+                await self._apply_state_snapshot(state)
+                self.db_path = path
+                self.broker.resume_pending_requests()
+            finally:
+                if self._memory._restore_suspended:
+                    self._memory.resume_after_restore()
 
     @asynccontextmanager
     async def agent_invocation(self, agent: Agent, *, allow_runtime: bool = False):

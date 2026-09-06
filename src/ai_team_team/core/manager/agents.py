@@ -22,6 +22,17 @@ class AgentRegistry:
         self.active_by_name: Dict[str, Agent] = {}
         self.by_id: Dict[str, Agent] = {}
 
+    def replace_indexes(
+        self,
+        active_by_name: Dict[str, Agent],
+        by_id: Dict[str, Agent],
+    ) -> None:
+        """Atomically rebinds every public and internal Agent index alias."""
+        self.active_by_name = active_by_name
+        self.by_id = by_id
+        self.manager.agents = active_by_name
+        self.manager._agents_by_id = by_id
+
     def register(self, agent: Agent, *, auto_save: bool = True) -> Agent:
         manager = self.manager
         if not isinstance(agent, Agent):
@@ -61,10 +72,17 @@ class AgentRegistry:
         elif library.library_kind != "agent_private" or library.owner_agent_id != agent.agent_id:
             raise ValueError("Private DocLib ownership is inconsistent.")
         agent._private_doc_library_id = lib_id
+        agent._manager = manager
         self.by_id[agent.agent_id] = agent
         self.active_by_name[agent.name] = agent
         if auto_save:
             manager._auto_save(agents={agent.agent_id}, libraries={lib_id})
+            manager._memory.record_event(
+                "agent_registered",
+                agent=agent,
+                payload={"lifecycle_state": "active"},
+                inherit_context=False,
+            )
         return agent
 
     def get_private_library_id(self, agent_id: str) -> str:
@@ -183,10 +201,26 @@ class AgentRegistry:
                 library.lifecycle_state = state
             self.active_by_name.pop(agent.name, None)
             agent.llm_client = None
+            lifecycle_event = None
             try:
-                manager._auto_save(agents={agent_id}, libraries={lib_id})
+                lifecycle_event = manager._memory.record_event(
+                    "agent_lifecycle_changed",
+                    agent=agent,
+                    payload={"lifecycle_state": state},
+                    persist=False,
+                    inherit_context=False,
+                )
+                manager._auto_save(
+                    agents={agent_id},
+                    libraries={lib_id},
+                    memory_events={lifecycle_event.event_id},
+                )
                 await manager.flush_state()
             except Exception:
+                if lifecycle_event is not None:
+                    manager._memory.discard_unpersisted_event(
+                        lifecycle_event.event_id
+                    )
                 agent.lifecycle_state = "active"
                 with library._lock:
                     library.lifecycle_state = "active"
@@ -210,6 +244,7 @@ class AgentRegistry:
         old_files = manager._library_files.get(lib_id, {})
         old_links = manager.library_links.get(lib_id)
         old_permissions = manager.library_permissions.get(lib_id)
+        old_memory = manager._memory.snapshot()
         moved = False
         committed = False
         try:
@@ -225,7 +260,19 @@ class AgentRegistry:
             manager._library_files.pop(lib_id, None)
             manager.library_links.pop(lib_id, None)
             manager.library_permissions.pop(lib_id, None)
-            manager._auto_save(deleted_agents={agent_id}, deleted_libraries={lib_id})
+            manager._memory.remove_agent_derived_state(agent_id)
+            lifecycle_event = manager._memory.record_event(
+                "agent_lifecycle_changed",
+                agent=agent,
+                payload={"lifecycle_state": "deleted"},
+                persist=False,
+                inherit_context=False,
+            )
+            manager._auto_save(
+                deleted_agents={agent_id},
+                deleted_libraries={lib_id},
+                memory_events={lifecycle_event.event_id},
+            )
             await manager.flush_state()
             committed = True
         except Exception:
@@ -242,6 +289,12 @@ class AgentRegistry:
             with library._lock:
                 library.lifecycle_state = "active"
             agent.lifecycle_state = "active"
+            manager._memory.restore(
+                old_memory["memory_events"],
+                old_memory["memory_segments"],
+                old_memory["memory_cards"],
+                old_memory["memory_references"],
+            )
             raise
         finally:
             if committed and os.path.exists(trash_path):
@@ -261,6 +314,7 @@ class AgentRegistry:
         agent.messages.clear()
         agent.message_history.clear()
         agent._history_seen_ids.clear()
+        agent._manager = None
 
     async def reactivate(self, agent_id: str, model_alias: str) -> Agent:
         agent = self.by_id.get(agent_id)
@@ -306,10 +360,26 @@ class AgentRegistry:
         with library._lock:
             library.lifecycle_state = "active"
         self.active_by_name[agent.name] = agent
+        lifecycle_event = None
         try:
-            manager._auto_save(agents={agent_id}, libraries={lib_id})
+            lifecycle_event = manager._memory.record_event(
+                "agent_lifecycle_changed",
+                agent=agent,
+                payload={"lifecycle_state": "active"},
+                persist=False,
+                inherit_context=False,
+            )
+            manager._auto_save(
+                agents={agent_id},
+                libraries={lib_id},
+                memory_events={lifecycle_event.event_id},
+            )
             await manager.flush_state()
         except Exception:
+            if lifecycle_event is not None:
+                manager._memory.discard_unpersisted_event(
+                    lifecycle_event.event_id
+                )
             self.active_by_name.pop(agent.name, None)
             agent.llm_client = None
             agent._model_alias = old_alias
@@ -326,4 +396,5 @@ class AgentRegistry:
                 "library_id": lib_id,
             },
         )
+        manager._memory.resume_pending()
         return agent

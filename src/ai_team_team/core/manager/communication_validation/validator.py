@@ -1,4 +1,4 @@
-"""Schema-6 communication governance state validation orchestration."""
+"""Communication governance state-validation orchestration."""
 
 from typing import Any, Dict, List, Tuple
 

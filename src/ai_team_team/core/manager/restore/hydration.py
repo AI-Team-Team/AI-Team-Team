@@ -6,7 +6,6 @@ import logging
 import time
 from typing import Any, Dict
 
-
 from ...adapters import HandlerClientAdapter, ManagerDefaultClientAdapter
 from ...agent import Agent
 from ...config import ATTConfig
@@ -74,6 +73,7 @@ class RestoreHydrationMixin:
             agent.lifecycle_state = lifecycle_state
             agent._model_alias = alias
             agent._private_doc_library_id = f"PDL-{agent.agent_id}"
+            agent._manager = manager
             agent.last_context = json.loads(row["last_context"]) if row["last_context"] else None
             agent.messages = []
             agent.message_history = []
@@ -81,7 +81,6 @@ class RestoreHydrationMixin:
             for message in row["messages"]:
                 restored = {key: value for key, value in message.items() if value is not None}
                 agent.messages.append(restored)
-                agent.message_history.append(restored)
                 agent._history_seen_ids.add(id(restored))
             manager._agents_by_id[agent.agent_id] = agent
             if lifecycle_state == "active":
@@ -185,3 +184,19 @@ class RestoreHydrationMixin:
             state.get("communication_agreements", []),
             state.get("peer_messages", []),
         )
+        manager._memory.restore(
+            state.get("memory_events", []),
+            state.get("memory_segments", []),
+            state.get("memory_cards", []),
+            state.get("memory_references", []),
+        )
+        for agent in manager._agents_by_id.values():
+            agent.message_history = [
+                dict(event.payload)
+                for event in sorted(
+                    manager._memory.events.values(),
+                    key=lambda item: item.sequence,
+                )
+                if event.agent_id == agent.agent_id
+                and event.event_type == "message"
+            ]

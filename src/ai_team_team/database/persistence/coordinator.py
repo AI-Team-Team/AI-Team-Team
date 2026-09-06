@@ -67,6 +67,22 @@ class PersistenceCoordinator:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self._read, db_path)
 
+    async def search_memory_card_ids(
+        self, db_path: str, agent_id: str, query: str, limit: int
+    ) -> list[str]:
+        """Flushes accepted deltas and executes an owner-scoped FTS query."""
+        self.claim(db_path)
+        await self.flush()
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._executor,
+            self._search_memory_card_ids,
+            db_path,
+            agent_id,
+            query,
+            limit,
+        )
+
     async def flush(self) -> None:
         while True:
             with self._lock:
@@ -129,6 +145,11 @@ class PersistenceCoordinator:
     def _read(self, db_path: str) -> Dict[str, Any]:
         return self._store(db_path).read()
 
+    def _search_memory_card_ids(
+        self, db_path: str, agent_id: str, query: str, limit: int
+    ) -> list[str]:
+        return self._store(db_path).search_memory_card_ids(agent_id, query, limit)
+
     def _start_locked(
         self,
         db_path: str,
@@ -175,6 +196,10 @@ class PersistenceCoordinator:
         merged = dict(earlier)
         merged["full"] = bool(earlier.get("full"))
         merged["state_version"] = later.get("state_version", earlier.get("state_version"))
+        merged["episodic_memory_enabled"] = later.get(
+            "episodic_memory_enabled",
+            earlier.get("episodic_memory_enabled", False),
+        )
         if later.get("configs") is not None:
             merged["configs"] = later["configs"]
         for key, identity in (
@@ -184,6 +209,10 @@ class PersistenceCoordinator:
             ("communication_requests", "request_id"),
             ("communication_agreements", "agreement_id"),
             ("peer_messages", "message_id"),
+            ("memory_events", "event_id"),
+            ("memory_segments", "segment_id"),
+            ("memory_cards", "memory_id"),
+            ("memory_references", "reference_id"),
         ):
             records = {record[identity]: record for record in earlier.get(key, [])}
             records.update({record[identity]: record for record in later.get(key, [])})
@@ -240,6 +269,10 @@ class PersistenceCoordinator:
         merged["deleted_libraries"] = list(
             set(earlier.get("deleted_libraries", ())) | set(later.get("deleted_libraries", ()))
         )
+        merged["deleted_memory_references"] = list(
+            set(earlier.get("deleted_memory_references", ()))
+            | set(later.get("deleted_memory_references", ()))
+        )
         deleted_agents = set(merged["deleted_agents"])
         deleted_libraries = set(merged["deleted_libraries"])
         merged["agents"] = [
@@ -257,10 +290,26 @@ class PersistenceCoordinator:
             for record in merged.get("agent_dependencies", [])
             if record["agent_id"] not in deleted_agents
         ]
+        for key in (
+            "memory_segments",
+            "memory_cards",
+            "memory_references",
+        ):
+            merged[key] = [
+                record
+                for record in merged.get(key, [])
+                if record["agent_id"] not in deleted_agents
+            ]
         merged["library_dependencies"] = [
             record
             for record in merged.get("library_dependencies", [])
             if record["lib_id"] not in deleted_libraries
+        ]
+        deleted_references = set(merged["deleted_memory_references"])
+        merged["memory_references"] = [
+            record
+            for record in merged.get("memory_references", [])
+            if record["reference_id"] not in deleted_references
         ]
         for key in ("permissions", "links", "file_changes"):
             merged[key] = {

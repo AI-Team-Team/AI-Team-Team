@@ -19,11 +19,12 @@ To understand specific systems in detail, please refer to the following document
 2. **[Gated Context Protection & File Reading](Gated_Reading.md)**: Details the size-aware `GatedFileReader`, collaborative team DocLib ACLs, and persistent Private Agent DocLib boundaries and publication.
 3. **[Supervisor Auditor Team](Supervisory_Team.md)**: Details the dynamic **3-AI Supervisory Team** (Integrity, Continuity, and Deadlock Auditors) which monitors dialogue transcripts with explicit `messages.clear()` memory isolation to prevent OOM errors, and performs recursive lineage parent escalations.
 4. **[State Persistence & Multi-Turn Memory](State_Persistence.md)**: Explains the asynchronous single-writer SQLite design, incremental deltas, validated recovery, multi-turn memory, and turn-based pruning.
-5. **[Team Governance & Communication Policies](Team_Governance.md)**: Details configuration-owned communication, explicit AgentTeam/Root Agent principals, durable Requests and Agreements, migration policies, token-budget failover, and emergency wakeups.
-6. **[Tool Execution & Development System](Tool_System.md)**: Explains the native tool-calling loop, Thorough Abstraction schema extraction, concurrent parallel executions, tool registration, and `ToolAuditor` pre-execution hooks.
-7. **[Core Objects Model](Core_Objects_Model.md)**: A deep-dive architectural data dictionary defining the internal memory mechanics and states of `ATTManager`, `AgentTeam`, and `Agent`.
-8. **[Developer Testing & Mocking Guide](dev/testing.md)**: Guidelines for writing unit tests and mocking sequence responses.
-9. **[Developer API Reference](dev/API_Reference.md)**: Reference listing system internals and execution logic.
+5. **[Selective Episodic Memory](Selective_Episodic_Memory.md)**: Defines the optional Agent-owned Memory Catalog, immutable Journal boundary, isolated indexing, ephemeral recall, tool capture policy, and schema 7 recovery rules.
+6. **[Team Governance & Communication Policies](Team_Governance.md)**: Details configuration-owned communication, explicit AgentTeam/Root Agent principals, durable Requests and Agreements, migration policies, token-budget failover, and emergency wakeups.
+7. **[Tool Execution & Development System](Tool_System.md)**: Explains the native tool-calling loop, Thorough Abstraction schema extraction, concurrent parallel executions, tool registration, and `ToolAuditor` pre-execution hooks.
+8. **[Core Objects Model](Core_Objects_Model.md)**: A deep-dive architectural data dictionary defining the internal memory mechanics and states of `ATTManager`, `AgentTeam`, and `Agent`.
+9. **[Developer Testing & Mocking Guide](dev/testing.md)**: Guidelines for writing unit tests and mocking sequence responses.
+10. **[Developer API Reference](dev/API_Reference.md)**: Reference listing system internals and execution logic.
 
 ## 📊 Visual Flowcharts Directory
 

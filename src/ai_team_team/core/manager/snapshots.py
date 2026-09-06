@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 from ai_team_team.database.persistence import STATE_SCHEMA_VERSION
 
 from ..agent import Agent
+from ..memory.sanitization import sanitize_working_context_message
 from ..team import AgentTeam
 
 if TYPE_CHECKING:
@@ -101,11 +102,10 @@ class SnapshotBuilder:
                     unresolved_agents.append(agent.name)
                     continue
                 dependency_error = dependency_error or "The active Agent has no model alias."
-            history = (
-                manager._agent_history(agent)
-                if agent_id in agent_ids
-                else self._peek_agent_history(agent)
-            )
+            working_context = [
+                sanitize_working_context_message(message)
+                for message in agent.messages
+            ]
             serialized_agent = {
                 "agent_id": agent.agent_id,
                 "name": agent.name,
@@ -115,7 +115,7 @@ class SnapshotBuilder:
                 "model_alias": model_alias,
                 "lifecycle_state": agent.lifecycle_state,
                 "last_context": (dict(agent.last_context) if agent.last_context else None),
-                "messages": tuple(dict(message) for message in history),
+                "messages": tuple(dict(message) for message in working_context),
                 "message_timestamp": now,
             }
             if dependency_error is not None:
@@ -293,9 +293,55 @@ class SnapshotBuilder:
             if message_id in manager.broker.peer_messages
         ]
 
+        with manager._memory._lock:
+            event_ids = (
+                set(manager._memory.events)
+                if full
+                else set(dirty["memory_events"])
+            )
+            segment_ids = (
+                set(manager._memory.segments)
+                if full
+                else set(dirty["memory_segments"])
+            )
+            card_ids = (
+                set(manager._memory.cards)
+                if full
+                else set(dirty["memory_cards"])
+            )
+            reference_ids = (
+                set(manager._memory.references)
+                if full
+                else set(dirty["memory_references"])
+            )
+            memory_events = [
+                manager._memory.events[event_id].model_dump(mode="json")
+                for event_id in sorted(
+                    event_ids,
+                    key=lambda identifier: manager._memory.events[identifier].sequence,
+                )
+                if event_id in manager._memory.events
+            ]
+            memory_segments = [
+                manager._memory.segments[segment_id].model_dump(mode="json")
+                for segment_id in sorted(segment_ids)
+                if segment_id in manager._memory.segments
+            ]
+            memory_cards = [
+                manager._memory.cards[memory_id].model_dump(mode="json")
+                for memory_id in sorted(card_ids)
+                if memory_id in manager._memory.cards
+            ]
+            memory_references = [
+                manager._memory.references[reference_id].model_dump(mode="json")
+                for reference_id in sorted(reference_ids)
+                if reference_id in manager._memory.references
+            ]
+
         return {
             "state_version": manager._state_version,
             "full": full,
+            "episodic_memory_enabled": manager.config.episodic_memory.enabled,
             "configs": configs,
             "agents": agents,
             "agent_dependencies": agent_dependencies,
@@ -307,6 +353,10 @@ class SnapshotBuilder:
             "communication_ballots": communication_ballots,
             "communication_agreements": communication_agreements,
             "peer_messages": peer_messages,
+            "memory_events": memory_events,
+            "memory_segments": memory_segments,
+            "memory_cards": memory_cards,
+            "memory_references": memory_references,
             "libraries": libraries,
             "library_dependencies": library_dependencies,
             "permissions": permissions,
@@ -314,4 +364,7 @@ class SnapshotBuilder:
             "file_changes": file_changes,
             "deleted_agents": tuple(dirty["deleted_agents"]),
             "deleted_libraries": tuple(dirty["deleted_libraries"]),
+            "deleted_memory_references": tuple(
+                dirty["deleted_memory_references"]
+            ),
         }

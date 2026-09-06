@@ -30,6 +30,7 @@ class Tool:
     prompt_schema_mode: Optional[str]
     examples: List[Dict[str, Any]]
     retry_safe: bool
+    memory_capture: str
 
     def __init__(
         self,
@@ -41,12 +42,13 @@ class Tool:
         prompt_schema_mode: Optional[str] = None,
         examples: Optional[List[Dict[str, Any]]] = None,
         retry_safe: bool = False,
+        memory_capture: str = "metadata_only",
     ):
         # Resolve positional arguments vs keyword arguments
         if callable(name):
             func = name
             name = getattr(func, "__name__", "custom_tool")
-            
+
         if func is None:
             raise ValueError("A callable function must be provided to create a Tool.")
 
@@ -87,9 +89,17 @@ class Tool:
             raise ValueError("Invalid tool prompt schema mode.")
         if not isinstance(retry_safe, bool):
             raise ValueError("retry_safe must be a boolean.")
+        if (
+            not isinstance(memory_capture, str)
+            or memory_capture not in {"content", "metadata_only"}
+        ):
+            raise ValueError(
+                "memory_capture must be content or metadata_only."
+            )
         self.prompt_schema_mode = prompt_schema_mode
         self.examples = list(examples or [])
         self.retry_safe = retry_safe
+        self.memory_capture = memory_capture
         self._signature = inspect.signature(func)
         try:
             self._type_hints = get_type_hints(func)
@@ -177,4 +187,3 @@ class Tool:
                 raise e
             logger.error(f"Error executing tool '{self.name}': {e}")
             return f"Error executing tool '{self.name}': {e}"
-

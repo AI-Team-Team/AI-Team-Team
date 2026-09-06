@@ -86,7 +86,7 @@ flowchart TB
         RetryPolicy["Typed Error Classification<br/>argument correction and safe execution retry budgets"]
         ToolResult["Structured ToolResult<br/>status, error kind, attempts, safe observation"]
         TurnResult["AgentTurnResult<br/>COMPLETED or INCOMPLETE"]
-        Memory["Continuous Agent Memory<br/>team_id and discussion_id provenance"]
+        WorkingContext["Persisted Working Context<br/>bounded model-visible messages"]
         Window["Bounded Model Window<br/>compression and team-aware selection"]
         Adapter["LLM Adapter Layer<br/>sync, async, streaming, structured response normalization"]
         TokenLedger["Atomic Token Ledger<br/>reserve maximum budget → settle actual usage → refund"]
@@ -96,7 +96,7 @@ flowchart TB
         ParallelTurns --> InvocationContext
         InvocationContext --> AgentInvocationLock
         AgentInvocationLock --> Prompt
-        Memory --> Window
+        WorkingContext --> Window
         Window --> Prompt
         ToolView --> Prompt
         ToolView --> ToolExecutor
@@ -116,8 +116,32 @@ flowchart TB
         RetryPolicy --> ToolResult
         ToolResult --> Strategy
         Strategy --> TurnResult
-        TurnResult --> Memory
+        TurnResult --> WorkingContext
         TurnResult --> RoundResult
+    end
+
+    subgraph EpisodicMemory["Agent-Owned Memory and Optional Recall"]
+        MemoryJournal["System Memory Journal<br/>append-only sanitized host history"]
+        AdvancedGate{"Episodic Memory Enabled?"}
+        MemorySegment["Deterministic Agent-Turn Segment<br/>source events and integrity digest"]
+        MemoryIndexer["Isolated Background Indexer<br/>same Agent model and invocation lock"]
+        MemoryCatalog["Agent-Visible Memory Catalog<br/>title, summary, normalized tags"]
+        MemoryFTS[(SQLite FTS5 Index)]
+        MemoryRecall["Owner-Only Ephemeral Recall<br/>bounded historical-data observation"]
+        MemoryRetention["Explicit Compact Retention<br/>or deliberate Private DocLib note"]
+
+        TurnResult --> MemoryJournal
+        MemoryJournal --> AdvancedGate
+        AdvancedGate -->|disabled| WorkingContext
+        AdvancedGate -->|completed or incomplete turn| MemorySegment
+        MemorySegment --> MemoryIndexer
+        MemoryIndexer --> MemoryCatalog
+        MemoryCatalog --> MemoryFTS
+        MemoryFTS --> MemoryRecall
+        MemoryRecall --> Strategy
+        MemoryRecall --> MemoryRetention
+        MemoryRetention --> WorkingContext
+        MemoryIndexer -. serialized by .-> AgentInvocationLock
     end
 
     subgraph Governance["Autonomous Governance and Cross-Team Coordination"]
@@ -235,15 +259,19 @@ flowchart TB
         Materialize["Background Materialization<br/>deep copy, JSON serialization, ORM record assembly"]
         Coordinator["Single-Writer Coordinator<br/>one executing delta plus one coalesced pending delta"]
         Lease["Exclusive Cross-Process Writer Lease<br/>second writer fails immediately"]
-        Database[(SQLite Schema 6<br/>foreign keys, WAL, busy timeout)]
+        Database[(SQLite Schema 7<br/>foreign keys, WAL, busy timeout, optional FTS5)]
         RestoreRead["Read Schema Version Before Mutation<br/>load all records into detached staging"]
-        RestoreValidate["Strict Restore Validation<br/>identity, topology, model aliases, governance,<br/>DocLib ownership, ACL, links, deliveries"]
+        RestoreValidate["Strict Restore Validation<br/>identity, topology, model aliases, governance,<br/>memory ownership/digests, DocLibs, ACL, links"]
         RestoreFiles["Stage DocLib Files in Temporary Directories"]
         RestorePublish["Atomic Runtime and DocLib Publication<br/>failure leaves current manager unchanged"]
 
         AgentRegistry --> DirtyTracking
         TeamRegistry --> DirtyTracking
-        Memory --> DirtyTracking
+        WorkingContext --> DirtyTracking
+        MemoryJournal --> DirtyTracking
+        MemorySegment --> DirtyTracking
+        MemoryCatalog --> DirtyTracking
+        MemoryRetention --> DirtyTracking
         MembershipProposal --> DirtyTracking
         Broker --> DirtyTracking
         MigrationCommit --> DirtyTracking
@@ -291,6 +319,7 @@ flowchart TB
     classDef identity fill:#e3f2fd,stroke:#1976d2,stroke-width:1.5px;
     classDef discussion fill:#e0f7fa,stroke:#00838f,stroke-width:1.5px;
     classDef execution fill:#fffde7,stroke:#f9a825,stroke-width:1.5px;
+    classDef memory fill:#e0f2f1,stroke:#00796b,stroke-width:1.5px;
     classDef governance fill:#fce4ec,stroke:#c2185b,stroke-width:1.5px;
     classDef knowledge fill:#e8f5e9,stroke:#388e3c,stroke-width:1.5px;
     classDef supervision fill:#fff3e0,stroke:#ef6c00,stroke-width:1.5px;
@@ -300,6 +329,7 @@ flowchart TB
     style Identity fill:#eff6ff,stroke:#1976d2,stroke-width:2px,color:#1f2937;
     style Discussion fill:#ecfeff,stroke:#00838f,stroke-width:2px,color:#1f2937;
     style Execution fill:#fffbeb,stroke:#f9a825,stroke-width:2px,color:#1f2937;
+    style EpisodicMemory fill:#ecfdf5,stroke:#00796b,stroke-width:2px,color:#1f2937;
     style Governance fill:#fff1f2,stroke:#c2185b,stroke-width:2px,color:#1f2937;
     style Knowledge fill:#f0fdf4,stroke:#388e3c,stroke-width:2px,color:#1f2937;
     style Supervision fill:#fff7ed,stroke:#ef6c00,stroke-width:2px,color:#1f2937;
@@ -308,7 +338,8 @@ flowchart TB
     class HostApp,Config,Bindings,Manager,RuntimeLifecycle,Events host;
     class Root,AgentRegistry,AgentState,Membership,TeamRegistry,Topology,Delegation,TeamCreation,AgentLifecycle,TeamStateLock,TopologyLock identity;
     class DiscussionEntry,DiscussionLock,Session,InboxClaim,Round,ParallelTurns,RoundResult,Transcript,DiscussionResult,DiscussionCleanup discussion;
-    class InvocationContext,AgentInvocationLock,Prompt,ToolView,Strategy,TextMode,NativeMode,ToolExecutor,ToolAuditor,RetryPolicy,ToolResult,TurnResult,Memory,Window,Adapter,TokenLedger,Provider,FailoverGate execution;
+    class InvocationContext,AgentInvocationLock,Prompt,ToolView,Strategy,TextMode,NativeMode,ToolExecutor,ToolAuditor,RetryPolicy,ToolResult,TurnResult,WorkingContext,Window,Adapter,TokenLedger,Provider,FailoverGate execution;
+    class MemoryJournal,AdvancedGate,MemorySegment,MemoryIndexer,MemoryCatalog,MemoryFTS,MemoryRecall,MemoryRetention memory;
     class MembershipProposal,CommunicationConfig,Broker,CommunicationLocks,DirectDelivery,CommRequest,ApprovalRecords,DeliveryMode,PrincipalDecision,PathCheck,Agreement,PeerMessage,MigrationPolicy,MigrationDecision,MigrationCommit,FailoverPolicy,ParentResourceDecision governance;
     class TeamLibrary,TeamACL,PrivateLibrary,PrivateOwner,GatedReader,WorkspaceReader,ManagedLinks,Publish,LibraryLocks knowledge;
     class AuditInput,Supervisors,ContentStatus,OperationalMode,OperationalStatus,AlertRegistry,AlertRoute,ParentInbox,RootEvent supervision;

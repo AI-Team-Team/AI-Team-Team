@@ -153,6 +153,10 @@ The suite's `test/test_att/test_high_hardening/` package contains reference patt
 
 Private Agent DocLib tests must create agents through `register_agent` or a supported team-creation path.
 
-Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, schema 6 corruption, and the absence of private body text from transcripts, callbacks, and message history. The `test/test_att/test_private_doclib/` package contains the baseline end-to-end cases.
+Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, schema 7 corruption, and the absence of private body text from transcripts, callbacks, and message history. The `test/test_att/test_private_doclib/` package contains the baseline end-to-end cases.
 
-Communication changes must cover strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes, full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation, idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations. Schema 5 must be rejected before DDL.
+Selective episodic-memory tests must cover disabled-mode zero indexing/tool exposure, one card per completed or incomplete turn, cancelled-turn exclusion, isolated label calls, owner-only search and recall, ephemeral recall cleanup, explicit compact retention, Journal immutability, private/tool-body redaction, FTS5 gating, Agent deletion semantics, restore corruption, and membership changes that leave all Agent-owned memory untouched.
+
+The suite's `test/test_att/test_episodic_memory/` package contains the baseline end-to-end cases for this optional mode.
+
+Communication changes must cover strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes, full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation, idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations. Schema 6 and earlier databases must be rejected before DDL.

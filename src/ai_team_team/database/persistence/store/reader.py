@@ -3,9 +3,13 @@
 import json
 from typing import Any, Dict
 
+from sqlalchemy import text
+
 from ai_team_team.core.exceptions import StateRestoreError
 from ai_team_team.database.models import (
     AgentMessageModel,
+    AgentMemoryCardModel,
+    AgentMemorySegmentModel,
     AgentModel,
     CommunicationAgreementModel,
     CommunicationApprovalModel,
@@ -16,7 +20,11 @@ from ai_team_team.database.models import (
     LibraryModel,
     LibraryPermissionModel,
     ManagerConfigModel,
+    MemoryCardSourceEventModel,
+    MemoryCardTagModel,
     PeerMessageModel,
+    RetainedMemoryReferenceModel,
+    SystemMemoryEventModel,
     TeamInboxModel,
     TeamModel,
     TeamProposalModel,
@@ -41,6 +49,23 @@ class StoreReadMixin:
                     f"Unsupported state schema version {version!r}; "
                     f"expected {STATE_SCHEMA_VERSION!r}."
                 )
+
+            episodic_enabled = bool(
+                json.loads(config_map.get("att_config", "{}")).get(
+                    "episodic_memory", {}
+                ).get("enabled", False)
+            )
+            if episodic_enabled:
+                fts_exists = session.execute(
+                    text(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' "
+                        "AND name='agent_memory_cards_fts'"
+                    )
+                ).first()
+                if not fts_exists:
+                    raise StateRestoreError(
+                        "The state enables selective episodic memory but its FTS5 index is missing."
+                    )
 
             agents = []
             for row in session.query(AgentModel).all():
@@ -245,6 +270,90 @@ class StoreReadMixin:
                 for row in session.query(PeerMessageModel).all()
             ]
 
+            memory_events = [
+                {
+                    "event_id": row.event_id,
+                    "sequence": row.sequence,
+                    "event_type": row.event_type,
+                    "agent_id": row.agent_id,
+                    "agent_name_snapshot": row.agent_name_snapshot,
+                    "team_id": row.team_id,
+                    "discussion_id": row.discussion_id,
+                    "turn_id": row.turn_id,
+                    "role": row.role,
+                    "payload": row.payload,
+                    "redacted": bool(row.redacted),
+                    "created_at": row.created_at,
+                }
+                for row in session.query(SystemMemoryEventModel)
+                .order_by(SystemMemoryEventModel.sequence)
+                .all()
+            ]
+            memory_segments = []
+            for row in session.query(AgentMemorySegmentModel).all():
+                source_event_ids = [
+                    event_id
+                    for (event_id,) in session.query(
+                        MemoryCardSourceEventModel.event_id
+                    )
+                    .filter_by(segment_id=row.segment_id)
+                    .order_by(MemoryCardSourceEventModel.sequence)
+                    .all()
+                ]
+                memory_segments.append(
+                    {
+                        "segment_id": row.segment_id,
+                        "agent_id": row.agent_id,
+                        "turn_id": row.turn_id,
+                        "origin_team_id": row.origin_team_id,
+                        "discussion_id": row.discussion_id,
+                        "source_event_ids": source_event_ids,
+                        "recall_content": row.recall_content,
+                        "content_sha256": row.content_sha256,
+                        "status": row.status,
+                        "attempts": row.attempts,
+                        "last_error_kind": row.last_error_kind,
+                        "created_at": row.created_at,
+                        "updated_at": row.updated_at,
+                    }
+                )
+            memory_cards = []
+            for row in session.query(AgentMemoryCardModel).all():
+                tags = [
+                    tag
+                    for (tag,) in session.query(MemoryCardTagModel.tag)
+                    .filter_by(memory_id=row.memory_id)
+                    .order_by(MemoryCardTagModel.sequence)
+                    .all()
+                ]
+                memory_cards.append(
+                    {
+                        "memory_id": row.memory_id,
+                        "agent_id": row.agent_id,
+                        "turn_id": row.turn_id,
+                        "title": row.title,
+                        "summary": row.summary,
+                        "tags": tags,
+                        "origin_team_id": row.origin_team_id,
+                        "discussion_id": row.discussion_id,
+                        "segment_id": row.segment_id,
+                        "status": row.status,
+                        "version": row.version,
+                        "created_at": row.created_at,
+                        "updated_at": row.updated_at,
+                    }
+                )
+            memory_references = [
+                {
+                    "reference_id": row.reference_id,
+                    "agent_id": row.agent_id,
+                    "memory_id": row.memory_id,
+                    "note": row.note,
+                    "created_at": row.created_at,
+                }
+                for row in session.query(RetainedMemoryReferenceModel).all()
+            ]
+
             return {
                 "configs": config_map,
                 "agents": agents,
@@ -257,6 +366,49 @@ class StoreReadMixin:
                 "communication_ballots": communication_ballots,
                 "communication_agreements": communication_agreements,
                 "peer_messages": peer_messages,
+                "memory_events": memory_events,
+                "memory_segments": memory_segments,
+                "memory_cards": memory_cards,
+                "memory_references": memory_references,
             }
+        finally:
+            session.close()
+
+    def search_memory_card_ids(
+        self, agent_id: str, query: str, limit: int
+    ) -> list[str]:
+        """Returns owner-scoped FTS5 matches without exposing card content."""
+        session = self.session_factory()
+        try:
+            exists = session.execute(
+                text(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' "
+                    "AND name='agent_memory_cards_fts'"
+                )
+            ).first()
+            if not exists:
+                raise StateRestoreError(
+                    "Selective episodic memory requires its SQLite FTS5 index."
+                )
+            terms = [part for part in query.split() if part]
+            expression = " AND ".join(
+                f'"{part.replace(chr(34), chr(34) * 2)}"' for part in terms
+            )
+            if not expression:
+                return []
+            rows = session.execute(
+                text(
+                    "SELECT agent_memory_cards_fts.memory_id "
+                    "FROM agent_memory_cards_fts "
+                    "JOIN agent_memory_cards ON "
+                    "agent_memory_cards.memory_id = agent_memory_cards_fts.memory_id "
+                    "WHERE agent_memory_cards_fts MATCH :query "
+                    "AND agent_memory_cards_fts.agent_id = :agent_id "
+                    "AND agent_memory_cards.status = 'active' "
+                    "ORDER BY rank LIMIT :limit"
+                ),
+                {"query": expression, "agent_id": agent_id, "limit": limit},
+            ).all()
+            return [row[0] for row in rows]
         finally:
             session.close()

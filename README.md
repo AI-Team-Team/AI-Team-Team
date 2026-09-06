@@ -45,6 +45,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 * **Bounded ReAct Loops**: Executes standard Thought/Action/Observation reasoning cycles, capped by max steps to prevent runaway API tokens.
 * **Strict Balanced Action Parser**: A character-level scanner handles nested delimiters, quotes, triple quotes, escapes, multiline input, Markdown fences, and Unicode before literal-only argument parsing; malformed or unquoted expressions never execute a tool.
 * **[Bounded Memory Compression](docs/State_Persistence.md)**: Automates memory pruning by extracting early conversation turns, calling the agent's LLM to generate a `*** HISTORICAL SUMMARY ARCHIVE ***`, and retaining a bounded high-fidelity window.
+* **[Optional Selective Episodic Memory](docs/Selective_Episodic_Memory.md)**: When explicitly enabled, records one deterministic Agent-owned segment per terminal business turn, queues isolated retrieval-metadata indexing in the background, and lets only that Agent search or temporarily recall its own Memory Cards.
 * **[LLM Adapter Architecture](docs/Tool_System.md)**: Unifies sync, async, and streaming LLM payloads from various providers (Google, OpenAI, Anthropic) into standard `LLMResponse` and `ToolCall` formats via the `ManagerDefaultClientAdapter`.
 * **[Atomic Token Budget Circuit Breakers](docs/Team_Governance.md#5-token-budget--failover-policies)**: Enforces hard per-model quotas by atomically reserving prompt and maximum output capacity before each request, settling provider usage, refunding unused capacity, and routing failover through the same ledger.
 
@@ -156,6 +157,21 @@ flowchart TB
         Supervision --> Alerts
     end
 
+    subgraph MemorySystem["Agent-Owned Memory Boundaries"]
+        WorkingContext["Persisted Working Context<br/>bounded model-visible window"]
+        Journal["System Memory Journal<br/>append-only host audit history"]
+        Catalog["Optional Memory Catalog<br/>Agent-owned cards and FTS5 search"]
+        Indexer["Isolated Background Indexer<br/>title, summary, and normalized tags"]
+        Recall["Ephemeral Recall and Explicit Retention"]
+
+        Turns --> WorkingContext
+        Turns --> Journal
+        Journal --> Indexer
+        Indexer --> Catalog
+        Catalog --> Recall
+        Recall --> Strategy
+    end
+
     subgraph Durability["Durability and Host Observation"]
         Dirty["Entity-Level Dirty Deltas"]
         Writer["Coalescing Single Writer<br/>cross-process lease"]
@@ -191,6 +207,9 @@ flowchart TB
     Agents --> Dirty
     Teams --> Dirty
     RoundResults --> Dirty
+    WorkingContext --> Dirty
+    Journal --> Dirty
+    Catalog --> Dirty
     DiscussionResult --> Dirty
     Governance --> Dirty
     Communication --> Dirty
@@ -205,12 +224,14 @@ flowchart TB
     classDef governance fill:#fce4ec,stroke:#c2185b,stroke-width:1.5px;
     classDef knowledge fill:#e8f5e9,stroke:#388e3c,stroke-width:1.5px;
     classDef supervision fill:#fff3e0,stroke:#ef6c00,stroke-width:1.5px;
+    classDef memory fill:#e0f2f1,stroke:#00796b,stroke-width:1.5px;
     classDef persistence fill:#ede7f6,stroke:#5e35b1,stroke-width:1.5px;
 
     style Host fill:#f4f7f9,stroke:#455a64,stroke-width:2px,color:#1f2937;
     style Organization fill:#eff6ff,stroke:#1976d2,stroke-width:2px,color:#1f2937;
     style Runtime fill:#fffbeb,stroke:#f9a825,stroke-width:2px,color:#1f2937;
     style Coordination fill:#fff1f2,stroke:#c2185b,stroke-width:2px,color:#1f2937;
+    style MemorySystem fill:#ecfdf5,stroke:#00796b,stroke-width:2px,color:#1f2937;
     style Durability fill:#f5f3ff,stroke:#5e35b1,stroke-width:2px,color:#1f2937;
 
     class HostApp,Config,Bindings,Manager host;
@@ -219,6 +240,7 @@ flowchart TB
     class Governance,Communication governance;
     class PrivateDocLib,TeamDocLib,Knowledge knowledge;
     class Supervision,Alerts supervision;
+    class WorkingContext,Journal,Catalog,Indexer,Recall memory;
     class Dirty,Writer,SQLite,Restore,Events persistence;
 ```
 
@@ -231,7 +253,7 @@ flowchart TB
 
 ```python
 from typing import Union, List, Dict, Optional
-from ai_team_team import ATTManager, Agent, ATTConfig
+from ai_team_team import ATTManager, Agent, ATTConfig, EpisodicMemoryConfig
 
 # 1. Configure the framework
 config = ATTConfig(
@@ -241,6 +263,7 @@ config = ATTConfig(
     subagent_discussion_rounds=2,
     react_max_steps=5,
     enable_memory_compression=True,       # Retains a bounded recent-message window
+    episodic_memory=EpisodicMemoryConfig(enabled=False),  # Optional; normally adds one isolated indexing call per terminal Agent turn
     failover_policy="auto",               # Automatically hot-swaps LLM client on TokenLimitError
     enable_emergency_wakeup=True,         # Enables deferred inbox processing for emergencies
     tool_calling_mode="auto",             # Auto-detects Pluggable Reasoning Strategy (Native or TextReAct)
@@ -557,6 +580,7 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `llm_retry_backoff_factor` | `float` | `1.5` | Initial exponential-backoff delay. `0` retries immediately. Only typed/provider-classified transient failures are retried. |
 | `enable_memory_compression` | `bool` | `True` | Whether to enable automatic dialogue compression/pruning of early conversation turns. |
 | `max_memory_turns` | `int` | `20` | The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns. |
+| `episodic_memory` | `EpisodicMemoryConfig` | `enabled=False` | Optional Agent-owned Memory Catalog configuration; disabled mode exposes no memory tools, creates no cards, makes no indexing calls, and does not require FTS5. |
 | `communication` | `CommunicationConfig` | `PermissiveCommunicationConfig()` | Strict discriminated configuration: permissive, parent approval, or lineage approval. Approval configurations also define `request_delivery` (`"queue"`/`"wake"`) and `direction` (`"one_way"`/`"bidirectional"`). |
 | `migration_policy` | `str` | `"ancestor_approval"` | The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`. |
 | `enable_emergency_wakeup` | `bool` | `True` | Whether to trigger active wake-up discussion on idle parent teams upon receiving high-priority child anomalies. |

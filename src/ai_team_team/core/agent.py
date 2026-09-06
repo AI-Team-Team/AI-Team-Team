@@ -46,6 +46,7 @@ class Agent:
         self.lifecycle_state = "active"
         self._private_doc_library_id: Optional[str] = None
         self._model_alias: Optional[str] = None
+        self._manager: Optional[Any] = None
 
     @property
     def agent_id(self) -> str:
@@ -84,18 +85,39 @@ class Agent:
 
     def sync_message_history(self) -> None:
         """Captures messages inserted directly through the compatibility list."""
+        manager = self._manager
         for message in self.messages:
             identity = id(message)
             if identity not in self._history_seen_ids:
                 self.message_history.append(message)
                 self._history_seen_ids.add(identity)
+                if manager is not None:
+                    team = manager._active_team.get()
+                    if team is None:
+                        team_id = message.get("team_id")
+                        team = manager.teams.get(team_id) if team_id else None
+                    manager._memory.record_message(self, team, message)
 
-    def append_message(self, message: Dict[str, Any]) -> None:
+    def append_message(
+        self, message: Dict[str, Any], *, capture_content: bool = True
+    ) -> None:
         """Appends to the model window and the complete persistent history."""
         self.sync_message_history()
         self.messages.append(message)
         self.message_history.append(message)
         self._history_seen_ids.add(id(message))
+        manager = self._manager
+        if manager is not None:
+            team = manager._active_team.get()
+            if team is None:
+                team_id = message.get("team_id")
+                team = manager.teams.get(team_id) if team_id else None
+            manager._memory.record_message(
+                self,
+                team,
+                message,
+                capture_content=capture_content,
+            )
 
     def launch_att(
         self,

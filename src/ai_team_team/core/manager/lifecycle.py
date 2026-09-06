@@ -22,6 +22,7 @@ class LifecycleService:
         if manager._closed:
             return
         manager._closing = True
+        await manager._memory.close()
         current = asyncio.current_task()
         active_tasks = {
             task
@@ -50,6 +51,9 @@ class LifecycleService:
             await manager._persistence.close()
         finally:
             manager._closed = True
+            for agent in manager._agents_by_id.values():
+                if agent._manager is manager:
+                    agent._manager = None
         if reset_error is not None:
             raise reset_error
 

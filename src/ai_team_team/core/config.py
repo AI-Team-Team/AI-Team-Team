@@ -52,6 +52,29 @@ class TurnFailurePolicyConfig(BaseModel):
     llm: Literal["isolate", "abort"] = "isolate"
 
 
+class EpisodicMemoryConfig(BaseModel):
+    """Controls the optional AI-visible episodic-memory catalog."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+        strict=True,
+        validate_default=True,
+    )
+
+    enabled: bool = False
+    segment_boundary: Literal["agent_turn"] = "agent_turn"
+    index_max_retries: Annotated[int, Field(ge=0)] = 2
+    index_retry_backoff_factor: Annotated[float, Field(ge=0)] = 0.5
+    index_worker_count: Annotated[int, Field(ge=1)] = 2
+    max_search_results: Annotated[int, Field(ge=1)] = 20
+    max_recall_lines: Annotated[int, Field(ge=1)] = 100
+    max_recall_chars: Annotated[int, Field(ge=1)] = 20_000
+    max_recall_tokens: Annotated[int, Field(ge=1)] = 4_000
+    max_tags_per_card: Annotated[int, Field(ge=1)] = 12
+    max_retained_context_items: Annotated[int, Field(ge=1)] = 20
+
+
 CommunicationConfig = Annotated[
     Union[
         PermissiveCommunicationConfig,
@@ -194,6 +217,9 @@ class ATTConfig(BaseModel):
     agent_private_data_policy: Literal[
         "retain", "archive", "delete"
     ] = "archive"
+    episodic_memory: EpisodicMemoryConfig = Field(
+        default_factory=EpisodicMemoryConfig
+    )
 
     _MAPPING_VALIDATORS: ClassVar[Dict[str, str]] = {
         "model_registry": "_validate_string_mapping",
@@ -223,6 +249,21 @@ class ATTConfig(BaseModel):
             return TurnFailurePolicyConfig.model_validate(dict(value))
         raise ValueError(
             "turn_failure_policy must be a TurnFailurePolicyConfig or mapping."
+        )
+
+    @field_validator("episodic_memory", mode="before")
+    @classmethod
+    def _validate_episodic_memory(
+        cls, value: Any
+    ) -> EpisodicMemoryConfig:
+        if value is None:
+            return EpisodicMemoryConfig()
+        if isinstance(value, EpisodicMemoryConfig):
+            return value
+        if isinstance(value, Mapping):
+            return EpisodicMemoryConfig.model_validate(dict(value))
+        raise ValueError(
+            "episodic_memory must be an EpisodicMemoryConfig or mapping."
         )
 
     @field_validator("workspace_root", mode="before")

@@ -26,10 +26,12 @@ class RuntimeRegistry:
         description: Optional[str] = None,
         func: Optional[Callable[..., Any]] = None,
         schema: Optional[Any] = None,
+        *,
+        memory_capture: str = "metadata_only",
     ):
         """Registers a custom utility tool to all teams."""
         manager = self.manager
-        tool = Tool(name, description, func, schema)
+        tool = Tool(name, description, func, schema, memory_capture=memory_capture)
         manager.global_tools[tool.name] = tool
         # Bind to existing teams
         for team in manager.teams.values():
@@ -210,6 +212,19 @@ class RuntimeRegistry:
                 "retract_membership_vote",
             }:
                 tools.pop(name, None)
+        manager._memory.ensure_enabled()
+        if not manager.config.episodic_memory.enabled:
+            for name in {
+                "search_memories",
+                "recall_memory",
+                "keep_memory_in_context",
+                "forget_memory",
+            }:
+                tools.pop(name, None)
+        else:
+            from ai_team_team.tool.memory import build_memory_tools
+
+            tools.update(build_memory_tools(manager))
         return tools
 
     def probe_native_tool_capability(

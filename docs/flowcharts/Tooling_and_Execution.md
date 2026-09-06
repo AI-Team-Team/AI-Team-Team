@@ -129,7 +129,7 @@ This flowchart outlines prompt compilation, invocation-time tool visibility, str
 flowchart TD
     StartStep["Call execute_reasoning_step(agent, team, prompt)"] --> TransitionCheck{"agent.last_context.get('team_id') != team.team_id?"}
     
-    TransitionCheck -- "Yes" --> InjectTransition["Inject Transition Notice system message into memory\n(Updates role, team purpose, and active preset details)"]
+    TransitionCheck -- "Yes" --> InjectTransition["Inject Transition Notice into Working Context\n(Updates role, team purpose, and active preset details)"]
     TransitionCheck -- "No" --> BuildContext["Compile Prompt Context:\n1. Get Identity Header\n2. Render Topology Tree map\n3. Format Active Voting Proposals\n4. Inject Global Expert Directory"]
     
     InjectTransition --> BuildContext
@@ -156,7 +156,7 @@ flowchart TD
     
     CatchFailover -- "No" --> ParseAction["Balanced scan of XML or Action: tool_name(...) syntax"]
     ParseAction --> ActionType{"Action found?"}
-    ActionType -- "No (Final Answer)" --> SetFinalAnswer["Append Final Answer to memory\nBreak Loop"]
+    ActionType -- "No (Final Answer)" --> SetFinalAnswer["Append Final Answer to Working Context\nBreak Loop"]
     ActionType -- "Yes (Tool Call)" --> SafeASTParse["Parse literal positional and keyword arguments; reject expansion and ambiguity"]
     SafeASTParse --> ASTCheck{"Parse, signature, and strict schema valid?"}
     ASTCheck -- "No" --> InvalidArgs["Append invalid_arguments observation and consume one correction opportunity"]
@@ -167,7 +167,7 @@ flowchart TD
     AuditorApprove -- "No" --> BlockTool["Append denied ToolResult; do not retry"]
     AuditorApprove -- "Yes" --> RunTool["Execute through shared ToolExecutor and typed retry policy"]
     ToolAuditor -- "No" --> RunTool
-    RunTool --> SaveObservation["Append Thought, Action, and Observation to memory"]
+    RunTool --> SaveObservation["Append Thought, Action, and Observation to Working Context\nJournal body follows Tool.memory_capture"]
     BlockTool --> NextReActStep["Increment step by 1"]
     InvalidArgs --> ArgumentBudget{"Correction budget exhausted?"}
     ArgumentBudget -- "No" --> NextReActStep
@@ -193,12 +193,16 @@ flowchart TD
     ParallelExecute --> SaveToolResults["Classify through shared ToolExecutor; an invalid batch consumes at most one correction opportunity"]
     SaveToolResults --> NativeLoop
     
-    NativeResponse -- "No (Text response)" --> SaveTextResponse["Save Assistant final text to memory\nBreak Loop"]
+    NativeResponse -- "No (Text response)" --> SaveTextResponse["Save Assistant final text to Working Context\nBreak Loop"]
     NativeLoop -- "No" --> CheckMemory
     
     %% --- Post Execution Flow ---
     SetFinalAnswer --> CheckMemory
     SaveTextResponse --> CheckMemory
     
-    CheckMemory["Call Memory Pruning (Summarize Early Turns)"] --> EndStep["Submit incremental state delta and return AgentTurnResult"]
+    CheckMemory["Prune or summarize bounded Working Context"] --> EndStep["Return terminal AgentTurnResult and append Journal boundary"]
+    EndStep --> MemoryGate{"Optional episodic memory enabled?"}
+    MemoryGate -- "No" --> Persist["Submit incremental state delta"]
+    MemoryGate -- "Yes" --> Index["Queue isolated Agent-turn metadata indexing"]
+    Index --> Persist
 ```

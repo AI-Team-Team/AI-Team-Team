@@ -56,7 +56,7 @@ class MyLLMClient:
             tools: Optional list of native `Tool` instances. Adapters MUST parse these into their provider's schema manually.
             max_output_tokens: Required provider output ceiling when a hard token quota is configured.
             temperature: Sampling temperature.
-            require_json: If True, you MUST return a valid JSON string (used by the 3-AI Supervisory Team).
+            require_json: If True, you MUST return a valid JSON string for governance, supervision, or optional episodic-memory indexing.
         """
         # Call your LLM SDK here (e.g., openai.ChatCompletion.create or genai.GenerativeModel.generate_content)
         # Ensure that if require_json is True, the model's output format is strict JSON.
@@ -75,13 +75,14 @@ When registering a custom tool, provide precise type hints and a concise descrip
 ATT generates and validates the tool schema from the callable, and Text ReAct prompts display that schema according to `text_tool_schema_mode`.
 
 ```python
-from ai_team_team import ATTManager, Agent, ATTConfig, Tool
+from ai_team_team import ATTManager, Agent, ATTConfig, EpisodicMemoryConfig, Tool
 
 # 1. Initialize configuration
 config = ATTConfig(
     enable_dynamic_delegation=True,
     max_delegation_depth=3,      # Support deep recursive spawning
-    min_subagent_team_size=3
+    min_subagent_team_size=3,
+    episodic_memory=EpisodicMemoryConfig(enabled=False),  # Optional advanced mode
 )
 
 # 2. Initialize manager and register global generator handler callback

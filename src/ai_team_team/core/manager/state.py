@@ -36,12 +36,17 @@ class StateCoordinator:
             "communication_approvals": set(),
             "communication_agreements": set(),
             "peer_messages": set(),
+            "memory_events": set(),
+            "memory_segments": set(),
+            "memory_cards": set(),
+            "memory_references": set(),
             "libraries": set(),
             "permissions": set(),
             "links": set(),
             "file_changes": {},
             "deleted_agents": set(),
             "deleted_libraries": set(),
+            "deleted_memory_references": set(),
         }
 
     @staticmethod
@@ -60,12 +65,19 @@ class StateCoordinator:
             "communication_approvals",
             "communication_agreements",
             "peer_messages",
+            "memory_events",
+            "memory_segments",
+            "memory_cards",
+            "memory_references",
         ):
             target[key].update(source[key])
         for lib_id, changes in source["file_changes"].items():
             target["file_changes"].setdefault(lib_id, {}).update(changes)
         target["deleted_agents"].update(source["deleted_agents"])
         target["deleted_libraries"].update(source["deleted_libraries"])
+        target["deleted_memory_references"].update(
+            source["deleted_memory_references"]
+        )
 
     @asynccontextmanager
     async def suppress_auto_save(self):
@@ -93,6 +105,10 @@ class StateCoordinator:
             or dirty["communication_approvals"]
             or dirty["communication_agreements"]
             or dirty["peer_messages"]
+            or dirty["memory_events"]
+            or dirty["memory_segments"]
+            or dirty["memory_cards"]
+            or dirty["memory_references"]
             or dirty["agents"]
             or dirty["teams"]
             or dirty["inboxes"]
@@ -103,6 +119,7 @@ class StateCoordinator:
             or dirty["file_changes"]
             or dirty["deleted_agents"]
             or dirty["deleted_libraries"]
+            or dirty["deleted_memory_references"]
         )
 
     def _auto_save(
@@ -117,6 +134,10 @@ class StateCoordinator:
         communication_approvals: Optional[set[str]] = None,
         communication_agreements: Optional[set[str]] = None,
         peer_messages: Optional[set[str]] = None,
+        memory_events: Optional[set[str]] = None,
+        memory_segments: Optional[set[str]] = None,
+        memory_cards: Optional[set[str]] = None,
+        memory_references: Optional[set[str]] = None,
         libraries: Optional[set[str]] = None,
         permissions: Optional[set[str]] = None,
         links: Optional[set[str]] = None,
@@ -124,6 +145,7 @@ class StateCoordinator:
         full: bool = False,
         deleted_agents: Optional[set[str]] = None,
         deleted_libraries: Optional[set[str]] = None,
+        deleted_memory_references: Optional[set[str]] = None,
     ) -> None:
         """Records an immutable incremental state delta for the single writer."""
         if not self.manager.db_path:
@@ -138,11 +160,18 @@ class StateCoordinator:
         dirty["communication_approvals"].update(communication_approvals or set())
         dirty["communication_agreements"].update(communication_agreements or set())
         dirty["peer_messages"].update(peer_messages or set())
+        dirty["memory_events"].update(memory_events or set())
+        dirty["memory_segments"].update(memory_segments or set())
+        dirty["memory_cards"].update(memory_cards or set())
+        dirty["memory_references"].update(memory_references or set())
         dirty["libraries"].update(libraries or set())
         dirty["permissions"].update(permissions or set())
         dirty["links"].update(links or set())
         dirty["deleted_agents"].update(deleted_agents or set())
         dirty["deleted_libraries"].update(deleted_libraries or set())
+        dirty["deleted_memory_references"].update(
+            deleted_memory_references or set()
+        )
         for lib_id, changes in (file_changes or {}).items():
             dirty["file_changes"].setdefault(lib_id, {}).update(changes)
 

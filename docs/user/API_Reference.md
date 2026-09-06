@@ -9,7 +9,7 @@ Configuration class to configure the multi-agent framework settings.
 ### Constructor
 
 ```python
-from ai_team_team import ATTConfig, PermissiveCommunicationConfig
+from ai_team_team import ATTConfig, EpisodicMemoryConfig, PermissiveCommunicationConfig
 
 config = ATTConfig(
     enable_dynamic_delegation: bool = True,
@@ -25,6 +25,7 @@ config = ATTConfig(
     llm_retry_backoff_factor: float = 1.5,
     enable_memory_compression: bool = True,
     max_memory_turns: int = 20,
+    episodic_memory: EpisodicMemoryConfig = EpisodicMemoryConfig(),
     communication: CommunicationConfig = PermissiveCommunicationConfig(),
     migration_policy: str = "ancestor_approval",
     enable_emergency_wakeup: bool = True,
@@ -65,6 +66,7 @@ config = ATTConfig(
 * **`llm_retry_backoff_factor`**: Initial exponential-backoff delay. `0` retries immediately.
 * **`enable_memory_compression`**: Whether to enable automatic dialogue compression/pruning of early conversation turns (default: `True`).
 * **`max_memory_turns`**: The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns (default: `20`).
+* **`episodic_memory`**: Strict optional `EpisodicMemoryConfig`; `enabled=False` by default performs no indexing calls, creates no Memory Cards, exposes no memory tools, and does not require FTS5.
 * **`communication`**: Strict `PermissiveCommunicationConfig`, `ParentApprovalCommunicationConfig`, or `LineageApprovalCommunicationConfig`. Approval configurations select `request_delivery` (`"queue"`/`"wake"`) and Agreement `direction` (`"one_way"`/`"bidirectional"`). The institution applies to every AgentTeam depth.
 * **`migration_policy`**: The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`.
 * **`enable_emergency_wakeup`**: Whether to trigger active wake-up discussion on idle parent teams upon receiving high-priority child anomalies (default: `True`).
@@ -151,8 +153,8 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 
 ### Methods
 
-* **`register_tool(name: str, description: str, func: Callable[..., Any])`**
-  Registers a custom utility tool globally to be automatically bound to all dynamic teams.
+* **`register_tool(name: str, description: str, func: Callable[..., Any], schema: Optional[Any] = None, *, memory_capture: str = "metadata_only")`**
+  Registers a custom utility tool globally and requires explicit `memory_capture="content"` before its observation body may enter episodic recall content.
 * **`register_agent(agent: Agent) -> Agent`**
   Registers one stable identity and creates its unique private DocLib. Direct mutation of `manager.agents` is unsupported.
 * **`get_private_library_id(agent_id: str) -> str`**
@@ -190,10 +192,18 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
   Transactionally restores a fully validated staged registry after runtime clients or a generator handler have been rebound. Missing or corrupt references raise `StateRestoreError` without changing the live manager or its DocLib files.
 * **`await flush_state()`**
   Waits for all queued incremental writes.
+* **`await flush_memory_indexing()`**
+  Waits for every currently runnable optional episodic-memory index job.
+* **`await retry_memory_index(segment_id: str)`**
+  Returns a pending or failed Agent-owned segment to the background indexing queue.
+* **`list_memory_index_failures(agent_id: Optional[str] = None)`**
+  Returns trusted-host diagnostics for failed index segments without exposing Journal access through Agent tools.
+* **`await restore_forgotten_memory(agent_id: str, memory_id: str)`**
+  Restores one forgotten Agent-owned Memory Card through the trusted host API.
+* **`list_agent_history(agent_id: str)`**
+  Returns the ordered host-only System Memory Journal view for one historical Agent identity.
 * **`await close()`**
-  Rejects new work, cancels outstanding external LLM waits and emergency tasks,
-  flushes all accepted persistence changes without a timeout, and releases the
-  exclusive database writer lease. `ATTManager` also supports `async with`.
+  Rejects new work, cancels outstanding external LLM waits and emergency tasks, flushes all accepted persistence changes without a timeout, and releases the exclusive database writer lease. `ATTManager` also supports `async with`.
 * **`await flush_callbacks()`**
   Waits for all observational callbacks queued so far.
 * **`acknowledge_unknown_alert(team_id: str, fingerprint: str) -> bool`**
@@ -239,7 +249,12 @@ tool = Tool(func=dummy_tool)
 
 # 3. Explicit schema override (can be dict, Pydantic BaseModel, or TypedDict class)
 tool = Tool(func=dummy_tool, schema=WeatherArgs)
+
+# 4. Tool bodies are excluded from memory by default; explicit content capture is opt-in
+tool = Tool(func=dummy_tool, memory_capture="content")
 ```
+
+`memory_capture` accepts `"metadata_only"` or `"content"`; private and episodic-memory tools always use metadata-only capture.
 
 Use `typing_extensions.TypedDict` for portable schemas across every supported Python version. Pydantic rejects `typing.TypedDict` on Python 3.11.
 

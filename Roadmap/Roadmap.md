@@ -23,7 +23,7 @@ The next iterations focus on sociological architecture and self-evolution: expan
   - A stable Agent UUID owns exactly one `PDL-<agent_id>` library across all team memberships.
   - Private access is resolved only from invocation-scoped agent identity; team ACLs, public discovery, metadata APIs, and managed links cannot expose a private library.
   - An AI explicitly reads its own files or copies a selected file into the current team's built-in DocLib. Private content is never automatically inserted into prompts, transcripts, audits, callbacks, or message history.
-  - Retain, archive, reactivate, and confirmed permanent-delete policies provide an auditable lifecycle backed by schema 5 persistence and atomic restore validation.
+  - Retain, archive, reactivate, and confirmed permanent-delete policies provide an auditable lifecycle backed by the current schema 7 persistence and atomic restore validation.
 
 ### 3. Multi-Parent DAG Topology (Team Subscription Modeling)
 

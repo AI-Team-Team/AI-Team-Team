@@ -93,34 +93,39 @@ class DiscussionSessionMixin:
                         )
 
                     async def _run_agent(ag=agent, pr=round_prompt):
-                        public_method = team.execute_reasoning_step
-                        if (
-                            getattr(public_method, "__func__", None)
-                            is not AgentTeam.execute_reasoning_step
-                        ):
-                            raw = await public_method(
+                        round_token = self.manager._active_round_number.set(r)
+                        try:
+                            public_method = team.execute_reasoning_step
+                            if (
+                                getattr(public_method, "__func__", None)
+                                is not AgentTeam.execute_reasoning_step
+                            ):
+                                raw = await public_method(
+                                    agent=ag,
+                                    prompt=pr,
+                                    system_instruction=team.system_instructions,
+                                    max_steps=self.manager.config.react_max_steps,
+                                    manager=self.manager,
+                                )
+                                if isinstance(raw, AgentTurnResult):
+                                    return raw
+                                return AgentTurnResult(
+                                    agent_id=ag.agent_id,
+                                    team_id=team.team_id,
+                                    discussion_id=self.manager._active_discussion_id.get(),
+                                    round_number=r,
+                                    status=AgentTurnStatus.COMPLETED,
+                                    answer=str(raw),
+                                )
+                            return await team.execute_reasoning_step_detailed(
                                 agent=ag,
                                 prompt=pr,
                                 system_instruction=team.system_instructions,
                                 max_steps=self.manager.config.react_max_steps,
                                 manager=self.manager,
                             )
-                            if isinstance(raw, AgentTurnResult):
-                                return raw
-                            return AgentTurnResult(
-                                agent_id=ag.agent_id,
-                                team_id=team.team_id,
-                                discussion_id=self.manager._active_discussion_id.get(),
-                                status=AgentTurnStatus.COMPLETED,
-                                answer=str(raw),
-                            )
-                        return await team.execute_reasoning_step_detailed(
-                            agent=ag,
-                            prompt=pr,
-                            system_instruction=team.system_instructions,
-                            max_steps=self.manager.config.react_max_steps,
-                            manager=self.manager,
-                        )
+                        finally:
+                            self.manager._active_round_number.reset(round_token)
 
                     tasks.append(_run_agent())
 

@@ -101,11 +101,22 @@ class TeamCreationTransactionMixin:
             team.team_id,
             len(team.members),
         )
+        registration_event_ids = {
+            manager._memory.record_event(
+                "agent_registered",
+                agent=agent,
+                payload={"lifecycle_state": "active"},
+                persist=False,
+                inherit_context=False,
+            ).event_id
+            for agent in stage["new_agents"]
+        }
         manager._auto_save(
             configs=True,
             agents={agent.agent_id for agent in stage["new_agents"]},
             teams={team.team_id} | ({team.parent_team.team_id} if team.parent_team else set()),
             libraries=set(stage["libraries"]),
+            memory_events=registration_event_ids,
         )
         return team
 
@@ -135,8 +146,11 @@ class TeamCreationTransactionMixin:
         for agent in manager._agents_by_id.values():
             if id(agent) not in snapshot["private_ids"]:
                 agent._private_doc_library_id = None
-        manager.agents = snapshot["agents"]
-        manager._agents_by_id = snapshot["agents_by_id"]
+                agent._manager = None
+        manager._agent_registry.replace_indexes(
+            snapshot["agents"],
+            snapshot["agents_by_id"],
+        )
         manager.teams = snapshot["teams"]
         manager.libraries = snapshot["libraries"]
         manager._library_files = snapshot["library_files"]

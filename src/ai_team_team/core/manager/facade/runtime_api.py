@@ -15,8 +15,16 @@ class RuntimeAPI:
         description: Optional[str] = None,
         func: Optional[Callable[..., Any]] = None,
         schema: Optional[Any] = None,
+        *,
+        memory_capture: str = "metadata_only",
     ):
-        return self._runtime.register_tool(name, description, func, schema)
+        return self._runtime.register_tool(
+            name,
+            description,
+            func,
+            schema,
+            memory_capture=memory_capture,
+        )
 
     def register_tool_auditor(self, tool_name: str, auditor_func: Callable[..., Tuple[bool, str]]):
         return self._runtime.register_tool_auditor(tool_name, auditor_func)

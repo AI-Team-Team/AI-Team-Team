@@ -25,6 +25,10 @@ class StateValidationPayload:
     communication_ballots: List[Dict[str, Any]]
     communication_agreements: List[Dict[str, Any]]
     peer_messages: List[Dict[str, Any]]
+    memory_events: List[Dict[str, Any]]
+    memory_segments: List[Dict[str, Any]]
+    memory_cards: List[Dict[str, Any]]
+    memory_references: List[Dict[str, Any]]
 
 
 def parse_state_validation_payload(
@@ -47,6 +51,10 @@ def parse_state_validation_payload(
             communication_ballots=state["communication_ballots"],
             communication_agreements=state["communication_agreements"],
             peer_messages=state["peer_messages"],
+            memory_events=state["memory_events"],
+            memory_segments=state["memory_segments"],
+            memory_cards=state["memory_cards"],
+            memory_references=state["memory_references"],
         )
     except Exception as exc:
         raise StateRestoreError(f"Invalid persisted state structure: {exc}") from exc

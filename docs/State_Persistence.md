@@ -24,7 +24,7 @@ await restored.close()
 
 ## Incremental single-writer design
 
-Auto-save hooks mark individual agents, teams, proposals, inboxes, communication requests/approvals/agreements/deliveries, libraries, permissions, managed links, configuration records, and library file paths dirty.
+Auto-save hooks mark individual agents, teams, proposals, inboxes, communication requests/approvals/agreements/deliveries, Journal events, memory segments/cards/references, libraries, permissions, managed links, configuration records, and library file paths dirty.
 
 - Each database has one non-blocking cross-process writer lease.
 - Constructing a second writer manager for the same path raises `DatabaseOwnershipError` immediately.
@@ -36,7 +36,7 @@ JSON serialization, deep copying, database I/O, and large state assembly run on 
 
 A delta rewrites only the selected rows.
 
-Replacing one agent's persisted history does not rewrite another agent's messages.
+Replacing one Agent's persisted Working Context does not rewrite another Agent's messages, Journal events, Memory Cards, or retained references.
 
 - SQLite connections explicitly enable foreign keys, WAL journal mode, and a five-second busy timeout.
 - ATT reads schema metadata in read-only mode before running `create_all()`, so an unsupported database is rejected without DDL or other modification.
@@ -58,12 +58,13 @@ The outermost scope submits one merged delta.
 The database stores:
 
 - schema version, `ATTConfig`, model metadata, presets, and token usage;
-- all active and inactive agents by immutable UUID, lifecycle state, private-library ownership, and complete message histories, including each message's source `team_id` and `discussion_id`;
+- all active and inactive agents by immutable UUID, lifecycle state, private-library ownership, and bounded Working Context;
+- append-only System Memory Journal events with identity snapshots and source provenance, plus optional Agent-owned segments, Memory Cards, normalized tags, retained references, and FTS5 search data;
 - teams, role-neutral `team_id ↔ agent_id` membership rows, lineage, migration counters, inboxes, and proposals;
 - communication requests, ordered approvals, member ballots, directional Agreements, and peer-delivery records;
 - document-library metadata, ACLs, managed cross-library links, paths, and file contents.
 
-An incremental membership change rewrites the affected team's `team_members` rows without rewriting an already persisted Agent record, message history, model binding, lifecycle state, or Private DocLib.
+An incremental membership change rewrites the affected team's `team_members` rows without rewriting an already persisted Agent record, Working Context, Journal, Memory Catalog, model binding, lifecycle state, or Private DocLib.
 
 Insert-only dependency records are used solely to satisfy foreign keys when a referenced registered identity has not yet been written to a new database.
 
@@ -93,7 +94,7 @@ await manager.load_state("att.db")
 
 Restoration is transactional.
 
-- ATT validates every agent UUID, member, creator, parent, model alias, DocLib owner, permission, communication principal and state combination, Agreement, peer delivery, file path, and managed link before publishing anything.
+- ATT validates every Agent UUID, member, creator, parent, model alias, DocLib owner, permission, communication principal and state combination, Agreement, peer delivery, Journal sequence, memory ownership and provenance edge, deterministic segment digest, file path, and managed link before publishing anything.
 - Multiple membership rows resolve to the same restored Agent object and do not carry team-role metadata.
 - Every agent must own exactly one canonical `PDL-<agent_id>` private library; private libraries must be non-public, have no team ACL or managed links, and match the owner's lifecycle state.
 - Persisted communication `PROCESSING` states reset to `PENDING` after validation.
@@ -108,12 +109,14 @@ Runtime tools and callbacks already registered on the host remain runtime-owned.
 
 When an agent exceeds `max_memory_turns`, ATT summarizes older messages for the active model window while preserving the initial instruction, recent high-fidelity messages, and native tool-call/result boundaries.
 
-Its complete cross-team history remains available for persistence.
+The complete sanitized cross-team history remains in the append-only System Memory Journal, while only the compressed Working Context is restored into `agent.messages`.
 
 One shared agent keeps a single identity and memory; calls are serialized by the agent lock, while `ContextVar` records identify the active team and discussion for prompts and team-sensitive tools.
 
+The optional [Selective Episodic Memory](Selective_Episodic_Memory.md) catalog creates one background-indexed card per completed or incomplete business Agent turn and never changes ownership when team memberships change.
+
 ## Schema policy
 
-- The current persistence schema version is `6`.
-- Compatibility with schema `5` and earlier SQLite layouts is intentionally unsupported.
+- The current persistence schema version is `7`.
+- Compatibility with schema `6` and earlier SQLite layouts is intentionally unsupported.
 - Create a new database when upgrading.

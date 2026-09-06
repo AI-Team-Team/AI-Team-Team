@@ -11,7 +11,7 @@ This document provides a technical overview of the internal classes, properties,
 
 Represents an individual AI specialist equipped with role definitions and generator client integration.
 
-One instance may be shared across teams. Its `lock` serializes complete model turns, `message_history` retains complete cross-team provenance, and manager `ContextVar` values provide the active team and discussion.
+One instance may be shared across teams. Its `lock` serializes complete model turns, `message_history` projects the sanitized cross-team Journal for host compatibility, and manager `ContextVar` values provide the active team and discussion.
 
 * **Constructor**:
 
@@ -80,8 +80,8 @@ Synchronous and asynchronous callbacks share one ordered background dispatcher; 
     Registers custom dynamic committee presets.
   * `get_preset(name: str) -> dict`
     Retrieves a registered preset or defaults to `generic`.
-  * `register_tool(name: str, description: str, func: Callable[..., Any])`
-    Registers a custom tool globally to be automatically bound to all dynamic teams.
+  * `register_tool(name: str, description: str, func: Callable[..., Any], schema: Optional[Any] = None, *, memory_capture: str = "metadata_only")`
+    Registers a custom tool globally with metadata-only Journal capture unless content capture is explicitly selected.
   * `register_tool_auditor(tool_name: str, auditor_func: Callable[..., Tuple[bool, str]])`
     Registers an auditing hook callback that intercepts specific tool calls before execution.
   * `register_tools_context(context: Dict[str, Any])`
@@ -112,9 +112,12 @@ Synchronous and asynchronous callbacks share one ordered background dispatcher; 
     Stages and validates every persisted reference, model binding, topology edge, DocLib file, ACL, and managed link before atomically publishing the restored runtime.
   * `await flush_state()`
     Waits for all queued incremental commits.
+  * `await flush_memory_indexing()` / `await retry_memory_index(segment_id)`
+    Coordinates optional background card indexing without making a business turn depend on indexing success.
+  * `list_memory_index_failures(...)` / `restore_forgotten_memory(...)` / `list_agent_history(...)`
+    Exposes trusted-host diagnostics and recovery while keeping the Journal unavailable to Agent tools.
   * `await close()`
-    Rejects new work, cancels external LLM waits, flushes accepted writes, and
-    closes the single writer lease, engines, and sessions.
+    Rejects new work, cancels external LLM waits, flushes accepted writes, and closes the single writer lease, engines, and sessions.
   * `await flush_callbacks()`
     Waits for the ordered observational callback queue.
   * `acknowledge_unknown_alert(...)` / `clear_unknown_alerts(...)`
@@ -143,6 +146,7 @@ Configuration options for tuning the ATT multi-agent framework.
       llm_retry_backoff_factor: float = 1.5,
       enable_memory_compression: bool = True,
       max_memory_turns: int = 20,
+      episodic_memory: EpisodicMemoryConfig = EpisodicMemoryConfig(),
       communication: CommunicationConfig = PermissiveCommunicationConfig(),
       migration_policy: str = "ancestor_approval",
       enable_emergency_wakeup: bool = True,
@@ -254,10 +258,12 @@ Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/
 
 ## Database Schema & ORM Models
 
-SQLAlchemy Declarative Models mapping schema 6 are defined in [`models.py`](../../src/ai_team_team/database/models.py):
+SQLAlchemy Declarative Models mapping schema 7 are defined in [`models.py`](../../src/ai_team_team/database/models.py):
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
-* **`AgentModel` & `AgentMessageModel`**: Uses immutable `agent_id` primary/foreign keys and persists lifecycle profiles plus complete conversation histories with `team_id` and `discussion_id` provenance.
+* **`AgentModel` & `AgentMessageModel`**: Uses immutable `agent_id` primary/foreign keys and persists lifecycle profiles plus the bounded Working Context.
+* **`SystemMemoryEventModel`**: Stores the append-only host Journal without an Agent foreign key so confirmed identity deletion can retain historical snapshots.
+* **`AgentMemorySegmentModel`, `AgentMemoryCardModel`, `MemoryCardTagModel`, `MemoryCardSourceEventModel`, and `RetainedMemoryReferenceModel`**: Store Agent-owned deterministic segments, searchable card metadata, source provenance, and explicit compact Working Context retention.
 * **`TeamModel`**: Tracks active topologies, migration counts, and UUID-backed creator/member references.
 * **`TeamInboxModel` & `TeamProposalModel`**: Persists child escalations, peer messages, and democratic proposal votes.
 * **`CommunicationRequestModel`, `CommunicationApprovalModel`, `CommunicationBallotModel`**: Persist the request lifecycle, ordered explicit principals, and member ballots.

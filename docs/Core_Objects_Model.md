@@ -26,6 +26,7 @@ The `ATTManager` is the public orchestration facade exported by the `ai_team_tea
 - **Snapshot and Restore Services**: Build immutable persistence snapshots, validate state and communication references, stage DocLib files, and publish a restore only after every validation succeeds.
 - **Team Creation, Migration, Membership, and Failover Services**: Own their respective governance workflows while the facade preserves the public manager API.
 - **Runtime Registry**: Owns model bindings, tool registration, tokenizer selection, presets, capability probes, and invocation-time tool visibility.
+- **Memory Service**: Owns the append-only Journal and the optional Agent-owned segment, card, FTS5 search, ephemeral recall, retained-reference, and indexing-job state.
 
 ## 2. `AgentTeam`: The Dynamic Group Unit
 
@@ -57,7 +58,7 @@ The `Agent` encapsulates a single identity and ReAct execution profile.
 - **`private_doc_library_id (str)`**: Read-only identifier for the one persistent `PDL-<agent_id>` workspace. The raw library object is intentionally not exposed on `Agent`.
 - **`lifecycle_state (str)`**: `active`, `retained`, or `archived`; inactive identities leave the active name index and do not require a model binding during restore.
 - **`messages (List[Dict])`**: The bounded high-fidelity model window.
-- **`message_history (List[Dict])`**: The complete persistent cross-team history; generated records contain `team_id` and `discussion_id`.
+- **`message_history (List[Dict])`**: A host-facing compatibility view of the Agent's sanitized Journal message events; it is not loaded into the model-visible `messages` window after restore.
 - **`lock (asyncio.Lock)`**: Serializes all model work for this identity when the same agent participates in several teams.
 - **`max_memory_turns (int)`**: The configuration value defining when the agent compresses old conversational turns into a background summary to save context window tokens.
 
@@ -66,5 +67,7 @@ The `Agent` encapsulates a single identity and ReAct execution profile.
 The agent does not run its own `while` loop. Instead, the `AgentTeam` invokes `manager.execute_reasoning_step(agent, ...)`, feeding the ReAct output back into the manager's state persistence layer.
 
 Private documents are deliberate artifacts, not hidden reasoning. They enter a model observation only after the owner explicitly invokes `read_private_file`, and enter a team library only after explicit publication.
+
+Selective Episodic Memory is optional and Agent-owned by immutable UUID, so team membership changes cannot copy, clear, relabel, or reassign its Journal events, Memory Cards, indexing jobs, or retained references.
 
 An Agent's `role`, description, instructions, model binding, memory, lifecycle state, invocation lock, and Private DocLib belong to the Agent identity rather than to any membership. Invocation-scoped team facts are carried through `ContextVar` values and are never persisted as a team-specific Agent identity.

@@ -21,7 +21,20 @@ from .config import (
     LineageApprovalCommunicationConfig,
     ParentApprovalCommunicationConfig,
     PermissiveCommunicationConfig,
+    EpisodicMemoryConfig,
     TurnFailurePolicyConfig,
+)
+from .memory import (
+    AgentMemoryCard,
+    AgentMemorySegment,
+    MemoryCardStatus,
+    MemoryIndexStatus,
+    MemoryOperationResult,
+    MemoryRecallResult,
+    MemorySearchItem,
+    MemorySearchResult,
+    RetainedMemoryReference,
+    SystemMemoryEvent,
 )
 from .communication import (
     AgreementDirection,

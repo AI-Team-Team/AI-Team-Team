@@ -25,6 +25,7 @@ from ..libraries import LibraryService
 from ..lifecycle import LifecycleService
 from ..membership import MembershipService
 from ..migration import MigrationService
+from ..memory import MemoryService
 from ..restore import RestoreService
 from ..runtime import RuntimeRegistry
 from ..snapshots import SnapshotBuilder
@@ -35,12 +36,21 @@ from ..topology import TopologyService
 from .agents_api import AgentAPI
 from .discussions_api import DiscussionAPI
 from .libraries_api import LibraryAPI
+from .memory_api import MemoryAPI
 from .runtime_api import RuntimeAPI
 from .state_api import StateAPI
 from .teams_api import TeamAPI
 
 
-class ATTManager(StateAPI, AgentAPI, RuntimeAPI, TeamAPI, LibraryAPI, DiscussionAPI):
+class ATTManager(
+    StateAPI,
+    AgentAPI,
+    RuntimeAPI,
+    TeamAPI,
+    LibraryAPI,
+    DiscussionAPI,
+    MemoryAPI,
+):
     """Master controller managing the overall ATT topology."""
 
     def __init__(
@@ -116,6 +126,16 @@ class ATTManager(StateAPI, AgentAPI, RuntimeAPI, TeamAPI, LibraryAPI, Discussion
         self._active_tool_invocation_id: contextvars.ContextVar[Optional[str]] = (
             contextvars.ContextVar(f"att_active_tool_invocation_{id(self)}", default=None)
         )
+        self._active_agent_turn_id: contextvars.ContextVar[Optional[str]] = (
+            contextvars.ContextVar(f"att_active_agent_turn_{id(self)}", default=None)
+        )
+        self._active_round_number: contextvars.ContextVar[Optional[int]] = (
+            contextvars.ContextVar(f"att_active_round_{id(self)}", default=None)
+        )
+        self._memory_internal_operation: contextvars.ContextVar[bool] = (
+            contextvars.ContextVar(f"att_memory_internal_{id(self)}", default=False)
+        )
+        self._memory = MemoryService(self)
         self._alerts = AlertService(self)
         self._unknown_audit_wakeups = self._alerts.active_wakeups
         self._emergency_tasks = self._alerts.emergency_tasks
@@ -152,3 +172,10 @@ class ATTManager(StateAPI, AgentAPI, RuntimeAPI, TeamAPI, LibraryAPI, Discussion
             self._agents_by_id[root_ai.agent_id] = root_ai
         else:
             self.register_agent(root_ai, auto_save=False)
+            self._memory.record_event(
+                "agent_registered",
+                agent=root_ai,
+                payload={"lifecycle_state": "active"},
+                persist=False,
+                inherit_context=False,
+            )

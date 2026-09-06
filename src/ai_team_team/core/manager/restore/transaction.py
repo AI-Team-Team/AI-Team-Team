@@ -7,7 +7,6 @@ import shutil
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
-
 from ...agent import Agent
 from ...config import ATTConfig
 from ...exceptions import StateRestoreError
@@ -33,6 +32,8 @@ class RestoreTransactionMixin:
             )
         try:
             target_config = manager._validate_state_snapshot(state)
+            if target_config.episodic_memory.enabled:
+                manager._memory._require_fts5()
         except StateRestoreError:
             raise
         except Exception as exc:
@@ -104,12 +105,17 @@ class RestoreTransactionMixin:
                 "communication_ballots": manager.broker.ballots,
                 "communication_agreements": manager.broker.agreements,
                 "peer_messages": manager.broker.peer_messages,
+                "memory": manager._memory.snapshot(),
             }
             try:
                 manager.config = target_config
                 manager.root_ai = staged.root_ai
-                manager.agents = staged.agents
-                manager._agents_by_id = staged._agents_by_id
+                manager._agent_registry.replace_indexes(
+                    staged.agents,
+                    staged._agents_by_id,
+                )
+                for agent in manager._agents_by_id.values():
+                    agent._manager = manager
                 manager.teams = staged.teams
                 manager.libraries = staged.libraries
                 manager.library_permissions = staged.library_permissions
@@ -136,14 +142,28 @@ class RestoreTransactionMixin:
                     (item.model_dump(mode="json") for item in staged.broker.agreements.values()),
                     (item.model_dump(mode="json") for item in staged.broker.peer_messages.values()),
                 )
+                staged_memory = staged._memory.snapshot()
+                manager._memory.restore(
+                    staged_memory["memory_events"],
+                    staged_memory["memory_segments"],
+                    staged_memory["memory_cards"],
+                    staged_memory["memory_references"],
+                )
                 manager.supervisor.root_ai = manager.root_ai
                 manager.tools_context["att_manager"] = manager
                 manager.token_budget.reset_reservations()
             except Exception:
+                for staged_agent in manager._agents_by_id.values():
+                    if old_state["agents_by_id"].get(staged_agent.agent_id) is not staged_agent:
+                        staged_agent._manager = None
                 manager.config = old_state["config"]
                 manager.root_ai = old_state["root_ai"]
-                manager.agents = old_state["agents"]
-                manager._agents_by_id = old_state["agents_by_id"]
+                manager._agent_registry.replace_indexes(
+                    old_state["agents"],
+                    old_state["agents_by_id"],
+                )
+                for old_agent in manager._agents_by_id.values():
+                    old_agent._manager = manager
                 manager.teams = old_state["teams"]
                 manager.libraries = old_state["libraries"]
                 manager.library_permissions = old_state["library_permissions"]
@@ -158,10 +178,20 @@ class RestoreTransactionMixin:
                 manager.broker.ballots = old_state["communication_ballots"]
                 manager.broker.agreements = old_state["communication_agreements"]
                 manager.broker.peer_messages = old_state["peer_messages"]
+                old_memory = old_state["memory"]
+                manager._memory.restore(
+                    old_memory["memory_events"],
+                    old_memory["memory_segments"],
+                    old_memory["memory_cards"],
+                    old_memory["memory_references"],
+                )
                 manager.supervisor.root_ai = manager.root_ai
                 manager._rollback_published_libraries(published)
                 published = []
                 raise
+            for old_agent in old_state["agents_by_id"].values():
+                if manager._agents_by_id.get(old_agent.agent_id) is not old_agent:
+                    old_agent._manager = None
             manager._discard_library_backups(published)
             published = []
         except StateRestoreError:

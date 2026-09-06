@@ -105,7 +105,7 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
                 set(),
             )
 
-    async def test_schema_six_restores_pending_request_and_delivery(self):
+    async def test_schema_seven_restores_pending_request_and_delivery(self):
         db_path = os.path.join(self.workspace, "communication.db")
         source = self.manager(
             ParentApprovalCommunicationConfig(), db_path=db_path

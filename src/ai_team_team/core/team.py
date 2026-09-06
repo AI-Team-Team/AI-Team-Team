@@ -211,7 +211,84 @@ class AgentTeam:
         max_steps: int = 5,
         manager: Optional['ATTManager'] = None,
     ) -> "AgentTurnResult":
-        """Executes one Agent turn and returns a structured outcome."""
+        """Executes one terminal Agent turn and journals its lifecycle."""
+        manager = manager if manager is not None else getattr(self, "manager", None)
+        if (
+            manager is None
+            or manager._memory_internal_operation.get()
+            or bool(getattr(self, "_runtime_only", False))
+        ):
+            return await self._execute_reasoning_step_detailed_inner(
+                agent,
+                prompt,
+                system_instruction,
+                max_steps=max_steps,
+                manager=manager,
+            )
+
+        from .exceptions import AgentTurnIncompleteError
+
+        turn_id = f"TURN-{uuid.uuid4().hex}"
+        turn_token = manager._active_agent_turn_id.set(turn_id)
+        outer_discussion_id = manager._active_discussion_id.get()
+        discussion_token = None
+        if outer_discussion_id is None:
+            discussion_token = manager._active_discussion_id.set(
+                f"DISC-{uuid.uuid4().hex}"
+            )
+        def identify(result: "AgentTurnResult") -> "AgentTurnResult":
+            return result.model_copy(
+                update={
+                    "turn_id": turn_id,
+                    "discussion_id": (
+                        result.discussion_id
+                        or manager._active_discussion_id.get()
+                    ),
+                    "round_number": (
+                        result.round_number
+                        if result.round_number is not None
+                        else manager._active_round_number.get()
+                    ),
+                }
+            )
+
+        try:
+            manager._memory.start_turn(agent, self, turn_id)
+            try:
+                result = await self._execute_reasoning_step_detailed_inner(
+                    agent,
+                    prompt,
+                    system_instruction,
+                    max_steps=max_steps,
+                    manager=manager,
+                )
+            except AgentTurnIncompleteError as exc:
+                result = identify(exc.result)
+                await manager._memory.finalize_turn(agent, self, result)
+                raise AgentTurnIncompleteError(result) from exc
+            except asyncio.CancelledError:
+                manager._memory.cancel_turn(agent, self, turn_id, "cancelled")
+                raise
+            except BaseException as exc:
+                manager._memory.cancel_turn(agent, self, turn_id, type(exc).__name__)
+                raise
+            result = identify(result)
+            await manager._memory.finalize_turn(agent, self, result)
+            return result
+        finally:
+            if discussion_token is not None:
+                manager._active_discussion_id.reset(discussion_token)
+            manager._active_agent_turn_id.reset(turn_token)
+
+    async def _execute_reasoning_step_detailed_inner(
+        self,
+        agent: Agent,
+        prompt: str,
+        system_instruction: str,
+        max_steps: int = 5,
+        manager: Optional['ATTManager'] = None,
+    ) -> "AgentTurnResult":
+        """Executes one Agent turn without creating a journal boundary."""
         manager = manager if manager is not None else getattr(self, "manager", None)
         if (
             not isinstance(max_steps, int)
