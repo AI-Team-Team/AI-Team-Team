@@ -1,117 +1,75 @@
-# Gated Paginator Reading Flowchart
+# Token-Based File Reading Flowcharts
 
-This document visualizes the control flow and slice boundaries enforced by the size-aware `GatedFileReader`.
+This document visualizes token-counter resolution, range continuation, DocLib authorization, and private publication boundaries.
 
-## 1. Gated Read File Decision Flowchart
-
-This flowchart outlines the logic executed when an agent node calls the `read_file(path, start_line, end_line)` tool:
+## 1. Model-Facing Read
 
 ```mermaid
 flowchart TD
-    Start["Call read_file(path, start_line, end_line)"] --> FileExist{"File exists on disk?"}
-    
-    FileExist -- "No" --> ReturnError["Return error: File does not exist"]
-    FileExist -- "Yes" --> GetSize["Fetch file size in KB"]
-    
-    GetSize --> SizeGate{"Size exceeds large_file_threshold_kb?\n(default: 50 KB)"}
-    
-    SizeGate -- "Yes" --> EndLineGate{"Coordinates supplied?\n(end_line is not None)"}
-    
-    EndLineGate -- "No" --> CountLines["1. Scan file and count total lines\n2. Extract first 5 lines sample\n3. Prepend LARGE FILE WARNING"]
-    CountLines --> ReturnOutline["Return Outline Warning payload"]
-    
-    EndLineGate -- "Yes" --> CalculateCap["Calculate requested window:\nWindow = end_line - start_line + 1"]
-    SizeGate -- "No" --> DefaultEndLine{"end_line supplied?"}
-    
-    DefaultEndLine -- "No" --> CalculateCapDefault["Set end_line = start_line + max_chunk_lines - 1\nWindow = max_chunk_lines (100)"]
-    DefaultEndLine -- "Yes" --> CalculateCap
-    
-    CalculateCap --> CapCheck{"Window exceeds max_chunk_lines?"}
-    CalculateCapDefault --> CapCheck
-    
-    CapCheck -- "Yes" --> ShrinkWindow["Auto-shrink: Set end_line = start_line + max_chunk_lines - 1"]
-    ShrinkWindow --> ReadSlice["Read lines from start_line to end_line\n(Prepend line numbers 'idx: content')"]
-    
-    CapCheck -- "No" --> ReadSlice
-    
-    ReadSlice --> ReturnChunk["Return line-numbered text slice"]
+    Tool["read_library_file or read_private_file"] --> Context{"Active Agent and AgentTeam context valid?"}
+    Context -- "No" --> Deny["Fail closed without reading content"]
+    Context -- "Yes" --> Authorization["Validate private ownership or team ACL"]
+    Authorization --> Link["Resolve managed link chain and live target ACLs"]
+    Link --> Range["Validate one-based line and character range"]
+    Range --> Counter["Resolve counter for the Agent's effective model"]
+    Counter --> SecureOpen["Open through symlink-safe DocLib descriptor"]
+    SecureOpen --> Read["Stream normalized Unicode source prefix"]
+    Read --> Count{"Content tokens within max_read_tokens?"}
+    Count -- "No" --> Trim["Find largest safe content prefix"]
+    Count -- "Yes" --> Complete{"Entire requested range returned?"}
+    Trim --> Partial["Return partial result, next position, and file version"]
+    Complete -- "No" --> Expand["Read a larger bounded source candidate"]
+    Expand --> Read
+    Complete -- "Yes" --> Done["Return complete FileReadResult"]
 ```
 
-## 2. Streaming Tail Read Decision Flowchart
+The token budget applies only to decoded `content`. Status, continuation coordinates, counter metadata, and tool-protocol framing are outside the budget.
 
-This flowchart visualizes the log tailing helper `read_file_tail(path, line_count)`:
+## 2. Counter Resolution
 
 ```mermaid
 flowchart TD
-    StartTail["Call read_file_tail(path, line_count)"] --> FileCheck{"File exists?"}
-    
-    FileCheck -- "No" --> ReturnErr["Return error: File not found"]
-    FileCheck -- "Yes" --> CountTotal["Scan and count total_lines in file"]
-    
-    CountTotal --> OffsetCalc["Calculate offset start:\nstart_line = max(1, total_lines - line_count + 1)"]
-    OffsetCalc --> ReadTailSlice["Read lines from start_line to total_lines\n(Prepend line numbers 'idx: content')"]
-    
-    ReadTailSlice --> ReturnTail["Return line-numbered tail slice"]
+    Start["Resolve active Agent's current llm_client and model alias"] --> Tokenizer{"Exact registered tokenizer for alias?"}
+    Tokenizer -- "Yes" --> Exact["Use registered_tokenizer"]
+    Tokenizer -- "No or unavailable" --> Provider{"Client exposes explicit count_tokens?"}
+    Provider -- "Yes" --> ProviderCount["Use provider_counter"]
+    Provider -- "No or unavailable" --> Host{"Host counter registered for alias?"}
+    Host -- "Yes" --> HostCount["Use host_counter"]
+    Host -- "No" --> Fallback{"tokenizer_fallback"}
+    Fallback -- "conservative" --> Bytes["Use UTF-8 byte upper bound; estimated=true"]
+    Fallback -- "strict" --> Error["Return token_counter_unavailable"]
 ```
 
-## 3. DocLib ACL Segment-Based Path Permission Resolution Flowchart
+Counter selection occurs for every file invocation, so a successful model failover changes the counter used by the next read.
 
-This flowchart details the segment-based folder/file path traversal logic executed during `check_library_access` to evaluate read/write permissions:
+## 3. Continuation
+
+```mermaid
+flowchart LR
+    First["Read from start_line and start_character"] --> Partial["Partial content"]
+    Partial --> Cursor["next_line, next_character, file_version"]
+    Cursor --> Retry["Read again with next coordinates and expected_file_version"]
+    Retry --> Version{"Same open-file version?"}
+    Version -- "No" --> Stale["file_version_changed"]
+    Version -- "Yes" --> Next["Return the next content prefix without a gap or duplicate"]
+```
+
+Line endings are normalized to `\n`, and coordinates refer to decoded Unicode code points in that normalized view.
+
+## 4. DocLib Authorization and Private Publication
 
 ```mermaid
 flowchart TD
-    Start["Call check_library_access(team_id, lib_id, path, required_permission)"] --> IsOwner{"Is team_id == lib.owner_team_id?"}
-    
-    IsOwner -- "Yes" --> ApproveOwner["Approve Access (Return True)"]
-    IsOwner -- "No" --> HasPerms{"Any permissions defined for lib_id?"}
-    
-    HasPerms -- "No" --> DenyAccess["Deny Access (Return False)"]
-    
-    HasPerms -- "Yes" --> DecomposePath["Clean path & decompose into segments:<br/>e.g., '/specs/sub/file.txt' becomes:<br/>['/specs/sub/file.txt', '/specs/sub', '/specs', '/']"]
-    
-    DecomposePath --> LoopSegments["For each segment p in segments<br/>(ordered from deepest to root '/')"]
-    
-    LoopSegments --> HasSegmentPerm{"Has permission registered for segment p?"}
-    
-    HasSegmentPerm -- "No" --> NextSegment["Next segment in loop"]
-    
-    HasSegmentPerm -- "Yes" --> TeamInPerm{"Is team_id granted permission for p?"}
-    
-    TeamInPerm -- "No" --> NextSegment
-    TeamInPerm -- "Yes" --> ResolvePerm{"Verify permission type:"}
-    
-    ResolvePerm -- "required_permission == 'READ'" --> CheckRead{"Granted permission is 'READ' or 'WRITE'?"}
-    CheckRead -- "Yes" --> ApproveAccess["Approve Access (Return True)"]
-    CheckRead -- "No" --> NextSegment
-    
-    ResolvePerm -- "required_permission == 'WRITE'" --> CheckWrite{"Granted permission is 'WRITE'?"}
-    CheckWrite -- "Yes" --> ApproveAccess
-    CheckWrite -- "No" --> NextSegment
-    
-    NextSegment --> LoopEnd{"More segments to evaluate?"}
-    LoopEnd -- "Yes" --> LoopSegments
-    LoopEnd -- "No" --> DenyAccess
+    Invocation["Invocation-scoped Agent and AgentTeam"] --> Kind{"Library kind"}
+    Kind -- "team" --> ACL["Check current AgentTeam READ or WRITE ACL"]
+    ACL --> Managed["Resolve managed file links and recheck every target ACL"]
+    Kind -- "agent_private" --> Owner["Require active Agent owner"]
+    Owner --> PrivateRead["Private read result is transient and later redacted"]
+    Owner --> Publish{"Explicit publish?"}
+    Publish -- "Yes" --> Membership["Require membership in current AgentTeam"]
+    Membership --> TargetACL["Require WRITE on built-in team DocLib target"]
+    TargetACL --> Locks["Lock both libraries in lib_id order"]
+    Locks --> Copy["Atomic copy while preserving private source"]
 ```
 
-Managed cross-library file links add a second resolution phase after source authorization. ATT follows `lib_id + relative path` metadata, repeats the same ACL check at every hop for the requested permission, rejects cycles, and opens only the final physical file. No operating-system symlink is followed.
-
-## 4. Private Agent DocLib and Explicit Publish
-
-```mermaid
-flowchart TD
-    Tool["Private tool call"] --> Context{"Active invocation Agent?"}
-    Context -- "No" --> Deny["Fail closed"]
-    Context -- "Yes" --> Owner{"Agent active and owner of PDL-agent_id?"}
-    Owner -- "No" --> Deny
-    Owner -- "Yes" --> Private["Read/write/list/move private file"]
-    Private --> Publish{"Explicit publish requested?"}
-    Publish -- "No" --> Done["Return private tool result only"]
-    Publish -- "Yes" --> Team{"Active team contains Agent?"}
-    Team -- "No" --> Deny
-    Team -- "Yes" --> ACL{"WRITE on built-in team DocLib target?"}
-    ACL -- "No" --> Deny
-    ACL -- "Yes" --> Locks["Lock both libraries in lib_id order"]
-    Locks --> Copy["Atomic file copy; preserve private source"]
-```
-
-Private libraries never participate in team ACLs, public discovery, or managed links. Runtime callbacks record only identity, team, library, path, operation, and result—not private file bodies.
+Native filesystem symlinks remain forbidden. Private libraries never participate in team ACLs, public discovery, or managed links.

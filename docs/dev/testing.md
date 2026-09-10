@@ -159,4 +159,8 @@ Selective episodic-memory tests must cover disabled-mode zero indexing/tool expo
 
 The suite's `test/test_att/test_episodic_memory/` package contains the baseline end-to-end cases for this optional mode.
 
+Token-based file-reading tests must cover many short lines, extremely long single lines, Unicode, normalized mixed line endings, exact continuation without gaps, range validation, file-version changes, registered/provider/host/conservative/strict counters, failover counter changes, private and team reads, ACL and managed-link checks, decoding failures, and the rule that only returned content counts against `max_read_tokens`. Invoke model-facing reads through `ToolExecutor` or establish both active Agent and AgentTeam ContextVars; direct `Tool.__call__()` has no model identity from which to resolve a counter.
+
+The suite's `test/test_att/test_file_reading/` package contains the model-context integration cases, while `test/test_gated_reader.py` covers the standalone reader.
+
 Communication changes must cover strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes, full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation, idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations. Schema 6 and earlier databases must be rejected before DDL.

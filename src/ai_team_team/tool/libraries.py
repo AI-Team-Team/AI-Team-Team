@@ -1,6 +1,10 @@
 """Team and private DocLib tools."""
 
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
+
+from pydantic import Field
+
+from ..gated_reader import FileReadError, FileReadRangeError, FileReadResult
 
 from ..core.exceptions import (
     ToolArgumentError,
@@ -10,6 +14,9 @@ from ..core.exceptions import (
 )
 from .context import _resolve_actual_team
 from .contract import Tool
+
+
+PositiveInt = Annotated[int, Field(ge=1)]
 
 
 def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
@@ -183,8 +190,16 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
                 f"Writing path {path!r} in library {lib_id!r} failed: {exc}"
             ) from exc
 
-    async def read_library_file(lib_id: str, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str:
-        """Reads a file chunk from a library. Requires 'READ' permission. Arguments: lib_id (str), path (str), start_line (int, default 1), end_line (int, optional)"""
+    async def read_library_file(
+        lib_id: str,
+        path: str,
+        start_line: PositiveInt = 1,
+        end_line: Optional[PositiveInt] = None,
+        start_character: PositiveInt = 1,
+        character_count: Optional[PositiveInt] = None,
+        expected_file_version: Optional[str] = None,
+    ) -> FileReadResult:
+        """Reads a token-bounded file range from a library with live READ permission."""
         if not att_manager:
             raise ToolBusinessError("ATTManager is not available in tools context.")
         if lib_id not in att_manager.libraries:
@@ -200,16 +215,24 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             )
             
         try:
-            content = await att_manager.read_library_file(
+            return await att_manager.read_library_file(
                 caller_team.team_id,
                 lib_id,
                 path,
                 start_line,
                 end_line,
+                start_character,
+                character_count,
+                expected_file_version,
             )
-            if content.startswith("Error: "):
-                raise ToolBusinessError(content.removeprefix("Error: "))
-            return content
+        except FileReadRangeError as exc:
+            raise ToolArgumentError(
+                str(exc), error_kind=exc.error_kind
+            ) from exc
+        except FileReadError as exc:
+            raise ToolBusinessError(
+                str(exc), error_kind=exc.error_kind
+            ) from exc
         except ToolError:
             raise
         except PermissionError as exc:
@@ -295,14 +318,32 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
 
     async def read_private_file(
         path: str,
-        start_line: int = 1,
-        end_line: Optional[int] = None,
-    ) -> str:
-        """Reads one private file for the current AI."""
+        start_line: PositiveInt = 1,
+        end_line: Optional[PositiveInt] = None,
+        start_character: PositiveInt = 1,
+        character_count: Optional[PositiveInt] = None,
+        expected_file_version: Optional[str] = None,
+    ) -> FileReadResult:
+        """Reads one token-bounded private file range for the current AI."""
         if not att_manager:
             raise ToolBusinessError("ATTManager is not available in tools context.")
         try:
-            return await att_manager.read_private_file(path, start_line, end_line)
+            return await att_manager.read_private_file(
+                path,
+                start_line,
+                end_line,
+                start_character,
+                character_count,
+                expected_file_version,
+            )
+        except FileReadRangeError as exc:
+            raise ToolArgumentError(
+                str(exc), error_kind=exc.error_kind
+            ) from exc
+        except FileReadError as exc:
+            raise ToolBusinessError(
+                str(exc), error_kind=exc.error_kind
+            ) from exc
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
         except Exception as exc:
@@ -437,7 +478,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
         ),
         "read_library_file": Tool(
             "read_library_file",
-            "Reads a file chunk from a library. Requires 'READ' permission. Arguments: lib_id (str), path (str), start_line (int, default 1), end_line (int, optional)",
+            "Reads a token-bounded file range from a library with live READ permission. Line and character coordinates select source content; continue partial reads with next_line, next_character, and expected_file_version.",
             read_library_file,
         ),
         "delete_library_file": Tool(
@@ -457,7 +498,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
         ),
         "read_private_file": Tool(
             "read_private_file",
-            "Reads a file from the current AI's private workspace. Arguments: path (str), start_line (int), end_line (int, optional)",
+            "Reads a token-bounded file range from the current AI's private workspace. Continue partial reads with next_line, next_character, and expected_file_version.",
             read_private_file,
         ),
         "write_private_file": Tool(
@@ -486,4 +527,3 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             move_library_file,
         ),
     }
-

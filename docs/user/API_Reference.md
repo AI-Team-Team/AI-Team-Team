@@ -9,7 +9,7 @@ Configuration class to configure the multi-agent framework settings.
 ### Constructor
 
 ```python
-from ai_team_team import ATTConfig, EpisodicMemoryConfig, PermissiveCommunicationConfig
+from ai_team_team import ATTConfig, EpisodicMemoryConfig, FileReadConfig, PermissiveCommunicationConfig
 
 config = ATTConfig(
     enable_dynamic_delegation: bool = True,
@@ -25,6 +25,7 @@ config = ATTConfig(
     llm_retry_backoff_factor: float = 1.5,
     enable_memory_compression: bool = True,
     max_memory_turns: int = 20,
+    file_read: FileReadConfig = FileReadConfig(),
     episodic_memory: EpisodicMemoryConfig = EpisodicMemoryConfig(),
     communication: CommunicationConfig = PermissiveCommunicationConfig(),
     migration_policy: str = "ancestor_approval",
@@ -66,6 +67,7 @@ config = ATTConfig(
 * **`llm_retry_backoff_factor`**: Initial exponential-backoff delay. `0` retries immediately.
 * **`enable_memory_compression`**: Whether to enable automatic dialogue compression/pruning of early conversation turns (default: `True`).
 * **`max_memory_turns`**: The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns (default: `20`).
+* **`file_read`**: Strict `FileReadConfig`; `max_read_tokens` limits only returned decoded file content and `tokenizer_fallback` selects `"conservative"` or `"strict"` behavior when no exact effective-model counter is available.
 * **`episodic_memory`**: Strict optional `EpisodicMemoryConfig`; `enabled=False` by default performs no indexing calls, creates no Memory Cards, exposes no memory tools, and does not require FTS5.
 * **`communication`**: Strict `PermissiveCommunicationConfig`, `ParentApprovalCommunicationConfig`, or `LineageApprovalCommunicationConfig`. Approval configurations select `request_delivery` (`"queue"`/`"wake"`) and Agreement `direction` (`"one_way"`/`"bidirectional"`). The institution applies to every AgentTeam depth.
 * **`migration_policy`**: The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`.
@@ -171,6 +173,8 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
   Registers one stable, unique alias for a direct client. Required before persisting any agent that uses the client.
 * **`register_generator_handler(handler: Callable[..., str])`**
   Registers a global callback handler for generating text from a model alias.
+* **`register_token_counter(model_alias: str, counter: Callable[[str], int | Awaitable[int]])`**
+  Registers a runtime-only host token counter for one stable model alias. Provider clients may instead expose the optional `count_tokens(text)` contract.
 * **`register_preset(name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]])`**
   Registers a custom dynamic committee preset (e.g. roles and system prompt).
 * **`register_tools_context(context: Dict[str, Any])`**
@@ -260,28 +264,31 @@ Use `typing_extensions.TypedDict` for portable schemas across every supported Py
 
 ## 📁 `GatedFileReader`
 
-Size-aware paginated file reader protecting agent context windows.
+Asynchronous token-bounded text reader for model-facing content. The budget applies only to decoded `content`; structured metadata and framework tool framing are excluded.
 
 ### Constructor
 
 ```python
 from ai_team_team import GatedFileReader
 
-reader = GatedFileReader(large_threshold_kb: int = 50, max_chunk: int = 100)
+reader = GatedFileReader(
+    max_read_tokens=4000,
+    tokenizer_fallback="conservative",
+    token_counter=my_counter,
+    model_alias="primary",
+)
 ```
 
 ### Methods
 
-* **`read_file(path: str, start_line: int = 1, end_line: Optional[int] = None) -> str`**
-  Reads a file. Fallbacks to Outline Warning if the file size exceeds `large_threshold_kb` and no `end_line` is provided. Otherwise, returns a line-numbered paginated chunk capped at `max_chunk` lines.
-* **`read_file_tail(path: str, line_count: int = 50) -> str`**
-  Returns the last `line_count` lines of a file with prepended line numbers.
+* **`await read_file(path: str, start_line: int = 1, end_line: Optional[int] = None, start_character: int = 1, character_count: Optional[int] = None, expected_file_version: Optional[str] = None) -> FileReadResult`**
+  Reads normalized UTF-8 content through line or character coordinates and returns the largest prefix within `max_read_tokens`. `end_line` and `character_count` are mutually exclusive. Partial results include the first unreturned position and a file version for safe continuation.
 
 ## 📁 `DocumentLibrary`
 
 A persistent document store classified as either `team` or `agent_private`.
-Applications normally access private libraries only through manager tools; the
-host process remains the trusted administrator.
+
+Applications normally access private libraries only through manager tools; the host process remains the trusted administrator.
 
 ### Constructor
 
@@ -313,8 +320,8 @@ lib = DocumentLibrary(
 
 * **`write_file(path: str, content: str)`**
   Writes content to a relative file path, creating parent directories as needed.
-* **`read_file(path: str, start_line: int = 1, end_line: Optional[int] = None) -> str`**
-  Reads a file, routing through the GatedFileReader for context window protection.
+* **`read_file(path: str, start_line: int = 1, end_line: Optional[int] = None, start_character: int = 1, character_count: Optional[int] = None) -> str`**
+  Reads an unbounded normalized range for trusted host-side operations. Model-facing code should use manager or tool reads so the active Agent's token budget is enforced.
 * **`delete_file(path: str) -> str`**
   Deletes a file or recursively deletes a directory.
 * **`list_contents(path: str = "/") -> List[str]`**
@@ -432,8 +439,8 @@ These tools are automatically registered and bound to all agent teams by default
   Creates a file-only managed link between registered DocLibs. Creation requires source `WRITE` and target `READ`; each later operation rechecks the target ACL.
 * **`write_library_file(lib_id: str, path: str, content: str) -> str`**
   Writes content to a file in a library (requires WRITE permission).
-* **`read_library_file(lib_id: str, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str`**
-  Reads a file segment from a library (requires READ permission, checks file-gating).
+* **`read_library_file(lib_id: str, path: str, start_line: int = 1, end_line: Optional[int] = None, start_character: int = 1, character_count: Optional[int] = None, expected_file_version: Optional[str] = None) -> FileReadResult`**
+  Reads a token-bounded normalized range after live AgentTeam membership, source ACL, managed-link, and target ACL checks. Partial results provide continuation coordinates and a file version.
 * **`delete_library_file(lib_id: str, path: str) -> str`**
   Deletes a file or directory in a library (requires WRITE permission).
 * **`list_library_files(lib_id: str, path: str = "/") -> str`**
@@ -446,7 +453,7 @@ These tools are automatically registered and bound to all agent teams by default
 Private tools do not accept an Agent or library ID. They always use the current invocation identity, so a model cannot name another AI's private workspace.
 
 * **`list_private_files(path: str = "/") -> str`**
-* **`read_private_file(path: str, start_line: int = 1, end_line: Optional[int] = None) -> str`**
+* **`read_private_file(path: str, start_line: int = 1, end_line: Optional[int] = None, start_character: int = 1, character_count: Optional[int] = None, expected_file_version: Optional[str] = None) -> FileReadResult`**
 * **`write_private_file(path: str, content: str) -> str`**
 * **`delete_private_file(path: str) -> str`**
 * **`move_private_file(source_path: str, target_path: str, overwrite: bool = False) -> str`**

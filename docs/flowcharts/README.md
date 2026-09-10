@@ -7,7 +7,7 @@ This directory contains technical flowcharts and Mermaid sequence diagrams for t
 1. **[ATT System Architecture](System_Architecture.md)**: Shows the complete system map across host integration, identity, topology, discussions, Agent execution, governance, knowledge, supervision, persistence, and recovery.
 2. **[Autonomous Communication Governance](Autonomous_Communication_Governance.md)**: Shows configuration-owned communication policy, explicit governance principals, request lifecycle, agreements, revocation, and durable peer delivery.
 3. **[Lineage Tree Mutations](Lineage_Tree_Mutations.md)**: Shows dynamic AgentTeam spawning, tool binding, membership voting, explicit-principal migration governance, and atomic topology mutation.
-4. **[Gated FileReader Size Limits](Gated_Reading.md)**: Shows the `read_file` size protection, outline fallback, and line-window behavior.
+4. **[Token-Based File Reading](Gated_Reading.md)**: Shows effective-model counter resolution, token-safe range continuation, and DocLib authorization.
 5. **[Tooling & Execution Engines](Tooling_and_Execution.md)**: Shows tool auditing, multi-round ReAct execution, native tool calling, and parallel tool execution.
 6. **[State Persistence & Recovery](State_Persistence.md)**: Shows task-local batching, the coalescing single-writer queue, incremental commits, and validated atomic restore.
 7. **[Selective Episodic Memory](Selective_Episodic_Memory.md)**: Shows the optional turn-segmentation, isolated indexing, owner-only search, ephemeral recall, retention, forget, and Journal boundaries.

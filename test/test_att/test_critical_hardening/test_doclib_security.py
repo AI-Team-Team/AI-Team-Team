@@ -16,9 +16,19 @@ from test.test_att.test_critical_hardening._support import (
     patch,
     sqlite3,
 )
+import json
 
 
 class TestCriticalHardening(CriticalHardeningTestCase):
+    async def _read_as(self, manager, team, tool, *args):
+        agent_token = manager._active_tool_agent.set(team.members[0])
+        team_token = manager._active_team.set(team)
+        try:
+            return await tool(*args)
+        finally:
+            manager._active_team.reset(team_token)
+            manager._active_tool_agent.reset(agent_token)
+
     async def test_managed_doclib_link_enforces_live_target_acl(self):
         team_a = self.manager.create_agent_team(self.root)
         team_b = self.manager.create_agent_team(self.root)
@@ -42,9 +52,15 @@ class TestCriticalHardening(CriticalHardeningTestCase):
         self.assertIn("Successfully linked", created)
         self.assertIn(
             "source content",
-            await tools_a["read_library_file"](
-                source_lib, "links/shared.txt"
-            ),
+            json.loads(
+                await self._read_as(
+                    self.manager,
+                    team_a,
+                    tools_a["read_library_file"],
+                    source_lib,
+                    "links/shared.txt",
+                )
+            )["content"],
         )
         denied_write = await tools_a["write_library_file"](
             source_lib, "links/shared.txt", "changed"
@@ -67,8 +83,12 @@ class TestCriticalHardening(CriticalHardeningTestCase):
         await tools_b["revoke_library_permission"](
             target_lib, "shared.txt", team_a.team_id
         )
-        revoked = await tools_a["read_library_file"](
-            source_lib, "links/shared.txt"
+        revoked = await self._read_as(
+            self.manager,
+            team_a,
+            tools_a["read_library_file"],
+            source_lib,
+            "links/shared.txt",
         )
         self.assertIn("Permission denied", revoked)
         deleted = await tools_a["delete_library_file"](
@@ -122,9 +142,15 @@ class TestCriticalHardening(CriticalHardeningTestCase):
         )
         self.assertIn(
             "persisted target",
-            await restored_tools["read_library_file"](
-                restored_a.doc_library.lib_id, "reference.txt"
-            ),
+            json.loads(
+                await self._read_as(
+                    restored,
+                    restored_a,
+                    restored_tools["read_library_file"],
+                    restored_a.doc_library.lib_id,
+                    "reference.txt",
+                )
+            )["content"],
         )
         await restored.close()
 
@@ -151,8 +177,13 @@ class TestCriticalHardening(CriticalHardeningTestCase):
             },
         }
         with self.assertRaisesRegex(ValueError, "cycle"):
-            await self.manager.read_library_file(
-                team_a.team_id, lib_a, "a.txt"
+            await self._read_as(
+                self.manager,
+                team_a,
+                self.manager.read_library_file,
+                team_a.team_id,
+                lib_a,
+                "a.txt",
             )
 
     async def test_late_restore_publication_failure_rolls_back_files(self):

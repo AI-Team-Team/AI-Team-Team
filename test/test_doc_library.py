@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import sys
 import tempfile
@@ -29,6 +30,15 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         os.chdir(self.old_cwd)
         shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    async def read_as(self, team, tool, **kwargs):
+        agent_token = self.manager._active_tool_agent.set(team.members[0])
+        team_token = self.manager._active_team.set(team)
+        try:
+            return await tool(**kwargs)
+        finally:
+            self.manager._active_team.reset(team_token)
+            self.manager._active_tool_agent.reset(agent_token)
 
     async def test_built_in_library_creation(self):
         """Verify that a team gets a default built-in DocLib on creation."""
@@ -88,7 +98,9 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
         
         # Team B tries to read it -> Denied
         read_tool_b = team_b.tools["read_library_file"]
-        res_read_denied = await read_tool_b(lib_id=lib_a_id, path="shared.txt")
+        res_read_denied = await self.read_as(
+            team_b, read_tool_b, lib_id=lib_a_id, path="shared.txt"
+        )
         self.assertIn("Permission denied", res_read_denied)
         
         # Team A grants READ access to Team B
@@ -97,8 +109,10 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Successfully granted", res_grant)
         
         # Team B reads it now -> Success
-        res_read_success = await read_tool_b(lib_id=lib_a_id, path="shared.txt")
-        self.assertIn("Secret data", res_read_success)
+        res_read_success = await self.read_as(
+            team_b, read_tool_b, lib_id=lib_a_id, path="shared.txt"
+        )
+        self.assertIn("Secret data", json.loads(res_read_success)["content"])
         
         # Team B tries to delete/write it -> Denied (only has READ)
         delete_tool_b = team_b.tools["delete_library_file"]
@@ -150,27 +164,39 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
         rules = captured_child.doc_library.read_file("rules/rules.md")
         self.assertIn("Safety first", rules)
 
-    async def test_gated_library_file_reading(self):
-        """Verify that GatedFileReader is integrated and protects context window on large files in DocLib."""
+    async def test_token_bounded_library_file_reading(self):
+        """Verify that model reads are bounded by content tokens rather than file size."""
+        self.manager.config.file_read.max_read_tokens = 40
         team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
         lib_id = team.doc_library.lib_id
-        
+
         # Write large content (exceeds 50 KB)
-        large_content = "Line content\n" * 5000 # ~ 60 KB
+        large_content = "Line content\n" * 5000  # ~ 60 KB
         write_tool = team.tools["write_library_file"]
         await write_tool(lib_id=lib_id, path="large.log", content=large_content)
-        
+
         read_tool = team.tools["read_library_file"]
-        
-        # 1. Read without line numbers -> outline warning
-        res_outline = await read_tool(lib_id=lib_id, path="large.log")
-        self.assertIn("### LARGE FILE WARNING", res_outline)
-        
-        # 2. Read specific lines -> chunk returned
-        res_chunk = await read_tool(lib_id=lib_id, path="large.log", start_line=10, end_line=15)
-        self.assertNotIn("LARGE FILE WARNING", res_chunk)
-        self.assertIn("10: Line content", res_chunk)
-        self.assertIn("15: Line content", res_chunk)
+
+        first = json.loads(
+            await self.read_as(team, read_tool, lib_id=lib_id, path="large.log")
+        )
+        self.assertEqual(first["status"], "partial")
+        self.assertLessEqual(first["content_token_count"], 40)
+        self.assertNotIn("LARGE FILE WARNING", first["content"])
+
+        selected = json.loads(
+            await self.read_as(
+                team,
+                read_tool,
+                lib_id=lib_id,
+                path="large.log",
+                start_line=10,
+                end_line=15,
+            )
+        )
+        self.assertLessEqual(selected["content_token_count"], 40)
+        self.assertTrue(selected["content"].startswith("Line content"))
+        self.assertNotIn("10: ", selected["content"])
 
     async def test_prefix_bypass_path_traversal_prevention(self):
         """Verify that sibling prefix traversal (e.g. DL-AT-abc123_private) is blocked."""

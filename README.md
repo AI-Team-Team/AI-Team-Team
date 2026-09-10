@@ -10,7 +10,7 @@ ATT aims to enable hundreds, thousands, or even tens of thousands of AIs to work
 
 <details>
 <summary>More</summary>
-ATT empowers AI agents to transition from passive context consumers to active, self-governing groups. It organizes agents into dynamic, tree-like recursive lineages with built-in consensus debates, ReAct reasoning loops, communication permission gating, size-aware file context protection, and supervisory health auditing.
+ATT empowers AI agents to transition from passive context consumers to active, self-governing groups. It organizes agents into dynamic, tree-like recursive lineages with built-in consensus debates, ReAct reasoning loops, communication permission gating, effective-model token-bounded file reading, and supervisory health auditing.
 </details>
 
 Many thanks to Gemini and GPT for their help!
@@ -57,8 +57,8 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 
 ### 🔒 Context Protection & Safety Gates
 
-* **[Gated Context Protection](docs/Gated_Reading.md)**: Restricts direct large file reads; falls back to Outline Warnings with a 5-line sample of files exceeding 50 KB, prompting agents to make paginated, sliced chunk requests.
-* **[Collaborative DocLib Storage](docs/Gated_Reading.md#5-document-libraries-doclib)**: Equips teams with built-in document libraries. Access is governed by prefix path ACL permissions (`READ`/`WRITE`) that inherit recursively downward to subdirectories.
+* **[Token-Bounded File Reading](docs/Gated_Reading.md)**: Limits model-facing reads by the effective model's content-token budget rather than file size or line count, supports exact continuation inside long lines, and rejects stale file cursors.
+* **[Collaborative DocLib Storage](docs/Gated_Reading.md#6-document-libraries-doclib)**: Equips teams with built-in document libraries. Access is governed by prefix path ACL permissions (`READ`/`WRITE`) that inherit recursively downward to subdirectories.
 * **Private Agent DocLibs**: Gives every registered AI one persistent private workspace (`PDL-<agent_id>`). Private files follow a shared AI across teams, remain outside team ACLs and prompts, and enter a team library only through an explicit copy/publish tool.
 * **Role-Neutral Shared Membership**: Adds an active registered Agent to multiple AgentTeams through `existing_members` or stable `existing_member_ids`. Each team stores only a membership reference, so joining another team never changes the Agent's identity, role, instructions, model binding, memory, lifecycle, invocation lock, or Private DocLib.
 * **Tool Auditor Interception**: Registers pre-execution interception hooks to audit, vet, approve, or reject specific tool calls (e.g. database safety query check).
@@ -581,11 +581,12 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `enable_memory_compression` | `bool` | `True` | Whether to enable automatic dialogue compression/pruning of early conversation turns. |
 | `max_memory_turns` | `int` | `20` | The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns. |
 | `episodic_memory` | `EpisodicMemoryConfig` | `enabled=False` | Optional Agent-owned Memory Catalog configuration; disabled mode exposes no memory tools, creates no cards, makes no indexing calls, and does not require FTS5. |
+| `file_read` | `FileReadConfig` | `max_read_tokens=4000, tokenizer_fallback="conservative"` | Model-facing file reads limit only decoded file content tokens. Line and character arguments select source ranges and do not bypass the token budget. |
 | `communication` | `CommunicationConfig` | `PermissiveCommunicationConfig()` | Strict discriminated configuration: permissive, parent approval, or lineage approval. Approval configurations also define `request_delivery` (`"queue"`/`"wake"`) and `direction` (`"one_way"`/`"bidirectional"`). |
 | `migration_policy` | `str` | `"ancestor_approval"` | The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`. |
 | `enable_emergency_wakeup` | `bool` | `True` | Whether to trigger active wake-up discussion on idle parent teams upon receiving high-priority child anomalies. |
 | `emergency_discussion_rounds` | `int` | `1` | The number of emergency discussion rounds executed when a team is woken up. |
-| `tool_calling_mode` | `str` | `"auto"` | Strategy for invoking tools. `"native"`, `"react"`, or `"auto"`. |
+| `tool_calling_mode` | `str` | `"auto"` | Strategy for invoking tools. `"native"`, `"text_react"` (or `"react"`), or `"auto"`. |
 | `max_tool_rounds` | `int` | `5` | Max depth of native parallel tool calls during a reasoning step. |
 | `max_tool_argument_retries` | `int` | `3` | Model correction opportunities after the first unknown-tool, parse, or validation failure. A Native parallel batch consumes at most one opportunity. |
 | `max_tool_execution_retries` | `int` | `2` | Extra execution attempts available to eligible typed transient failures. |
@@ -605,14 +606,16 @@ Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries
 | `audit_unknown_escalation_mode` | `str` | `"wake"` | Handling for indeterminate audits: immediately `"wake"` the parent or only `"queue"` the alert. |
 | `audit_unknown_soft_threshold` | `int` | `100` | Soft operational warning threshold for unique UNKNOWN alerts; alerts are never dropped or expired automatically. |
 
-### `GatedFileReader` Parameters
+### Token-Based File Reading
 
-Configure file reading gates to safeguard the prompt context from massive logs or code databases:
+`FileReadConfig` controls the content returned by `read_library_file` and `read_private_file`. The budget excludes the small structured metadata and tool-protocol framing overhead.
 
 | Configuration Property | Type | Default Value | Description |
 | :--- | :--- | :--- | :--- |
-| `large_threshold_kb` | `int` | `50` | File size limit triggering an outline warning if no line boundaries are provided. |
-| `max_chunk` | `int` | `100` | Capped line slice count returned per paginated chunk request. |
+| `max_read_tokens` | `int` | `4000` | Hard token limit for returned decoded file content. File size and line count are not limits. |
+| `tokenizer_fallback` | `str` | `"conservative"` | Uses a UTF-8-byte upper-bound estimate when no exact counter is available; `"strict"` rejects the read instead. |
+
+Partial results include `next_line`, `next_character`, and `file_version`. Pass the coordinates and version into the next read to continue without gaps and to reject a cursor if the file changed. ATT resolves counting from the active Agent's effective model on every invocation, so model failover immediately changes the selected tokenizer or counter.
 
 ## 📊 Architecture & Control Flow Diagrams
 
@@ -625,7 +628,7 @@ For visual flowcharts and sequencing diagrams detailing the runtime loops, gated
 * **[Autonomous Communication Governance](docs/flowcharts/Autonomous_Communication_Governance.md)**
 * **[Lineage Tree Mutations (Spawning, Voting, Migration)](docs/flowcharts/Lineage_Tree_Mutations.md)**
 * **[Supervision & Emergencies (3-AI Audits, Emergency Wakeup)](docs/flowcharts/Supervision_and_Emergencies.md)**
-* **[Gated Paginator Reading & DocLib ACL Traversal](docs/flowcharts/Gated_Reading.md)**
+* **[Token-Bounded File Reading & DocLib ACL Traversal](docs/flowcharts/Gated_Reading.md)**
 
 ## 📄 License
 

@@ -16,7 +16,7 @@ To understand specific systems in detail, please refer to the following document
 ### 🛠️ System Specifications & Dev Docs
 
 1. **[Hierarchical Dynamic Delegation](Dynamic_Delegation.md)**: Explains the recursive `Agent` and `AgentTeam` lineages (Level 0 Root AI spawning Level 1 ATs, which recursively spawn deeper sub-teams of Level $N$), ReAct execution loops with safe literal evaluation, and the lineage escalation channels.
-2. **[Gated Context Protection & File Reading](Gated_Reading.md)**: Details the size-aware `GatedFileReader`, collaborative team DocLib ACLs, and persistent Private Agent DocLib boundaries and publication.
+2. **[Token-Based File Reading](Gated_Reading.md)**: Details effective-model token budgets, line and character continuation, collaborative team DocLib ACLs, and persistent Private Agent DocLib boundaries.
 3. **[Supervisor Auditor Team](Supervisory_Team.md)**: Details the dynamic **3-AI Supervisory Team** (Integrity, Continuity, and Deadlock Auditors) which monitors dialogue transcripts with explicit `messages.clear()` memory isolation to prevent OOM errors, and performs recursive lineage parent escalations.
 4. **[State Persistence & Multi-Turn Memory](State_Persistence.md)**: Explains the asynchronous single-writer SQLite design, incremental deltas, validated recovery, multi-turn memory, and turn-based pruning.
 5. **[Selective Episodic Memory](Selective_Episodic_Memory.md)**: Defines the optional Agent-owned Memory Catalog, immutable Journal boundary, isolated indexing, ephemeral recall, tool capture policy, and schema 7 recovery rules.
@@ -32,7 +32,7 @@ For visual diagrams sequencing ATT loops, refer to the flowchart index and speci
 
 * **[Autonomy Flowcharts Index](flowcharts/README.md)**: Overview diagram of all coordinating processes.
 * **[Lineage Tree Mutations](flowcharts/Lineage_Tree_Mutations.md)**: Visualizes child creation, membership voting, and explicitly governed migration.
-* **[Gated Reading Slicing Sequence](flowcharts/Gated_Reading.md)**: Visualizes line chunk slicing logic and outline fallbacks.
+* **[Token-Based File Reading Sequence](flowcharts/Gated_Reading.md)**: Visualizes effective-model counter resolution, token-safe continuation, and DocLib authorization.
 * **[Autonomous Communication Governance](flowcharts/Autonomous_Communication_Governance.md)**: Sequences configuration selection, explicit-principal approval, Agreement creation, delivery, and revocation.
 * **[Supervision and Emergencies](flowcharts/Supervision_and_Emergencies.md)**: Sequences dialogue auditing and ancestor anomaly routing.
 * **[State Persistence Flowchart](flowcharts/State_Persistence.md)**: Sequences SQLite auto-saving event triggers and reconstruction cycles.

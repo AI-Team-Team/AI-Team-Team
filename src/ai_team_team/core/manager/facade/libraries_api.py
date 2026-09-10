@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
-
+from ai_team_team.gated_reader import FileReadResult
 from ...agent import Agent
 from ..libraries import LibraryService
 
@@ -67,9 +67,19 @@ class LibraryAPI:
         path: str,
         start_line: int = 1,
         end_line: Optional[int] = None,
-    ) -> str:
+        start_character: int = 1,
+        character_count: Optional[int] = None,
+        expected_file_version: Optional[str] = None,
+    ) -> FileReadResult:
         return await self._library_service.read_library_file(
-            team_id, lib_id, path, start_line, end_line
+            team_id,
+            lib_id,
+            path,
+            start_line,
+            end_line,
+            start_character,
+            character_count,
+            expected_file_version,
         )
 
     async def write_library_file(self, team_id: str, lib_id: str, path: str, content: str) -> None:
@@ -89,8 +99,18 @@ class LibraryAPI:
         path: str,
         start_line: int = 1,
         end_line: Optional[int] = None,
-    ) -> str:
-        return await self._library_service.read_private_file(path, start_line, end_line)
+        start_character: int = 1,
+        character_count: Optional[int] = None,
+        expected_file_version: Optional[str] = None,
+    ) -> FileReadResult:
+        return await self._library_service.read_private_file(
+            path,
+            start_line,
+            end_line,
+            start_character,
+            character_count,
+            expected_file_version,
+        )
 
     async def write_private_file(self, path: str, content: str) -> None:
         await self._library_service.write_private_file(path, content)

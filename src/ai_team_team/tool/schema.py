@@ -2,7 +2,7 @@
 
 import inspect
 import typing
-from typing import Any, Callable, Dict, Optional, get_type_hints
+from typing import Any, Callable, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, create_model
 
@@ -16,7 +16,7 @@ def _schema_from_typeddict(tp: Any, description: str) -> Dict[str, Any]:
 
 def _schema_from_function(func: Callable[..., Any], description: str) -> Dict[str, Any]:
     sig = inspect.signature(func)
-    type_hints = get_type_hints(func)
+    type_hints = typing.get_type_hints(func, include_extras=True)
     fields = {}
     for param_name, param in sig.parameters.items():
         if param_name in ('self', 'cls'):

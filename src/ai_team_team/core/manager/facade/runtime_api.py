@@ -1,6 +1,6 @@
 """Public ATTManager delegation methods for RuntimeAPI."""
 
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
 
 from ...agent import Agent
@@ -42,6 +42,13 @@ class RuntimeAPI:
 
     def register_generator_handler(self, handler: Callable[..., str]):
         return self._runtime.register_generator_handler(handler)
+
+    def register_token_counter(
+        self,
+        model_alias: str,
+        counter: Callable[[str], Union[int, Awaitable[int]]],
+    ) -> None:
+        return self._runtime.register_token_counter(model_alias, counter)
 
     def count_tokens(self, text: str, model_alias: str) -> int:
         return self._runtime.count_tokens(text, model_alias)

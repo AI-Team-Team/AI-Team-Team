@@ -97,7 +97,7 @@ The available tool set is resolved for every invocation. `dispatch_subagent` is 
 * **`grant_library_permission(lib_id: str, path: str, target_team_id: str, permission: str) -> str`**: Owner team grants READ/WRITE permission to a target team for a path in their library.
 * **`revoke_library_permission(lib_id: str, path: str, target_team_id: str) -> str`**: Owner team revokes permissions.
 * **`write_library_file(lib_id: str, path: str, content: str) -> str`**: Writes content to a file in a library (requires WRITE permission).
-* **`read_library_file(lib_id: str, path: str, start_line: int, end_line: Optional[int]) -> str`**: Reads a file chunk from a library (requires READ permission, checks file-gating).
+* **`read_library_file(lib_id: str, path: str, start_line: int = 1, end_line: Optional[int] = None, start_character: int = 1, character_count: Optional[int] = None, expected_file_version: Optional[str] = None) -> FileReadResult`**: Reads a token-bounded normalized text range with live READ permission and effective-model token counting.
 * **`delete_library_file(lib_id: str, path: str) -> str`**: Deletes a file or directory in a library (requires WRITE permission).
 * **`list_library_files(lib_id: str, path: str) -> str`**: Lists files and directories under a path in a library (requires READ permission).
 * Custom tools (e.g. database query, semantic search) can be registered dynamically by the host application on `ATTManager`.

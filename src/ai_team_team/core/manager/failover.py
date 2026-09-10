@@ -149,6 +149,7 @@ class FailoverService:
             return False
 
         agent.llm_client = new_client
+        agent._model_alias = selected_model
 
         agent_status = f"Failover: Switched to {selected_model}"
         team.set_status(agent.name, agent_status)

@@ -75,6 +75,8 @@ class ATTManager(
 
         self.model_configs: Dict[str, Dict[str, Any]] = {}
         self.generator_handler: Optional[Callable[..., str]] = None
+        self.token_counters: Dict[str, Callable[[str], Any]] = {}
+        self._tokenizer_cache: Dict[str, Any] = {}
 
         from ai_team_team.supervision import SupervisoryTeam
 

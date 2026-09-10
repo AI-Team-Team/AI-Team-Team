@@ -1,9 +1,26 @@
-"""Model, tool, preset, and invocation capability registries."""
+"""Model, tool, preset, token-counter, and capability registries."""
 
+import asyncio
 import inspect
 import os
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Mapping
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
+from ai_team_team.gated_reader import (
+    TokenCountResult,
+    TokenCounter,
+    TokenCounterUnavailableError,
+)
 from ai_team_team.tool import Tool
 
 from ..adapters import HandlerClientAdapter
@@ -86,6 +103,185 @@ class RuntimeRegistry:
         manager = self.manager
         manager.generator_handler = handler
 
+    def register_token_counter(
+        self,
+        model_alias: str,
+        counter: Callable[[str], Union[int, Awaitable[int]]],
+    ) -> None:
+        """Registers one runtime-only token counter for a stable model alias."""
+
+        manager = self.manager
+        if not isinstance(model_alias, str) or not model_alias.strip():
+            raise ValueError("Model alias must be a non-empty string.")
+        if not callable(counter):
+            raise ValueError("Token counter must be callable.")
+        manager.token_counters[model_alias] = counter
+
+    @staticmethod
+    def _coerce_token_count(value: Any) -> int:
+        if isinstance(value, Mapping):
+            for key in ("token_count", "input_tokens", "total_tokens", "tokens"):
+                candidate = value.get(key)
+                if isinstance(candidate, int) and not isinstance(candidate, bool) and candidate >= 0:
+                    return candidate
+        else:
+            for key in ("token_count", "input_tokens", "total_tokens", "tokens"):
+                candidate = getattr(value, key, None)
+                if isinstance(candidate, int) and not isinstance(candidate, bool) and candidate >= 0:
+                    return candidate
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+        raise TypeError("Token counters must return a non-negative integer count.")
+
+    async def resolve_file_token_counter(
+        self,
+        agent: Agent,
+        tokenizer_fallback: str,
+    ) -> Tuple[str, TokenCounter]:
+        """Resolves one stable counter chain for the Agent's effective model."""
+
+        manager = self.manager
+        if manager._agents_by_id.get(agent.agent_id) is not agent or agent.lifecycle_state != "active":
+            raise PermissionError("Model-facing file reads require an active registered Agent.")
+        alias = manager.resolve_runtime_model_alias(agent.llm_client)
+        candidates: List[Tuple[str, bool, Callable[[str], Any]]] = []
+
+        tokenizer_name_or_path = manager.config.model_tokenizer_configs.get(alias)
+        if tokenizer_name_or_path:
+            try:
+                tokenizer = await asyncio.to_thread(
+                    self._load_tokenizer, tokenizer_name_or_path
+                )
+                candidates.append(
+                    (
+                        "registered_tokenizer",
+                        False,
+                        self._tokenizer_counter(tokenizer),
+                    )
+                )
+            except Exception as exc:
+                manager.logger.warning(
+                    "Configured tokenizer for model %r is unavailable: %s.",
+                    alias,
+                    type(exc).__name__,
+                )
+
+        provider_counter = self._provider_token_counter(agent.llm_client)
+        if provider_counter is not None:
+            candidates.append(("provider_counter", False, provider_counter))
+
+        host_counter = manager.token_counters.get(alias)
+        if host_counter is not None:
+            candidates.append(("host_counter", False, host_counter))
+
+        if tokenizer_fallback == "conservative":
+            candidates.append(
+                (
+                    "utf8_bytes_upper_bound",
+                    True,
+                    lambda text: len(text.encode("utf-8")),
+                )
+            )
+        elif tokenizer_fallback != "strict":
+            raise ValueError("tokenizer_fallback must be conservative or strict.")
+
+        selected: Optional[Tuple[str, bool, Callable[[str], Any]]] = None
+
+        async def count(text: str) -> TokenCountResult:
+            nonlocal selected
+            available = [selected] if selected is not None else candidates
+            for candidate in available:
+                if candidate is None:
+                    continue
+                method, estimated, counter = candidate
+                try:
+                    if inspect.iscoroutinefunction(counter):
+                        value = counter(text)
+                    else:
+                        value = await asyncio.to_thread(counter, text)
+                    if inspect.isawaitable(value):
+                        value = await value
+                    count_value = self._coerce_token_count(value)
+                except Exception as exc:
+                    if selected is not None:
+                        raise TokenCounterUnavailableError(
+                            "The selected token counter failed during file reading."
+                        ) from exc
+                    manager.logger.warning(
+                        "Token counter %s for model %r is unavailable: %s.",
+                        method,
+                        alias,
+                        type(exc).__name__,
+                    )
+                    continue
+                selected = candidate
+                return TokenCountResult(
+                    count=count_value,
+                    method=method,
+                    estimated=estimated,
+                    model_alias=alias,
+                )
+            raise TokenCounterUnavailableError()
+
+        if not candidates:
+            raise TokenCounterUnavailableError()
+        return alias, count
+
+    @staticmethod
+    def _tokenizer_counter(tokenizer: Any) -> Callable[[str], Any]:
+        """Builds a non-blocking counter for one loaded tokenizer."""
+
+        async def count(text: str) -> int:
+            def encode() -> int:
+                return len(tokenizer.encode(text, add_special_tokens=False).ids)
+
+            return await asyncio.to_thread(encode)
+
+        return count
+
+    def _load_tokenizer(self, tokenizer_name_or_path: str) -> Any:
+        manager = self.manager
+        tokenizer = manager._tokenizer_cache.get(tokenizer_name_or_path)
+        if tokenizer is not None:
+            return tokenizer
+        from tokenizers import Tokenizer
+
+        if tokenizer_name_or_path.endswith(".json") and os.path.exists(
+            tokenizer_name_or_path
+        ):
+            tokenizer = Tokenizer.from_file(tokenizer_name_or_path)
+        else:
+            tokenizer = Tokenizer.from_pretrained(tokenizer_name_or_path)
+        manager._tokenizer_cache[tokenizer_name_or_path] = tokenizer
+        return tokenizer
+
+    @staticmethod
+    def _provider_token_counter(client: Any) -> Optional[Callable[[str], Any]]:
+        """Returns the effective client's explicit provider counting method."""
+
+        targets = [client]
+        handler = getattr(client, "handler", None)
+        if handler is not None:
+            targets.append(handler)
+        nested_manager = getattr(client, "manager", None)
+        if nested_manager is not None:
+            if nested_manager.generator_handler is not None:
+                targets.append(nested_manager.generator_handler)
+            root_client = getattr(nested_manager.root_ai, "llm_client", None)
+            if root_client is not client:
+                targets.append(root_client)
+        for target in targets:
+            try:
+                declared = inspect.getattr_static(target, "count_tokens")
+            except AttributeError:
+                continue
+            if declared is None:
+                continue
+            counter = getattr(target, "count_tokens", None)
+            if callable(counter):
+                return counter
+        return None
+
     def count_tokens(self, text: str, model_alias: str) -> int:
         """Counts tokens for the given text using tokenizers or falls back to len(text)//4."""
         manager = self.manager
@@ -98,21 +294,7 @@ class RuntimeRegistry:
 
         if tokenizer_name_or_path:
             try:
-                if not hasattr(manager, "_tokenizer_cache"):
-                    manager._tokenizer_cache = {}
-
-                if tokenizer_name_or_path not in manager._tokenizer_cache:
-                    from tokenizers import Tokenizer
-
-                    if tokenizer_name_or_path.endswith(".json") and os.path.exists(
-                        tokenizer_name_or_path
-                    ):
-                        tokenizer = Tokenizer.from_file(tokenizer_name_or_path)
-                    else:
-                        tokenizer = Tokenizer.from_pretrained(tokenizer_name_or_path)
-                    manager._tokenizer_cache[tokenizer_name_or_path] = tokenizer
-
-                tokenizer = manager._tokenizer_cache[tokenizer_name_or_path]
+                tokenizer = self._load_tokenizer(tokenizer_name_or_path)
                 encoded = tokenizer.encode(text)
                 return len(encoded.ids)
             except Exception as e:

@@ -62,7 +62,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
             await self.manager.write_private_file("notes.txt", "private secret")
             self.assertIn(
                 "private secret",
-                await self.manager.read_private_file("notes.txt"),
+                (await self.manager.read_private_file("notes.txt")).content,
             )
             await self.manager.publish_private_file(
                 "notes.txt", "published.txt"
@@ -107,7 +107,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         try:
             self.assertIn(
                 "private secret",
-                await self.manager.read_private_file("notes.txt"),
+                (await self.manager.read_private_file("notes.txt")).content,
             )
         finally:
             self._deactivate(tokens)

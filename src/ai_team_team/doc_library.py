@@ -6,7 +6,12 @@ import logging
 import threading
 from pathlib import PurePosixPath
 from typing import Optional, List, Callable, Dict
-from .gated_reader import GatedFileReader
+from .gated_reader import (
+    FileSourceSlice,
+    FileVersionChangedError,
+    file_version_from_stat,
+    read_text_stream_selection,
+)
 
 logger = logging.getLogger("ATT.DocLib")
 
@@ -14,7 +19,7 @@ logger = logging.getLogger("ATT.DocLib")
 class DocumentLibrary:
     """
     Manages a persistent folder of text/code documents for an Agent Team.
-    Supports file creation, reading via GatedFileReader, listing, and deletion.
+    Supports secure file creation, raw host reads, listing, and deletion.
     """
     def __init__(
         self,
@@ -77,7 +82,6 @@ class DocumentLibrary:
             )
         self.root_dir = os.path.abspath(target_root)
         os.makedirs(self.root_dir, exist_ok=True)
-        self.gated_reader = GatedFileReader()
 
     def write_file(self, path: str, content: str) -> None:
         """Writes content to a file path within the library. Creates directories if necessary."""
@@ -106,23 +110,70 @@ class DocumentLibrary:
                 stream.write(content)
             return normalized_path
 
-    def read_file(self, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str:
-        """Reads a file path within the library, routing through GatedFileReader."""
+    def read_file(
+        self,
+        path: str,
+        start_line: int = 1,
+        end_line: Optional[int] = None,
+        start_character: int = 1,
+        character_count: Optional[int] = None,
+    ) -> str:
+        """Reads an unbounded selected range for trusted host-side callers."""
+        return self.read_file_slice(
+            path,
+            start_line=start_line,
+            end_line=end_line,
+            start_character=start_character,
+            character_count=character_count,
+        ).content
+
+    def read_file_slice(
+        self,
+        path: str,
+        *,
+        start_line: int = 1,
+        end_line: Optional[int] = None,
+        start_character: int = 1,
+        character_count: Optional[int] = None,
+        maximum_characters: Optional[int] = None,
+        expected_file_version: Optional[str] = None,
+    ) -> FileSourceSlice:
+        """Reads a secure normalized source prefix for model-facing gating."""
         with self._lock:
             normalized_path = self._normalize_path(path, allow_root=False)
-            try:
-                fd = self._open_file_descriptor(
-                    normalized_path, os.O_RDONLY, create_parents=False
-                )
-            except FileNotFoundError:
-                return f"Error: File '{path}' does not exist in library '{self.lib_id}'."
-            with os.fdopen(fd, "r", encoding="utf-8", errors="ignore") as stream:
-                return self.gated_reader.read_stream(
+            fd = self._open_file_descriptor(
+                normalized_path, os.O_RDONLY, create_parents=False
+            )
+            with os.fdopen(
+                fd,
+                "r",
+                encoding="utf-8",
+                errors="strict",
+                newline=None,
+            ) as stream:
+                return read_text_stream_selection(
                     stream,
-                    os.path.basename(normalized_path),
-                    start_line,
-                    end_line,
+                    start_line=start_line,
+                    end_line=end_line,
+                    start_character=start_character,
+                    character_count=character_count,
+                    maximum_characters=maximum_characters,
+                    expected_file_version=expected_file_version,
                 )
+
+    def _assert_file_version(self, path: str, expected_file_version: str) -> None:
+        """Verifies that a physical file path still names the expected version."""
+
+        with self._lock:
+            normalized_path = self._normalize_path(path, allow_root=False)
+            fd = self._open_file_descriptor(
+                normalized_path, os.O_RDONLY, create_parents=False
+            )
+            try:
+                if file_version_from_stat(os.fstat(fd)) != expected_file_version:
+                    raise FileVersionChangedError()
+            finally:
+                os.close(fd)
 
     def delete_file(self, path: str) -> str:
         """Deletes a file or directory path within the library."""
@@ -377,7 +428,7 @@ class DocumentLibrary:
             fd = self._open_file_descriptor(
                 normalized, os.O_RDONLY, create_parents=False
             )
-            with os.fdopen(fd, "r", encoding="utf-8", errors="ignore") as stream:
+            with os.fdopen(fd, "r", encoding="utf-8", errors="strict") as stream:
                 return stream.read()
 
     def move_file(

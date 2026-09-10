@@ -69,7 +69,7 @@ class ToolExecutor:
                     str(exc),
                     raw,
                     status=ToolResultStatus.INVALID_ARGUMENTS,
-                    error_kind="argument_validation",
+                    error_kind=exc.error_kind or "argument_validation",
                 )
 
             auditor = (
@@ -149,7 +149,7 @@ class ToolExecutor:
                         str(exc),
                         raw,
                         status=ToolResultStatus.INVALID_ARGUMENTS,
-                        error_kind="argument_validation",
+                        error_kind=exc.error_kind or "argument_validation",
                         attempts=attempts,
                     )
                 except (ToolPermissionError, PermissionError) as exc:
@@ -159,7 +159,10 @@ class ToolExecutor:
                         str(exc),
                         raw,
                         status=ToolResultStatus.DENIED,
-                        error_kind="permission_denied",
+                        error_kind=(
+                            getattr(exc, "error_kind", None)
+                            or "permission_denied"
+                        ),
                         attempts=attempts,
                     )
                 except ToolBusinessError as exc:
@@ -169,7 +172,7 @@ class ToolExecutor:
                         str(exc),
                         raw,
                         status=ToolResultStatus.BUSINESS_ERROR,
-                        error_kind="business_error",
+                        error_kind=exc.error_kind or "business_error",
                         attempts=attempts,
                     )
                 except RetryableToolError as exc:

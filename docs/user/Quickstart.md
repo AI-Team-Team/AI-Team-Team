@@ -404,17 +404,18 @@ Agent teams can request access by sending a peer message to the owner team:
 
 - `Action: send_peer_message(team_id="AT-abc123", message="Please grant READ permission to team AT-xyz789 for library DL-AT-abc123 path /specs.")`
 
-### File Operations (Gated Context Protection)
+### File Operations (Token-Based Context Protection)
 
 Agent teams can use standard file operations:
 
 - **Write file**: `Action: write_library_file(lib_id="DL-AT-abc123", path="/specs/guide.txt", content="New guide text")`
-- **Read file**: `Action: read_library_file(lib_id="DL-AT-abc123", path="/specs/guide.txt", start_line=1, end_line=50)`
+- **Read file by lines**: `Action: read_library_file(lib_id="DL-AT-abc123", path="/specs/guide.txt", start_line=1, end_line=50)`
+- **Read a long line by characters**: `Action: read_library_file(lib_id="DL-AT-abc123", path="/data/minified.json", start_line=1, start_character=1, character_count=20000)`
 - **List files**: `Action: list_library_files(lib_id="DL-AT-abc123", path="/")`
 - **Delete file**: `Action: delete_library_file(lib_id="DL-AT-abc123", path="/specs/guide.txt")`
 - **Create managed file link**: `Action: create_library_link(source_lib_id="DL-AT-xyz789", source_path="/references/guide.txt", target_lib_id="DL-AT-abc123", target_path="/specs/guide.txt")`
 
-All `read_library_file` operations are automatically audited by the `GatedFileReader`. If a team member attempts to read a file exceeding 50 KB without specifying a line chunk window, the operation will be rejected and return an Outline Warning, protecting the LLM context from pollution.
+All `read_library_file` operations limit returned decoded content to `ATTConfig.file_read.max_read_tokens`, regardless of file size, line count, or requested range. A partial result supplies `next_line`, `next_character`, and `file_version`; pass those coordinates and the version as `expected_file_version` to continue without gaps. The small structured metadata and tool-protocol framing are outside the content budget.
 
 Managed links work only between registered DocLib files. Creation requires `WRITE` on the source path and `READ` on the target. Reads and writes recheck the target ACL every time; writes require target `WRITE`, and deleting the link does not delete the target file. Native filesystem symlinks are rejected.
 

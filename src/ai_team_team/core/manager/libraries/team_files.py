@@ -4,6 +4,8 @@ import asyncio
 import os
 from typing import List, Optional
 
+from ai_team_team.gated_reader import FileReadResult, FileVersionChangedError
+
 
 class TeamFileMixin:
     async def read_library_file(
@@ -13,9 +15,66 @@ class TeamFileMixin:
         path: str,
         start_line: int = 1,
         end_line: Optional[int] = None,
-    ) -> str:
-        library, resolved_path = self.manager._resolve_library_target(team_id, lib_id, path, "READ")
-        return await asyncio.to_thread(library.read_file, resolved_path, start_line, end_line)
+        start_character: int = 1,
+        character_count: Optional[int] = None,
+        expected_file_version: Optional[str] = None,
+    ) -> FileReadResult:
+        agent = self._require_team_model_read_context(team_id)
+        library, resolved_path = self.manager._resolve_library_target(
+            team_id, lib_id, path, "READ"
+        )
+
+        def resolve_current_target():
+            if self._require_team_model_read_context(team_id) is not agent:
+                raise PermissionError(
+                    "The active AgentTeam invocation changed during file reading."
+                )
+            try:
+                current_library, current_path = self.manager._resolve_library_target(
+                    team_id, lib_id, path, "READ"
+                )
+            except FileNotFoundError as exc:
+                raise FileVersionChangedError() from exc
+            if current_library is not library or current_path != resolved_path:
+                raise FileVersionChangedError()
+            return current_library, current_path
+
+        async def source_reader(_source_path: str, **kwargs):
+            current_library, current_path = resolve_current_target()
+            try:
+                return await asyncio.to_thread(
+                    current_library.read_file_slice,
+                    current_path,
+                    **kwargs,
+                )
+            except FileNotFoundError as exc:
+                if kwargs.get("expected_file_version") is not None:
+                    raise FileVersionChangedError() from exc
+                raise
+
+        async def validate_final(result: FileReadResult):
+            current_library, current_path = resolve_current_target()
+            try:
+                await asyncio.to_thread(
+                    current_library._assert_file_version,
+                    current_path,
+                    result.file_version,
+                )
+            except FileNotFoundError as exc:
+                raise FileVersionChangedError() from exc
+
+        return await self._read_model_file(
+            agent,
+            library,
+            resolved_path,
+            start_line=start_line,
+            end_line=end_line,
+            start_character=start_character,
+            character_count=character_count,
+            expected_file_version=expected_file_version,
+            source_reader=source_reader,
+            final_validator=validate_final,
+        )
 
     async def write_library_file(
         self,

@@ -3,6 +3,8 @@
 import asyncio
 from typing import List, Optional
 
+from ai_team_team.gated_reader import FileReadResult, FileVersionChangedError
+
 
 class PrivateFileMixin:
     async def list_private_files(self, path: str = "/") -> List[str]:
@@ -15,10 +17,57 @@ class PrivateFileMixin:
         path: str,
         start_line: int = 1,
         end_line: Optional[int] = None,
-    ) -> str:
+        start_character: int = 1,
+        character_count: Optional[int] = None,
+        expected_file_version: Optional[str] = None,
+    ) -> FileReadResult:
         """Reads private content only for the current invocation agent."""
-        _, library = self.manager._require_private_agent_context()
-        return await asyncio.to_thread(library.read_file, path, start_line, end_line)
+        agent, library = self.manager._require_private_agent_context()
+
+        def validate_owner_context():
+            current_agent, current_library = self.manager._require_private_agent_context()
+            if current_agent is not agent or current_library is not library:
+                raise PermissionError(
+                    "The active Agent's private DocLib changed during file reading."
+                )
+            return current_agent, current_library
+
+        async def source_reader(source_path: str, **kwargs):
+            _, current_library = validate_owner_context()
+            try:
+                return await asyncio.to_thread(
+                    current_library.read_file_slice,
+                    source_path,
+                    **kwargs,
+                )
+            except FileNotFoundError as exc:
+                if kwargs.get("expected_file_version") is not None:
+                    raise FileVersionChangedError() from exc
+                raise
+
+        async def validate_final(result: FileReadResult):
+            _, current_library = validate_owner_context()
+            try:
+                await asyncio.to_thread(
+                    current_library._assert_file_version,
+                    path,
+                    result.file_version,
+                )
+            except FileNotFoundError as exc:
+                raise FileVersionChangedError() from exc
+
+        return await self._read_model_file(
+            agent,
+            library,
+            path,
+            start_line=start_line,
+            end_line=end_line,
+            start_character=start_character,
+            character_count=character_count,
+            expected_file_version=expected_file_version,
+            source_reader=source_reader,
+            final_validator=validate_final,
+        )
 
     async def write_private_file(self, path: str, content: str) -> None:
         """Writes private content only for the current invocation agent."""

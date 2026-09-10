@@ -10,8 +10,11 @@ from ai_team_team import (
     Agent,
     AgentTeam,
     DiscussionResult,
+    FileReadConfig,
+    FileReadResult,
     LLMClientProto,
     LLMResponse,
+    TokenCountingClientProto,
     Tool,
     ToolResult,
 )
@@ -39,16 +42,23 @@ class ThirdPartyProviderAdapter:
     def supports_output_token_limit(self) -> bool:
         return True
 
+    def count_tokens(self, text: str) -> int:
+        return len(text)
+
 
 client: LLMClientProto = ThirdPartyProviderAdapter()
+counting_client: TokenCountingClientProto = ThirdPartyProviderAdapter()
 config = ATTConfig(model_token_limits={"default": 4096})
 tool = Tool(name="noop", description="No operation.", func=lambda: None)
 
 assert_type(client, LLMClientProto)
+assert_type(counting_client, TokenCountingClientProto)
+assert_type(config.file_read, FileReadConfig)
 assert_type(config.model_token_limits["default"], int)
 assert_type(tool.json_schema, Dict[str, Any])
 assert_type(ToolResult("call-1", "noop", "done"), ToolResult)
 assert_type(DiscussionResult, type[DiscussionResult])
+assert_type(FileReadResult, type[FileReadResult])
 
 
 def create_shared_memberships(

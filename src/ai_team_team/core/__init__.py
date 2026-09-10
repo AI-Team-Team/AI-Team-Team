@@ -22,6 +22,7 @@ from .config import (
     ParentApprovalCommunicationConfig,
     PermissiveCommunicationConfig,
     EpisodicMemoryConfig,
+    FileReadConfig,
     TurnFailurePolicyConfig,
 )
 from .memory import (

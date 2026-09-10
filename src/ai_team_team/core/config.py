@@ -52,6 +52,20 @@ class TurnFailurePolicyConfig(BaseModel):
     llm: Literal["isolate", "abort"] = "isolate"
 
 
+class FileReadConfig(BaseModel):
+    """Controls model-facing file content token budgets."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+        strict=True,
+        validate_default=True,
+    )
+
+    max_read_tokens: Annotated[int, Field(ge=1)] = 4_000
+    tokenizer_fallback: Literal["conservative", "strict"] = "conservative"
+
+
 class EpisodicMemoryConfig(BaseModel):
     """Controls the optional AI-visible episodic-memory catalog."""
 
@@ -217,6 +231,7 @@ class ATTConfig(BaseModel):
     agent_private_data_policy: Literal[
         "retain", "archive", "delete"
     ] = "archive"
+    file_read: FileReadConfig = Field(default_factory=FileReadConfig)
     episodic_memory: EpisodicMemoryConfig = Field(
         default_factory=EpisodicMemoryConfig
     )
@@ -250,6 +265,17 @@ class ATTConfig(BaseModel):
         raise ValueError(
             "turn_failure_policy must be a TurnFailurePolicyConfig or mapping."
         )
+
+    @field_validator("file_read", mode="before")
+    @classmethod
+    def _validate_file_read(cls, value: Any) -> FileReadConfig:
+        if value is None:
+            return FileReadConfig()
+        if isinstance(value, FileReadConfig):
+            return value
+        if isinstance(value, Mapping):
+            return FileReadConfig.model_validate(dict(value))
+        raise ValueError("file_read must be a FileReadConfig or mapping.")
 
     @field_validator("episodic_memory", mode="before")
     @classmethod

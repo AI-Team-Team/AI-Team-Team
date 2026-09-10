@@ -50,6 +50,10 @@ class AgentTurnIncompleteError(ATTException):
 class ToolError(Exception):
     """Base class for classified tool execution failures."""
 
+    def __init__(self, message: str, *, error_kind: str | None = None) -> None:
+        self.error_kind = error_kind
+        super().__init__(message)
+
 
 class ToolArgumentError(ToolError):
     """Raised when tool arguments cannot be parsed or validated."""

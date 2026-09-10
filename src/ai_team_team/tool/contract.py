@@ -102,7 +102,7 @@ class Tool:
         self.memory_capture = memory_capture
         self._signature = inspect.signature(func)
         try:
-            self._type_hints = get_type_hints(func)
+            self._type_hints = typing.get_type_hints(func, include_extras=True)
         except (NameError, TypeError):
             self._type_hints = {}
         self._json_validator = Draft202012Validator(self.json_schema)

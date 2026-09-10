@@ -1,116 +1,116 @@
-# Gated Context Protection & File Reading Specification
+# Token-Based File Reading Specification
 
-This document details the operational behavior, parameters, and slice boundaries of the **Gated File Reading** system.
+This document defines model-facing text reads for team DocLibs, Private Agent DocLibs, managed file links, and the public `GatedFileReader` utility.
 
-## 1. Context Protection Paradigm
+## 1. Content-Token Boundary
 
-During autonomous ReAct reasoning runs, agents frequently need to query historic text drafts, large discussion indexes, or detailed `.log` files. Direct, un-gated file reads represent a severe risk:
-
-* **Context Pollution**: Dumping a 300 KB log into the prompt context leaves no room for system instructions.
-* **Hallucination**: Massive noise causes the model to ignore strict narrative boundaries.
-* **Token Inflation**: Massive context blocks incur high financial and latency costs.
-
-The **GatedFileReader** solves this by enforcing size pre-filtering and paginated chunk access.
-
-For a step-by-step visual of this decision logic and chunking flow, see the [Gated Read File Decision Flowchart](flowcharts/Gated_Reading.md#1-gated-read-file-decision-flowchart).
-
-## 2. Gated Size Pre-filtering & Outline Fallbacks
-
-When an agent invokes `read_file_chunk` (or when a process attempts a file read) on a target file:
-
-* **Size Gate**: If the file size is $\le$ `large_file_threshold_kb` (default: 50 KB), the read proceeds normally.
-* **Blocked Gate**: If the file exceeds `large_file_threshold_kb` and no specific `end_line` coordinate is supplied by the agent:
-  1. The system blocks the read.
-  2. It counts the total line count of the file in $O(N)$ speed.
-  3. It extracts a sample of the first 5 lines of the target file.
-  4. It constructs and returns a structured **Outline Warning**:
-
-     ```markdown
-     ### LARGE FILE WARNING
-     - **File**: discussion_index.jsonl
-     - **Size**: 120.4 KB (Exceeds threshold of 50 KB)
-     - **Total Lines**: 1250
-     
-     Direct reading of large files is gated to protect the context window.
-     Please read specific parts using the paginated `read_file_chunk(path, start_line, end_line)` tool.
-     
-     **First 5 Lines Sample**:
-
-     1: {"log_id": "001", "timestamp": "...", "phase_type": "world", ...}
-     2: {"log_id": "002", "timestamp": "...", "phase_type": "plot", ...}
-     3: ...
-     ```
-
-  5. The agent must review the outline and formulate a paginated chunk request.
-
-## 3. Paginated Line Chunking (Slicing Caps)
-
-To read parts of a large file, the agent must supply precise coordinates (`start_line` and `end_line`). Slicing is governed by two boundaries:
-
-1. **Maximum Chunk Size**: Single requests are strictly capped at `max_chunk_lines` (default: 100 lines).
-2. **Auto-Cap Logic**:
-   * If the requested window $(end\_line - start\_line + 1)$ exceeds `max_chunk_lines`, the system automatically shrinks the window:
-     $$end\_line = start\_line + max\_chunk\_lines - 1$$
-   * If the agent omits the `end_line`, the system defaults to:
-     $$end\_line = start\_line + max\_chunk\_lines - 1$$
-
-## 4. Tail Logs & Active Stream Operations
-
-For continuous logs or discussion indexes, the agent frequently needs to inspect only the latest events rather than the initial ones:
-
-* **Tool**: `read_file_tail(path, line_count)` (default: 50 lines).
-* **Logic**: Counts total lines in the file and returns a slice starting at:
-  $$start\_line = \max(1, total\_lines - line\_count + 1)$$
-  $$end\_line = total\_lines$$
-
-For the visual breakdown of the tail-reading logic, see the [Streaming Tail Read Decision Flowchart](flowcharts/Gated_Reading.md#2-streaming-tail-read-decision-flowchart).
-
-## 5. Public Python Class Interface: `GatedFileReader`
+ATT limits a file read by the number of decoded content tokens returned to the active Agent. It does not reject files because of byte size or line count, and line or character coordinates select source content rather than changing the resource budget.
 
 ```python
-class GatedFileReader:
-    def __init__(self, large_threshold_kb: int = 50, max_chunk: int = 100):
-        """
-        Initializes the gated reader with size limits and maximum line return caps.
-        """
-        self.large_threshold_kb = large_threshold_kb
-        self.max_chunk = max_chunk
-        ...
-
-    def read_file(self, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str:
-        """
-        Reads a file. Returns an Outline Warning if the file is larger than threshold 
-        and no end_line coordinate is provided.
-        Otherwise, returns a line-numbered paginated chunk capped at max_chunk lines.
-        """
-        ...
-
-    def read_file_tail(self, path: str, line_count: int = 50) -> str:
-        """
-        Calculates file offset and returns only the last line_count lines of a file.
-        """
-        ...
+ATTConfig(
+    file_read=FileReadConfig(
+        max_read_tokens=4_000,
+        tokenizer_fallback="conservative",
+    )
+)
 ```
 
-## 5. Document Libraries (DocLib)
+`max_read_tokens` applies only to the `content` field. Structured result metadata and framework-owned tool-observation framing add a small amount of protocol overhead outside this limit.
 
-To enable secure document storage and sharing between agent teams, the framework introduces `DocumentLibrary`:
+ATT resolves the token counter from the active Agent's effective `llm_client` at invocation time. The resolution order is an exact tokenizer registered for that model alias, an explicit provider `count_tokens(text)` method, a host counter registered with `manager.register_token_counter(alias, counter)`, and finally the configured fallback.
 
-* **Built-in Storage**: Every spawned `AgentTeam` automatically receives a default document library (root folder: `.att_doc_libs/<lib_id>`) mapped as `team.doc_library`.
-* **Private Agent Storage**: Every agent registered with `ATTManager` owns one `agent_private` library named `PDL-<agent_id>`. A shared agent uses the same library in every team. Team ACL grants, public discovery, ordinary library metadata tools, and managed links cannot access it. Only private tools running under the owner's active invocation context may operate on it.
-* **Invocation-Scoped Observation**: An explicit `read_private_file` result is available only inside the current reasoning invocation. When that invocation ends, ATT replaces the private observation in the shared model window with a redacted marker so a later team invocation cannot inherit the file body implicitly.
-* **Explicit Publication**: `publish_private_file` copies one ordinary text/code file into the active team's built-in DocLib after a live target `WRITE` check. It does not remove the source. Private content is not automatically added to prompts, transcripts, audits, callbacks, or message history.
-* **Gated Interoperability**: When agents call the `read_library_file` tool, the request is routed through `GatedFileReader`. This ensures files stored in libraries undergo the exact same size gating, line chunking, and outline checks to safeguard the LLM context window.
-* **Access Control List (ACL) & Segment-Based Path Inheritance**: File and folder access is governed by team-level permissions (`READ` or `WRITE`) registered under path prefixes. Permission inheritance propagates recursively downward to all subdirectories and files. For example, if a team is granted permission on a folder path (e.g. `/specs`), they automatically inherit the same permission on any nested paths under that folder (e.g. `/specs/subfolder/file.txt`).
-  * **Evaluation Order**: The framework evaluates permissions by decomposing the target file path into parent segment directories (from the full path down to the root `/`). If a matching permission for the caller's team is found on any parent path segment, it is immediately applied.
-  * **Permission Hierarchy**: A `WRITE` permission grant implicitly permits `READ` operations. Sibling or cross-lineage teams can request access by sending peer messages to the library owner.
-* **Managed Cross-Library File Links**: `create_library_link` stores only a
-  target `lib_id` and relative file path. It never creates an operating-system symlink.
-  
-  Every read or write resolves the link chain and rechecks the caller's live ACL on every source and target path, so revocation takes effect immediately.
-  
-  Writes require `WRITE` throughout the chain; deleting a link removes only link metadata. Links are file-only, must terminate in a registered DocLib file, and cycles are rejected.
-* **Native Symlink Rejection**: DocLib roots and path components may not be
-  filesystem symbolic links. File descriptors are opened relative to a no-follow directory chain so a native symlink cannot escape the managed root.
+If a counter reports fixed framing tokens for an empty string, ATT subtracts that baseline so `max_read_tokens` continues to describe only decoded file content.
 
-Private libraries cannot be link sources or targets. An archived private library is read-only; a retained library remains stored but is unreachable through AI tools until its owner is explicitly reactivated.
+The `"conservative"` fallback reports the UTF-8 byte length as an upper-bound estimate and sets `estimated=true`. The `"strict"` fallback rejects the read when no exact counter is available. ATT never uses an optimistic heuristic such as `len(text) // 4` for model-facing file reads.
+
+## 2. Range Selection
+
+The team and private tools expose the same coordinates:
+
+```python
+read_file(
+    path,
+    start_line=1,
+    end_line=None,
+    start_character=1,
+    character_count=None,
+    expected_file_version=None,
+)
+```
+
+`start_line` and `start_character` are one-based. `start_character` selects a decoded Unicode code-point position within the normalized start line, and `character_count` may span multiple lines. `end_line` is inclusive and cannot be combined with `character_count`.
+
+ATT normalizes `LF`, `CRLF`, and `CR` line endings to `\n` before applying coordinates and counting content. The returned `content` is raw normalized text and does not contain injected line-number prefixes.
+
+A range larger than the configured token budget is reduced to the largest safe prefix found by the selected counter. A range ending before the file ends is still `complete` when the entire requested range was returned.
+
+## 3. Continuation and File Versions
+
+A partial result identifies the first normalized source position not returned:
+
+```json
+{
+  "status": "partial",
+  "content": "...",
+  "start_line": 1,
+  "start_character": 1,
+  "next_line": 1,
+  "next_character": 18042,
+  "file_version": "0c231b64f22753bfbc535c575c03e6332a0eb76f552b0ea6baacfe60e6165d60",
+  "model_alias": "primary",
+  "content_token_count": 3998,
+  "max_read_tokens": 4000,
+  "token_count_method": "registered_tokenizer",
+  "estimated": false
+}
+```
+
+Continue by passing `next_line`, `next_character`, and the returned `file_version` as `expected_file_version`. This preserves exact normalized-content continuity inside ordinary files and extremely long single lines.
+
+The opaque version is derived from the open file identity and mutation metadata without exposing those raw filesystem values to the model. If the file changes between calls or during a read, ATT returns `file_version_changed` instead of combining positions from different file versions.
+
+## 4. Authorization and Privacy
+
+Token-based reading runs only after authorization. Team reads resolve the invocation-scoped AgentTeam, verify active membership, evaluate the source path ACL, follow registered managed links, and recheck every target path's live ACL. Private reads require the invocation-scoped active Agent to own the Private DocLib.
+
+Managed storage continues to reject native filesystem symlinks. Private libraries cannot participate in public discovery, team ACL grants, or managed links.
+
+Invalid coordinates, incompatible range arguments, decoding failures, stale file versions, and strict token-counter failures return stable structured tool error kinds. Errors, logs, callbacks, and token-counter diagnostics do not include file content.
+
+An explicit private read remains available only in the current reasoning invocation. ATT replaces the private observation with a redacted marker before the Agent's reusable model window can flow into another team invocation.
+
+## 5. Host and Model-Facing APIs
+
+`read_library_file` requires invocation-scoped active Agent and AgentTeam membership. `read_private_file` requires the invocation-scoped active Agent to own the private library. Both return `FileReadResult` through the Python API and stable JSON through the tool layer.
+
+`DocumentLibrary.read_file()` is a trusted host-side range reader. It retains path and symlink protection but does not apply a model token budget because it has no active Agent model context. Persistence, restore, publication, and other trusted manager operations use host-side reads rather than model-facing tools.
+
+The public asynchronous `GatedFileReader` can read ordinary filesystem text with an injected synchronous or asynchronous token counter. Without a counter it uses the configured conservative fallback, or rejects the read in strict mode.
+
+```python
+reader = GatedFileReader(
+    max_read_tokens=4_000,
+    tokenizer_fallback="conservative",
+    token_counter=my_counter,
+    model_alias="primary",
+)
+result = await reader.read_file("report.txt", start_line=1)
+```
+
+## 6. Document Libraries (DocLib)
+
+Every `AgentTeam` owns a built-in team library under the manager's `.att_doc_libs` storage root, and every registered Agent owns exactly one persistent Private Agent DocLib that follows the same identity across all team memberships.
+
+- **Private boundary**: Team ACL grants, public discovery, ordinary library metadata tools, and managed links cannot expose a Private Agent DocLib. Only the active owning Agent can invoke its private tools.
+- **Invocation-scoped observation**: An explicit `read_private_file` result is available in the current reasoning invocation, then its body is redacted from the reusable model window so another team does not inherit it implicitly.
+- **Explicit publication**: `publish_private_file` copies one ordinary text or code file into the current team's built-in DocLib after active membership and target `WRITE` permission checks. It preserves the private source and never publishes content automatically.
+- **Prefix ACL inheritance**: Team libraries grant `READ` or `WRITE` to AgentTeams at normalized path prefixes. The full path is checked first, followed by each parent path and `/`; `WRITE` also permits reading.
+- **Managed file links**: `create_library_link` stores only a registered target library ID and normalized relative file path. Every operation resolves the complete chain, rechecks live source and target ACLs, rejects cycles, and never creates an operating-system symlink.
+- **Deletion and archive rules**: Deleting a managed link removes only link metadata. Private libraries cannot be link sources or targets, and an archived Private Agent DocLib remains read-only and unavailable to AI tools until its owner is reactivated.
+- **Native symlink rejection**: DocLib roots and path components cannot be filesystem symbolic links. Supported platforms use descriptor-relative no-follow traversal so a symlink cannot escape the managed root.
+
+## 7. Configuration and Persistence
+
+`FileReadConfig` uses strict Pydantic validation with assignment validation and forbids unknown fields. `max_read_tokens` must be a positive integer, and `tokenizer_fallback` must be `"conservative"` or `"strict"`.
+
+The configuration and model tokenizer mappings use the existing ATT configuration persistence. Runtime client methods and host token-counter callables are bindings supplied by the host and are not serialized.

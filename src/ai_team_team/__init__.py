@@ -1,8 +1,10 @@
-from typing import Protocol, Optional, Union, List, Dict, Any, TYPE_CHECKING
+from typing import Any, Awaitable, Dict, List, Optional, Protocol, TYPE_CHECKING, Union
+
 from .core import ToolCall, ToolResult, LLMResponse
 
 if TYPE_CHECKING:
     from .tool import Tool
+
 
 class LLMClientProto(Protocol):
     """Protocol defining the standard interface for LLM client generation."""
@@ -19,12 +21,22 @@ class LLMClientProto(Protocol):
         ...
 
     def supports_native_tool_calling(self) -> bool:
-        """Returns True if the client/model configuration natively supports structured function calling."""
+        """Returns True when the client supports structured function calling."""
         ...
 
     def supports_output_token_limit(self) -> Union[bool, str]:
         """Reports support for max_output_tokens or max_tokens requests."""
         ...
+
+
+class TokenCountingClientProto(Protocol):
+    """Optional provider contract for effective-model token counting."""
+
+    def count_tokens(self, text: str) -> Union[int, Awaitable[int]]:
+        """Returns the exact token count for text under this client model."""
+
+        ...
+
 
 from .core import (
     Agent,
@@ -45,6 +57,7 @@ from .core import (
     ParentApprovalCommunicationConfig,
     PermissiveCommunicationConfig,
     EpisodicMemoryConfig,
+    FileReadConfig,
     TurnFailurePolicyConfig,
     AgentTurnResult,
     AgentTurnStatus,
@@ -85,7 +98,17 @@ from .core.exceptions import (
 )
 from .supervision import AuditResult, AuditStatus
 from .tool import Tool
-from .gated_reader import GatedFileReader
+from .gated_reader import (
+    FileDecodingError,
+    FileReadError,
+    FileReadRangeError,
+    FileReadResult,
+    FileReadStatus,
+    FileVersionChangedError,
+    GatedFileReader,
+    TokenCountResult,
+    TokenCounterUnavailableError,
+)
 from .doc_library import DocumentLibrary
 
 __all__ = [
@@ -94,6 +117,7 @@ __all__ = [
     "ATTConfig",
     "PermissiveCommunicationConfig",
     "EpisodicMemoryConfig",
+    "FileReadConfig",
     "ParentApprovalCommunicationConfig",
     "LineageApprovalCommunicationConfig",
     "ApprovalPrincipal",
@@ -121,7 +145,16 @@ __all__ = [
     "ATTManager",
     "Tool",
     "GatedFileReader",
+    "FileReadResult",
+    "FileReadStatus",
+    "TokenCountResult",
+    "FileReadError",
+    "FileReadRangeError",
+    "FileDecodingError",
+    "FileVersionChangedError",
+    "TokenCounterUnavailableError",
     "LLMClientProto",
+    "TokenCountingClientProto",
     "ATTException",
     "LLMGenerationError",
     "TokenLimitExceededError",

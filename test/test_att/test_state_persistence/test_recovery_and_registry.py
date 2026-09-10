@@ -74,6 +74,8 @@ class TestStatePersistence(StatePersistenceTestCase):
 
     async def test_state_persistence_and_recovery(self):
         """Verify the complete serialization & deserialization pipeline."""
+        self.manager.config.file_read.max_read_tokens = 321
+        self.manager.config.file_read.tokenizer_fallback = "strict"
         # 1. Create a deep lineage structure
         team_parent = self.manager.create_agent_team(
             creator=self.root_ai,
@@ -192,8 +194,10 @@ class TestStatePersistence(StatePersistenceTestCase):
         self.assertIsNotNone(restored_parent.doc_library)
         self.assertIsNotNone(restored_child.doc_library)
         
-        self.assertEqual(restored_parent.doc_library.read_file("readme.md"), "1: Parent Readme Content")
-        self.assertEqual(restored_child.doc_library.read_file("child_docs/spec.txt"), "1: Child Spec Content")
+        self.assertEqual(restored_parent.doc_library.read_file("readme.md"), "Parent Readme Content")
+        self.assertEqual(restored_child.doc_library.read_file("child_docs/spec.txt"), "Child Spec Content")
+        self.assertEqual(new_manager.config.file_read.max_read_tokens, 321)
+        self.assertEqual(new_manager.config.file_read.tokenizer_fallback, "strict")
         
         # Verify inbox & proposals & broker agreements
         self.assertEqual(len(restored_parent.message_inbox), 1)

@@ -70,6 +70,8 @@ Synchronous and asynchronous callbacks share one ordered background dispatcher; 
     Registers one stable alias for one direct client identity.
   * `register_generator_handler(handler: Callable[..., str])`
     Registers a global callback handler for generating text from a model alias.
+  * `register_token_counter(model_alias: str, counter: Callable[[str], int | Awaitable[int]])`
+    Registers a runtime-only exact counter for model-facing file content.
   * `register_agent(agent: Agent) -> Agent`
     Installs one stable identity in the ID registry and active name index and creates exactly one canonical private library.
   * `get_private_library_id(agent_id: str) -> str`
@@ -146,6 +148,7 @@ Configuration options for tuning the ATT multi-agent framework.
       llm_retry_backoff_factor: float = 1.5,
       enable_memory_compression: bool = True,
       max_memory_turns: int = 20,
+      file_read: FileReadConfig = FileReadConfig(),
       episodic_memory: EpisodicMemoryConfig = EpisodicMemoryConfig(),
       communication: CommunicationConfig = PermissiveCommunicationConfig(),
       migration_policy: str = "ancestor_approval",
@@ -209,19 +212,22 @@ Native provider interfaces receive `Optional[List[Tool]]`. The provider adapter 
 
 ### `GatedFileReader`
 
-Size-aware paginated file reader protecting agent context windows.
+Asynchronous token-bounded reader for normalized model-facing text content.
 
 * **Constructor**:
 
   ```python
-  reader = GatedFileReader(large_threshold_kb: int = 50, max_chunk: int = 100)
+  reader = GatedFileReader(
+      max_read_tokens=4000,
+      tokenizer_fallback="conservative",
+      token_counter=my_counter,
+      model_alias="primary",
+  )
   ```
 
 * **Methods**:
-  * `read_file(path: str, start_line: int = 1, end_line: Optional[int] = None) -> str`
-    Reads a file. Fallbacks to Outline Warning if the file size exceeds threshold and no line window is provided.
-  * `read_file_tail(path: str, line_count: int = 50) -> str`
-    Returns the last line_count lines of a file with prepended line numbers.
+  * `await read_file(path: str, start_line: int = 1, end_line: Optional[int] = None, start_character: int = 1, character_count: Optional[int] = None, expected_file_version: Optional[str] = None) -> FileReadResult`
+    Returns the largest requested normalized content prefix within `max_read_tokens`. Partial results include the next source position and file version; the token budget excludes structured metadata and tool framing.
 
 ### `DocumentLibrary`
 
@@ -237,7 +243,8 @@ Represents a `team` or `agent_private` document store with path traversal protec
   * `root_dir -> str`: Absolute path to the persistent workspace folder (.att_doc_libs/<lib_id>).
 * **Methods**:
   * `write_file(path: str, content: str)`
-  * `read_file(path: str, start_line: int, end_line: Optional[int]) -> str`
+  * `read_file(path: str, start_line: int, end_line: Optional[int], start_character: int = 1, character_count: Optional[int] = None) -> str`
+    Reads an unbounded normalized source range for trusted host-side operations.
   * `delete_file(path: str) -> str`
   * `list_contents(path: str) -> List[str]`
   * `move_file(source_path: str, target_path: str, overwrite: bool = False)`
