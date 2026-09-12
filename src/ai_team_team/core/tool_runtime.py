@@ -27,6 +27,7 @@ class ToolExecutor:
         kwargs: Optional[Dict[str, Any]] = None,
         *,
         call_id: str = "",
+        invocation_id: Optional[str] = None,
         raw: Any = None,
         tools: Optional[Mapping[str, Any]] = None,
     ) -> ToolResult:
@@ -53,7 +54,9 @@ class ToolExecutor:
             else None
         )
         invocation_token = (
-            self.manager._active_tool_invocation_id.set(call_id)
+            self.manager._active_tool_invocation_id.set(
+                invocation_id if invocation_id is not None else call_id
+            )
             if self.manager
             else None
         )

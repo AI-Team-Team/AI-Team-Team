@@ -19,6 +19,7 @@ from test.test_att.test_critical_hardening._support import (
 from ai_team_team.core.manager.discussions.cleanup import (
     finalize_discussion_session,
 )
+from ai_team_team import Tool
 
 
 class TestCriticalHardening(CriticalHardeningTestCase):
@@ -146,6 +147,76 @@ class TestCriticalHardening(CriticalHardeningTestCase):
         self.assertEqual(manager.model_token_usage["default"], 3)
         self.assertEqual(manager.token_budget.available("default"), 7)
         await manager.close()
+
+    async def test_hard_budget_reserves_system_and_transmitted_tool_inputs(self):
+        for component in ("system_instruction", "tools"):
+            with self.subTest(component=component):
+                calls = []
+
+                class CountingClient:
+                    def supports_output_token_limit(self):
+                        return "max_output_tokens"
+
+                    async def generate(
+                        self,
+                        prompt,
+                        system_instruction=None,
+                        tools=None,
+                        max_output_tokens=None,
+                        **kwargs,
+                    ):
+                        calls.append(
+                            {
+                                "system_instruction": system_instruction,
+                                "tools": tools,
+                            }
+                        )
+                        return LLMResponse("ok")
+
+                client = CountingClient()
+                manager = ATTManager(
+                    Agent(f"BudgetRoot-{component}", "Architect", client),
+                    ATTConfig(
+                        workspace_root=self.tmpdir,
+                        model_token_limits={"default": 10},
+                        model_max_output_tokens={"default": 2},
+                    ),
+                )
+                manager.count_tokens = (
+                    lambda text, model_alias=None: len(str(text).split())
+                )
+                system_instruction = (
+                    "large " * 20
+                    if component == "system_instruction"
+                    else None
+                )
+                tools = (
+                    [
+                        Tool(
+                            "large_tool",
+                            "large " * 20,
+                            lambda: "ok",
+                        )
+                    ]
+                    if component == "tools"
+                    else None
+                )
+
+                with self.assertRaises(TokenLimitExceededError):
+                    await generate_with_retry(
+                        client,
+                        "small",
+                        system_instruction=system_instruction,
+                        tools=tools,
+                        manager=manager,
+                        retries=0,
+                    )
+
+                self.assertEqual(calls, [])
+                self.assertEqual(
+                    manager.model_token_usage.get("default", 0), 0
+                )
+                await manager.close()
 
     async def test_cancelled_sent_request_charges_prompt_and_releases_output(self):
         started = asyncio.Event()

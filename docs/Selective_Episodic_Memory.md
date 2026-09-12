@@ -50,6 +50,8 @@ Indexing failure never changes the business turn result and leaves a retryable o
 
 This separation prevents a complete historical log from becoming model-visible merely because the manager restarted.
 
+Automatic compression summaries are model-visible Working Context transforms rather than new Journal facts, so they cannot reintroduce metadata-only tool observations into deterministic recall segments.
+
 ## Enabling the Optional Mode
 
 ```python

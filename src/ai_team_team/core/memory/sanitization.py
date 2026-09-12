@@ -24,7 +24,7 @@ def sanitize_message_payload(
     content = str(payload.get("content", ""))
     redacted = False
     if not capture_content:
-        payload["content"] = "[tool content omitted from memory journal]"
+        payload["content"] = "[content omitted from memory journal]"
         tool_calls = payload.get("tool_calls")
         if isinstance(tool_calls, list):
             sanitized_calls = []

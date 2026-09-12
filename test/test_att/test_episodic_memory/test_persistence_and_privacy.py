@@ -461,6 +461,95 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
         )
         self.assertIn(captured_body, captured_segment.recall_content)
 
+    async def test_compression_cannot_capture_metadata_only_tool_content(self):
+        marker = "METADATA-ONLY-COMPRESSION-BODY"
+        summary_inputs = []
+        original_generate = self.client.generate
+
+        async def generate(
+            prompt,
+            system_instruction=None,
+            require_json=False,
+            **kwargs,
+        ):
+            if system_instruction == "You are a precise summarization assistant.":
+                summary_inputs.append(str(prompt))
+                return LLMResponse(
+                    text=(
+                        f"The lookup returned {marker}."
+                        if marker in str(prompt)
+                        else "Earlier work completed."
+                    )
+                )
+            return await original_generate(
+                prompt,
+                system_instruction=system_instruction,
+                require_json=require_json,
+                **kwargs,
+            )
+
+        self.client.generate = generate
+        self.manager.config.enable_memory_compression = True
+        self.manager.config.max_memory_turns = 2
+
+        def metadata_lookup():
+            return marker
+
+        self.manager.register_tool(
+            "metadata_lookup",
+            "Returns metadata-only content.",
+            metadata_lookup,
+        )
+        self.client.responses = [
+            "Action: metadata_lookup()",
+            "Final Answer: lookup completed",
+        ]
+        await self.team.execute_reasoning_step_detailed(
+            self.agent,
+            "Look up the record.",
+            "System.",
+            manager=self.manager,
+        )
+        for prompt in ("Continue with another task.", "Continue again."):
+            await self.team.execute_reasoning_step_detailed(
+                self.agent,
+                prompt,
+                "System.",
+                manager=self.manager,
+            )
+        await self.manager.flush_memory_indexing()
+
+        self.assertTrue(summary_inputs)
+        self.assertTrue(any(marker in item for item in summary_inputs))
+        self.assertFalse(
+            any(
+                marker in str(event.payload)
+                for event in self.manager._memory.events.values()
+            )
+        )
+        self.assertFalse(
+            any(
+                marker in segment.recall_content
+                for segment in self.manager._memory.segments.values()
+            )
+        )
+
+        db_path = os.path.join(self.tmpdir, "compression-capture.db")
+        await self.manager.save_state(db_path)
+        with closing(sqlite3.connect(db_path)) as connection:
+            persisted_events = connection.execute(
+                "SELECT COUNT(*) FROM system_memory_events "
+                "WHERE instr(payload, ?) > 0",
+                (marker,),
+            ).fetchone()[0]
+            persisted_segments = connection.execute(
+                "SELECT COUNT(*) FROM agent_memory_segments "
+                "WHERE instr(recall_content, ?) > 0",
+                (marker,),
+            ).fetchone()[0]
+        self.assertEqual(persisted_events, 0)
+        self.assertEqual(persisted_segments, 0)
+
     async def test_membership_changes_do_not_touch_agent_memory(self):
         await self.team.execute_reasoning_step_detailed(
             self.agent,

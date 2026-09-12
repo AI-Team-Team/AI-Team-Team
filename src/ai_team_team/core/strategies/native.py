@@ -1,6 +1,7 @@
 """Native provider tool-calling reasoning strategy."""
 
 import asyncio
+import uuid
 from typing import Any, List
 
 from ai_team_team.core.agent import Agent
@@ -55,6 +56,10 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
             tools = _available_tools(team, agent, manager)
             native_tools = list(tools.values())
             executor = ToolExecutor(team, agent, manager)
+            invocation_scope = (
+                manager._active_agent_turn_id.get()
+                or f"TURN-runtime-{uuid.uuid4().hex}"
+            )
             max_rounds = manager.config.max_tool_rounds if manager else 5
             max_argument_retries = (
                 manager.config.max_tool_argument_retries if manager else 3
@@ -126,34 +131,38 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                     manager,
                     capture_content=False,
                 )
-                results = await asyncio.gather(
-                    *(
-                        executor.execute(
-                            call.name,
-                            kwargs=(
-                                call.arguments
-                                if isinstance(call.arguments, dict)
-                                else {}
-                            ),
-                            call_id=call.call_id,
-                            raw=call.raw,
-                            tools=tools,
+                executions = []
+                for call_index, call in enumerate(response.tool_calls):
+                    if isinstance(call.arguments, dict):
+                        durable_invocation_id = (
+                            f"{invocation_scope}:native:"
+                            f"{round_index}:{call_index}"
                         )
-                        if isinstance(call.arguments, dict)
-                        else asyncio.sleep(
-                            0,
-                            result=ToolResult(
-                                call.call_id,
+                        executions.append(
+                            executor.execute(
                                 call.name,
-                                "Native tool arguments must be an object.",
-                                call.raw,
-                                status=ToolResultStatus.INVALID_ARGUMENTS,
-                                error_kind="native_arguments_not_object",
-                            ),
+                                kwargs=call.arguments,
+                                call_id=call.call_id,
+                                invocation_id=durable_invocation_id,
+                                raw=call.raw,
+                                tools=tools,
+                            )
                         )
-                        for call in response.tool_calls
-                    )
-                )
+                    else:
+                        executions.append(
+                            asyncio.sleep(
+                                0,
+                                result=ToolResult(
+                                    call.call_id,
+                                    call.name,
+                                    "Native tool arguments must be an object.",
+                                    call.raw,
+                                    status=ToolResultStatus.INVALID_ARGUMENTS,
+                                    error_kind="native_arguments_not_object",
+                                ),
+                            )
+                        )
+                results = await asyncio.gather(*executions)
                 invalid_batch = False
                 fatal_tool_result = None
                 for result in results:

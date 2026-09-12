@@ -174,7 +174,9 @@ Before committing, the manager reacquires the topology lock and revalidates the 
 
 Configured model token limits are hard quotas.
 
-Before each model attempt, ATT atomically reserves the estimated prompt tokens and maximum output budget.
+Before each model attempt, ATT atomically reserves the estimated prompt, system instruction, transmitted tool-definition, and maximum output tokens.
+
+The estimate covers explicit ATT request components without attempting to reproduce provider-internal framing or billing details.
 
 Settlement charges reported usage when available, refunds unused output capacity, and conservatively accounts for sent failures or cancellations.
 

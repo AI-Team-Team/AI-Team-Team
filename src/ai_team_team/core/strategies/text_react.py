@@ -1,6 +1,7 @@
 """Strict text ReAct reasoning strategy."""
 
 import re
+import uuid
 from typing import Any, List
 
 from ai_team_team.core.agent import Agent
@@ -76,7 +77,11 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     ),
                     manager=manager,
                 )
-                text = response.text if isinstance(response, LLMResponse) else str(response)
+                text = (
+                    response.text or ""
+                    if isinstance(response, LLMResponse)
+                    else str(response)
+                )
                 answer = _extract_final_answer(text)
                 if answer is None:
                     answer = text.strip()
@@ -123,6 +128,11 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                 mode_instruction,
             )
             executor = ToolExecutor(team, agent, manager)
+            invocation_scope = (
+                manager._active_agent_turn_id.get()
+                if manager
+                else None
+            ) or f"TURN-runtime-{uuid.uuid4().hex}"
             max_argument_retries = (
                 manager.config.max_tool_argument_retries if manager else 3
             )
@@ -140,7 +150,11 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     ),
                     manager=manager,
                 )
-                text = response.text if isinstance(response, LLMResponse) else str(response)
+                text = (
+                    response.text or ""
+                    if isinstance(response, LLMResponse)
+                    else str(response)
+                )
                 text = text.strip()
                 has_action = bool(
                     re.search(r"(?im)^\s*Action\s*:", text)
@@ -176,16 +190,15 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     action = parse_text_action(text)
                     args, kwargs = parse_tool_arguments(action.arguments)
                     call_id = (
-                        f"{manager._active_discussion_id.get() or 'runtime'}:"
-                        f"{agent.agent_id}:{step}:{action.name}"
-                        if manager
-                        else f"{agent.agent_id}:{step}:{action.name}"
+                        f"{invocation_scope}:text:{step}:"
+                        f"{action.name}"
                     )
                     result = await executor.execute(
                         action.name,
                         args,
                         kwargs,
                         call_id=call_id,
+                        invocation_id=call_id,
                         tools=tools,
                     )
                     if manager:

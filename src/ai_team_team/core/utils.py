@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import json
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Union, List, Dict, Optional, Any
 from .exceptions import (
     LLMGenerationError,
@@ -55,7 +56,7 @@ async def _await_external_llm(awaitable: Any, manager: Optional[Any]) -> Any:
             if callable(close_awaitable):
                 close_awaitable()
             cancelled = asyncio.CancelledError("ATTManager is closing.")
-            cancelled.request_sent = False
+            setattr(cancelled, "request_sent", False)
             raise cancelled
         if task is not None:
             manager._llm_tasks.add(task)
@@ -72,7 +73,7 @@ def _output_limit_parameter(llm_client: Any) -> Optional[str]:
         try:
             supported = support_check()
             if supported in {"max_output_tokens", "max_tokens"}:
-                return supported
+                return str(supported)
             if supported is not True:
                 return None
         except Exception:
@@ -138,6 +139,53 @@ def _actual_usage(
         fallback_output_tokens if output is None else output
     )
 
+
+def _accepts_keyword(callable_obj: Any, name: str) -> bool:
+    """Returns whether a callable explicitly or variadically accepts a keyword."""
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return False
+    return name in signature.parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+
+
+def _serialize_tool_definition(tool: Any) -> str:
+    """Returns the stable provider-neutral definition sent for one Tool."""
+    if hasattr(tool, "json_schema"):
+        value = {
+            "name": getattr(tool, "name", ""),
+            "description": getattr(tool, "description", ""),
+            "parameters": getattr(tool, "json_schema"),
+        }
+    elif isinstance(tool, Mapping):
+        value = dict(tool)
+    else:
+        value = tool
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _count_request_input_tokens(
+    manager: Any,
+    model_alias: str,
+    prompt: Union[str, List[Dict[str, str]]],
+    system_instruction: Optional[str],
+    tools: Optional[List["Tool"]],
+) -> int:
+    """Estimates all explicit model-bound request components."""
+    prompt_text = (
+        prompt
+        if isinstance(prompt, str)
+        else json.dumps(prompt, ensure_ascii=False, default=str)
+    )
+    components = [prompt_text]
+    if system_instruction:
+        components.append(system_instruction)
+    components.extend(_serialize_tool_definition(tool) for tool in tools or [])
+    return sum(manager.count_tokens(component, model_alias) for component in components)
+
 async def generate_with_retry(
     llm_client: Any,
     prompt: Union[str, List[Dict[str, str]]],
@@ -153,16 +201,28 @@ async def generate_with_retry(
 ) -> Union[str, Any]:
     """Invokes LLM client generation with exponential backoff on transient errors."""
     from .response import LLMResponse
-    prompt_tokens = 0
+    input_tokens = 0
     resolved_alias = model_alias
-    prompt_text = prompt if isinstance(prompt, str) else json.dumps(prompt)
+    generate_callable = getattr(llm_client, "generate", llm_client)
+    transmitted_tools = (
+        tools
+        if tools is not None and _accepts_keyword(generate_callable, "tools")
+        else None
+    )
 
     if manager:
         resolved_alias = (
             resolved_alias
             or manager.resolve_runtime_model_alias(llm_client)
         )
-        prompt_tokens = manager.count_tokens(prompt_text, resolved_alias)
+        if resolved_alias in manager.config.model_token_limits:
+            input_tokens = _count_request_input_tokens(
+                manager,
+                resolved_alias,
+                prompt,
+                system_instruction,
+                transmitted_tools,
+            )
 
     if not isinstance(retries, int) or isinstance(retries, bool) or retries < 0:
         raise ValueError("retries must be a non-negative integer.")
@@ -180,7 +240,8 @@ async def generate_with_retry(
         try:
             output_parameter = None
             if (
-                manager
+                manager is not None
+                and resolved_alias is not None
                 and resolved_alias in manager.config.model_token_limits
             ):
                 output_parameter = _output_limit_parameter(llm_client)
@@ -189,7 +250,7 @@ async def generate_with_retry(
                 )
                 reservation = manager.token_budget.reserve(
                     resolved_alias,
-                    prompt_tokens,
+                    input_tokens,
                     requested_output,
                 )
                 if reservation is not None and output_parameter is None:
@@ -202,13 +263,8 @@ async def generate_with_retry(
 
             if hasattr(llm_client, "generate"):
                 kwargs = {}
-                if tools is not None:
-                    try:
-                        sig = inspect.signature(llm_client.generate)
-                        if any(p.name == "tools" or p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-                            kwargs["tools"] = tools
-                    except Exception:
-                        pass
+                if transmitted_tools is not None:
+                    kwargs["tools"] = transmitted_tools
                 if output_parameter and reservation is not None:
                     kwargs[output_parameter] = reservation.output_tokens
                 request = llm_client.generate(
@@ -225,12 +281,14 @@ async def generate_with_retry(
                 )
             else:
                 # Fallback to direct callable
-                call_kwargs = {
+                call_kwargs: Dict[str, Any] = {
                     "prompt": prompt,
                     "system_instruction": system_instruction,
                     "temperature": temperature,
                     "require_json": require_json,
                 }
+                if transmitted_tools is not None:
+                    call_kwargs["tools"] = transmitted_tools
                 if output_parameter and reservation is not None:
                     call_kwargs[output_parameter] = reservation.output_tokens
                 if asyncio.iscoroutinefunction(llm_client):
@@ -253,15 +311,14 @@ async def generate_with_retry(
                 response_text = response.text
             elif hasattr(response, "text") and response.text is not None:
                 response_text = response.text
-            response_tokens = (
-                manager.count_tokens(response_text, resolved_alias)
-                if manager
-                else 0
-            )
             if reservation is not None:
+                assert manager is not None
+                response_tokens = manager.count_tokens(
+                    response_text, resolved_alias
+                )
                 manager.token_budget.settle(
                     reservation,
-                    _actual_usage(response, prompt_tokens, response_tokens),
+                    _actual_usage(response, input_tokens, response_tokens),
                 )
                 reservation = None
 
@@ -272,22 +329,24 @@ async def generate_with_retry(
             return response
         except asyncio.CancelledError as exc:
             if reservation is not None:
+                assert manager is not None
                 sent = getattr(exc, "request_sent", request_sent) is not False
                 if sent:
                     manager.token_budget.settle(
                         reservation,
-                        _actual_usage(exc, prompt_tokens, 0),
+                        _actual_usage(exc, input_tokens, 0),
                     )
                 else:
                     manager.token_budget.release(reservation)
             raise
         except Exception as e:
             if reservation is not None:
+                assert manager is not None
                 sent = getattr(e, "request_sent", request_sent) is not False
                 if sent:
                     manager.token_budget.settle(
                         reservation,
-                        _actual_usage(e, prompt_tokens, 0),
+                        _actual_usage(e, input_tokens, 0),
                     )
                 else:
                     manager.token_budget.release(reservation)

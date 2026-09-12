@@ -84,6 +84,36 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(result.status, ToolResultStatus.SUCCESS)
         self.assertEqual(result.content, "Error: domain text")
+
+    async def test_provider_call_id_is_separate_from_durable_invocation_id(self):
+        observed_invocation_ids = []
+
+        def observe_invocation():
+            observed_invocation_ids.append(
+                self.manager._active_tool_invocation_id.get()
+            )
+            return "ok"
+
+        result = await ToolExecutor(
+            self.team, self.agent, self.manager
+        ).execute(
+            "observe_invocation",
+            call_id="provider-call-id",
+            invocation_id="TURN-1:native:0:0",
+            tools={
+                "observe_invocation": Tool(
+                    "observe_invocation",
+                    "Observe the durable invocation identity.",
+                    observe_invocation,
+                )
+            },
+        )
+
+        self.assertEqual(result.tool_call_id, "provider-call-id")
+        self.assertEqual(
+            observed_invocation_ids,
+            ["TURN-1:native:0:0"],
+        )
     async def test_typed_transient_retry_policies(self):
         for policy, retry_safe, expected_attempts in [
             ("never", True, 1),

@@ -361,7 +361,11 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
                 backoff_factor=backoff,
                 manager=manager
             )
-            summary_text = summary_resp.text if isinstance(summary_resp, LLMResponse) else str(summary_resp)
+            summary_text = (
+                (summary_resp.text or "")
+                if isinstance(summary_resp, LLMResponse)
+                else str(summary_resp)
+            )
             summary_text = summary_text.strip()
         except Exception as e:
             team.logger.warning(f"Memory compression summarization failed: {e}. Using a generic fallback summary.")
@@ -372,7 +376,17 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
             "content": f"*** HISTORICAL SUMMARY ARCHIVE ***\n{summary_text}"
         }
         latest_messages = agent.messages[slice_idx :]
-        _append_agent_message(agent, archive_message, team, manager)
+        # Compression is a derived, model-visible Working Context transform. It
+        # must not create a new Journal fact because its source may contain tool
+        # observations whose memory_capture policy is metadata-only. Authorized
+        # source messages already have their own immutable Journal events.
+        _append_agent_message(
+            agent,
+            archive_message,
+            team,
+            manager,
+            capture_content=False,
+        )
         enriched_archive = agent.messages.pop()
         agent.messages = [first_msg, enriched_archive] + latest_messages
 
@@ -430,7 +444,7 @@ def _turn_result(
 
 def _available_tools(team: Any, agent: Agent, manager: Any) -> Dict[str, Any]:
     if manager and hasattr(manager, "get_available_tools"):
-        return manager.get_available_tools(team, agent)
+        return dict(manager.get_available_tools(team, agent))
     return dict(getattr(team, "tools", {}) or {})
 
 
