@@ -82,11 +82,15 @@ Enabling the feature requires SQLite FTS5, and ATT fails clearly when the local 
 The following tools appear in the invocation-scoped tool view only while the feature is enabled:
 
 - `search_memories(query=None, tags=None, team_id=None, discussion_id=None, limit=20, cursor=None)` returns only Agent-owned card metadata and provenance.
-- `recall_memory(memory_id, start_line=1, end_line=None)` returns a bounded historical-data observation from one active Agent-owned card.
+- `recall_memory(memory_id, start_line=1, end_line=None, start_character=1, character_count=None, expected_segment_version=None)` returns a bounded historical-data observation from one active Agent-owned card.
 - `keep_memory_in_context(memory_id, note=None)` retains only a compact reference after the same card was recalled earlier in the current Agent turn.
 - `forget_memory(memory_id, reason=None)` hides the card and removes its retained references without modifying Journal events or source records.
 
 Recall content is prefixed as historical reference data rather than instructions.
+
+Line and Unicode-character coordinates are one-based. `end_line` and `character_count` are mutually exclusive selections, while `max_recall_lines`, `max_recall_chars`, and `max_recall_tokens` remain host-controlled output bounds.
+
+A partial result returns `next_line`, `next_character`, and the immutable Segment digest as `segment_version`. The next call supplies those coordinates and `expected_segment_version`; this makes long single lines, Unicode, and multi-line content reachable without gaps or duplication and rejects a continuation if its source Segment changed.
 
 The recalled body is available only to the current invocation and is replaced in Working Context with `[Historical memory recalled: <memory_id>]` when that invocation ends.
 

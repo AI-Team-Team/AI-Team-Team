@@ -15,8 +15,14 @@ flowchart TD
     Labels -->|temporary failure| Retry["Return segment to pending with bounded retry"]
     Labels -->|retry exhausted| Failed["Mark segment failed without changing business result"]
     Card --> Search["Owner-only metadata search or browse"]
-    Search --> Recall["Bounded recall_content observation marked as historical data"]
-    Recall --> Invocation["Current Agent invocation only"]
+    Search --> Recall["Token-bounded recall_content observation marked as historical data"]
+    Recall --> Complete{"Requested range complete?"}
+    Complete -->|no| Cursor["Return next_line, next_character, and segment_version"]
+    Cursor --> Version{"Same Agent, memory ID, and Segment version?"}
+    Version -->|yes| Recall
+    Version -->|no| Reject["Reject stale or mismatched continuation"]
+    Complete -->|yes| Invocation
+    Invocation["Current Agent invocation only"]
     Invocation --> Cleanup["Replace body with memory-ID marker when invocation ends"]
     Recall --> Keep{"Agent explicitly keeps a compact reference?"}
     Keep -->|yes| Working["Persist compact Working Context reference"]

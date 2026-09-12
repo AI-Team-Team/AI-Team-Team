@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import shutil
 import sqlite3
@@ -6,6 +7,7 @@ import tempfile
 import time
 import unittest
 from contextlib import closing
+from unittest.mock import patch
 
 from ai_team_team import (
     ATTConfig,
@@ -15,7 +17,9 @@ from ai_team_team import (
     AgentTurnStatus,
     MemoryCardStatus,
     MemoryIndexStatus,
+    ToolResultStatus,
 )
+from ai_team_team.core.tool_runtime import ToolExecutor
 from ai_team_team.core.memory.sanitization import content_digest
 
 from test.test_att.test_episodic_memory._support import (
@@ -322,6 +326,123 @@ class TestCatalogAndRecall(EpisodicMemoryTestCase):
             1,
         )
         self.assertTrue(recalled.truncated)
+
+    async def test_recall_continuation_reconstructs_source_without_gaps(self):
+        await self.team.execute_reasoning_step_detailed(
+            self.agent,
+            "Create a memory for continuation testing.",
+            "System.",
+            manager=self.manager,
+        )
+        await self.manager.flush_memory_indexing()
+        card = next(iter(self.manager._memory.cards.values()))
+        segment = self.manager._memory.segments[card.segment_id]
+        source = "αβγδεζη\n" + "X" * 19 + "TAIL_FACT_987\n終"
+        segment.recall_content = source
+        segment.content_sha256 = content_digest(source)
+        executor = ToolExecutor(self.team, self.agent, self.manager)
+        tools = self.manager.get_available_tools(self.team, self.agent)
+        recall_schema = tools["recall_memory"].json_schema["properties"]
+        self.assertIn("start_character", recall_schema)
+        self.assertIn("character_count", recall_schema)
+        self.assertIn("expected_segment_version", recall_schema)
+        self.assertEqual(recall_schema["start_line"]["minimum"], 1)
+        self.assertEqual(recall_schema["start_character"]["minimum"], 1)
+
+        async def reconstruct():
+            line = 1
+            character = 1
+            expected_version = None
+            pages = []
+            for _ in range(len(source) + 1):
+                tool_result = await executor.execute(
+                    "recall_memory",
+                    kwargs={
+                        "memory_id": card.memory_id,
+                        "start_line": line,
+                        "start_character": character,
+                        "expected_segment_version": expected_version,
+                    },
+                    tools=tools,
+                )
+                self.assertIs(tool_result.status, ToolResultStatus.SUCCESS)
+                result = json.loads(tool_result.content)
+                pages.append(result["content"])
+                self.assertEqual(
+                    result["segment_version"], segment.content_sha256
+                )
+                if not result["truncated"]:
+                    self.assertIsNone(result["next_line"])
+                    self.assertIsNone(result["next_character"])
+                    return "".join(pages)
+                self.assertIsNotNone(result["next_line"])
+                self.assertIsNotNone(result["next_character"])
+                self.assertNotEqual(
+                    (result["next_line"], result["next_character"]),
+                    (line, character),
+                )
+                line = result["next_line"]
+                character = result["next_character"]
+                expected_version = result["segment_version"]
+            self.fail("Recall continuation did not terminate.")
+
+        turn_token = self.manager._active_agent_turn_id.set("TURN-recall-pages")
+        try:
+            self.manager.config.episodic_memory.max_recall_chars = 7
+            self.manager.config.episodic_memory.max_recall_tokens = 10_000
+            by_character_limit = await reconstruct()
+
+            self.manager.config.episodic_memory.max_recall_chars = 10_000
+            self.manager.config.episodic_memory.max_recall_tokens = 5
+            with patch.object(
+                self.manager,
+                "count_tokens",
+                side_effect=lambda text, alias: len(text),
+            ):
+                by_token_limit = await reconstruct()
+
+            self.manager.config.episodic_memory.max_recall_tokens = 10_000
+            self.manager.config.episodic_memory.max_recall_lines = 1
+            by_line_limit = await reconstruct()
+        finally:
+            self.manager._active_agent_turn_id.reset(turn_token)
+
+        self.assertEqual(by_character_limit, source)
+        self.assertEqual(by_token_limit, source)
+        self.assertEqual(by_line_limit, source)
+
+    async def test_recall_continuation_rejects_changed_segment(self):
+        await self.team.execute_reasoning_step_detailed(
+            self.agent,
+            "Create a versioned memory.",
+            "System.",
+            manager=self.manager,
+        )
+        await self.manager.flush_memory_indexing()
+        card = next(iter(self.manager._memory.cards.values()))
+        segment = self.manager._memory.segments[card.segment_id]
+        segment.recall_content = "A" * 100
+        segment.content_sha256 = content_digest(segment.recall_content)
+        self.manager.config.episodic_memory.max_recall_chars = 10
+
+        agent_token = self.manager._active_tool_agent.set(self.agent)
+        team_token = self.manager._active_team.set(self.team)
+        turn_token = self.manager._active_agent_turn_id.set("TURN-recall-version")
+        try:
+            first = await self.manager._memory.recall(card.memory_id)
+            segment.recall_content = "B" + segment.recall_content
+            segment.content_sha256 = content_digest(segment.recall_content)
+            with self.assertRaisesRegex(ValueError, "recall cursor"):
+                await self.manager._memory.recall(
+                    card.memory_id,
+                    start_line=first.next_line,
+                    start_character=first.next_character,
+                    expected_segment_version=first.segment_version,
+                )
+        finally:
+            self.manager._active_agent_turn_id.reset(turn_token)
+            self.manager._active_team.reset(team_token)
+            self.manager._active_tool_agent.reset(agent_token)
 
     async def test_forget_hides_card_without_mutating_journal(self):
         await self.team.execute_reasoning_step_detailed(

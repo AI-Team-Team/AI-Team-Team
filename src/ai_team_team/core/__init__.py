@@ -9,6 +9,7 @@ from .exceptions import (
     StateRestoreError,
     TokenLimitExceededError,
     TransientLLMError,
+    AgentInvocationDependencyError,
     AgentTurnIncompleteError,
     ToolArgumentError,
     ToolBusinessError,

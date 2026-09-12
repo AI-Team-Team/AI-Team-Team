@@ -35,6 +35,8 @@ The system supports two core execution modes:
 
 Reasoning strategies are encapsulated as pluggable classes inheriting from `BaseReasoningStrategy`.
 
+Every business-turn strategy receives the same composed identity contract: invocation-scoped AgentTeam instructions, the persistent Agent's own `system_instructions`, the current identity/topology header, and only then the mode-specific tool protocol. Switching between Text ReAct, Native, and auto-selected Native execution therefore cannot remove the Agent's individual mission.
+
 ### Class Hierarchy
 
 * **`BaseReasoningStrategy`**: Abstract class declaring the `execute(...)` interface.

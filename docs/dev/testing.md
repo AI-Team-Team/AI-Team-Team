@@ -155,7 +155,11 @@ Private Agent DocLib tests must create agents through `register_agent` or a supp
 
 Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, schema 7 corruption, and the absence of private body text from transcripts, callbacks, and message history. The `test/test_att/test_private_doclib/` package contains the baseline end-to-end cases.
 
-Selective episodic-memory tests must cover disabled-mode zero indexing/tool exposure, one card per completed or incomplete turn, cancelled-turn exclusion, isolated label calls, owner-only search and recall, ephemeral recall cleanup, explicit compact retention, Journal immutability, private/tool-body redaction, FTS5 gating, Agent deletion semantics, restore corruption, and membership changes that leave all Agent-owned memory untouched.
+Selective episodic-memory tests must cover disabled-mode zero indexing/tool exposure, one card per completed or incomplete turn, cancelled-turn exclusion, isolated label calls, owner-only search and recall, character- and token-bounded continuation that reconstructs long single lines and Unicode without gaps or duplication, Segment-version mismatch rejection, ephemeral recall cleanup, explicit compact retention, Journal immutability, private/tool-body redaction, FTS5 gating, Agent deletion semantics, restore corruption, and membership changes that leave all Agent-owned memory untouched.
+
+Reasoning-strategy tests must assert that persistent Agent `system_instructions` reach Text ReAct, Native, auto-selected Native, and no-tool business turns together with the invocation-scoped AgentTeam instructions.
+
+Synchronous delegation tests must reject direct self-inclusion and inherited ancestor invocation dependencies before creating any Agent, AgentTeam, or DocLib, while retaining a passing idle-Agent delegation control. Detached tasks that inherit a completed ContextVar chain must not be treated as active dependencies.
 
 The suite's `test/test_att/test_episodic_memory/` package contains the baseline end-to-end cases for this optional mode.
 

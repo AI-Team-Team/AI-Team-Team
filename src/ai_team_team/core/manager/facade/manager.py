@@ -108,6 +108,7 @@ class ATTManager(
         self._runtime_gate = asyncio.Lock()
         self._starting_invocations = 0
         self._active_invocations = 0
+        self._active_agent_invocation_tokens: set[str] = set()
         self._state_version = 0
         self._snapshots = SnapshotBuilder(self)
         self._restore = RestoreService(self)
@@ -133,6 +134,13 @@ class ATTManager(
         )
         self._active_round_number: contextvars.ContextVar[Optional[int]] = (
             contextvars.ContextVar(f"att_active_round_{id(self)}", default=None)
+        )
+        self._agent_invocation_chain: contextvars.ContextVar[
+            Tuple[Tuple[str, str], ...]
+        ] = (
+            contextvars.ContextVar(
+                f"att_agent_invocation_chain_{id(self)}", default=()
+            )
         )
         self._memory_internal_operation: contextvars.ContextVar[bool] = (
             contextvars.ContextVar(f"att_memory_internal_{id(self)}", default=False)

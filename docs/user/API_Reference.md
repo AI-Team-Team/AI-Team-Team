@@ -384,7 +384,7 @@ These tools are automatically registered and bound to all agent teams by default
 ### Spawning & Communication
 
 * **`dispatch_subagent(task: str, team_purpose: str, member_configs: Optional[dict] = None, existing_member_ids: Optional[List[str]] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: Optional[dict] = None) -> str`**
-  Spawns a recursive child `AgentTeam` (Level $N+1$). `member_configs` creates new Agents and `existing_member_ids` adds active registered Agents without assigning team-specific roles; their combined count must satisfy the configured minimum. Optional context files can be pre-populated via `initial_documents`.
+  Spawns a recursive child `AgentTeam` (Level $N+1$). `member_configs` creates new Agents and `existing_member_ids` adds active registered Agents without assigning team-specific roles; their combined count must satisfy the configured minimum. An Agent already present in the inherited synchronous invocation dependency chain is rejected before child creation. Optional context files can be pre-populated via `initial_documents`.
 * **`delegate_escalation(objective: str, rationale: str) -> str`**
   Escalates a task or deadlock upward to the team's direct parent in the lineage hierarchy.
 * **`send_peer_message(team_id: str, message: str) -> str`**
@@ -422,6 +422,19 @@ These tools are automatically registered and bound to all agent teams by default
 
 * **`request_migration(target_parent_id: str, rationale: str) -> str`**
   Requests to migrate the caller's team to a new parent in the hierarchy, audited by the configured `migration_policy`.
+
+### Selective Episodic Memory
+
+These tools are visible only when `episodic_memory.enabled=True` and are always scoped to the current active Agent identity.
+
+* **`search_memories(query: Optional[str] = None, tags: Optional[List[str]] = None, team_id: Optional[str] = None, discussion_id: Optional[str] = None, limit: int = 20, cursor: Optional[str] = None) -> MemorySearchResult`**
+  Searches only the current Agent's active Memory Cards.
+* **`recall_memory(memory_id: str, start_line: int = 1, end_line: Optional[int] = None, start_character: int = 1, character_count: Optional[int] = None, expected_segment_version: Optional[str] = None) -> MemoryRecallResult`**
+  Returns a token-bounded historical observation. Partial results expose `next_line`, `next_character`, and `segment_version`; pass them into the next call to continue without gaps or duplication.
+* **`keep_memory_in_context(memory_id: str, note: Optional[str] = None) -> MemoryOperationResult`**
+  Retains a compact reference only after the card was recalled in the same Agent turn.
+* **`forget_memory(memory_id: str, reason: Optional[str] = None) -> MemoryOperationResult`**
+  Hides the Agent-owned card without modifying the immutable Journal or source Segment.
 
 ### Document Library (DocLib) File Actions
 

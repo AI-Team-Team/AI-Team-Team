@@ -29,6 +29,29 @@ _MEMORY_RECALL_TOOL_NAMES = {"recall_memory"}
 _MEMORY_WINDOW_MARKER = "[ATT_MEMORY_RECALL]"
 
 
+def _compose_business_system_instruction(
+    team_instruction: str,
+    agent: Agent,
+    identity_header: str,
+    mode_instruction: str = "",
+) -> str:
+    """Composes the shared identity contract for every business-turn backend."""
+
+    parts = []
+    if team_instruction:
+        parts.append(team_instruction)
+    if agent.system_instructions:
+        parts.append(
+            "### YOUR INDIVIDUAL MISSION\n"
+            f"{agent.system_instructions}"
+        )
+    if identity_header:
+        parts.append(identity_header)
+    if mode_instruction:
+        parts.append(mode_instruction)
+    return "\n\n".join(parts)
+
+
 def _memory_recall_placeholder(result: ToolResult) -> str:
     try:
         memory_id = json.loads(result.content).get("memory_id")
@@ -214,8 +237,16 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
     role_desc_str = f"- **Role Description**: {agent.role_description}\n" if getattr(agent, "role_description", "") else ""
     experts_str = ""
     if manager:
+        active_tokens = manager._active_agent_invocation_tokens
+        dependency_ids = {
+            agent_id
+            for agent_id, invocation_id in manager._agent_invocation_chain.get()
+            if invocation_id in active_tokens
+        }
         experts_lines = []
         for name, exp_agent in sorted(manager.agents.items()):
+            if exp_agent.agent_id in dependency_ids:
+                continue
             role_desc = getattr(exp_agent, "role_description", "") or "No description"
             experts_lines.append(
                 f"  - **{name}** (agent_id: `{exp_agent.agent_id}`; identity role: {exp_agent.role}): {role_desc}"

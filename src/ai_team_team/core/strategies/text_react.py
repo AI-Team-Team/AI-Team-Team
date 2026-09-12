@@ -26,6 +26,7 @@ from .shared import (
     _append_private_window_message,
     _append_transient_window_message,
     _available_tools,
+    _compose_business_system_instruction,
     _extract_final_answer,
     _memory_recall_placeholder,
     _prepare_agent_context,
@@ -57,17 +58,14 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
             )
             tools = _available_tools(team, agent, manager)
             if not tools:
-                agent_mission = (
-                    f"\n\n### YOUR INDIVIDUAL MISSION\n{agent.system_instructions}"
-                    if getattr(agent, "system_instructions", "")
-                    else ""
-                )
                 response = await generate_with_retry(
                     llm_client=agent.llm_client,
                     prompt=agent.messages,
-                    system_instruction=(
-                        f"{system_instruction}{agent_mission}\n\n{identity_header}\n"
-                        "Output exactly 'Final Answer: <content>' when complete."
+                    system_instruction=_compose_business_system_instruction(
+                        system_instruction,
+                        agent,
+                        identity_header,
+                        "Output exactly 'Final Answer: <content>' when complete.",
                     ),
                     temperature=0.3,
                     retries=manager.config.llm_max_retries if manager else 3,
@@ -109,14 +107,7 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                     else "compact"
                 )
                 rendered_tools.append(render_tool_prompt(tool, mode))
-            react_instruction = (
-                f"{system_instruction}\n\n"
-                + (
-                    f"### YOUR INDIVIDUAL MISSION\n{agent.system_instructions}\n\n"
-                    if getattr(agent, "system_instructions", "")
-                    else ""
-                )
-                + f"{identity_header}"
+            mode_instruction = (
                 "### AVAILABLE TOOLS\n"
                 + "\n".join(rendered_tools)
                 + "\n\n### REACT FORMAT INSTRUCTIONS\n"
@@ -124,6 +115,12 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                 "Thought: <brief reasoning>\n"
                 "Action: tool_name(<literal positional or keyword arguments>)\n"
                 "When complete, output exactly Final Answer: <content>."
+            )
+            react_instruction = _compose_business_system_instruction(
+                system_instruction,
+                agent,
+                identity_header,
+                mode_instruction,
             )
             executor = ToolExecutor(team, agent, manager)
             max_argument_retries = (
@@ -311,4 +308,3 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
                 manager._auto_save(
                     agents={agent.agent_id}, teams={team.team_id}
                 )
-

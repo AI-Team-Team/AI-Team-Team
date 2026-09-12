@@ -47,6 +47,10 @@ class AgentTurnIncompleteError(ATTException):
         super().__init__(result.reason or "Agent turn was incomplete.")
 
 
+class AgentInvocationDependencyError(ATTException):
+    """Raised when nested work would wait for an Agent invocation it depends on."""
+
+
 class ToolError(Exception):
     """Base class for classified tool execution failures."""
 

@@ -23,6 +23,7 @@ from .shared import (
     _append_private_window_message,
     _append_transient_window_message,
     _available_tools,
+    _compose_business_system_instruction,
     _memory_recall_placeholder,
     _prepare_agent_context,
     _privacy_safe_agent_output,
@@ -62,7 +63,11 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                 response = await generate_with_retry(
                     llm_client=agent.llm_client,
                     prompt=agent.messages,
-                    system_instruction=f"{system_instruction}\n\n{identity_header}",
+                    system_instruction=_compose_business_system_instruction(
+                        system_instruction,
+                        agent,
+                        identity_header,
+                    ),
                     temperature=0.3,
                     require_json=False,
                     retries=manager.config.llm_max_retries if manager else 3,

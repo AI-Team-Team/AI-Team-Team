@@ -128,7 +128,12 @@ class MemoryRecallResult(BaseModel):
     discussion_id: Optional[str] = None
     content: str
     start_line: int = Field(ge=1)
+    start_character: int = Field(ge=1)
     end_line: int = Field(ge=1)
+    next_line: Optional[int] = Field(default=None, ge=1)
+    next_character: Optional[int] = Field(default=None, ge=1)
+    segment_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    content_token_count: int = Field(ge=0)
     truncated: bool = False
 
 

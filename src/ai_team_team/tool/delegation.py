@@ -65,6 +65,20 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                     "Existing Agents are not actively registered: "
                     + ", ".join(sorted(unavailable_ids))
                 )
+            active_tokens = att_manager._active_agent_invocation_tokens
+            dependency_ids = {
+                agent_id
+                for agent_id, invocation_id in att_manager._agent_invocation_chain.get()
+                if invocation_id in active_tokens
+            }
+            blocking_ids = sorted(dependency_ids.intersection(existing_member_ids))
+            if blocking_ids:
+                raise ToolBusinessError(
+                    "A synchronous child AgentTeam cannot include an Agent whose "
+                    "invocation is in the current dependency chain: "
+                    + ", ".join(blocking_ids),
+                    error_kind="agent_invocation_dependency",
+                )
 
         min_size = config.min_subagent_team_size
         if member_configs:

@@ -1,9 +1,14 @@
 """Invocation-scoped tools for an Agent's optional episodic-memory catalog."""
 
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
+
+from pydantic import Field
 
 from ..core.exceptions import ToolBusinessError, ToolPermissionError
 from .contract import Tool
+
+
+PositiveInt = Annotated[int, Field(ge=1)]
 
 
 def build_memory_tools(att_manager: Any) -> Dict[str, Tool]:
@@ -36,13 +41,21 @@ def build_memory_tools(att_manager: Any) -> Dict[str, Tool]:
 
     async def recall_memory(
         memory_id: str,
-        start_line: int = 1,
-        end_line: Optional[int] = None,
+        start_line: PositiveInt = 1,
+        end_line: Optional[PositiveInt] = None,
+        start_character: PositiveInt = 1,
+        character_count: Optional[PositiveInt] = None,
+        expected_segment_version: Optional[str] = None,
     ) -> Any:
         """Temporarily recalls one active Memory Card owned by the current Agent."""
         try:
             return await att_manager._memory.recall(
-                memory_id, start_line=start_line, end_line=end_line
+                memory_id,
+                start_line=start_line,
+                end_line=end_line,
+                start_character=start_character,
+                character_count=character_count,
+                expected_segment_version=expected_segment_version,
             )
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
@@ -80,7 +93,7 @@ def build_memory_tools(att_manager: Any) -> Dict[str, Tool]:
         ),
         "recall_memory": Tool(
             "recall_memory",
-            "Temporarily recalls a paginated historical memory owned by this Agent.",
+            "Temporarily recalls token-bounded historical memory owned by this Agent; continue partial results with next_line, next_character, and expected_segment_version.",
             recall_memory,
             memory_capture="metadata_only",
         ),

@@ -1,6 +1,7 @@
 """Owner-scoped Memory Catalog search, recall, retention, and forgetting."""
 
 import base64
+import bisect
 import hashlib
 import json
 import time
@@ -23,6 +24,57 @@ from ai_team_team.core.memory.sanitization import (
 
 if TYPE_CHECKING:
     from ai_team_team.core.agent import Agent
+
+
+def _line_start_offsets(content: str) -> List[int]:
+    """Returns absolute offsets for each one-based normalized line."""
+
+    offsets = [0]
+    offsets.extend(
+        index + 1 for index, character in enumerate(content) if character == "\n"
+    )
+    return offsets
+
+
+def _position_to_offset(
+    content: str,
+    line_offsets: Sequence[int],
+    line: int,
+    character: int,
+) -> int:
+    """Converts a one-based line and character position to an absolute offset."""
+
+    if line > len(line_offsets):
+        raise ValueError("start_line is beyond the end of the memory segment.")
+    line_start = line_offsets[line - 1]
+    newline_offset = content.find("\n", line_start)
+    line_limit = newline_offset if newline_offset >= 0 else len(content)
+    maximum_character = line_limit - line_start + 1
+    if character > maximum_character:
+        raise ValueError(
+            "start_character is beyond the requested memory segment line."
+        )
+    return line_start + character - 1
+
+
+def _offset_to_position(
+    line_offsets: Sequence[int], offset: int
+) -> tuple[int, int]:
+    """Converts an absolute offset to one-based continuation coordinates."""
+
+    line_index = bisect.bisect_right(line_offsets, offset) - 1
+    line_start = line_offsets[line_index]
+    return line_index + 1, offset - line_start + 1
+
+
+def _offset_after_line(
+    content: str, line_offsets: Sequence[int], line: int
+) -> int:
+    """Returns the offset immediately after an inclusive one-based line."""
+
+    if line < len(line_offsets):
+        return line_offsets[line]
+    return len(content)
 
 
 class MemoryCatalogMixin:
@@ -190,6 +242,9 @@ class MemoryCatalogMixin:
         memory_id: str,
         start_line: int = 1,
         end_line: Optional[int] = None,
+        start_character: int = 1,
+        character_count: Optional[int] = None,
+        expected_segment_version: Optional[str] = None,
     ) -> MemoryRecallResult:
         self._require_catalog_enabled()
         agent = self._require_active_agent()
@@ -203,35 +258,109 @@ class MemoryCatalogMixin:
         segment = self.segments.get(card.segment_id)
         if segment is None or content_digest(segment.recall_content) != segment.content_sha256:
             raise RuntimeError("The memory segment is missing or failed integrity validation.")
-        if not isinstance(start_line, int) or isinstance(start_line, bool) or start_line < 1:
-            raise ValueError("start_line must be a positive integer.")
+        for name, value in {
+            "start_line": start_line,
+            "start_character": start_character,
+        }.items():
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"{name} must be a positive integer.")
+        if end_line is not None and (
+            not isinstance(end_line, int)
+            or isinstance(end_line, bool)
+            or end_line < start_line
+        ):
+            raise ValueError(
+                "end_line must be an integer greater than or equal to start_line."
+            )
+        if character_count is not None and (
+            not isinstance(character_count, int)
+            or isinstance(character_count, bool)
+            or character_count < 1
+        ):
+            raise ValueError("character_count must be a positive integer.")
+        if end_line is not None and character_count is not None:
+            raise ValueError(
+                "end_line and character_count are mutually exclusive."
+            )
+        if expected_segment_version is not None and (
+            not isinstance(expected_segment_version, str)
+            or not expected_segment_version
+        ):
+            raise ValueError(
+                "expected_segment_version must be a non-empty string when provided."
+            )
+        if (
+            expected_segment_version is not None
+            and expected_segment_version != segment.content_sha256
+        ):
+            raise ValueError(
+                "The memory segment changed after the recall cursor was created."
+            )
+
+        source = segment.recall_content
+        line_offsets = _line_start_offsets(source)
+        start_offset = _position_to_offset(
+            source,
+            line_offsets,
+            start_line,
+            start_character,
+        )
+        if character_count is not None:
+            requested_end_offset = min(
+                len(source), start_offset + character_count
+            )
+        elif end_line is not None:
+            requested_end_offset = _offset_after_line(
+                source, line_offsets, end_line
+            )
+        else:
+            requested_end_offset = len(source)
+
         configured_lines = self.manager.config.episodic_memory.max_recall_lines
-        if end_line is None:
-            end_line = start_line + configured_lines - 1
-        if not isinstance(end_line, int) or isinstance(end_line, bool) or end_line < start_line:
-            raise ValueError("end_line must be an integer greater than or equal to start_line.")
-        end_line = min(end_line, start_line + configured_lines - 1)
-        lines = segment.recall_content.splitlines()
-        selected = lines[start_line - 1 : end_line]
-        content = "\n".join(selected)
-        truncated = end_line < len(lines)
+        line_limited_end = _offset_after_line(
+            source,
+            line_offsets,
+            start_line + configured_lines - 1,
+        )
         maximum_chars = self.manager.config.episodic_memory.max_recall_chars
-        if len(content) > maximum_chars:
-            content = content[:maximum_chars]
-            truncated = True
+        bounded_end_offset = min(
+            requested_end_offset,
+            line_limited_end,
+            start_offset + maximum_chars,
+        )
+        recalled_content = source[start_offset:bounded_end_offset]
         alias = self.manager.resolve_runtime_model_alias(agent.llm_client)
         maximum_tokens = self.manager.config.episodic_memory.max_recall_tokens
-        if content and self.manager.count_tokens(content, alias) > maximum_tokens:
+        content_token_count = self.manager.count_tokens(recalled_content, alias)
+        if recalled_content and content_token_count > maximum_tokens:
             lower = 0
-            upper = len(content)
+            upper = len(recalled_content)
             while lower < upper:
                 midpoint = (lower + upper + 1) // 2
-                if self.manager.count_tokens(content[:midpoint], alias) <= maximum_tokens:
+                if (
+                    self.manager.count_tokens(recalled_content[:midpoint], alias)
+                    <= maximum_tokens
+                ):
                     lower = midpoint
                 else:
                     upper = midpoint - 1
-            content = content[:lower]
-            truncated = True
+            recalled_content = recalled_content[:lower]
+            bounded_end_offset = start_offset + lower
+            content_token_count = self.manager.count_tokens(recalled_content, alias)
+
+        truncated = bounded_end_offset < requested_end_offset
+        if truncated and bounded_end_offset == start_offset:
+            raise RuntimeError(
+                "The configured memory recall token budget cannot return the next "
+                "Unicode character."
+            )
+        if truncated:
+            next_line, next_character = _offset_to_position(
+                line_offsets, bounded_end_offset
+            )
+        else:
+            next_line = None
+            next_character = None
         turn_id = self.manager._active_agent_turn_id.get()
         if not turn_id:
             raise RuntimeError("Memory recall requires an active Agent turn.")
@@ -243,23 +372,28 @@ class MemoryCatalogMixin:
             payload={
                 "memory_id": memory_id,
                 "start_line": start_line,
-                "end_line": start_line + content.count("\n"),
+                "start_character": start_character,
+                "end_line": start_line + recalled_content.count("\n"),
+                "next_line": next_line,
+                "next_character": next_character,
+                "segment_version": segment.content_sha256,
                 "truncated": truncated,
             },
             redacted=True,
         )
-        actual_end_line = start_line + content.count("\n")
-        if not selected:
-            content = ""
-            actual_end_line = start_line
-            truncated = False
+        actual_end_line = start_line + recalled_content.count("\n")
         return MemoryRecallResult(
             memory_id=memory_id,
             origin_team_id=card.origin_team_id,
             discussion_id=card.discussion_id,
-            content=content,
+            content=recalled_content,
             start_line=start_line,
+            start_character=start_character,
             end_line=actual_end_line,
+            next_line=next_line,
+            next_character=next_character,
+            segment_version=segment.content_sha256,
+            content_token_count=content_token_count,
             truncated=truncated,
         )
 
