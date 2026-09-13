@@ -109,6 +109,7 @@ class ATTManager(
         self._starting_invocations = 0
         self._active_invocations = 0
         self._active_agent_invocation_tokens: set[str] = set()
+        self._agent_wait_edge_counts: Dict[Tuple[str, str], int] = {}
         self._state_version = 0
         self._snapshots = SnapshotBuilder(self)
         self._restore = RestoreService(self)

@@ -114,12 +114,14 @@ flowchart TB
         Agents["Stable Agent Registry<br/>one identity and memory per Agent"]
         Membership["Role-Neutral Membership<br/>team_id ↔ agent_id"]
         Teams["Recursive AgentTeam Tree<br/>dynamic creation and migration"]
+        DelegationAdmission["Atomic Delegation Admission<br/>manager-wide Agent wait graph"]
         PrivateDocLib["Private Agent DocLibs"]
         TeamDocLib["Team DocLibs and Path ACLs"]
 
         Root --> Agents
         Agents --> Membership
         Membership --> Teams
+        DelegationAdmission --> Teams
         Agents --> PrivateDocLib
         Teams --> TeamDocLib
     end
@@ -129,6 +131,7 @@ flowchart TB
         Rounds["Multi-Round Discussion<br/>frozen membership per round"]
         Turns["Concurrent Member Turns"]
         AgentLock["Per-Agent Invocation Lock<br/>shared Agent calls remain serialized"]
+        WaitGraph["Reference-Counted Wait Graph<br/>reject synchronous cycles before creation"]
         Strategy["Text ReAct or Native Tool Calling"]
         Model["LLM Adapter, Atomic Token Budget,<br/>and Configured Failover"]
         Tools["Validated Tool Runtime<br/>ContextVars, schema, auditor, typed results"]
@@ -138,6 +141,8 @@ flowchart TB
         DiscussionLock --> Rounds
         Rounds --> Turns
         Turns --> AgentLock
+        AgentLock --> WaitGraph
+        WaitGraph --> DelegationAdmission
         AgentLock --> Strategy
         Strategy --> Model
         Strategy --> Tools
@@ -235,8 +240,8 @@ flowchart TB
     style Durability fill:#f5f3ff,stroke:#5e35b1,stroke-width:2px,color:#1f2937;
 
     class HostApp,Config,Bindings,Manager host;
-    class Root,Agents,Membership,Teams identity;
-    class DiscussionLock,Rounds,Turns,AgentLock,Strategy,Model,Tools,RoundResults,DiscussionResult execution;
+    class Root,Agents,Membership,Teams,DelegationAdmission identity;
+    class DiscussionLock,Rounds,Turns,AgentLock,WaitGraph,Strategy,Model,Tools,RoundResults,DiscussionResult execution;
     class Governance,Communication governance;
     class PrivateDocLib,TeamDocLib,Knowledge knowledge;
     class Supervision,Alerts supervision;

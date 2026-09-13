@@ -18,9 +18,14 @@ class RestoreTransactionMixin:
         manager = self.manager
         from ..facade import ATTManager
 
-        if manager._starting_invocations or manager._active_invocations:
+        if (
+            manager._starting_invocations
+            or manager._active_invocations
+            or manager._agent_wait_edge_counts
+        ):
             raise StateRestoreError(
-                "Cannot restore state while agent invocations are active or starting."
+                "Cannot restore state while agent invocations or synchronous "
+                "dependency reservations are active."
             )
         if any(team.is_running for team in manager.teams.values()):
             raise StateRestoreError("Cannot restore state while a team discussion is active.")

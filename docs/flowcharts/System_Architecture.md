@@ -76,6 +76,7 @@ flowchart TB
     subgraph Execution["Invocation-Scoped Agent and Tool Execution"]
         InvocationContext["ContextVars<br/>active Agent, AgentTeam, discussion, tool call"]
         AgentInvocationLock["Per-Agent invocation lock<br/>serializes one shared Agent across teams"]
+        AgentWaitGraph["Reference-Counted Agent Wait Graph<br/>atomic dependency reservation and<br/>transitive cycle rejection"]
         Prompt["Prompt Assembly<br/>identity, current AgentTeam, topology, experts,<br/>inbox, proposals, previous round, bounded memory"]
         ToolView["Invocation-Scoped Tool Resolver<br/>hide unavailable delegation or escalation tools"]
         Strategy{"Reasoning Strategy"}
@@ -95,11 +96,14 @@ flowchart TB
 
         ParallelTurns --> InvocationContext
         InvocationContext --> AgentInvocationLock
+        AgentInvocationLock -. coordinated by .-> AgentWaitGraph
         AgentInvocationLock --> Prompt
         WorkingContext --> Window
         Window --> Prompt
         ToolView --> Prompt
         ToolView --> ToolExecutor
+        ToolExecutor -->|synchronous delegation admission| AgentWaitGraph
+        AgentWaitGraph -->|cycle-free| TeamCreation
         Prompt --> Strategy
         Strategy --> TextMode
         Strategy --> NativeMode
@@ -338,7 +342,7 @@ flowchart TB
     class HostApp,Config,Bindings,Manager,RuntimeLifecycle,Events host;
     class Root,AgentRegistry,AgentState,Membership,TeamRegistry,Topology,Delegation,TeamCreation,AgentLifecycle,TeamStateLock,TopologyLock identity;
     class DiscussionEntry,DiscussionLock,Session,InboxClaim,Round,ParallelTurns,RoundResult,Transcript,DiscussionResult,DiscussionCleanup discussion;
-    class InvocationContext,AgentInvocationLock,Prompt,ToolView,Strategy,TextMode,NativeMode,ToolExecutor,ToolAuditor,RetryPolicy,ToolResult,TurnResult,WorkingContext,Window,Adapter,TokenLedger,Provider,FailoverGate execution;
+    class InvocationContext,AgentInvocationLock,AgentWaitGraph,Prompt,ToolView,Strategy,TextMode,NativeMode,ToolExecutor,ToolAuditor,RetryPolicy,ToolResult,TurnResult,WorkingContext,Window,Adapter,TokenLedger,Provider,FailoverGate execution;
     class MemoryJournal,AdvancedGate,MemorySegment,MemoryIndexer,MemoryCatalog,MemoryFTS,MemoryRecall,MemoryRetention memory;
     class MembershipProposal,CommunicationConfig,Broker,CommunicationLocks,DirectDelivery,CommRequest,ApprovalRecords,DeliveryMode,PrincipalDecision,PathCheck,Agreement,PeerMessage,MigrationPolicy,MigrationDecision,MigrationCommit,FailoverPolicy,ParentResourceDecision governance;
     class TeamLibrary,TeamACL,PrivateLibrary,PrivateOwner,GatedReader,WorkspaceReader,ManagedLinks,Publish,LibraryLocks knowledge;

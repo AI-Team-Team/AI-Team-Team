@@ -76,7 +76,7 @@ AgentTeam-to-AgentTeam messaging follows the single communication institution in
 
 The available tool set is resolved for every invocation. `dispatch_subagent` is hidden when dynamic delegation is disabled or the current depth reaches `max_delegation_depth`; `delegate_escalation` is hidden without a parent; voting tools follow the live voting configuration. Identity prompts describe only tools that are actually available, so configuration changes and migrations affect the next model call immediately.
 
-* **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, existing_member_ids: list[str] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: dict = None) -> str`**: Spawns a recursive child AT under the ATT tree. `member_configs` creates new Agents and `existing_member_ids` adds active registered Agents through neutral membership references; their combined count must satisfy the configured minimum. A synchronous child cannot include an Agent whose invocation is already in the inherited dependency chain, because the parent is waiting for that child while preserving the Agent's non-reentrant serialization lock. This condition is rejected before child creation. Optional `initial_documents` pre-populate the child team's built-in DocLib.
+* **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, existing_member_ids: list[str] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: dict = None) -> str`**: Spawns a recursive child AT under the ATT tree. `member_configs` creates new Agents and `existing_member_ids` adds active registered Agents through neutral membership references; their combined count must satisfy the configured minimum. Before creation, ATT atomically reserves every synchronous dependency on reused Agents in a manager-wide wait-for graph. A direct, inherited, sibling, or longer transitive cycle is rejected as `agent_invocation_dependency` without creating any Agent, Private DocLib, Team DocLib, or child AgentTeam; a busy but acyclic Agent remains valid and waits normally. Optional `initial_documents` pre-populate the child team's built-in DocLib.
 * **`delegate_escalation(objective: str, rationale: str) -> str`**: Escalates task objectives upward in the lineage tree to the direct parent.
 * **`update_team_purpose(new_purpose: str) -> str`**: Updates the purpose string of the caller's team.
 * **`update_team_status(purpose: str, progress: str) -> str`**: Allows a team to dynamically update its globally broadcasted purpose and progress metrics.
@@ -113,7 +113,9 @@ The topology lock then revalidates and commits registry and parent/child state w
 
 A failure at validation, construction, or publication restores registries, pointers, dirty state, and filesystem directories; callbacks, logging, and auto-save begin only after commit. A successful commit adds only `team_id ↔ agent_id` relationships for existing Agents and introduces no framework-level team role.
 
-A failure in the team's later first discussion does not roll back the successfully created AgentTeam.
+Synchronous delegation admission occurs before this creation transaction. The manager atomically adds all reused-Agent dependency edges, rejects any edge that closes a wait cycle, and retains the accepted edges until creation and the child discussion complete, fail, or are cancelled. Reference counts allow the admission reservation and actual invocation wait to overlap without releasing protection early.
+
+A failure in the team's later first discussion does not roll back the successfully created AgentTeam when creation and dependency admission both succeeded. An unsatisfiable Agent wait cycle is not a discussion failure: it is rejected before creation and leaves all Agent, library, filesystem, and topology state unchanged.
 
 ## 6. Team Governance & Democratic Voting System
 

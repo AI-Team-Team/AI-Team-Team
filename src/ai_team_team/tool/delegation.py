@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from ..core.exceptions import (
     ATTException,
+    AgentInvocationDependencyError,
     ToolArgumentError,
     ToolBusinessError,
     ToolError,
@@ -65,21 +66,6 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                     "Existing Agents are not actively registered: "
                     + ", ".join(sorted(unavailable_ids))
                 )
-            active_tokens = att_manager._active_agent_invocation_tokens
-            dependency_ids = {
-                agent_id
-                for agent_id, invocation_id in att_manager._agent_invocation_chain.get()
-                if invocation_id in active_tokens
-            }
-            blocking_ids = sorted(dependency_ids.intersection(existing_member_ids))
-            if blocking_ids:
-                raise ToolBusinessError(
-                    "A synchronous child AgentTeam cannot include an Agent whose "
-                    "invocation is in the current dependency chain: "
-                    + ", ".join(blocking_ids),
-                    error_kind="agent_invocation_dependency",
-                )
-
         min_size = config.min_subagent_team_size
         if member_configs:
             if not isinstance(member_configs, dict):
@@ -106,22 +92,30 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
             member_count = min_size
 
         try:
-            child_team = caller_node.launch_att(
-                manager=att_manager,
-                member_count=member_count,
-                system_instructions=system_instructions,
-                team_purpose=team_purpose,
-                member_configs=member_configs,
-                existing_member_ids=existing_member_ids,
-                is_public_visible=is_public_visible,
-                initial_docs=initial_documents
-            )
-            
-            return await att_manager.execute_team_discussion(
-                child_team,
-                task,
-                rounds=config.subagent_discussion_rounds
-            )
+            async with att_manager._lifecycle.reserve_synchronous_dependencies(
+                existing_member_ids or ()
+            ):
+                child_team = caller_node.launch_att(
+                    manager=att_manager,
+                    member_count=member_count,
+                    system_instructions=system_instructions,
+                    team_purpose=team_purpose,
+                    member_configs=member_configs,
+                    existing_member_ids=existing_member_ids,
+                    is_public_visible=is_public_visible,
+                    initial_docs=initial_documents
+                )
+
+                return await att_manager.execute_team_discussion(
+                    child_team,
+                    task,
+                    rounds=config.subagent_discussion_rounds
+                )
+        except AgentInvocationDependencyError as exc:
+            raise ToolBusinessError(
+                str(exc),
+                error_kind="agent_invocation_dependency",
+            ) from exc
         except (ToolError, ATTException):
             raise
         except Exception as e:

@@ -4,13 +4,18 @@ This document consolidates the sequence flows that govern how the AgentTeam topo
 
 ## 1. Dynamic Spawning & Tool Binding
 
-This flowchart outlines the logic executed when an `Agent` or `AgentTeam` launches a dynamic sub-team:
+This flowchart outlines direct `launch_att()` creation and the synchronously awaited `dispatch_subagent` tool path:
 
 ```mermaid
 flowchart TD
-    Start["Call creator.launch_att(manager, member_configs, existing_member_ids)"] --> EnforceSize{"Combined membership satisfies configured minimum?"}
+    Start["Call launch_att() or dispatch_subagent()"] --> EnforceSize{"Combined membership satisfies configured minimum?"}
     EnforceSize -- "No" --> RaiseError["Raise ValueError<br/>Spawning blocked"]
-    EnforceSize -- "Yes" --> GenerateID["Generate unique team_id: AT-xxxxxx"]
+    EnforceSize -- "Yes" --> Synchronous{"Will this call synchronously await<br/>the child discussion?"}
+    Synchronous -- "No: launch_att()" --> GenerateID
+    Synchronous -- "Yes: dispatch_subagent()" --> ReserveDependencies["Atomically reserve reused-Agent edges<br/>in manager wait-for graph"]
+    ReserveDependencies --> DependencyCycle{"Would any edge close a direct<br/>or transitive wait cycle?"}
+    DependencyCycle -- "Yes" --> DependencyError["Return agent_invocation_dependency<br/>Create no entities or files"]
+    DependencyCycle -- "No" --> GenerateID["Generate unique team_id: AT-xxxxxx"]
     GenerateID --> SpawnMembers["Create configured new Agents<br/>Resolve existing registered Agent IDs"]
     SpawnMembers --> RegisterAgents["Register only new Agents and Private DocLibs<br/>Existing identities remain unchanged"]
     RegisterAgents --> CreateTeam["Instantiate AgentTeam with creator link"]
@@ -21,7 +26,11 @@ flowchart TD
     CreatorIsTeam -- "Yes" --> AddChildLink["Add child reference and parent mapping"]
     CreatorIsTeam -- "No" --> Save["Queue incremental entity and file deltas"]
     AddChildLink --> Save
-    Save --> End["Dynamic AgentTeam active"]
+    Save --> AwaitChild{"Synchronous dispatch?"}
+    AwaitChild -- "No" --> End["Dynamic AgentTeam active"]
+    AwaitChild -- "Yes" --> Discuss["Run synchronously awaited child discussion<br/>while dependency reservation remains active"]
+    Discuss --> Release["Release reference-counted dependency edges<br/>on success, failure, or cancellation"]
+    Release --> End
 ```
 
 ## 2. Communication Request Routing
