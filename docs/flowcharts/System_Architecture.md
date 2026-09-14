@@ -24,10 +24,12 @@ flowchart TB
         Root["Root AI Agent<br/>stable Agent UUID and root governance principal"]
         AgentRegistry["Agent Registry<br/>active, retained, archived identities"]
         AgentState["Agent-Owned State<br/>identity role, instructions, model binding,<br/>memory, locks, lifecycle, Private DocLib ID"]
+        AgentInbox["Persistent Agent Inbox<br/>identity-addressed invitations and results"]
         Membership["Role-Neutral Membership Relation<br/>team_id ↔ agent_id only"]
         TeamRegistry["AgentTeam Registry<br/>creator, members, parent, children, purpose"]
         Topology["Recursive AgentTeam Lineage<br/>top-level, child, and descendant teams"]
         Delegation["Dynamic Delegation<br/>depth and team-size gates, presets,<br/>new identities or existing Agent IDs"]
+        Formation["Consensual Team Formation<br/>four attitudes, accepted-subset eligibility,<br/>completion choice, and optional late join"]
         TeamCreation["Atomic Team Creation<br/>validate → stage Agents and DocLibs → publish"]
         AgentLifecycle["Explicit Agent Lifecycle<br/>register, retire, reactivate, confirmed delete"]
         TeamStateLock["Per-AgentTeam state_lock<br/>membership, proposals, votes, and inbox structure"]
@@ -35,11 +37,15 @@ flowchart TB
 
         Root --> AgentRegistry
         AgentRegistry --> AgentState
+        AgentRegistry --> AgentInbox
         AgentRegistry --> Membership
         Membership --> TeamRegistry
         TeamRegistry --> Topology
         Root -->|top-level governance| Topology
         Delegation --> TeamCreation
+        Delegation -->|existing identity| Formation
+        Formation --> AgentInbox
+        Formation -->|eligible accepted membership| TeamCreation
         TeamCreation --> AgentRegistry
         TeamCreation --> TeamRegistry
         AgentLifecycle --> AgentRegistry
@@ -77,7 +83,7 @@ flowchart TB
         InvocationContext["ContextVars<br/>active Agent, AgentTeam, discussion, tool call"]
         AgentInvocationLock["Per-Agent invocation lock<br/>serializes one shared Agent across teams"]
         AgentWaitGraph["Reference-Counted Agent Wait Graph<br/>atomic dependency reservation and<br/>transitive cycle rejection"]
-        Prompt["Prompt Assembly<br/>identity, current AgentTeam, topology, experts,<br/>inbox, proposals, previous round, bounded memory"]
+        Prompt["Prompt Assembly<br/>identity, current AgentTeam, topology, experts,<br/>Agent and team inboxes, proposals, previous round, bounded memory"]
         ToolView["Invocation-Scoped Tool Resolver<br/>hide unavailable delegation or escalation tools"]
         Strategy{"Reasoning Strategy"}
         TextMode["Text ReAct<br/>balanced Action scanner and literal parser"]
@@ -263,13 +269,15 @@ flowchart TB
         Materialize["Background Materialization<br/>deep copy, JSON serialization, ORM record assembly"]
         Coordinator["Single-Writer Coordinator<br/>one executing delta plus one coalesced pending delta"]
         Lease["Exclusive Cross-Process Writer Lease<br/>second writer fails immediately"]
-        Database[(SQLite Schema 7<br/>foreign keys, WAL, busy timeout, optional FTS5)]
+        Database[(SQLite Schema 8<br/>foreign keys, WAL, busy timeout, optional FTS5)]
         RestoreRead["Read Schema Version Before Mutation<br/>load all records into detached staging"]
         RestoreValidate["Strict Restore Validation<br/>identity, topology, model aliases, governance,<br/>memory ownership/digests, DocLibs, ACL, links"]
         RestoreFiles["Stage DocLib Files in Temporary Directories"]
         RestorePublish["Atomic Runtime and DocLib Publication<br/>failure leaves current manager unchanged"]
 
         AgentRegistry --> DirtyTracking
+        AgentInbox --> DirtyTracking
+        Formation --> DirtyTracking
         TeamRegistry --> DirtyTracking
         WorkingContext --> DirtyTracking
         MemoryJournal --> DirtyTracking

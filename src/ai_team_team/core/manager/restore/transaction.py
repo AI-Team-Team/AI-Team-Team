@@ -31,6 +31,12 @@ class RestoreTransactionMixin:
             raise StateRestoreError("Cannot restore state while a team discussion is active.")
         if any(agent.lock.locked() for agent in manager._agents_by_id.values()):
             raise StateRestoreError("Cannot restore state while an agent invocation is active.")
+        if manager._formations.tasks or any(
+            lock.locked() for lock in manager._formations._request_locks.values()
+        ) or manager._active_formation_operations:
+            raise StateRestoreError(
+                "Cannot restore state while a team formation operation is active."
+            )
         if manager.token_budget.has_active_reservations():
             raise StateRestoreError(
                 "Cannot restore state while model token reservations are active."
@@ -110,6 +116,12 @@ class RestoreTransactionMixin:
                 "communication_ballots": manager.broker.ballots,
                 "communication_agreements": manager.broker.agreements,
                 "peer_messages": manager.broker.peer_messages,
+                "formation_requests": dict(manager._formations.requests),
+                "formation_invitations": dict(manager._formations.invitations),
+                "agent_inboxes": {
+                    agent.agent_id: [dict(message) for message in agent.agent_inbox]
+                    for agent in manager._agents_by_id.values()
+                },
                 "memory": manager._memory.snapshot(),
             }
             try:
@@ -147,6 +159,20 @@ class RestoreTransactionMixin:
                     (item.model_dump(mode="json") for item in staged.broker.agreements.values()),
                     (item.model_dump(mode="json") for item in staged.broker.peer_messages.values()),
                 )
+                manager._formations.restore(
+                    (
+                        item.model_dump(mode="json")
+                        for item in staged._formations.requests.values()
+                    ),
+                    (
+                        item.model_dump(mode="json")
+                        for item in staged._formations.invitations.values()
+                    ),
+                    {
+                        agent.agent_id: [dict(message) for message in agent.agent_inbox]
+                        for agent in staged._agents_by_id.values()
+                    },
+                )
                 staged_memory = staged._memory.snapshot()
                 manager._memory.restore(
                     staged_memory["memory_events"],
@@ -183,6 +209,19 @@ class RestoreTransactionMixin:
                 manager.broker.ballots = old_state["communication_ballots"]
                 manager.broker.agreements = old_state["communication_agreements"]
                 manager.broker.peer_messages = old_state["peer_messages"]
+                manager._formations.requests.clear()
+                manager._formations.requests.update(old_state["formation_requests"])
+                manager._formations.invitations.clear()
+                manager._formations.invitations.update(old_state["formation_invitations"])
+                for old_agent in manager._agents_by_id.values():
+                    with old_agent.inbox_lock:
+                        old_agent.agent_inbox = [
+                            dict(message)
+                            for message in old_state["agent_inboxes"].get(
+                                old_agent.agent_id,
+                                [],
+                            )
+                        ]
                 old_memory = old_state["memory"]
                 manager._memory.restore(
                     old_memory["memory_events"],

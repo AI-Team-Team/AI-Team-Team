@@ -159,7 +159,6 @@ class AgentRegistry:
             raise ValueError("Agent still creates teams: " + ", ".join(sorted(creator_teams)))
         if agent.lock.locked():
             raise ValueError("Agent has an active model invocation.")
-
         if selected == "delete":
             governance_refs = [
                 f"{team.team_id}:{proposal_id}"
@@ -172,6 +171,12 @@ class AgentRegistry:
                 f"communication-request:{request.request_id}"
                 for request in manager.broker.communication_requests.values()
                 if request.initiated_by_agent_id == agent_id
+            )
+            governance_refs.extend(
+                f"team-formation:{request.request_id}"
+                for request in manager._formations.requests.values()
+                if request.initiator_agent_id == agent_id
+                or agent_id in request.invitee_agent_ids
             )
             governance_refs.extend(
                 f"communication-ballot:{request_id}"

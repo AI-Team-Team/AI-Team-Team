@@ -1,7 +1,15 @@
 # Architectural Design: Asynchronous & Event-Driven Agent Collaboration
 
-> [!TIP]
+> [!IMPORTANT]
 > This is just a conceptual idea, and the idea itself is not fully thought out.
+
+> [!NOTE]
+> Two related design directions are also being explored separately:
+>
+> * A separate idea around memory is still being developed and organized.
+> * A broader architectural direction is also under consideration. The current ATT architecture can be thought of as a "Company Mode," while a future "Society Mode" would be fully decentralized by design. It would not prescribe whether agents must form organizations, what those organizations should look like, or how they should be governed. Instead, organizational structures, roles, coordination mechanisms, and governance models—if they emerge at all—would be developed autonomously by the AI agents themselves.
+>
+> These ideas are still preliminary and are outside the scope of this document.
 
 This document proposes the transition of the **AI-Team-Team (ATT)** framework from a synchronous, turn-based (round-robin) discussion model to a fully asynchronous, event-driven reactive collaboration model.
 

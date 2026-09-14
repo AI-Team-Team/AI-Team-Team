@@ -19,7 +19,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
 
         member = Agent("StillMember", "Member", self.client)
         self.manager.register_agent(member)
-        self.manager.create_agent_team(
+        self.manager.bootstrap_agent_team(
             self.root,
             member_configs={
                 "PeerE": {"model": "default"},
@@ -31,6 +31,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
             await self.manager.retire_agent(member.agent_id)
 
         creator = Agent("Creator", "Lead", self.client)
+        self.manager.register_agent(creator)
         self.manager.create_agent_team(creator)
         with self.assertRaises(ValueError):
             await self.manager.retire_agent(creator.agent_id)
@@ -179,7 +180,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
             )
         )
         await started.wait()
-        team = self.manager.create_agent_team(
+        team = self.manager.bootstrap_agent_team(
             self.root,
             member_configs={
                 "PeerD1": {"model": "default"},

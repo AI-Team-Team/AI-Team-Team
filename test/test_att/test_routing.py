@@ -146,6 +146,8 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
 
         self.manager.execute_team_discussion = mock_execute_team_discussion
 
+        agent_token = self.manager._active_tool_agent.set(team.members[0])
+        team_token = self.manager._active_team.set(team)
         try:
             await dispatch_tool(
                 task="Do task",
@@ -158,6 +160,8 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
                 system_instructions="Adhere to rules"
             )
         finally:
+            self.manager._active_team.reset(team_token)
+            self.manager._active_tool_agent.reset(agent_token)
             self.manager.execute_team_discussion = original_execute
 
         self.assertIsNotNone(captured_child_team)
@@ -189,30 +193,36 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
         )
 
         dispatch_tool = team.tools["dispatch_subagent"]
+        agent_token = self.manager._active_tool_agent.set(team.members[0])
+        team_token = self.manager._active_team.set(team)
 
-        # 1. Spawn dynamic subagent with 3 dynamic roles -> success
-        res = await dispatch_tool(
-            task="Do task",
-            team_purpose="Sub task",
-            member_configs={
-                "Code_Architect": {"model": "default"},
-                "Security_Auditor": {"model": "default"},
-                "Quality_Assurance": {"model": "default"}
-            },
-            system_instructions="Adhere to rules"
-        )
-        self.assertNotIn("Error", res)
+        try:
+            # 1. Spawn dynamic subagent with 3 dynamic roles -> success
+            res = await dispatch_tool(
+                task="Do task",
+                team_purpose="Sub task",
+                member_configs={
+                    "Code_Architect": {"model": "default"},
+                    "Security_Auditor": {"model": "default"},
+                    "Quality_Assurance": {"model": "default"}
+                },
+                system_instructions="Adhere to rules"
+            )
+            self.assertNotIn("Error", res)
 
-        # 2. Spawn dynamic subagent with 2 dynamic roles -> failure (min_subagent_team_size is 3)
-        res_fail = await dispatch_tool(
-            task="Do task",
-            team_purpose="Sub task",
-            member_configs={
-                "Architect": {"model": "default"},
-                "Reviewer": {"model": "default"}
-            },
-            system_instructions="Adhere to rules"
-        )
+            # 2. Spawn dynamic subagent with 2 dynamic roles -> failure (min_subagent_team_size is 3)
+            res_fail = await dispatch_tool(
+                task="Do task",
+                team_purpose="Sub task",
+                member_configs={
+                    "Architect": {"model": "default"},
+                    "Reviewer": {"model": "default"}
+                },
+                system_instructions="Adhere to rules"
+            )
+        finally:
+            self.manager._active_team.reset(team_token)
+            self.manager._active_tool_agent.reset(agent_token)
         self.assertIn("Error", res_fail)
         self.assertIn("MUST have at least 3 members", res_fail)
 

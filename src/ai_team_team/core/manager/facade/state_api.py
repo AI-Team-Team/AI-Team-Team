@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from ...agent import Agent
 from ...config import ATTConfig
+from ...exceptions import StateRestoreError
 from ..state import StateCoordinator
 
 if TYPE_CHECKING:
@@ -64,8 +65,13 @@ class StateAPI:
         async with self._runtime_gate:
             if self._closing:
                 raise RuntimeError("ATTManager is closing and cannot restore state.")
+            if self._active_formation_operations:
+                raise StateRestoreError(
+                    "Cannot restore state while a team formation operation is active."
+                )
             if not os.path.exists(path):
                 raise FileNotFoundError(f"State database file '{path}' not found.")
+            self._restore_in_progress = True
             try:
                 await self._memory.suspend_for_restore()
                 state = await self._persistence.read(path)
@@ -73,6 +79,7 @@ class StateAPI:
                 self.db_path = path
                 self.broker.resume_pending_requests()
             finally:
+                self._restore_in_progress = False
                 if self._memory._restore_suspended:
                     self._memory.resume_after_restore()
 

@@ -21,6 +21,7 @@ from ..callbacks import CallbackDispatcher
 from ..communication_validation import CommunicationStateValidator
 from ..discussions import DiscussionCoordinator
 from ..failover import FailoverService
+from ..formations import FormationService
 from ..libraries import LibraryService
 from ..lifecycle import LifecycleService
 from ..membership import MembershipService
@@ -35,6 +36,7 @@ from ..team_creation import TeamCreationService
 from ..topology import TopologyService
 from .agents_api import AgentAPI
 from .discussions_api import DiscussionAPI
+from .formations_api import FormationAPI
 from .libraries_api import LibraryAPI
 from .memory_api import MemoryAPI
 from .runtime_api import RuntimeAPI
@@ -50,6 +52,7 @@ class ATTManager(
     LibraryAPI,
     DiscussionAPI,
     MemoryAPI,
+    FormationAPI,
 ):
     """Master controller managing the overall ATT topology."""
 
@@ -97,6 +100,9 @@ class ATTManager(
         self._migration = MigrationService(self)
         self._runtime = RuntimeRegistry(self)
         self._team_creation = TeamCreationService(self)
+        self._formations = FormationService(self)
+        self.team_formation_requests = self._formations.requests
+        self.team_formation_invitations = self._formations.invitations
 
         # Public Tool registries
         self.global_tools: Dict[str, Tool] = {}
@@ -106,6 +112,9 @@ class ATTManager(
         self._topology_lock = self._topology.lock
         self._snapshot_lock = threading.RLock()
         self._runtime_gate = asyncio.Lock()
+        self._active_formation_operations = 0
+        self._formation_operation_tasks: set[asyncio.Task[Any]] = set()
+        self._restore_in_progress = False
         self._starting_invocations = 0
         self._active_invocations = 0
         self._active_agent_invocation_tokens: set[str] = set()

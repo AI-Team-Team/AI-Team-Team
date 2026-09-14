@@ -49,7 +49,7 @@ class TestStatePersistence(StatePersistenceTestCase):
         
         self.mock_react_client.generate = mock_generate
         
-        team = self.manager.create_agent_team(
+        team = self.manager.bootstrap_agent_team(
             creator=self.root_ai,
             preset_name="generic",
             team_purpose="Testing expert discovery",

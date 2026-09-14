@@ -295,6 +295,8 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
         f"{experts_str}"
         f"{autonomy_text}"
     )
+    if manager:
+        identity_header += manager._formations.render_agent_inbox(agent.agent_id)
     if manager and manager.config.episodic_memory.enabled:
         identity_header += manager._memory.retained_context(agent.agent_id)
 

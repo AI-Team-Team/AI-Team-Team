@@ -93,12 +93,12 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             "HelperC": {"model": "shared-model"},
             "HelperD": {"model": "shared-model"},
         }
-        team_a = manager.create_agent_team(
+        team_a = manager.bootstrap_agent_team(
             root,
             member_configs=configs_a,
             existing_members=[shared],
         )
-        team_b = manager.create_agent_team(
+        team_b = manager.bootstrap_agent_team(
             root,
             member_configs=configs_b,
             existing_member_ids=[shared.agent_id],

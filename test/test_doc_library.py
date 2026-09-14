@@ -135,6 +135,8 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
             return "Result"
             
         self.manager.execute_team_discussion = mock_execute
+        agent_token = self.manager._active_tool_agent.set(team.members[0])
+        team_token = self.manager._active_team.set(team)
         
         try:
             initial_documents = {
@@ -152,6 +154,8 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
                 initial_documents=initial_documents
             )
         finally:
+            self.manager._active_team.reset(team_token)
+            self.manager._active_tool_agent.reset(agent_token)
             self.manager.execute_team_discussion = original_execute
             
         self.assertIsNotNone(captured_child)

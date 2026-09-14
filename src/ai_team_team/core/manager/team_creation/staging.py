@@ -40,6 +40,9 @@ class TeamCreationStagingMixin:
         initial_docs: Optional[Dict[str, str]] = None,
         *,
         staging_root: str,
+        parent_override: Optional[AgentTeam] = None,
+        parent_override_provided: bool = False,
+        required_creator_member_agent_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Builds a complete AgentTeam transaction without live registration."""
         manager = self.manager
@@ -49,7 +52,13 @@ class TeamCreationStagingMixin:
             team_purpose=team_purpose,
         )
         team.manager = manager
-        parent = creator if isinstance(creator, AgentTeam) else manager.get_agent_team(creator)
+        parent = (
+            parent_override
+            if parent_override_provided
+            else creator
+            if isinstance(creator, AgentTeam)
+            else manager.get_agent_team(creator)
+        )
         team._parent_team = parent
         if isinstance(creator, AgentTeam):
             team.chapter_num = creator.chapter_num
@@ -195,6 +204,8 @@ class TeamCreationStagingMixin:
         return {
             "team": team,
             "parent": parent,
+            "parent_override_provided": parent_override_provided,
+            "required_creator_member_agent_id": required_creator_member_agent_id,
             "new_agents": new_agents,
             "existing_agents": existing_agents,
             "libraries": libraries,

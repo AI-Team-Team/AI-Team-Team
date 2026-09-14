@@ -73,8 +73,11 @@ class TeamCreationValidationMixin:
             raise TypeError("creator must be an Agent or AgentTeam.")
         if isinstance(creator, AgentTeam) and manager.teams.get(creator.team_id) is not creator:
             raise ValueError("The creator AgentTeam must be registered.")
-        if isinstance(creator, Agent) and creator.lifecycle_state != "active":
-            raise ValueError("The creator Agent must be active.")
+        if isinstance(creator, Agent) and (
+            creator.lifecycle_state != "active"
+            or manager._agents_by_id.get(creator.agent_id) is not creator
+        ):
+            raise ValueError("The creator Agent must be active and registered.")
         for name, value in {
             "preset_name": preset_name,
             "system_instructions": system_instructions,
@@ -181,7 +184,19 @@ class TeamCreationValidationMixin:
             raise RuntimeError("ATTManager is closing and rejects new teams.")
         team = stage["team"]
         creator = team.creator
-        if isinstance(creator, AgentTeam):
+        if isinstance(creator, Agent) and (
+            creator.lifecycle_state != "active"
+            or manager._agents_by_id.get(creator.agent_id) is not creator
+            or manager.agents.get(creator.name) is not creator
+        ):
+            raise ValueError("The creator Agent changed during team staging.")
+        if stage.get("parent_override_provided"):
+            current_parent = stage["parent"]
+            if current_parent is not None and manager.teams.get(current_parent.team_id) is not current_parent:
+                raise ValueError("The intended parent changed during team staging.")
+            if isinstance(creator, AgentTeam) and current_parent is not creator:
+                raise ValueError("An AgentTeam creator must be the intended parent.")
+        elif isinstance(creator, AgentTeam):
             if manager.teams.get(creator.team_id) is not creator:
                 raise ValueError("The creator AgentTeam changed during team staging.")
             current_parent = creator
@@ -191,6 +206,22 @@ class TeamCreationValidationMixin:
             current_parent = manager.get_agent_team(creator)
         if current_parent is not stage["parent"]:
             raise ValueError("The proposed parent changed during team staging.")
+        required_agent_id = stage.get("required_creator_member_agent_id")
+        if required_agent_id is not None:
+            required_agent = manager._agents_by_id.get(required_agent_id)
+            if (
+                required_agent is None
+                or required_agent.lifecycle_state != "active"
+                or manager.agents.get(required_agent.name) is not required_agent
+            ):
+                raise ValueError("The formation initiator changed during team staging.")
+            authority_team = creator if isinstance(creator, AgentTeam) else current_parent
+            if authority_team is not None and all(
+                member.agent_id != required_agent_id for member in authority_team.members
+            ):
+                raise ValueError(
+                    "The formation initiator left the creating AgentTeam during staging."
+                )
         if team.team_id in manager.teams:
             raise ValueError(f"AgentTeam ID {team.team_id!r} is already registered.")
         for lib_id in stage["libraries"]:

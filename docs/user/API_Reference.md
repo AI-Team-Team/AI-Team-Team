@@ -112,8 +112,8 @@ agent = Agent(name: str, role: str, llm_client: Optional[Any] = None, role_descr
 
 ### Methods
 
-* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, existing_members: Optional[List[Agent]] = None, existing_member_ids: Optional[List[str]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
-  Allows this agent to recursively launch a child dynamic `AgentTeam`, create new members from `member_configs`, and add already registered Agents through the role-neutral `existing_members` or `existing_member_ids` inputs.
+* **`launch_att(...) -> AgentTeam | TeamFormationRequest`**
+  Launches an all-new child AgentTeam immediately, or opens a persistent consent workflow when the proposal names existing Agents or explicitly includes the initiator. Existing identities are not added until they accept; see [Consensual Existing-Agent Team Formation](../Consensual_Team_Formation.md).
 
 ## 👥 `AgentTeam`
 
@@ -134,8 +134,8 @@ Represents a dynamic team of agents executing discussions and tasks in a parent-
 
 ### Methods
 
-* **`launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, existing_members: Optional[List[Agent]] = None, existing_member_ids: Optional[List[str]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
-  Allows this team to recursively spawn a child dynamic sub-team (Level $N+1$), create new members, reuse existing registered Agent identities, and propagate visibility and context documents to the subteam's DocLib.
+* **`launch_att(...) -> AgentTeam | TeamFormationRequest`**
+  Launches an all-new child AgentTeam immediately, or returns a formation request when existing Agents must consent. The initiating member is never added implicitly.
 * **`await execute_reasoning_step(...) -> str`**
   Returns the completed answer, or a stable `[Turn incomplete: ...]` placeholder when the configured isolate policy contains a member-scoped failure.
 * **`await execute_reasoning_step_detailed(...) -> AgentTurnResult`**
@@ -179,8 +179,20 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
   Registers a custom dynamic committee preset (e.g. roles and system prompt).
 * **`register_tools_context(context: Dict[str, Any])`**
   Registers additional runtime resources and rebinds tools. `att_manager` is present automatically and cannot be overwritten.
-* **`create_agent_team(creator: Any, member_count: int = 3, roles_and_presets: List[Tuple[str, str]] = None, preset_name: str = "custom", system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, existing_members: Optional[List[Agent]] = None, existing_member_ids: Optional[List[str]] = None, is_public_visible: bool = False, initial_docs: Optional[Dict[str, str]] = None) -> AgentTeam`**
-  Dynamically spawns a recursive AgentTeam. `member_configs` creates new Agent identities, while `existing_members` and `existing_member_ids` add active registered identities without changing their names, roles, instructions, model bindings, memories, lifecycle state, or Private DocLibs. The combined explicit membership must satisfy the configured minimum size, duplicate identities are rejected, `is_public_visible` controls team-library discovery, and `initial_docs` populates that library.
+* **`create_agent_team(...) -> AgentTeam | TeamFormationRequest`**
+  Creates an all-new AgentTeam immediately when only new-Agent specifications are present. Supplying `existing_members`, `existing_member_ids`, or `initiator_joins=True` creates persistent invitations instead; only accepted Agents may enter the final membership, and joining changes no Agent-owned field.
+* **`bootstrap_agent_team(creator, **kwargs) -> AgentTeam`**
+  Performs explicitly trusted host topology initialization without interactive consent and emits a `trusted_team_bootstrap` audit event. This administrative API is never available to Agent tools and should not replace ordinary formation.
+* **`inspect_team_formation(request_id, *, actor) -> TeamFormationInspection`**
+  Returns the proposal, four public attitude counts, live eligible membership, `can_create`, and an eligibility reason.
+* **`await respond_team_invitation(request_id, *, actor, attitude) -> FormationOperationResult`**
+  Records an invited Agent's `accepted`, `declined`, or `explicitly_ignored` attitude. Choosing `None` deliberately withholds a public attitude and remains externally indistinguishable from an unprocessed invitation as `no_response`.
+* **`await create_team_from_formation(request_id, *, actor) -> FormationOperationResult`**
+  Lets only the initiating Agent commit the currently accepted eligible membership.
+* **`await abandon_team_formation(request_id, *, actor, reason="") -> FormationOperationResult`**
+  Terminates an uncreated proposal and notifies every invitee.
+* **`list_agent_inbox(agent_id, *, unread_only=True) -> list[AgentInboxMessage]`** / **`await mark_agent_inbox_read(agent_id, message_ids=None) -> int`**
+  Provides trusted-host access to persistent notifications owned by a stable Agent identity.
 
 * **`await execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
   Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits. Sessions for the same team, including emergency sessions, wait on one serial lock; different teams may run concurrently.
@@ -383,8 +395,16 @@ These tools are automatically registered and bound to all agent teams by default
 
 ### Spawning & Communication
 
-* **`dispatch_subagent(task: str, team_purpose: str, member_configs: Optional[dict] = None, existing_member_ids: Optional[List[str]] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: Optional[dict] = None) -> str`**
-  Spawns a recursive child `AgentTeam` (Level $N+1$). `member_configs` creates new Agents and `existing_member_ids` adds active registered Agents without assigning team-specific roles; their combined count must satisfy the configured minimum. ATT atomically reserves the resulting synchronous dependencies in a manager-wide wait-for graph before creation. Direct, inherited, sibling, and longer transitive cycles return a structured `agent_invocation_dependency` error without creating any child entities or files, while busy acyclic Agents wait normally. Optional context files can be pre-populated via `initial_documents`.
+* **`dispatch_subagent(task: str, team_purpose: str, member_configs: Optional[dict] = None, existing_member_ids: Optional[List[str]] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: Optional[dict] = None, initiator_joins: bool = False, unanimous_acceptance_action: str = "require_confirmation", late_join_policy: str = "disabled") -> str`**
+  Creates and synchronously discusses an all-new child AgentTeam when no existing identity participates. If existing Agent IDs or initiator self-membership are requested, it returns `PENDING_RESPONSES` with a persistent formation request instead; no team or DocLib is created and the first discussion is deferred until after a successful formation commit.
+* **`list_agent_inbox(unread_only: bool = True) -> str`** / **`mark_agent_inbox_read(message_ids: Optional[List[str]] = None) -> str`**
+  Lists or acknowledges persistent notifications for the current invocation-scoped Agent identity.
+* **`inspect_team_formation(request_id: str) -> str`** / **`respond_team_invitation(request_id: str, attitude: Optional[str] = None) -> str`**
+  Inspects public attitude counts or lets the current invited Agent choose `accepted`, `declined`, `explicitly_ignored`, or `None`; `None` deliberately withholds a public attitude and appears as `NO_RESPONSE`.
+* **`create_team_from_formation(request_id: str) -> str`** / **`abandon_team_formation(request_id: str, reason: str = "") -> str`**
+  Lets the initiating Agent commit an eligible accepted subset or abandon the proposal.
+* **`decide_team_formation_late_join(request_id: str, invitee_agent_id: str, approved: bool) -> str`**
+  Resolves a consenting invitee's pending late join when the stored policy requires initiator confirmation.
 * **`delegate_escalation(objective: str, rationale: str) -> str`**
   Escalates a task or deadlock upward to the team's direct parent in the lineage hierarchy.
 * **`send_peer_message(team_id: str, message: str) -> str`**

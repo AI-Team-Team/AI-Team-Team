@@ -1,9 +1,11 @@
 import asyncio
+import threading
 import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, List, Dict, Optional, Tuple, Any
 
 if TYPE_CHECKING:
+    from .formation import TeamFormationRequest
     from .manager import ATTManager
     from .team import AgentTeam
 
@@ -47,6 +49,13 @@ class Agent:
         self._private_doc_library_id: Optional[str] = None
         self._model_alias: Optional[str] = None
         self._manager: Optional[Any] = None
+        self.agent_inbox: List[Dict[str, Any]] = []
+        self._inbox_lock = threading.RLock()
+
+    @property
+    def inbox_lock(self) -> threading.RLock:
+        """Protects this identity's persistent notification inbox."""
+        return self._inbox_lock
 
     @property
     def agent_id(self) -> str:
@@ -131,10 +140,14 @@ class Agent:
         existing_members: Optional[List["Agent"]] = None,
         existing_member_ids: Optional[List[str]] = None,
         is_public_visible: bool = False,
-        initial_docs: Optional[Dict[str, str]] = None
-    ) -> 'AgentTeam':
+        initial_docs: Optional[Dict[str, str]] = None,
+        initiator_joins: bool = False,
+        unanimous_acceptance_action: str = "require_confirmation",
+        late_join_policy: str = "disabled",
+        task: Optional[str] = None,
+    ) -> "AgentTeam | TeamFormationRequest":
         """Allows this agent to launch a dynamic sub-team (Level $N$)."""
-        child = manager.create_agent_team(
+        return manager.create_agent_team(
             creator=self,
             member_count=member_count,
             roles_and_presets=roles_and_presets,
@@ -145,9 +158,10 @@ class Agent:
             existing_members=existing_members,
             existing_member_ids=existing_member_ids,
             is_public_visible=is_public_visible,
-            initial_docs=initial_docs
+            initial_docs=initial_docs,
+            initiating_agent=self,
+            initiator_joins=initiator_joins,
+            unanimous_acceptance_action=unanimous_acceptance_action,
+            late_join_policy=late_join_policy,
+            task=task,
         )
-        parent = manager.get_agent_team(self)
-        if parent is not None:
-            child.chapter_num = parent.chapter_num
-        return child

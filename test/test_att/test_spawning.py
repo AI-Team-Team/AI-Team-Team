@@ -106,7 +106,13 @@ class TestATTSpawning(unittest.IsolatedAsyncioTestCase):
         
         # Call dispatch_subagent tool on team4, which has depth 4 (>= max_delegation_depth 4), should be blocked
         dispatch_tool = team4.tools["dispatch_subagent"]
-        res = await dispatch_tool(task="Verify logic", team_purpose="Review")
+        agent_token = manager._active_tool_agent.set(team4.members[0])
+        team_token = manager._active_team.set(team4)
+        try:
+            res = await dispatch_tool(task="Verify logic", team_purpose="Review")
+        finally:
+            manager._active_team.reset(team_token)
+            manager._active_tool_agent.reset(agent_token)
         self.assertIn("Max delegation depth (4) reached", res)
 
     def test_topology_tree_rendering(self):

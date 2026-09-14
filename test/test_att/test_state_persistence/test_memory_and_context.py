@@ -41,7 +41,7 @@ class TestStatePersistence(StatePersistenceTestCase):
         self.manager.register_agent(agent)
         
         # Create team A
-        team_a = self.manager.create_agent_team(
+        team_a = self.manager.bootstrap_agent_team(
             creator=self.root_ai,
             preset_name="generic",
             team_purpose="Purpose A",
@@ -58,7 +58,7 @@ class TestStatePersistence(StatePersistenceTestCase):
         self.assertEqual(agent.last_context["team_id"], team_a.team_id)
         
         # Create team B (context change)
-        team_b = self.manager.create_agent_team(
+        team_b = self.manager.bootstrap_agent_team(
             creator=self.root_ai,
             preset_name="generic",
             team_purpose="Purpose B",
@@ -89,7 +89,7 @@ class TestStatePersistence(StatePersistenceTestCase):
         self.manager.register_agent(agent)
         
         # Spawn team A with the existing Agent object.
-        team_a = self.manager.create_agent_team(
+        team_a = self.manager.bootstrap_agent_team(
             creator=self.root_ai,
             member_configs={
                 "Helper1": {"model": "critic"},
@@ -104,7 +104,7 @@ class TestStatePersistence(StatePersistenceTestCase):
         await team_a.execute_react_step(agent, "Task A", "Sys A")
         
         # Spawn team B with the same stable Agent ID.
-        team_b = self.manager.create_agent_team(
+        team_b = self.manager.bootstrap_agent_team(
             creator=self.root_ai,
             member_configs={
                 "Helper3": {"model": "critic"},

@@ -17,6 +17,7 @@ from ai_team_team import (
     TokenCountingClientProto,
     Tool,
     ToolResult,
+    TeamFormationRequest,
 )
 
 
@@ -67,14 +68,20 @@ def create_shared_memberships(
     shared: Agent,
     new_members: Dict[str, Dict[str, Any]],
 ) -> tuple[AgentTeam, AgentTeam]:
-    """Exercise both role-neutral shared-membership entry points."""
-    by_object = manager.create_agent_team(
+    """Exercise explicit trusted-host topology initialization."""
+    proposal = manager.create_agent_team(
         creator,
         member_configs=new_members,
         existing_members=[shared],
     )
-    by_id = creator.launch_att(
-        manager,
+    assert_type(proposal, AgentTeam | TeamFormationRequest)
+    by_object = manager.bootstrap_agent_team(
+        creator,
+        member_configs=new_members,
+        existing_members=[shared],
+    )
+    by_id = manager.bootstrap_agent_team(
+        creator,
         member_configs=new_members,
         existing_member_ids=[shared.agent_id],
     )

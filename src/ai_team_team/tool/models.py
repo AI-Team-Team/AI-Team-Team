@@ -1,6 +1,6 @@
 """Strict argument models for complex built-in tools."""
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -25,6 +25,13 @@ class DispatchSubagentArguments(BaseModel):
     system_instructions: str = ""
     is_public_visible: bool = False
     initial_documents: Optional[Dict[str, str]] = None
+    initiator_joins: bool = False
+    unanimous_acceptance_action: Literal[
+        "auto_create", "require_confirmation"
+    ] = "require_confirmation"
+    late_join_policy: Literal[
+        "disabled", "open", "require_initiator_confirmation"
+    ] = "disabled"
 
 
 class MembershipProposalDetails(BaseModel):
@@ -43,4 +50,3 @@ class MembershipProposalArguments(BaseModel):
     rationale: str
     initiator_type: str = "individual"
     proposed_details: Optional[MembershipProposalDetails] = None
-

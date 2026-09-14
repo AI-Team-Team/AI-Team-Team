@@ -209,6 +209,7 @@ class PersistenceCoordinator:
             ("communication_requests", "request_id"),
             ("communication_agreements", "agreement_id"),
             ("peer_messages", "message_id"),
+            ("formation_requests", "request_id"),
             ("memory_events", "event_id"),
             ("memory_segments", "segment_id"),
             ("memory_cards", "memory_id"),
@@ -252,7 +253,18 @@ class PersistenceCoordinator:
             approval_records.extend(later.get(key, []))
             merged[key] = approval_records
 
-        for key in ("inboxes", "proposals", "permissions", "links"):
+        replaced_formation_requests = {
+            record["request_id"] for record in later.get("formation_invitations", [])
+        }
+        formation_invitations = [
+            record
+            for record in earlier.get("formation_invitations", [])
+            if record["request_id"] not in replaced_formation_requests
+        ]
+        formation_invitations.extend(later.get("formation_invitations", []))
+        merged["formation_invitations"] = formation_invitations
+
+        for key in ("inboxes", "agent_inboxes", "proposals", "permissions", "links"):
             records = dict(earlier.get(key, {}))
             records.update(later.get(key, {}))
             merged[key] = records
@@ -290,6 +302,11 @@ class PersistenceCoordinator:
             for record in merged.get("agent_dependencies", [])
             if record["agent_id"] not in deleted_agents
         ]
+        merged["agent_inboxes"] = {
+            agent_id: inbox
+            for agent_id, inbox in merged.get("agent_inboxes", {}).items()
+            if agent_id not in deleted_agents
+        }
         for key in (
             "memory_segments",
             "memory_cards",

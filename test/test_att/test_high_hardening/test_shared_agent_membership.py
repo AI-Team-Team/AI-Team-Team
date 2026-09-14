@@ -1,3 +1,5 @@
+import asyncio
+import json
 import os
 import shutil
 import sqlite3
@@ -97,12 +99,12 @@ class TestSharedAgentMembership(unittest.IsolatedAsyncioTestCase):
         identity_before = self._identity_state()
         private_library = self.manager.libraries[self.shared.private_doc_library_id]
 
-        team_a = self.manager.create_agent_team(
+        team_a = self.manager.bootstrap_agent_team(
             self.parent,
             member_configs=self._new_member_configs("A", 3),
             existing_members=[self.shared],
         )
-        team_b = self.manager.create_agent_team(
+        team_b = self.manager.bootstrap_agent_team(
             self.parent,
             member_configs=self._new_member_configs("B", 2),
             existing_member_ids=[self.shared.agent_id],
@@ -213,12 +215,12 @@ class TestSharedAgentMembership(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(os.listdir(managed_root)), before[3])
 
     async def test_save_and_restore_reuses_one_agent_object_for_all_memberships(self):
-        team_a = self.manager.create_agent_team(
+        team_a = self.manager.bootstrap_agent_team(
             self.parent,
             member_configs=self._new_member_configs("PersistA", 2),
             existing_members=[self.shared],
         )
-        team_b = self.manager.create_agent_team(
+        team_b = self.manager.bootstrap_agent_team(
             self.parent,
             member_configs=self._new_member_configs("PersistB", 2),
             existing_member_ids=[self.shared.agent_id],
@@ -300,7 +302,7 @@ class TestSharedAgentMembership(unittest.IsolatedAsyncioTestCase):
         await self.manager.save_state()
         before = self._persisted_identity_state(db_path)
 
-        child = self.manager.create_agent_team(
+        child = self.manager.bootstrap_agent_team(
             self.parent,
             member_configs=self._new_member_configs("Relation", 3),
             existing_members=[self.shared],
@@ -334,7 +336,7 @@ class TestSharedAgentMembership(unittest.IsolatedAsyncioTestCase):
         before = self._persisted_identity_state(db_path)
 
         self.shared.llm_client = EchoClient()
-        child = self.manager.create_agent_team(
+        child = self.manager.bootstrap_agent_team(
             self.parent,
             member_configs=self._new_member_configs("Isolation", 2),
             existing_member_ids=[self.shared.agent_id],
@@ -344,7 +346,7 @@ class TestSharedAgentMembership(unittest.IsolatedAsyncioTestCase):
         self.assertIn(self.shared, child.members)
         self.assertEqual(self._persisted_identity_state(db_path), before)
 
-    async def test_dispatch_uses_existing_agent_ids_without_roles(self):
+    async def test_dispatch_invites_existing_agent_ids_without_roles(self):
         dispatch_tool = self.parent.tools["dispatch_subagent"]
         schema = dispatch_tool.json_schema
         member_schema = schema["properties"]["member_configs"]["anyOf"][0]
@@ -360,19 +362,40 @@ class TestSharedAgentMembership(unittest.IsolatedAsyncioTestCase):
             captured_team = team
             return "captured"
 
+        agent_token = self.manager._active_tool_agent.set(self.parent.members[0])
+        team_token = self.manager._active_team.set(self.parent)
         with patch.object(
             self.manager,
             "execute_team_discussion",
             side_effect=capture_discussion,
         ):
-            result = await dispatch_tool(
-                task="Use the shared researcher.",
-                team_purpose="Role-neutral delegation",
-                member_configs=self._new_member_configs("Dispatch", 2),
-                existing_member_ids=[self.shared.agent_id],
+            try:
+                result = await dispatch_tool(
+                    task="Use the shared researcher.",
+                    team_purpose="Role-neutral delegation",
+                    member_configs=self._new_member_configs("Dispatch", 2),
+                    existing_member_ids=[self.shared.agent_id],
+                )
+            finally:
+                self.manager._active_team.reset(team_token)
+                self.manager._active_tool_agent.reset(agent_token)
+            payload = json.loads(result)
+            self.assertEqual(payload["status"], "PENDING_RESPONSES")
+            request_id = payload["request"]["request_id"]
+            self.assertIsNone(captured_team)
+            await self.manager.respond_team_invitation(
+                request_id,
+                actor=self.shared,
+                attitude="accepted",
             )
+            created = await self.manager.create_team_from_formation(
+                request_id,
+                actor=self.parent.members[0],
+            )
+            if self.manager._formations.tasks:
+                await asyncio.gather(*tuple(self.manager._formations.tasks))
 
-        self.assertEqual(result, "captured")
+        self.assertEqual(created.status, "CREATED")
         self.assertIsNotNone(captured_team)
         self.assertIs(
             next(

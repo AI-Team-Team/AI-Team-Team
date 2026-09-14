@@ -17,7 +17,10 @@ class StateValidationPayload:
     presets: Dict[str, Any]
     model_token_usage: Dict[str, Any]
     agents: List[Dict[str, Any]]
+    agent_inboxes: Dict[str, List[Dict[str, Any]]]
     teams: List[Dict[str, Any]]
+    formation_requests: List[Dict[str, Any]]
+    formation_invitations: List[Dict[str, Any]]
     libraries: List[Dict[str, Any]]
     permissions: Dict[str, Any]
     communication_requests: List[Dict[str, Any]]
@@ -43,7 +46,10 @@ def parse_state_validation_payload(
             presets=json.loads(configs.get("presets", "{}")),
             model_token_usage=json.loads(configs.get("model_token_usage", "{}")),
             agents=state["agents"],
+            agent_inboxes=state["agent_inboxes"],
             teams=state["teams"],
+            formation_requests=state["formation_requests"],
+            formation_invitations=state["formation_invitations"],
             libraries=state["libraries"],
             permissions=state["permissions"],
             communication_requests=state["communication_requests"],

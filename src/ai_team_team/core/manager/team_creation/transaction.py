@@ -3,11 +3,12 @@
 import os
 import shutil
 import tempfile
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 
 from ...agent import Agent
 from ...team import AgentTeam
+from ...formation import TeamFormationRequest
 
 
 class TeamCreationTransactionMixin:
@@ -25,9 +26,123 @@ class TeamCreationTransactionMixin:
         existing_member_ids: Optional[List[str]] = None,
         is_public_visible: bool = False,
         initial_docs: Optional[Dict[str, str]] = None,
+        initiating_agent: Optional[Agent] = None,
+        initiator_joins: bool = False,
+        unanimous_acceptance_action: str = "require_confirmation",
+        late_join_policy: str = "disabled",
+        task: Optional[str] = None,
+    ) -> Union[AgentTeam, TeamFormationRequest]:
+        """Creates an all-new team or opens consent for any existing identity."""
+        if existing_members or existing_member_ids or initiator_joins:
+            return self.manager._formations.propose_team_formation(
+                creator=creator,
+                member_count=member_count,
+                roles_and_presets=roles_and_presets,
+                preset_name=preset_name,
+                system_instructions=system_instructions,
+                team_purpose=team_purpose,
+                roles_and_models=roles_and_models,
+                member_configs=member_configs,
+                existing_members=existing_members,
+                existing_member_ids=existing_member_ids,
+                is_public_visible=is_public_visible,
+                initial_docs=initial_docs,
+                initiating_agent=initiating_agent,
+                initiator_joins=initiator_joins,
+                unanimous_acceptance_action=unanimous_acceptance_action,
+                late_join_policy=late_join_policy,
+                task=task,
+            )
+        return self.create_immediate(
+            creator=creator,
+            member_count=member_count,
+            roles_and_presets=roles_and_presets,
+            preset_name=preset_name,
+            system_instructions=system_instructions,
+            team_purpose=team_purpose,
+            roles_and_models=roles_and_models,
+            member_configs=member_configs,
+            is_public_visible=is_public_visible,
+            initial_docs=initial_docs,
+        )
+
+    def bootstrap_agent_team(self, creator: Any, **kwargs: Any) -> AgentTeam:
+        """Trusted host-only topology bootstrap that bypasses interactive consent explicitly."""
+        reserved = {
+            "authorized_existing",
+            "parent_override",
+            "parent_override_provided",
+            "required_creator_member_agent_id",
+            "record_registration_events",
+        }.intersection(kwargs)
+        if reserved:
+            raise TypeError(
+                "Trusted bootstrap does not accept internal transaction controls: "
+                + ", ".join(sorted(reserved))
+            )
+        team = self.create_immediate(
+            creator=creator,
+            authorized_existing=True,
+            **kwargs,
+        )
+        manager = self.manager
+        creator_kind = "agent_team" if isinstance(creator, AgentTeam) else "agent"
+        creator_id = creator.team_id if isinstance(creator, AgentTeam) else creator.agent_id
+        event = manager._memory.record_event(
+            "trusted_team_bootstrap",
+            agent=None,
+            team=team,
+            payload={
+                "team_id": team.team_id,
+                "member_count": len(team.members),
+                "creator_kind": creator_kind,
+                "creator_id": creator_id,
+            },
+            persist=False,
+            inherit_context=False,
+        )
+        manager._auto_save(memory_events={event.event_id})
+        manager._emit_callback(
+            "on_system_event",
+            "trusted_team_bootstrap",
+            {
+                "team_id": team.team_id,
+                "member_count": len(team.members),
+                "creator_kind": creator_kind,
+                "creator_id": creator_id,
+            },
+        )
+        return team
+
+    def create_immediate(
+        self,
+        creator: Any,
+        member_count: int = 3,
+        roles_and_presets: List[Tuple[str, str]] = None,
+        preset_name: str = "custom",
+        system_instructions: str = "",
+        team_purpose: str = "Unspecified team purpose",
+        roles_and_models: Optional[Dict[str, str]] = None,
+        member_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        existing_members: Optional[List[Agent]] = None,
+        existing_member_ids: Optional[List[str]] = None,
+        is_public_visible: bool = False,
+        initial_docs: Optional[Dict[str, str]] = None,
+        *,
+        authorized_existing: bool = False,
+        parent_override: Optional[AgentTeam] = None,
+        parent_override_provided: bool = False,
+        required_creator_member_agent_id: Optional[str] = None,
+        record_registration_events: bool = True,
     ) -> AgentTeam:
         """Stages off-registry objects and atomically publishes one AgentTeam."""
         manager = self.manager
+        if manager._restore_in_progress:
+            raise RuntimeError("ATTManager is restoring state and rejects new teams.")
+        if (existing_members or existing_member_ids) and not authorized_existing:
+            raise PermissionError(
+                "Existing Agents require a formation invitation or the explicit trusted bootstrap API."
+            )
         if manager._closing:
             raise RuntimeError("ATTManager is closing and rejects new teams.")
         manager._validate_team_creation_inputs(
@@ -69,6 +184,9 @@ class TeamCreationTransactionMixin:
                 existing_member_ids=existing_member_ids,
                 is_public_visible=is_public_visible,
                 initial_docs=initial_docs,
+                parent_override=parent_override,
+                parent_override_provided=parent_override_provided,
+                required_creator_member_agent_id=required_creator_member_agent_id,
                 staging_root=staging_root,
             )
             with manager._topology_lock:
@@ -101,16 +219,18 @@ class TeamCreationTransactionMixin:
             team.team_id,
             len(team.members),
         )
-        registration_event_ids = {
-            manager._memory.record_event(
-                "agent_registered",
-                agent=agent,
-                payload={"lifecycle_state": "active"},
-                persist=False,
-                inherit_context=False,
-            ).event_id
-            for agent in stage["new_agents"]
-        }
+        registration_event_ids = set()
+        if record_registration_events:
+            registration_event_ids = {
+                manager._memory.record_event(
+                    "agent_registered",
+                    agent=agent,
+                    payload={"lifecycle_state": "active"},
+                    persist=False,
+                    inherit_context=False,
+                ).event_id
+                for agent in stage["new_agents"]
+            }
         manager._auto_save(
             configs=True,
             agents={agent.agent_id for agent in stage["new_agents"]},

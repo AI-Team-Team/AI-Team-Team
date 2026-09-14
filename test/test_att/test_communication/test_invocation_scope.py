@@ -58,7 +58,7 @@ class TestPeerInvocationScope(unittest.IsolatedAsyncioTestCase):
         messenger = Agent("Messenger", "Researcher", messenger_client)
         manager.register_llm_client("messenger", messenger_client)
         manager.register_agent(messenger)
-        sender = manager.create_agent_team(
+        sender = manager.bootstrap_agent_team(
             manager.root_ai,
             existing_members=[messenger],
             member_configs={"HelperA": {}, "HelperB": {}},

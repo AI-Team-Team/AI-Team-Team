@@ -1,9 +1,10 @@
 """Public ATTManager delegation methods for TeamAPI."""
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 
 from ...agent import Agent
+from ...formation import TeamFormationRequest
 from ...team import AgentTeam
 
 
@@ -25,7 +26,12 @@ class TeamAPI:
         existing_member_ids: Optional[List[str]] = None,
         is_public_visible: bool = False,
         initial_docs: Optional[Dict[str, str]] = None,
-    ) -> AgentTeam:
+        initiating_agent: Optional[Agent] = None,
+        initiator_joins: bool = False,
+        unanimous_acceptance_action: str = "require_confirmation",
+        late_join_policy: str = "disabled",
+        task: Optional[str] = None,
+    ) -> Union[AgentTeam, TeamFormationRequest]:
         return self._team_creation.create_agent_team(
             creator=creator,
             member_count=member_count,
@@ -39,10 +45,22 @@ class TeamAPI:
             existing_member_ids=existing_member_ids,
             is_public_visible=is_public_visible,
             initial_docs=initial_docs,
+            initiating_agent=initiating_agent,
+            initiator_joins=initiator_joins,
+            unanimous_acceptance_action=unanimous_acceptance_action,
+            late_join_policy=late_join_policy,
+            task=task,
         )
+
+    def bootstrap_agent_team(self, creator: Any, **kwargs: Any) -> AgentTeam:
+        """Explicit trusted-host topology initialization; never exposed as an Agent tool."""
+        return self._team_creation.bootstrap_agent_team(creator, **kwargs)
 
     def _validate_team_creation_inputs(self, *args: Any, **kwargs: Any) -> Any:
         return self._team_creation._validate_team_creation_inputs(*args, **kwargs)
+
+    def _resolve_existing_team_members(self, *args: Any, **kwargs: Any) -> Any:
+        return self._team_creation._resolve_existing_team_members(*args, **kwargs)
 
     def _team_creation_snapshot(self) -> Dict[str, Any]:
         return self._team_creation._team_creation_snapshot()

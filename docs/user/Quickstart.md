@@ -328,14 +328,14 @@ Action: dispatch_subagent(
 
 ### Reusing an Existing Agent
 
-Register a persistent Agent once, then add the same identity to several AgentTeams through a neutral membership input. `member_configs` continues to create new Agents, while existing membership never changes the shared Agent's role, instructions, model binding, memory, lifecycle state, invocation lock, or Private DocLib.
+Register a persistent Agent once, then invite the same identity to several AgentTeams. Ordinary host calls and Agent tools create a persistent formation request rather than adding an existing Agent immediately; only the Agent's explicit acceptance makes it eligible to join. Membership never rebinds or clears the shared Agent's role, instructions, model binding, memory, lifecycle state, invocation lock, Agent inbox, or Private DocLib; formation notifications are appended to the existing inbox independently.
 
 ```python
 shared_client = MyLLMClient()
 manager.register_llm_client("shared-agent", shared_client)
 alice = manager.register_agent(Agent("Alice", "Researcher", shared_client))
 
-team_a = manager.create_agent_team(
+formation_a = manager.create_agent_team(
     creator=root_agent,
     member_configs={
         "Planner": {"model": "openai-123"},
@@ -343,8 +343,11 @@ team_a = manager.create_agent_team(
     },
     existing_members=[alice],
 )
+await manager.respond_team_invitation(formation_a.request_id, actor=alice, attitude="accepted")
+created_a = await manager.create_team_from_formation(formation_a.request_id, actor=root_agent)
+team_a = manager.teams[created_a.team_id]
 
-team_b = manager.create_agent_team(
+formation_b = manager.create_agent_team(
     creator=root_agent,
     member_configs={
         "Analyst": {"model": "openai-123"},
@@ -352,6 +355,9 @@ team_b = manager.create_agent_team(
     },
     existing_member_ids=[alice.agent_id],
 )
+await manager.respond_team_invitation(formation_b.request_id, actor=alice, attitude="accepted")
+created_b = await manager.create_team_from_formation(formation_b.request_id, actor=root_agent)
+team_b = manager.teams[created_b.team_id]
 
 assert next(member for member in team_a.members if member.agent_id == alice.agent_id) is alice
 assert next(member for member in team_b.members if member.agent_id == alice.agent_id) is alice

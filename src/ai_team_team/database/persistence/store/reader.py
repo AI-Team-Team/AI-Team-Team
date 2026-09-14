@@ -8,6 +8,7 @@ from sqlalchemy import text
 from ai_team_team.core.exceptions import StateRestoreError
 from ai_team_team.database.models import (
     AgentMessageModel,
+    AgentInboxModel,
     AgentMemoryCardModel,
     AgentMemorySegmentModel,
     AgentModel,
@@ -26,6 +27,8 @@ from ai_team_team.database.models import (
     RetainedMemoryReferenceModel,
     SystemMemoryEventModel,
     TeamInboxModel,
+    TeamFormationInvitationModel,
+    TeamFormationRequestModel,
     TeamModel,
     TeamProposalModel,
     team_members,
@@ -99,6 +102,23 @@ class StoreReadMixin:
                         "last_context": row.last_context,
                         "lifecycle_state": row.lifecycle_state,
                         "messages": messages,
+                    }
+                )
+
+            agent_inboxes: Dict[str, list[Dict[str, Any]]] = {}
+            for row in (
+                session.query(AgentInboxModel)
+                .order_by(AgentInboxModel.created_at, AgentInboxModel.message_id)
+                .all()
+            ):
+                agent_inboxes.setdefault(row.agent_id, []).append(
+                    {
+                        "message_id": row.message_id,
+                        "agent_id": row.agent_id,
+                        "message_type": row.message_type,
+                        "payload": row.payload,
+                        "created_at": row.created_at,
+                        "read_at": row.read_at,
                     }
                 )
 
@@ -206,6 +226,52 @@ class StoreReadMixin:
                     "supersedes_request_id": row.supersedes_request_id,
                 }
                 for row in session.query(CommunicationRequestModel).all()
+            ]
+            formation_requests = [
+                {
+                    "request_id": row.request_id,
+                    "initiator_agent_id": row.initiator_agent_id,
+                    "creator_kind": row.creator_kind,
+                    "creator_id": row.creator_agent_id or row.creator_team_id,
+                    "parent_team_id": row.parent_team_id,
+                    "task": row.task,
+                    "member_count": row.member_count,
+                    "roles_and_presets": row.roles_and_presets,
+                    "preset_name": row.preset_name,
+                    "system_instructions": row.system_instructions,
+                    "team_purpose": row.team_purpose,
+                    "roles_and_models": row.roles_and_models,
+                    "member_configs": row.member_configs,
+                    "invitee_agent_ids": row.invitee_agent_ids,
+                    "initial_docs": row.initial_docs,
+                    "is_public_visible": row.is_public_visible,
+                    "initiator_joins": row.initiator_joins,
+                    "unanimous_acceptance_action": row.unanimous_acceptance_action,
+                    "late_join_policy": row.late_join_policy,
+                    "proposal_revision": row.proposal_revision,
+                    "proposal_fingerprint": row.proposal_fingerprint,
+                    "status": row.status,
+                    "created_team_id": row.created_team_id,
+                    "decision_reason": row.decision_reason,
+                    "created_at": row.created_at,
+                    "updated_at": row.updated_at,
+                    "resolved_at": row.resolved_at,
+                }
+                for row in session.query(TeamFormationRequestModel).all()
+            ]
+            formation_invitations = [
+                {
+                    "request_id": row.request_id,
+                    "agent_id": row.agent_id,
+                    "proposal_revision": row.proposal_revision,
+                    "attitude": row.attitude,
+                    "responded_at": row.responded_at,
+                    "joined_at": row.joined_at,
+                    "late_join_pending": row.late_join_pending,
+                    "late_join_requested_at": row.late_join_requested_at,
+                    "late_join_decision": row.late_join_decision,
+                }
+                for row in session.query(TeamFormationInvitationModel).all()
             ]
             communication_approvals = [
                 {
@@ -357,11 +423,14 @@ class StoreReadMixin:
             return {
                 "configs": config_map,
                 "agents": agents,
+                "agent_inboxes": agent_inboxes,
                 "teams": teams,
                 "libraries": libraries,
                 "permissions": permissions,
                 "links": links,
                 "communication_requests": communication_requests,
+                "formation_requests": formation_requests,
+                "formation_invitations": formation_invitations,
                 "communication_approvals": communication_approvals,
                 "communication_ballots": communication_ballots,
                 "communication_agreements": communication_agreements,

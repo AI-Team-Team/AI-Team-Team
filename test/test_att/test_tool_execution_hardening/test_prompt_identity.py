@@ -47,7 +47,7 @@ class TestPromptIdentityConsistency(unittest.IsolatedAsyncioTestCase):
             system_instructions=self.mission,
         )
         self.manager.register_agent(self.agent)
-        self.team = self.manager.create_agent_team(
+        self.team = self.manager.bootstrap_agent_team(
             self.manager.root_ai,
             existing_members=[self.agent],
             member_configs={"HelperA": {}, "HelperB": {}},
@@ -102,7 +102,7 @@ class TestPromptIdentityConsistency(unittest.IsolatedAsyncioTestCase):
         self.assertIn("### AVAILABLE TOOLS", system_instruction)
 
     async def test_shared_agent_keeps_mission_with_each_current_team(self):
-        other_team = self.manager.create_agent_team(
+        other_team = self.manager.bootstrap_agent_team(
             self.manager.root_ai,
             existing_members=[self.agent],
             member_configs={"OtherA": {}, "OtherB": {}},

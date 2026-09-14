@@ -1,6 +1,6 @@
 """Dynamic delegation, escalation, and AgentTeam status tools."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from ..core.exceptions import (
     ATTException,
@@ -10,7 +10,7 @@ from ..core.exceptions import (
     ToolError,
     ToolPermissionError,
 )
-from .context import _resolve_actual_team
+from .context import _resolve_actual_agent, _resolve_actual_team
 from .contract import Tool
 from .models import DispatchSubagentArguments
 
@@ -23,7 +23,14 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
         existing_member_ids: Optional[List[str]] = None,
         system_instructions: str = "",
         is_public_visible: bool = False,
-        initial_documents: Optional[Dict[str, str]] = None
+        initial_documents: Optional[Dict[str, str]] = None,
+        initiator_joins: bool = False,
+        unanimous_acceptance_action: Literal[
+            "auto_create", "require_confirmation"
+        ] = "require_confirmation",
+        late_join_policy: Literal[
+            "disabled", "open", "require_initiator_confirmation"
+        ] = "disabled",
     ) -> str:
         """Spawns a recursive child AT using new member configs and role-neutral existing Agent IDs."""
         if not att_manager:
@@ -33,8 +40,12 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
         if not config.enable_dynamic_delegation:
             raise ToolPermissionError("Dynamic Subagent Delegation is disabled.")
         
-        from ..core import Agent, AgentTeam
         actual_team = _resolve_actual_team(caller_node, att_manager)
+        actual_agent = _resolve_actual_agent(caller_node, att_manager)
+        if actual_agent is None or actual_team is None:
+            raise ToolPermissionError(
+                "Dynamic delegation requires an active Agent and AgentTeam invocation."
+            )
         
         current_depth = actual_team.depth if actual_team else 1
         max_depth = config.max_delegation_depth
@@ -82,8 +93,12 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                             raise ToolArgumentError(
                                 f"Model {model_alias!r} is not registered. Available models: {available}."
                             )
-        if member_configs or existing_member_ids:
-            member_count = len(member_configs or {}) + len(existing_member_ids or [])
+        if member_configs or existing_member_ids or initiator_joins:
+            member_count = (
+                len(member_configs or {})
+                + len(existing_member_ids or [])
+                + int(initiator_joins)
+            )
             if member_count < min_size:
                 raise ToolArgumentError(
                     f"A delegated AgentTeam MUST have at least {min_size} members."
@@ -92,18 +107,43 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
             member_count = min_size
 
         try:
-            async with att_manager._lifecycle.reserve_synchronous_dependencies(
-                existing_member_ids or ()
-            ):
-                child_team = caller_node.launch_att(
-                    manager=att_manager,
+            if existing_member_ids or initiator_joins:
+                formation = att_manager.create_agent_team(
+                    creator=actual_team,
                     member_count=member_count,
                     system_instructions=system_instructions,
                     team_purpose=team_purpose,
                     member_configs=member_configs,
                     existing_member_ids=existing_member_ids,
                     is_public_visible=is_public_visible,
-                    initial_docs=initial_documents
+                    initial_docs=initial_documents,
+                    initiating_agent=actual_agent,
+                    initiator_joins=initiator_joins,
+                    unanimous_acceptance_action=unanimous_acceptance_action,
+                    late_join_policy=late_join_policy,
+                    task=task,
+                )
+                summary = att_manager.inspect_team_formation(
+                    formation.request_id,
+                    actor=actual_agent,
+                ).summary
+                return (
+                    "{\"status\":\"PENDING_RESPONSES\",\"request\":"
+                    + formation.model_dump_json()
+                    + ",\"summary\":"
+                    + summary.model_dump_json()
+                    + "}"
+                )
+
+            async with att_manager._lifecycle.reserve_synchronous_dependencies(()):
+                child_team = caller_node.launch_att(
+                    manager=att_manager,
+                    member_count=member_count,
+                    system_instructions=system_instructions,
+                    team_purpose=team_purpose,
+                    member_configs=member_configs,
+                    is_public_visible=is_public_visible,
+                    initial_docs=initial_documents,
                 )
 
                 return await att_manager.execute_team_discussion(
@@ -194,6 +234,9 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                         "Arbitrator": {"model": "default"},
                     },
                     "existing_member_ids": None,
+                    "initiator_joins": False,
+                    "unanimous_acceptance_action": "require_confirmation",
+                    "late_join_policy": "disabled",
                     "initial_documents": {"brief.md": "Review scope"},
                 }
             ],

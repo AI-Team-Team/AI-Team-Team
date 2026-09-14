@@ -6,6 +6,7 @@ from sqlalchemy import delete, text
 
 from ai_team_team.database.models import (
     AgentMessageModel,
+    AgentInboxModel,
     AgentMemoryCardModel,
     AgentMemorySegmentModel,
     AgentModel,
@@ -23,6 +24,8 @@ from ai_team_team.database.models import (
     PeerMessageModel,
     RetainedMemoryReferenceModel,
     TeamInboxModel,
+    TeamFormationInvitationModel,
+    TeamFormationRequestModel,
     TeamModel,
     TeamProposalModel,
     team_members,
@@ -39,8 +42,11 @@ class CleanupWriteMixin:
             AgentMemoryCardModel,
             AgentMemorySegmentModel,
             AgentMessageModel,
+            AgentInboxModel,
             TeamInboxModel,
             TeamProposalModel,
+            TeamFormationInvitationModel,
+            TeamFormationRequestModel,
             PeerMessageModel,
             CommunicationBallotModel,
             CommunicationAgreementModel,

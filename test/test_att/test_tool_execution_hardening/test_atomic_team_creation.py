@@ -189,7 +189,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             "add_child_team",
             side_effect=RuntimeError("parent update failed"),
         ), self.assertRaisesRegex(RuntimeError, "parent update failed"):
-            self.manager.create_agent_team(
+            self.manager.bootstrap_agent_team(
                 parent,
                 member_configs={
                     "Tester": {"model": "default"},

@@ -24,7 +24,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         )
         writer = Agent("ReActWriter", "Writer", client)
         self.manager.register_agent(writer)
-        team = self.manager.create_agent_team(
+        team = self.manager.bootstrap_agent_team(
             self.root,
             member_configs={
                 "PeerC": {"model": "default"},
@@ -60,7 +60,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         )
         reader = Agent("ReActReader", "Reader", client)
         self.manager.register_agent(reader)
-        team = self.manager.create_agent_team(
+        team = self.manager.bootstrap_agent_team(
             self.root,
             member_configs={
                 "PeerR1": {"model": "default"},

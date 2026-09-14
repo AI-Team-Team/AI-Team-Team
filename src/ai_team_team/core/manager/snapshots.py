@@ -73,12 +73,21 @@ class SnapshotBuilder:
                     agent_ids.add(manager.agents[identifier].agent_id)
         agent_dependency_ids: set[str] = set()
         if not full:
+            agent_dependency_ids.update(dirty["agent_inboxes"])
             for team_id in dirty["teams"]:
                 team = manager.teams.get(team_id)
                 if team is not None:
                     agent_dependency_ids.update(member.agent_id for member in team.members)
                     if isinstance(team.creator, Agent):
                         agent_dependency_ids.add(team.creator.agent_id)
+            for request_id in dirty["formation_requests"] | dirty["formation_invitations"]:
+                request = manager._formations.requests.get(request_id)
+                if request is None:
+                    continue
+                agent_dependency_ids.add(request.initiator_agent_id)
+                agent_dependency_ids.update(request.invitee_agent_ids)
+                if request.creator_kind == "agent":
+                    agent_dependency_ids.add(request.creator_id)
         agent_dependency_ids.difference_update(agent_ids)
         serialized_agents: Dict[str, Dict[str, Any]] = {}
         unresolved_agents: List[str] = []
@@ -178,6 +187,15 @@ class SnapshotBuilder:
                 "messages": messages,
                 "message_timestamp": now,
             }
+        agent_inbox_ids = set(agent_lookup) if full else set(dirty["agent_inboxes"])
+        agent_inboxes = {}
+        for agent_id in sorted(agent_inbox_ids):
+            agent = agent_lookup.get(agent_id)
+            if agent is None:
+                continue
+            with agent.inbox_lock:
+                messages = tuple(dict(message) for message in agent.agent_inbox)
+            agent_inboxes[agent_id] = {"messages": messages}
         proposal_ids = set(manager.teams) if full else set(dirty["proposals"])
         proposals = {
             team_id: [
@@ -293,6 +311,30 @@ class SnapshotBuilder:
             if message_id in manager.broker.peer_messages
         ]
 
+        formation_request_ids = (
+            set(manager._formations.requests)
+            if full
+            else set(dirty["formation_requests"])
+        )
+        formation_invitation_request_ids = (
+            set(manager._formations.requests)
+            if full
+            else set(dirty["formation_invitations"])
+        )
+        formation_requests = [
+            manager._formations.requests[request_id].model_dump(mode="json")
+            for request_id in sorted(formation_request_ids)
+            if request_id in manager._formations.requests
+        ]
+        formation_invitations = []
+        for request_id in sorted(formation_invitation_request_ids):
+            if request_id not in manager._formations.requests:
+                continue
+            formation_invitations.extend(
+                invitation.model_dump(mode="json")
+                for invitation in manager._formations._request_invitations(request_id)
+            )
+
         with manager._memory._lock:
             event_ids = (
                 set(manager._memory.events)
@@ -347,7 +389,10 @@ class SnapshotBuilder:
             "agent_dependencies": agent_dependencies,
             "teams": teams,
             "inboxes": inboxes,
+            "agent_inboxes": agent_inboxes,
             "proposals": proposals,
+            "formation_requests": formation_requests,
+            "formation_invitations": formation_invitations,
             "communication_requests": communication_requests,
             "communication_approvals": communication_approvals,
             "communication_ballots": communication_ballots,

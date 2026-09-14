@@ -11,6 +11,7 @@ from .exceptions import ATTException
 from .utils import generate_with_retry
 
 if TYPE_CHECKING:
+    from .formation import TeamFormationRequest
     from .manager import ATTManager
     from .response import AgentTurnResult
 
@@ -116,8 +117,13 @@ class AgentTeam:
         existing_members: Optional[List[Agent]] = None,
         existing_member_ids: Optional[List[str]] = None,
         is_public_visible: bool = False,
-        initial_docs: Optional[Dict[str, str]] = None
-    ) -> 'AgentTeam':
+        initial_docs: Optional[Dict[str, str]] = None,
+        initiating_agent: Optional[Agent] = None,
+        initiator_joins: bool = False,
+        unanimous_acceptance_action: str = "require_confirmation",
+        late_join_policy: str = "disabled",
+        task: Optional[str] = None,
+    ) -> "AgentTeam | TeamFormationRequest":
         """Allows any active team to recursively launch their own child AT."""
         child = manager.create_agent_team(
             creator=self,
@@ -130,9 +136,15 @@ class AgentTeam:
             existing_members=existing_members,
             existing_member_ids=existing_member_ids,
             is_public_visible=is_public_visible,
-            initial_docs=initial_docs
+            initial_docs=initial_docs,
+            initiating_agent=initiating_agent,
+            initiator_joins=initiator_joins,
+            unanimous_acceptance_action=unanimous_acceptance_action,
+            late_join_policy=late_join_policy,
+            task=task,
         )
-        child.chapter_num = self.chapter_num
+        if hasattr(child, "chapter_num"):
+            child.chapter_num = self.chapter_num
         return child
 
 

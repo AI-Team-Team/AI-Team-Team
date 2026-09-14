@@ -14,7 +14,7 @@ from test.test_att.test_private_doclib._support import (
 
 
 class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
-    async def test_schema_five_round_trip_and_corruption_is_atomic(self):
+    async def test_current_schema_round_trip_and_corruption_is_atomic(self):
         db_path = os.path.join(self.temp_dir, "state.db")
         self.manager.db_path = db_path
         active = Agent("Active", "Researcher", self.client)
@@ -75,4 +75,3 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
             )
         finally:
             await restored.close()
-

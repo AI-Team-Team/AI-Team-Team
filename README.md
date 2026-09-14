@@ -37,7 +37,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Permits active teams to request parent-hierarchy migrations, arbitrated by modular strategies with loop/cycle detection and parent notification logs.
 * **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects an ASCII-drawn indented tree map of active teams (displaying purposes, status, and progress metrics in real-time) directly into the agent prompt context.
 * **[Global Expert Discovery](docs/State_Persistence.md)**: Automatically appends a directory of all active system experts (names, roles, and profiles) into the agent's identity context to facilitate peer discovery.
-* **Shared-Agent Continuity**: One `Agent` may participate in several teams with one identity and complete memory. Invocation-scoped team/discussion context keeps prompts and team-sensitive tools correctly scoped while the agent's own model calls remain serialized.
+* **[Shared-Agent Continuity](docs/Consensual_Team_Formation.md)**: One `Agent` may participate in several teams with one identity, one persistent Agent inbox, and complete memory. Invocation-scoped team/discussion context keeps prompts and team-sensitive tools correctly scoped while the agent's own model calls remain serialized.
 * **[Resilient Failover Routing](docs/Team_Governance.md#5-token-budget--failover-policies)**: Dynamically hot-swaps exhausted or failing model clients. `"auto"` selects from available bindings; `"parent"` uses an explicit parent AgentTeam ballot or a Root Agent decision and fails closed.
 
 ### 🧠 ReAct Loops & Execution Engine
@@ -60,7 +60,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 * **[Token-Bounded File Reading](docs/Gated_Reading.md)**: Limits model-facing reads by the effective model's content-token budget rather than file size or line count, supports exact continuation inside long lines, and rejects stale file cursors.
 * **[Collaborative DocLib Storage](docs/Gated_Reading.md#6-document-libraries-doclib)**: Equips teams with built-in document libraries. Access is governed by prefix path ACL permissions (`READ`/`WRITE`) that inherit recursively downward to subdirectories.
 * **Private Agent DocLibs**: Gives every registered AI one persistent private workspace (`PDL-<agent_id>`). Private files follow a shared AI across teams, remain outside team ACLs and prompts, and enter a team library only through an explicit copy/publish tool.
-* **Role-Neutral Shared Membership**: Adds an active registered Agent to multiple AgentTeams through `existing_members` or stable `existing_member_ids`. Each team stores only a membership reference, so joining another team never changes the Agent's identity, role, instructions, model binding, memory, lifecycle, invocation lock, or Private DocLib.
+* **[Consensual Existing-Agent Membership](docs/Consensual_Team_Formation.md)**: Ordinary Agent and host APIs send persistent identity-inbox invitations before adding a registered Agent to a new AgentTeam. Only accepted Agents may join, while membership remains a role-neutral relation that never rebinds or clears Agent-owned identity, memory, model, lifecycle, lock, inbox, or Private DocLib state.
 * **Tool Auditor Interception**: Registers pre-execution interception hooks to audit, vet, approve, or reject specific tool calls (e.g. database safety query check).
 
 ### 💾 Persistence & Diagnostics
@@ -112,15 +112,20 @@ flowchart TB
     subgraph Organization["Identity and Recursive Organization"]
         Root["Root AI Agent<br/>root governance principal"]
         Agents["Stable Agent Registry<br/>one identity and memory per Agent"]
+        AgentInbox["Persistent Agent Inbox<br/>identity-addressed invitations and results"]
         Membership["Role-Neutral Membership<br/>team_id ↔ agent_id"]
         Teams["Recursive AgentTeam Tree<br/>dynamic creation and migration"]
+        Formation["Consensual Team Formation<br/>persistent invitations, attitudes, and late join"]
         DelegationAdmission["Atomic Delegation Admission<br/>manager-wide Agent wait graph"]
         PrivateDocLib["Private Agent DocLibs"]
         TeamDocLib["Team DocLibs and Path ACLs"]
 
         Root --> Agents
+        Agents --> AgentInbox
         Agents --> Membership
         Membership --> Teams
+        AgentInbox --> Formation
+        Formation --> Membership
         DelegationAdmission --> Teams
         Agents --> PrivateDocLib
         Teams --> TeamDocLib
@@ -196,6 +201,7 @@ flowchart TB
     Manager --> DiscussionLock
     Teams --> DiscussionLock
     Tools --> Governance
+    Tools --> Formation
     Governance -->|governance session| DiscussionLock
     Model -->|parent failover request| Governance
     Governance -->|selected model binding| Model
@@ -205,11 +211,13 @@ flowchart TB
     PrivateDocLib --> Knowledge
     TeamDocLib --> Knowledge
     Governance --> Teams
+    Formation --> Teams
     Communication --> Teams
     DiscussionResult --> Supervision
     Alerts -->|queue| Teams
     Alerts -->|wake| DiscussionLock
     Agents --> Dirty
+    AgentInbox --> Dirty
     Teams --> Dirty
     RoundResults --> Dirty
     WorkingContext --> Dirty
@@ -217,6 +225,7 @@ flowchart TB
     Catalog --> Dirty
     DiscussionResult --> Dirty
     Governance --> Dirty
+    Formation --> Dirty
     Communication --> Dirty
     Knowledge --> Dirty
     DiscussionResult --> Events
@@ -240,7 +249,7 @@ flowchart TB
     style Durability fill:#f5f3ff,stroke:#5e35b1,stroke-width:2px,color:#1f2937;
 
     class HostApp,Config,Bindings,Manager host;
-    class Root,Agents,Membership,Teams,DelegationAdmission identity;
+    class Root,Agents,AgentInbox,Membership,Teams,Formation,DelegationAdmission identity;
     class DiscussionLock,Rounds,Turns,AgentLock,WaitGraph,Strategy,Model,Tools,RoundResults,DiscussionResult execution;
     class Governance,Communication governance;
     class PrivateDocLib,TeamDocLib,Knowledge knowledge;

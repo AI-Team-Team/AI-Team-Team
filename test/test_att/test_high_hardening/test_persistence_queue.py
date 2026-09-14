@@ -123,6 +123,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             "teams": [],
             "libraries": [{"lib_id": lib_id, "name": "Deleted"}],
             "inboxes": {},
+            "agent_inboxes": {agent_id: {"messages": [{"stale": True}]}},
             "proposals": {},
             "permissions": {lib_id: {"/": {}}},
             "links": {lib_id: {}},
@@ -137,6 +138,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             "teams": [],
             "libraries": [],
             "inboxes": {},
+            "agent_inboxes": {},
             "proposals": {},
             "permissions": {},
             "links": {},
@@ -149,6 +151,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(merged["agents"], [])
         self.assertEqual(merged["libraries"], [])
+        self.assertNotIn(agent_id, merged["agent_inboxes"])
         self.assertNotIn(lib_id, merged["permissions"])
         self.assertNotIn(lib_id, merged["links"])
         self.assertNotIn(lib_id, merged["file_changes"])

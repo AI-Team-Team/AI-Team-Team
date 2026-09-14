@@ -7,6 +7,7 @@ from sqlalchemy import text
 from .cleanup import CleanupWriteMixin
 from .communication import CommunicationWriteMixin
 from .core_state import CoreStateWriteMixin
+from .formations import FormationWriteMixin
 from .libraries import LibraryWriteMixin
 from .memory import MemoryWriteMixin
 
@@ -16,6 +17,7 @@ class StoreWriteMixin(
     MemoryWriteMixin,
     CoreStateWriteMixin,
     CommunicationWriteMixin,
+    FormationWriteMixin,
     LibraryWriteMixin,
 ):
     session_factory: Any
@@ -55,6 +57,14 @@ class StoreWriteMixin(
             self._sync_memory_fts(session, snapshot)
             self._write_teams(session, snapshot.get("teams", []))
             session.flush()
+            self._write_formation_requests(
+                session, snapshot.get("formation_requests", [])
+            )
+            session.flush()
+            self._write_formation_invitations(
+                session, snapshot.get("formation_invitations", [])
+            )
+            self._write_agent_inboxes(session, snapshot.get("agent_inboxes", {}))
             self._write_inboxes(session, snapshot.get("inboxes", {}))
             self._write_proposals(session, snapshot.get("proposals", {}))
             self._write_communication_requests(session, snapshot.get("communication_requests", []))

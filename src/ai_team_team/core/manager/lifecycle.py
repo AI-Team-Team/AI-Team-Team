@@ -132,7 +132,12 @@ class LifecycleService:
         current = asyncio.current_task()
         active_tasks = {
             task
-            for task in manager._llm_tasks | manager._emergency_tasks
+            for task in (
+                manager._llm_tasks
+                | manager._emergency_tasks
+                | manager._formations.tasks
+                | manager._formation_operation_tasks
+            )
             if not task.done() and task is not current
         }
         for task in active_tasks:

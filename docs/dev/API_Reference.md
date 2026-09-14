@@ -20,8 +20,8 @@ One instance may be shared across teams. Its `lock` serializes complete model tu
   ```
 
 * **Methods**:
-  * `launch_att(manager: ATTManager, member_count: int = 3, roles_and_presets: Optional[List[Tuple[str, str]]] = None, system_instructions: str = "", team_purpose: str = "Unspecified team purpose", roles_and_models: Optional[Dict[str, str]] = None, member_configs: Optional[Dict[str, Dict[str, Any]]] = None, existing_members: Optional[List[Agent]] = None, existing_member_ids: Optional[List[str]] = None) -> AgentTeam`
-        Allows any active agent to recursively launch a child `AgentTeam`. Existing Agent inputs create only membership references and never mutate Agent-owned identity or runtime state.
+  * `launch_att(...) -> AgentTeam | TeamFormationRequest`
+        Creates an all-new child immediately or opens persistent consent when existing Agents or initiator self-membership are requested. No invitation mutates Agent-owned identity or runtime state.
 
 `agent_id` is an immutable canonical UUID. `_private_doc_library_id` and `_model_alias` are manager-owned persistence fields; public code reads only `private_doc_library_id`.
 
@@ -53,7 +53,7 @@ Represents a dynamic team of at least 3 agents ($N \ge 3$) executing discussions
 
 Master orchestrator managing the overall ATT topology, dynamic presets, tool registrations, and callback events.
 
-`create_agent_team()` accepts `existing_members` or stable `existing_member_ids` for active registered Agents. These inputs are resolved before staging and revalidated under the topology lock; membership stores only the team/Agent relationship, while `member_configs` remains exclusively responsible for creating new Agent entities.
+`create_agent_team()` returns an immediate AgentTeam only for all-new membership. Existing Agent inputs return a persistent `TeamFormationRequest`; accepted identities are revalidated before the staged commit, and membership stores only the team/Agent relationship. `bootstrap_agent_team()` is the explicit audited host-only provisioned-topology bypass and is not registered as a tool.
 
 Synchronous and asynchronous callbacks share one ordered background dispatcher; callback failures are logged and never alter core transaction outcomes.
 
@@ -88,8 +88,14 @@ Synchronous and asynchronous callbacks share one ordered background dispatcher; 
     Registers an auditing hook callback that intercepts specific tool calls before execution.
   * `register_tools_context(context: Dict[str, Any])`
     Registers additional runtime resources and rebinds coordination tools. The reserved `att_manager` reference is installed automatically and cannot be overwritten.
-  * `create_agent_team(...) -> AgentTeam`
-    Validates inputs before mutation, stages new identities and DocLibs outside their final paths, atomically publishes files and topology under the mutation lock, and rolls back all runtime and filesystem state on failure.
+  * `create_agent_team(...) -> AgentTeam | TeamFormationRequest`
+    Validates all-new creation before mutation or opens a consent request without creating team entities when existing identities participate.
+  * `bootstrap_agent_team(...) -> AgentTeam`
+    Performs explicit trusted-host topology provisioning, preserves every Agent-owned field, and emits a durable administrative audit event.
+  * `inspect_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, `decide_team_formation_late_join`
+    Coordinate persistent invitation attitudes, live eligibility, accepted-subset creation, abandonment, and explicitly initiated late joining under a per-request lock.
+  * `list_agent_inbox` / `mark_agent_inbox_read`
+    Read and acknowledge identity-owned persistent notifications independently of any AgentTeam inbox.
   * `suppress_auto_save() -> AsyncContextManager`
     Nested, task-local batching context that merges dirty deltas and submits one write when the outer scope exits.
   * `await execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`
@@ -265,14 +271,15 @@ Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/
 
 ## Database Schema & ORM Models
 
-SQLAlchemy Declarative Models mapping schema 7 are defined in [`models.py`](../../src/ai_team_team/database/models.py):
+SQLAlchemy Declarative Models mapping schema 8 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
-* **`AgentModel` & `AgentMessageModel`**: Uses immutable `agent_id` primary/foreign keys and persists lifecycle profiles plus the bounded Working Context.
+* **`AgentModel`, `AgentMessageModel`, and `AgentInboxModel`**: Use immutable `agent_id` primary/foreign keys and persist lifecycle profiles, bounded Working Context, and identity-addressed notifications.
 * **`SystemMemoryEventModel`**: Stores the append-only host Journal without an Agent foreign key so confirmed identity deletion can retain historical snapshots.
 * **`AgentMemorySegmentModel`, `AgentMemoryCardModel`, `MemoryCardTagModel`, `MemoryCardSourceEventModel`, and `RetainedMemoryReferenceModel`**: Store Agent-owned deterministic segments, searchable card metadata, source provenance, and explicit compact Working Context retention.
 * **`TeamModel`**: Tracks active topologies, migration counts, and UUID-backed creator/member references.
 * **`TeamInboxModel` & `TeamProposalModel`**: Persists child escalations, peer messages, and democratic proposal votes.
+* **`TeamFormationRequestModel` & `TeamFormationInvitationModel`**: Persist proposal configuration, revisions, invitation attitudes, accepted founding records, completion choices, and late-join state.
 * **`CommunicationRequestModel`, `CommunicationApprovalModel`, `CommunicationBallotModel`**: Persist the request lifecycle, ordered explicit principals, and member ballots.
 * **`CommunicationAgreementModel` & `PeerMessageModel`**: Persist directional endpoint channels, revocation state, and idempotent delivery lifecycle.
 * **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel` & `DocLibLinkModel`**: Persists library kind, mutually exclusive team/agent ownership, lifecycle, ACL segments, physical document contents, and managed team-library link targets.

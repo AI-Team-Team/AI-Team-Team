@@ -58,11 +58,17 @@ class TestValidationAndRetry(unittest.IsolatedAsyncioTestCase):
             "Specialist_C": {"model": "default", "role_description": "C", "system_instructions": "C"}
         }
 
-        observation = await dispatch_tool(
-            task="Solve task",
-            team_purpose="Sub task",
-            member_configs=member_configs
-        )
+        agent_token = self.manager._active_tool_agent.set(team.members[0])
+        team_token = self.manager._active_team.set(team)
+        try:
+            observation = await dispatch_tool(
+                task="Solve task",
+                team_purpose="Sub task",
+                member_configs=member_configs
+            )
+        finally:
+            self.manager._active_team.reset(team_token)
+            self.manager._active_tool_agent.reset(agent_token)
         self.assertIn("Error: Model 'invalid-model-name' is not registered", observation)
 
     async def test_add_team_member_tool_invalid_model(self):

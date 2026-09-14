@@ -80,7 +80,7 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
             tools=tools,
         )
 
-    async def test_direct_self_dependency_is_rejected_before_team_creation(self):
+    async def test_direct_self_invitation_is_rejected_before_formation(self):
         teams_before = set(self.manager.teams)
         libraries_before = set(self.manager.libraries)
         agents_before = set(self.manager._agents_by_id)
@@ -89,12 +89,13 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
             result = await self._dispatch_with_existing(self.caller.agent_id)
 
         self.assertIs(result.status, ToolResultStatus.BUSINESS_ERROR)
-        self.assertEqual(result.error_kind, "agent_invocation_dependency")
+        self.assertEqual(result.error_kind, "business_error")
+        self.assertIn("cannot invite itself", result.content)
         self.assertEqual(set(self.manager.teams), teams_before)
         self.assertEqual(set(self.manager.libraries), libraries_before)
         self.assertEqual(set(self.manager._agents_by_id), agents_before)
 
-    async def test_ancestor_dependency_is_rejected_before_team_creation(self):
+    async def test_async_invitation_does_not_reserve_an_invocation_dependency(self):
         teams_before = set(self.manager.teams)
         libraries_before = set(self.manager.libraries)
         agents_before = set(self.manager._agents_by_id)
@@ -105,8 +106,8 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
                     self.ancestor.agent_id
                 )
 
-        self.assertIs(result.status, ToolResultStatus.BUSINESS_ERROR)
-        self.assertEqual(result.error_kind, "agent_invocation_dependency")
+        self.assertIs(result.status, ToolResultStatus.SUCCESS)
+        self.assertIn('"status":"PENDING_RESPONSES"', result.content)
         self.assertEqual(set(self.manager.teams), teams_before)
         self.assertEqual(set(self.manager.libraries), libraries_before)
         self.assertEqual(set(self.manager._agents_by_id), agents_before)
@@ -131,7 +132,7 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(await task, "completed")
 
-    async def test_idle_agent_can_still_join_a_synchronous_child(self):
+    async def test_idle_agent_receives_an_asynchronous_invitation(self):
         peer = Agent("IdlePeer", "Reviewer", self.client)
         self.manager.register_agent(peer)
         discussion = AsyncMock(return_value="completed")
@@ -145,9 +146,14 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
                 result = await self._dispatch_with_existing(peer.agent_id)
 
         self.assertIs(result.status, ToolResultStatus.SUCCESS)
-        self.assertEqual(result.content, "completed")
-        child = discussion.await_args.args[0]
-        self.assertIn(peer, child.members)
+        self.assertIn('"status":"PENDING_RESPONSES"', result.content)
+        discussion.assert_not_awaited()
+        self.assertTrue(
+            any(
+                message.message_type == "team_formation_invitation"
+                for message in self.manager.list_agent_inbox(peer.agent_id)
+            )
+        )
 
     async def test_cancellation_after_agent_lock_acquisition_releases_lifecycle_state(self):
         agent_lock_acquired = asyncio.Event()
@@ -346,7 +352,7 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(self.manager._agent_wait_edge_counts)
 
-    async def test_reciprocal_sibling_delegation_rejects_one_branch_before_creation(self):
+    async def test_reciprocal_sibling_invitations_create_no_synchronous_wait_cycle(self):
         barrier = asyncio.Barrier(2)
         alice_client = CoordinatedDelegatingClient(barrier)
         bob_client = CoordinatedDelegatingClient(barrier)
@@ -358,7 +364,7 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
         self.manager.register_agent(bob)
         alice_client.target_agent_id = bob.agent_id
         bob_client.target_agent_id = alice.agent_id
-        team = self.manager.create_agent_team(
+        team = self.manager.bootstrap_agent_team(
             self.manager.root_ai,
             existing_members=[alice, bob],
             member_configs={"Observer": {}},
@@ -380,21 +386,17 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result.status.value, "completed")
-        self.assertEqual(len(team.child_teams), 1)
-        self.assertEqual(len(set(self.manager.teams) - teams_before), 1)
-        self.assertEqual(len(set(self.manager._agents_by_id) - agents_before), 2)
-        self.assertEqual(len(set(self.manager.libraries) - libraries_before), 3)
+        self.assertEqual(len(team.child_teams), 0)
+        self.assertEqual(set(self.manager.teams), teams_before)
+        self.assertEqual(set(self.manager._agents_by_id), agents_before)
+        self.assertEqual(len(self.manager.team_formation_requests), 2)
+        self.assertFalse(self.manager._agent_wait_edge_counts)
         self.assertEqual(
-            len({path.name for path in managed_root.iterdir()} - directories_before),
-            3,
+            {request.status.value for request in self.manager.team_formation_requests.values()},
+            {"collecting_responses"},
         )
-        observations = alice.message_history + bob.message_history
-        self.assertTrue(
-            any(
-                message.get("tool_error_kind") == "agent_invocation_dependency"
-                for message in observations
-            )
-        )
+        self.assertEqual(set(self.manager.libraries), libraries_before)
+        self.assertEqual({path.name for path in managed_root.iterdir()}, directories_before)
         self.assertFalse(self.manager._agent_wait_edge_counts)
         self.assertEqual(self.manager._starting_invocations, 0)
         self.assertEqual(self.manager._active_invocations, 0)

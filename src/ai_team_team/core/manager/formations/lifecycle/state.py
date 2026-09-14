@@ -1,0 +1,192 @@
+"""Shared state and validation helpers for formation lifecycles."""
+
+from typing import Any, Dict, Iterable, Optional
+
+from ....agent import Agent
+from ....formation import (
+    FormationStatusSummary,
+    InvitationAttitude,
+    TeamFormationInvitation,
+    TeamFormationInspection,
+    TeamFormationRequest,
+    TeamFormationStatus,
+)
+from ....team import AgentTeam
+
+
+class FormationStateMixin:
+    def _request_invitations(
+        self,
+        request_id: str,
+    ) -> list[TeamFormationInvitation]:
+        return [
+            self.invitations[(request_id, agent_id)]
+            for agent_id in self.requests[request_id].invitee_agent_ids
+        ]
+
+    @staticmethod
+    def _new_member_count(request: TeamFormationRequest) -> int:
+        if request.member_configs:
+            return len(request.member_configs)
+        if request.roles_and_presets:
+            return len(request.roles_and_presets)
+        return 0
+
+    def _live_creation_error(self, request: TeamFormationRequest) -> str:
+        if request.status not in {
+            TeamFormationStatus.COLLECTING_RESPONSES,
+            TeamFormationStatus.READY_FOR_CONFIRMATION,
+        }:
+            return f"A formation in {request.status.value!r} status cannot be created."
+        try:
+            creator = self._resolve_request_creator(request)
+            parent = self._resolve_request_parent(request)
+            initiator = self.manager._agents_by_id.get(request.initiator_agent_id)
+            if initiator is None or initiator.lifecycle_state != "active":
+                raise ValueError("The initiating Agent is no longer active.")
+            self._require_active_agent(initiator)
+            if isinstance(creator, AgentTeam) and all(
+                member.agent_id != initiator.agent_id for member in creator.members
+            ):
+                raise ValueError(
+                    "The initiating Agent is no longer a member of the creator AgentTeam."
+                )
+            if isinstance(creator, Agent) and parent is not None and all(
+                member.agent_id != creator.agent_id for member in parent.members
+            ):
+                raise ValueError(
+                    "The initiating Agent is no longer a member of the intended parent AgentTeam."
+                )
+            accepted = []
+            for invitation in self._request_invitations(request.request_id):
+                if invitation.attitude is not InvitationAttitude.ACCEPTED:
+                    continue
+                agent = self.manager._agents_by_id.get(invitation.agent_id)
+                if agent is None:
+                    raise ValueError(
+                        f"Accepted Agent identity {invitation.agent_id!r} is no longer registered."
+                    )
+                self._require_active_agent(agent)
+                accepted.append(agent)
+            if request.initiator_joins:
+                accepted.append(initiator)
+            if len({agent.agent_id for agent in accepted}) != len(accepted):
+                raise ValueError("The resolved founding membership contains duplicate Agents.")
+            self.manager._validate_team_creation_inputs(
+                creator=creator,
+                member_count=request.member_count,
+                roles_and_presets=(
+                    [tuple(item) for item in request.roles_and_presets]
+                    if request.roles_and_presets is not None
+                    else None
+                ),
+                roles_and_models=request.roles_and_models,
+                member_configs=request.member_configs,
+                existing_members=accepted,
+                existing_member_ids=None,
+                initial_docs=request.initial_docs,
+                preset_name=request.preset_name,
+                system_instructions=request.system_instructions,
+                team_purpose=request.team_purpose,
+                is_public_visible=request.is_public_visible,
+            )
+        except (KeyError, PermissionError, TypeError, ValueError) as exc:
+            return str(exc)
+        return ""
+
+    def formation_summary(self, request_id: str) -> FormationStatusSummary:
+        request = self.requests.get(request_id)
+        if request is None:
+            raise KeyError(f"Unknown team formation request {request_id!r}.")
+        invitations = self._request_invitations(request_id)
+        counts = {attitude: 0 for attitude in InvitationAttitude}
+        for invitation in invitations:
+            counts[invitation.attitude] += 1
+        eligible = (
+            self._new_member_count(request)
+            + counts[InvitationAttitude.ACCEPTED]
+            + int(request.initiator_joins)
+        )
+        minimum = self.manager.config.min_subagent_team_size
+        size_eligible = eligible >= minimum
+        live_error = self._live_creation_error(request) if size_eligible else ""
+        return FormationStatusSummary(
+            request_id=request_id,
+            status=request.status,
+            accepted=counts[InvitationAttitude.ACCEPTED],
+            declined=counts[InvitationAttitude.DECLINED],
+            explicitly_ignored=counts[InvitationAttitude.EXPLICITLY_IGNORED],
+            no_response=counts[InvitationAttitude.NO_RESPONSE],
+            eligible_member_count=eligible,
+            minimum_member_count=minimum,
+            can_create=size_eligible and not live_error,
+            eligibility_reason=(
+                live_error
+                if live_error
+                else ""
+                if size_eligible
+                else (
+                    f"The accepted founding membership has {eligible} members; "
+                    f"at least {minimum} are required."
+                )
+            ),
+            created_team_id=request.created_team_id,
+        )
+
+    def inspect_team_formation(
+        self,
+        request_id: str,
+        *,
+        actor: Agent,
+    ) -> TeamFormationInspection:
+        self._require_active_agent(actor)
+        request = self.requests.get(request_id)
+        if request is None:
+            raise KeyError(f"Unknown team formation request {request_id!r}.")
+        if actor.agent_id != request.initiator_agent_id and actor.agent_id not in request.invitee_agent_ids:
+            raise PermissionError("Only the initiator or an invitee may inspect this formation.")
+        return TeamFormationInspection(
+            request=request.model_copy(deep=True),
+            summary=self.formation_summary(request_id),
+        )
+
+    def _dirty(
+        self,
+        request_id: str,
+        *,
+        inbox_agent_ids: Iterable[str] = (),
+        team_ids: Iterable[str] = (),
+    ) -> Dict[str, Any]:
+        dirty = self.manager._new_dirty_state()
+        dirty["formation_requests"].add(request_id)
+        dirty["formation_invitations"].add(request_id)
+        dirty["agent_inboxes"].update(inbox_agent_ids)
+        dirty["teams"].update(team_ids)
+        return dirty
+
+    def _emit_event(self, event_type: str, payload: Dict[str, Any]) -> None:
+        self.manager._emit_callback("on_system_event", event_type, payload)
+
+    @staticmethod
+    def _copy_inboxes(agents: Iterable[Agent]) -> Dict[str, list[dict[str, Any]]]:
+        copies = {}
+        for agent in agents:
+            with agent.inbox_lock:
+                copies[agent.agent_id] = [dict(message) for message in agent.agent_inbox]
+        return copies
+
+    @staticmethod
+    def _restore_inboxes(agents: Iterable[Agent], copies: Dict[str, list[dict[str, Any]]]) -> None:
+        for agent in agents:
+            if agent.agent_id not in copies:
+                continue
+            with agent.inbox_lock:
+                agent.agent_inbox = [dict(message) for message in copies[agent.agent_id]]
+
+    def _require_active_agent(self, actor: Agent) -> None:
+        if (
+            self.manager._agents_by_id.get(actor.agent_id) is not actor
+            or self.manager.agents.get(actor.name) is not actor
+            or actor.lifecycle_state != "active"
+        ):
+            raise PermissionError("The acting Agent must be active and registered.")

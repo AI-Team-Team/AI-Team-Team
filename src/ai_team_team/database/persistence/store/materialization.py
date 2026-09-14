@@ -49,6 +49,12 @@ class StoreMaterializationMixin:
             }
             for team_id, inbox in snapshot.get("inboxes", {}).items()
         }
+        result["agent_inboxes"] = {
+            agent_id: {
+                "messages": json.loads(json.dumps(list(inbox["messages"]))),
+            }
+            for agent_id, inbox in snapshot.get("agent_inboxes", {}).items()
+        }
         result["proposals"] = json.loads(json.dumps(snapshot.get("proposals", {})))
         result["permissions"] = json.loads(json.dumps(snapshot.get("permissions", {})))
         result["links"] = json.loads(json.dumps(snapshot.get("links", {})))
@@ -58,6 +64,8 @@ class StoreMaterializationMixin:
             "communication_ballots",
             "communication_agreements",
             "peer_messages",
+            "formation_requests",
+            "formation_invitations",
             "memory_events",
             "memory_segments",
             "memory_cards",

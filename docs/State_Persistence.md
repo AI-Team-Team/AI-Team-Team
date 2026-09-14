@@ -24,7 +24,7 @@ await restored.close()
 
 ## Incremental single-writer design
 
-Auto-save hooks mark individual agents, teams, proposals, inboxes, communication requests/approvals/agreements/deliveries, Journal events, memory segments/cards/references, libraries, permissions, managed links, configuration records, and library file paths dirty.
+Auto-save hooks mark individual agents, Agent identity inboxes, teams, formation requests and invitations, proposals, AgentTeam inboxes, communication requests/approvals/agreements/deliveries, Journal events, memory segments/cards/references, libraries, permissions, managed links, configuration records, and library file paths dirty.
 
 - Each database has one non-blocking cross-process writer lease.
 - Constructing a second writer manager for the same path raises `DatabaseOwnershipError` immediately.
@@ -58,9 +58,10 @@ The outermost scope submits one merged delta.
 The database stores:
 
 - schema version, `ATTConfig`, model metadata, presets, and token usage;
-- all active and inactive agents by immutable UUID, lifecycle state, private-library ownership, and bounded Working Context;
+- all active and inactive agents by immutable UUID, lifecycle state, private-library ownership, bounded Working Context, and persistent identity-addressed inbox messages;
 - append-only System Memory Journal events with identity snapshots and source provenance, plus optional Agent-owned segments, Memory Cards, normalized tags, retained references, and FTS5 search data;
-- teams, role-neutral `team_id ↔ agent_id` membership rows, lineage, migration counters, inboxes, and proposals;
+- teams, role-neutral `team_id ↔ agent_id` membership rows, lineage, migration counters, AgentTeam inboxes, and proposals;
+- consensual formation requests, proposal fingerprints and revisions, invitation attitudes, creation choices, late-join state, and resulting team references;
 - communication requests, ordered approvals, member ballots, directional Agreements, and peer-delivery records;
 - document-library metadata, ACLs, managed cross-library links, paths, and file contents.
 
@@ -94,7 +95,7 @@ await manager.load_state("att.db")
 
 Restoration is transactional.
 
-- ATT validates every Agent UUID, member, creator, parent, model alias, DocLib owner, permission, communication principal and state combination, Agreement, peer delivery, Journal sequence, memory ownership and provenance edge, deterministic segment digest, file path, and managed link before publishing anything.
+- ATT validates every Agent UUID, identity inbox message, formation request and invitation, member, creator, parent, model alias, DocLib owner, permission, communication principal and state combination, Agreement, peer delivery, Journal sequence, memory ownership and provenance edge, deterministic segment digest, file path, and managed link before publishing anything.
 - Multiple membership rows resolve to the same restored Agent object and do not carry team-role metadata.
 - Every agent must own exactly one canonical `PDL-<agent_id>` private library; private libraries must be non-public, have no team ACL or managed links, and match the owner's lifecycle state.
 - Persisted communication `PROCESSING` states reset to `PENDING` after validation.
@@ -117,6 +118,6 @@ The optional [Selective Episodic Memory](Selective_Episodic_Memory.md) catalog c
 
 ## Schema policy
 
-- The current persistence schema version is `7`.
-- Compatibility with schema `6` and earlier SQLite layouts is intentionally unsupported.
+- The current persistence schema version is `8`.
+- Compatibility with schema `7` and earlier SQLite layouts is intentionally unsupported.
 - Create a new database when upgrading.

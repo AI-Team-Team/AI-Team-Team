@@ -31,7 +31,10 @@ class StateCoordinator:
             "agents": set(),
             "teams": set(),
             "inboxes": set(),
+            "agent_inboxes": set(),
             "proposals": set(),
+            "formation_requests": set(),
+            "formation_invitations": set(),
             "communication_requests": set(),
             "communication_approvals": set(),
             "communication_agreements": set(),
@@ -57,7 +60,10 @@ class StateCoordinator:
             "agents",
             "teams",
             "inboxes",
+            "agent_inboxes",
             "proposals",
+            "formation_requests",
+            "formation_invitations",
             "libraries",
             "permissions",
             "links",
@@ -112,7 +118,10 @@ class StateCoordinator:
             or dirty["agents"]
             or dirty["teams"]
             or dirty["inboxes"]
+            or dirty["agent_inboxes"]
             or dirty["proposals"]
+            or dirty["formation_requests"]
+            or dirty["formation_invitations"]
             or dirty["libraries"]
             or dirty["permissions"]
             or dirty["links"]
@@ -129,7 +138,10 @@ class StateCoordinator:
         agents: Optional[set[str]] = None,
         teams: Optional[set[str]] = None,
         inboxes: Optional[set[str]] = None,
+        agent_inboxes: Optional[set[str]] = None,
         proposals: Optional[set[str]] = None,
+        formation_requests: Optional[set[str]] = None,
+        formation_invitations: Optional[set[str]] = None,
         communication_requests: Optional[set[str]] = None,
         communication_approvals: Optional[set[str]] = None,
         communication_agreements: Optional[set[str]] = None,
@@ -155,7 +167,10 @@ class StateCoordinator:
         dirty["agents"].update(agents or set())
         dirty["teams"].update(teams or set())
         dirty["inboxes"].update(inboxes or set())
+        dirty["agent_inboxes"].update(agent_inboxes or set())
         dirty["proposals"].update(proposals or set())
+        dirty["formation_requests"].update(formation_requests or set())
+        dirty["formation_invitations"].update(formation_invitations or set())
         dirty["communication_requests"].update(communication_requests or set())
         dirty["communication_approvals"].update(communication_approvals or set())
         dirty["communication_agreements"].update(communication_agreements or set())

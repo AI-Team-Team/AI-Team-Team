@@ -38,6 +38,18 @@ from .memory import (
     RetainedMemoryReference,
     SystemMemoryEvent,
 )
+from .formation import (
+    AgentInboxMessage,
+    FormationOperationResult,
+    FormationStatusSummary,
+    InvitationAttitude,
+    LateJoinPolicy,
+    TeamFormationInvitation,
+    TeamFormationInspection,
+    TeamFormationRequest,
+    TeamFormationStatus,
+    UnanimousAcceptanceAction,
+)
 from .communication import (
     AgreementDirection,
     ApprovalPrincipal,

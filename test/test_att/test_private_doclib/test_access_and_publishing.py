@@ -23,7 +23,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         self.assertEqual(private.library_kind, "agent_private")
         self.assertFalse(private.is_public_visible)
 
-        first = self.manager.create_agent_team(
+        first = self.manager.bootstrap_agent_team(
             self.root,
             member_configs={
                 "One": {"model": "default"},
@@ -31,7 +31,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
             },
             existing_members=[shared],
         )
-        second = self.manager.create_agent_team(
+        second = self.manager.bootstrap_agent_team(
             self.root,
             member_configs={
                 "Three": {"model": "default"},
@@ -115,7 +115,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
     async def test_publish_collision_move_and_private_events_hide_content(self):
         agent = Agent("Publisher", "Writer", self.client)
         self.manager.register_agent(agent)
-        team = self.manager.create_agent_team(
+        team = self.manager.bootstrap_agent_team(
             self.root,
             member_configs={
                 "PeerA": {"model": "default"},

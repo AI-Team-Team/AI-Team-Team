@@ -4,34 +4,39 @@ This document consolidates the sequence flows that govern how the AgentTeam topo
 
 ## 1. Dynamic Spawning & Tool Binding
 
-This flowchart outlines direct `launch_att()` creation and the synchronously awaited `dispatch_subagent` tool path:
+This flowchart separates immediate all-new delegation from persistent formation involving an existing Agent identity:
 
 ```mermaid
 flowchart TD
-    Start["Call launch_att() or dispatch_subagent()"] --> EnforceSize{"Combined membership satisfies configured minimum?"}
-    EnforceSize -- "No" --> RaiseError["Raise ValueError<br/>Spawning blocked"]
-    EnforceSize -- "Yes" --> Synchronous{"Will this call synchronously await<br/>the child discussion?"}
-    Synchronous -- "No: launch_att()" --> GenerateID
-    Synchronous -- "Yes: dispatch_subagent()" --> ReserveDependencies["Atomically reserve reused-Agent edges<br/>in manager wait-for graph"]
-    ReserveDependencies --> DependencyCycle{"Would any edge close a direct<br/>or transitive wait cycle?"}
-    DependencyCycle -- "Yes" --> DependencyError["Return agent_invocation_dependency<br/>Create no entities or files"]
-    DependencyCycle -- "No" --> GenerateID["Generate unique team_id: AT-xxxxxx"]
-    GenerateID --> SpawnMembers["Create configured new Agents<br/>Resolve existing registered Agent IDs"]
-    SpawnMembers --> RegisterAgents["Register only new Agents and Private DocLibs<br/>Existing identities remain unchanged"]
-    RegisterAgents --> CreateTeam["Instantiate AgentTeam with creator link"]
-    CreateTeam --> CreateDocLib["Create and register built-in team DocLib<br/>Populate initial documents"]
-    CreateDocLib --> BindTools["Bind default and global tools<br/>att_manager context is already reserved"]
-    BindTools --> RegisterTeam["Register team and team_id ↔ agent_id memberships"]
-    RegisterTeam --> CreatorIsTeam{"Is creator an AgentTeam?"}
-    CreatorIsTeam -- "Yes" --> AddChildLink["Add child reference and parent mapping"]
-    CreatorIsTeam -- "No" --> Save["Queue incremental entity and file deltas"]
-    AddChildLink --> Save
-    Save --> AwaitChild{"Synchronous dispatch?"}
-    AwaitChild -- "No" --> End["Dynamic AgentTeam active"]
-    AwaitChild -- "Yes" --> Discuss["Run synchronously awaited child discussion<br/>while dependency reservation remains active"]
-    Discuss --> Release["Release reference-counted dependency edges<br/>on success, failure, or cancellation"]
-    Release --> End
+    Start["Call create_agent_team, launch_att,<br/>or dispatch_subagent"] --> Existing{"Existing Agent IDs or<br/>initiator_joins?"}
+    Existing -- "No" --> ValidateNew["Validate all-new membership,<br/>models, paths, and topology"]
+    ValidateNew --> Stage["Stage new Agents, Private DocLibs,<br/>Team DocLib, and initial files"]
+    Stage --> Commit["Atomically publish team, files,<br/>and membership relations"]
+    Commit --> Synchronous{"dispatch_subagent?"}
+    Synchronous -- "Yes" --> Discuss["Run child discussion synchronously"]
+    Synchronous -- "No" --> Active["AgentTeam active"]
+    Discuss --> Active
+
+    Existing -- "Yes" --> ValidateProposal["Validate full possible proposal<br/>without creating entities or files"]
+    ValidateProposal --> PersistRequest["Persist TeamFormationRequest,<br/>invitations, and proposal revision"]
+    PersistRequest --> IdentityInbox["Notify each stable Agent identity<br/>through its personal inbox"]
+    IdentityInbox --> Attitudes["Invitees publish accepted, declined,<br/>explicitly_ignored, or no_response"]
+    Attitudes --> Inspect["Initiator inspects live counts,<br/>eligible membership, and reason"]
+    Inspect --> Eligible{"Accepted membership satisfies<br/>all live creation rules?"}
+    Eligible -- "No" --> Attitudes
+    Eligible -- "Yes" --> Complete{"Explicit create or configured<br/>unanimous auto-create?"}
+    Complete -- "Abandon" --> Abandoned["Persist ABANDONED<br/>notify every invitee"]
+    Complete -- "Create" --> Stage
+    Active --> Late{"Non-founding invitee later<br/>explicitly accepts?"}
+    Late -- "Policy disabled" --> NoJoin["Remain a nonmember"]
+    Late -- "Open" --> Join["Atomically add only<br/>team_id ↔ agent_id"]
+    Late -- "Confirmation required" --> Confirm["Initiator approves or denies<br/>pending late join"]
+    Confirm -- "Approve" --> Join
+    Confirm -- "Deny" --> NoJoin
+    Join --> Active
 ```
+
+Formation never synchronously waits for invited Agents or the new team's first discussion, so the invitation itself creates no wait-for dependency. If a committed formation includes an initial task, ATT schedules it after the creating invocation returns and sends the result to the initiator's Agent inbox. The manager-wide wait graph still protects every operation that actually introduces a synchronous Agent wait.
 
 ## 2. Communication Request Routing
 

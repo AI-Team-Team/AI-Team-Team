@@ -6,6 +6,7 @@ from ...config import ATTConfig
 from .agents import validate_agents
 from .libraries import validate_libraries
 from .memory import validate_memory_state
+from .formations import validate_formations
 from .payload import parse_state_validation_payload
 from .permissions import validate_permissions_and_links
 from .teams import validate_teams
@@ -20,6 +21,13 @@ class SnapshotValidationMixin:
         configs = state["configs"]
         agent_ids, active_agent_ids, root_id = validate_agents(manager, payload, configs)
         team_ids = validate_teams(payload, agent_ids, active_agent_ids)
+        validate_formations(
+            manager,
+            payload,
+            agent_ids,
+            active_agent_ids,
+            team_ids,
+        )
         library_ids, library_kinds, files_by_library = validate_libraries(
             manager, payload, agent_ids, team_ids
         )
