@@ -61,8 +61,19 @@ class StoreWriteMixin(
                 session, snapshot.get("formation_requests", [])
             )
             session.flush()
+            self._write_formation_revisions(
+                session, snapshot.get("formation_revisions", [])
+            )
+            self._write_formation_decisions(
+                session, snapshot.get("formation_decisions", [])
+            )
+            self._write_formation_drafts(
+                session, snapshot.get("formation_drafts", [])
+            )
             self._write_formation_invitations(
-                session, snapshot.get("formation_invitations", [])
+                session,
+                snapshot.get("formation_invitations", []),
+                snapshot.get("formation_invitation_request_ids", []),
             )
             self._write_agent_inboxes(session, snapshot.get("agent_inboxes", {}))
             self._write_inboxes(session, snapshot.get("inboxes", {}))

@@ -25,46 +25,104 @@ To install directly as a Git dependency in your own project:
 pip install git+https://github.com/AI-Team-Team/AI-Team-Team.git@main
 ```
 
-## 🔌 2. Implementing the LLM Client
+## ⚙️ 2. Configure ATT and Create the Manager
+
+Create the Root Agent and `ATTManager` after selecting the framework-wide policies that every AgentTeam will follow:
+
+```python
+from ai_team_team import ATTManager, Agent, ATTConfig, EpisodicMemoryConfig
+
+config = ATTConfig(
+    enable_dynamic_delegation=True,
+    max_delegation_depth=2,
+    min_subagent_team_size=3,
+    subagent_discussion_rounds=2,
+    react_max_steps=5,
+    enable_memory_compression=True,
+    episodic_memory=EpisodicMemoryConfig(enabled=False),  # Optional advanced mode
+    failover_policy="auto",
+    enable_emergency_wakeup=True,
+    tool_calling_mode="auto",
+    audit_unknown_escalation_mode="wake",  # Or "queue"
+    agent_private_data_policy="archive",  # Or "retain" / "delete"
+)
+
+root_agent = Agent(name="Root_AI", role="Architect")
+manager = ATTManager(root_ai=root_agent, config=config, db_path="att_state.db")
+```
+
+Supplying `db_path` enables asynchronous incremental persistence and automatic saving of accepted state changes.
+
+Register the runtime model bindings described below before loading persisted state, because callables and external connections are intentionally not serialized.
+
+### Stable Client and Agent Registration
+
+A direct client object must have one stable identity binding before related state can be saved, and its `model_name` attribute is accepted as an alias only when the same client object is registered under that name:
+
+```python
+manager.register_llm_client("analysis", analysis_client)
+```
+
+Register every external Agent through the manager so ATT can preserve its UUID, model binding, lifecycle record, inbox, and single Private DocLib across all team memberships:
+
+```python
+researcher = Agent("Researcher", "Evidence analyst", analysis_client)
+manager.register_agent(researcher)
+private_id = manager.get_private_library_id(researcher.agent_id)
+
+await manager.retire_agent(researcher.agent_id)  # Default policy: archive.
+await manager.reactivate_agent(researcher.agent_id, "analysis")
+```
+
+Retirement and reactivation preserve the same Agent identity and private library unless the explicit, confirmed `delete` lifecycle policy is used.
+
+## 🔌 3. Implement the LLM Client
 
 ATT is backend-agnostic. To connect your LLM provider (e.g., Google GenAI, OpenAI, Anthropic, or a local model), you must provide a client class that implements the `LLMClientProto` protocol.
 
-The adapter class must implement a `generate` method with the following signature:
+The adapter class must implement `generate` and the two synchronous capability methods in `LLMClientProto`:
 
 ```python
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Union
 
-from ai_team_team import Tool
+from ai_team_team import LLMResponse, Tool
 
 class MyLLMClient:
     async def generate(
         self,
-        prompt: str,
+        prompt: Union[str, List[Dict[str, Any]]],
         system_instruction: Optional[str] = None,
         tools: Optional[List[Tool]] = None,
         max_output_tokens: Optional[int] = None,
-        temperature: float = 0.3,
+        temperature: float = 0.7,
         require_json: bool = False,
-        **kwargs
-    ) -> str:
+    ) -> LLMResponse:
         """
-        Generates text completion.
+        Generates a text completion or returns structured tool calls.
         
         Args:
-            prompt: The user query or discussion history.
+            prompt: The user query or discussion history as text or message dictionaries.
             system_instruction: Guidelines and context injected for the agent.
-            tools: Optional list of native `Tool` instances. Adapters MUST parse these into their provider's schema manually.
+            tools: Optional provider-neutral `Tool` instances to convert into the provider's schema.
             max_output_tokens: Required provider output ceiling when a hard token quota is configured.
             temperature: Sampling temperature.
             require_json: If True, you MUST return a valid JSON string for governance, supervision, or optional episodic-memory indexing.
         """
-        # Call your LLM SDK here (e.g., openai.ChatCompletion.create or genai.GenerativeModel.generate_content)
-        # Ensure that if require_json is True, the model's output format is strict JSON.
-        response_text = ... 
-        return response_text
+        response_text = await call_provider_sdk(...)
+        return LLMResponse(text=response_text)
+
+    def supports_native_tool_calling(self) -> bool:
+        # Auto mode selects Native Strategy only for the literal boolean True.
+        return False
+
+    def supports_output_token_limit(self) -> Union[bool, str]:
+        # Return the provider parameter name, True for max_output_tokens, or False.
+        return "max_output_tokens"
 ```
 
-## 🛠️ 3. Registering Custom Tools & Presets
+When `require_json=True`, the response text must be valid JSON because governance, supervision, and optional memory indexing use strict structured results.
+
+## 🛠️ 4. Register Custom Tools and Presets
 
 You can extend agents' capabilities by registering custom tools and committees.
 
@@ -75,19 +133,10 @@ When registering a custom tool, provide precise type hints and a concise descrip
 ATT generates and validates the tool schema from the callable, and Text ReAct prompts display that schema according to `text_tool_schema_mode`.
 
 ```python
-from ai_team_team import ATTManager, Agent, ATTConfig, EpisodicMemoryConfig, Tool
+import os
+from typing import List, Optional
 
-# 1. Initialize configuration
-config = ATTConfig(
-    enable_dynamic_delegation=True,
-    max_delegation_depth=3,      # Support deep recursive spawning
-    min_subagent_team_size=3,
-    episodic_memory=EpisodicMemoryConfig(enabled=False),  # Optional advanced mode
-)
-
-# 2. Initialize manager and register global generator handler callback
-root_agent = Agent(name="Root_AI", role="Architect")
-manager = ATTManager(root_ai=root_agent, config=config)
+from ai_team_team import Tool
 
 async def my_generator_handler(
     model_name: str,
@@ -103,17 +152,36 @@ async def my_generator_handler(
 
 manager.register_generator_handler(my_generator_handler)
 
-# 3. Register a custom tool
+# Restore only after the required runtime handler and client aliases are bound.
+if os.path.exists("att_state.db"):
+    await manager.load_state("att_state.db")
+
 def search_knowledge_base(query: str, limit: int = 3) -> str:
+    """Search the project knowledge base."""
     # Your search logic (e.g., VectorDB lookup)
     return "Search results..."
 
-manager.register_tool(
-    name="search_kb",
-    description="Search the project knowledge base. Arguments: query (str), limit (int)",
-    func=search_knowledge_base
-)
+# Derive the name, description, and schema from the callable.
+manager.register_tool(search_knowledge_base)
+
+# Alternatively, provide an explicit public name and description.
+# manager.register_tool(
+#     name="search_kb",
+#     description="Search the project knowledge base. Arguments: query (str), limit (int)",
+#     func=search_knowledge_base,
+# )
 ```
+
+### Text ReAct Argument Syntax
+
+ATT derives and validates each tool's parameter schema from its callable, while the description should still explain the operation's purpose and any important domain constraints.
+
+Text ReAct actions use safe Python literal and keyword syntax:
+
+- `Action: search_kb(query="Iris character profile", limit=3)`
+- `Action: query_db(sql_command="SELECT * FROM characters")`
+
+Malformed, truncated, ambiguous, or schema-invalid arguments are rejected without executing the tool.
 
 ### Tool Interception Auditing
 
@@ -145,7 +213,7 @@ manager.register_preset(
 )
 ```
 
-## 🚀 4. Spawning Teams & Executing Debates
+## 🚀 5. Spawn Teams and Execute Discussions
 
 Once tools and presets are registered, you can spawn your Level 1 agent team and start a discussion loop:
 
@@ -166,9 +234,17 @@ transcript = await manager.execute_team_discussion(
 )
 
 print("Debate Transcript:\n", transcript)
+
+# Use the detailed API when the host needs per-turn failure and audit metadata.
+detailed = await manager.execute_team_discussion_detailed(
+    team=team,
+    prompt="Audit the schema details provided in file_schema.sql.",
+    rounds=2,
+)
+print(detailed.status, detailed.rounds, detailed.audit)
 ```
 
-## 📊 5. Hooking up status display & custom logs
+## 📊 6. Connect Status Displays and Custom Logs
 
 ATT decouples implementation logic from user interfaces and file loggers. Use event callbacks to stream activity updates and build terminal dashboards:
 
@@ -192,12 +268,12 @@ def log_append_callback(team_id: str, title: str, content: str, chapter_num: Opt
 
 manager.on_log_append = log_append_callback
 
-# Callbacks run on an ordered background dispatcher. Wait at an observation
-# boundary when the host needs to know that every callback has completed.
+# Callbacks run on an ordered background dispatcher.
+# Await this observation boundary when the host must know that all queued callbacks completed.
 await manager.flush_callbacks()
 ```
 
-## 🔗 6. Dynamic Team Migration & Topology Tree
+## 🔗 7. Dynamic Team Migration and Topology Tree
 
 ATT supports dynamic organizational restructuring at runtime. A team can request to migrate itself under a different parent team in the active hierarchy using the `request_migration` tool.
 
@@ -232,7 +308,55 @@ def emergency_callback(team_id: str, alert_type: str, alert_reason: str):
 manager.on_emergency_escalation = emergency_callback
 ```
 
-## 🤖 7. Model Registry & Global Generator Callback (Multi-Model Support)
+## 🔗 8. Configure AgentTeam Communication
+
+Every AgentTeam follows the single communication institution selected in `ATTConfig`, regardless of its topology depth, and the default `permissive` policy delivers authenticated peer messages without an Agreement.
+
+Select an approval-governed institution when communication channels must be authorized:
+
+```python
+from ai_team_team import ATTConfig, ParentApprovalCommunicationConfig
+
+config = ATTConfig(
+    communication=ParentApprovalCommunicationConfig(
+        request_delivery="queue",
+        direction="bidirectional",
+    )
+)
+```
+
+Use `LineageApprovalCommunicationConfig(request_delivery="wake", direction="one_way")` instead when the recipient and the required topology lineage must approve a one-way channel.
+
+The invoking Agent must be an active member of its current invocation-scoped AgentTeam, and communication tools never accept overrides for the sender, policy, direction, or approval principals.
+
+- **Request a governed channel**: `Action: request_peer_communication(team_id="AT-xyz789", rationale="Coordinate the audit")`
+- **Send a peer message**: `Action: send_peer_message(team_id="AT-xyz789", message="Verify the status of Iris")`
+- **Revoke a channel**: `Action: revoke_peer_agreement(agreement_id="CA-123", reason="Coordination complete")`
+- **Escalate to the parent**: `Action: delegate_escalation(objective="Failed to verify rule consistency", rationale="Depth limit reached")`
+
+Under an approval policy, `send_peer_message` requires an active Agreement; under the permissive policy, it delivers directly without creating an implicit Agreement.
+
+Parent escalations enter the parent AgentTeam's inbox and are summarized during its next active discussion.
+
+## 🧰 9. Select Native or Text ReAct Tool Calling
+
+ATT uses `tool_calling_mode="auto"` by default.
+
+Auto mode selects Native Strategy only when the client's synchronous `supports_native_tool_calling()` probe returns the literal boolean `True`; probe errors, awaitables, and non-boolean values produce a system event and fall back to Text ReAct.
+
+Provider adapters receive `List[Tool]` and are responsible for converting each `Tool.json_schema` into the provider SDK's format.
+
+```python
+# Force native structured tool calling without running the capability probe.
+config.tool_calling_mode = "native"
+
+# Record native capability for a manager-routed model.
+manager.register_model("gpt-5.6-sol", {
+    "supports_native_tool_calling": True,
+})
+```
+
+## 🤖 10. Model Registry and Global Generator Callback
 
 ATT features a unified model registry allowing dynamic teams to assign different members to different model configurations based on task complexity (e.g. using a fast model for basic tasks and a strong model for planning). All LLM requests are resolved through a centralized global generator callback handler.
 
@@ -343,8 +467,8 @@ formation_a = manager.create_agent_team(
     },
     existing_members=[alice],
 )
-await manager.respond_team_invitation(formation_a.request_id, actor=alice, attitude="accepted")
-created_a = await manager.create_team_from_formation(formation_a.request_id, actor=root_agent)
+await manager.respond_team_invitation(formation_a.request_id, actor=alice, proposal_revision=formation_a.proposal_revision, attitude="accepted")
+created_a = await manager.create_team_from_formation(formation_a.request_id, actor=root_agent, proposal_revision=formation_a.proposal_revision)
 team_a = manager.teams[created_a.team_id]
 
 formation_b = manager.create_agent_team(
@@ -355,15 +479,17 @@ formation_b = manager.create_agent_team(
     },
     existing_member_ids=[alice.agent_id],
 )
-await manager.respond_team_invitation(formation_b.request_id, actor=alice, attitude="accepted")
-created_b = await manager.create_team_from_formation(formation_b.request_id, actor=root_agent)
+await manager.respond_team_invitation(formation_b.request_id, actor=alice, proposal_revision=formation_b.proposal_revision, attitude="accepted")
+created_b = await manager.create_team_from_formation(formation_b.request_id, actor=root_agent, proposal_revision=formation_b.proposal_revision)
 team_b = manager.teams[created_b.team_id]
 
 assert next(member for member in team_a.members if member.agent_id == alice.agent_id) is alice
 assert next(member for member in team_b.members if member.agent_id == alice.agent_id) is alice
 ```
 
-## 📂 8. Collaborative Document Library (DocLib)
+Consent always belongs to an exact proposal revision. If the initiator materially revises an open proposal with `await manager.revise_team_formation(..., base_revision=formation.proposal_revision, changes=TeamFormationRevisionPatch(...))`, every retained invitee returns to `no_response` and must review the new revision. For creator-Team collaboration before publication, use `discuss_team_formation_proposal()`, wait for the Agent inbox completion notification, inspect the detached draft, and explicitly call `publish_team_formation_draft()`; the advisory discussion never supplies invitee consent.
+
+## 📂 11. Collaborative Document Library (DocLib)
 
 Every Agent Team features a built-in document library (`DocLib`) to store documents, pass context down, and share specs across teams.
 
@@ -445,3 +571,15 @@ The current AI can deliberately use:
 Publishing copies the file to the current team's built-in DocLib and keeps the private source. A collision is rejected unless `overwrite=True`, and the target path is always checked for current team `WRITE` permission.
 
 An explicit private read is scoped to that single reasoning invocation. ATT redacts the observation from the AI's reusable model window when the invocation ends, preventing another team from receiving the private file body implicitly.
+
+## 💾 12. Save and Close
+
+Persistence APIs are asynchronous, and `flush_state()` waits for all accepted state changes before `close()` releases the writer and other manager resources:
+
+```python
+await manager.save_state("att_backup.db")
+await manager.flush_state()
+await manager.close()
+```
+
+Use `async with ATTManager(...) as manager` when possible so normal scope exit performs the final flush and close automatically.

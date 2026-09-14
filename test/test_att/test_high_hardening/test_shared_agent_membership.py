@@ -382,15 +382,18 @@ class TestSharedAgentMembership(unittest.IsolatedAsyncioTestCase):
             payload = json.loads(result)
             self.assertEqual(payload["status"], "PENDING_RESPONSES")
             request_id = payload["request"]["request_id"]
+            proposal_revision = payload["request"]["proposal_revision"]
             self.assertIsNone(captured_team)
             await self.manager.respond_team_invitation(
                 request_id,
                 actor=self.shared,
+                proposal_revision=proposal_revision,
                 attitude="accepted",
             )
             created = await self.manager.create_team_from_formation(
                 request_id,
                 actor=self.parent.members[0],
+                proposal_revision=proposal_revision,
             )
             if self.manager._formations.tasks:
                 await asyncio.gather(*tuple(self.manager._formations.tasks))

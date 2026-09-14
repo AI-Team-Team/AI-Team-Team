@@ -23,6 +23,7 @@ class DiscussionSessionMixin:
         rounds: int = 2,
         skip_audit: bool = False,
         require_complete: bool = False,
+        process_inbox: bool = True,
     ) -> "DiscussionResult":
         """Executes a multi-agent debate session inside the AT, monitored by the Supervisor."""
         with self.manager._topology_lock:
@@ -59,14 +60,16 @@ class DiscussionSessionMixin:
         await auto_save_context.__aenter__()
         try:
             for r in range(1, rounds + 1):
-                inbox_context = await prepare_inbox_context(
-                    self.manager,
-                    team,
-                    processed_unknown_fingerprints,
-                    processed_operational_fingerprints,
-                    processed_communication_request_ids,
-                    processed_peer_message_ids,
-                )
+                inbox_context = ""
+                if process_inbox:
+                    inbox_context = await prepare_inbox_context(
+                        self.manager,
+                        team,
+                        processed_unknown_fingerprints,
+                        processed_operational_fingerprints,
+                        processed_communication_request_ids,
+                        processed_peer_message_ids,
+                    )
 
                 round_members = list(team.members)
                 tasks = []

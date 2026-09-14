@@ -385,6 +385,7 @@ class RuntimeRegistry:
             or team.depth >= manager.config.max_delegation_depth
         ):
             tools.pop("dispatch_subagent", None)
+            tools.pop("discuss_team_formation_proposal", None)
         if team.parent_team is None and manager.find_parent_team(team) is None:
             tools.pop("delegate_escalation", None)
         if not manager.config.enable_membership_voting:

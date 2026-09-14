@@ -24,8 +24,12 @@ class FormationService(
         self.manager = manager
         self.requests = {}
         self.invitations = {}
+        self.revisions = {}
+        self.decisions = {}
+        self.drafts = {}
         self._state_lock = threading.RLock()
         self._request_locks = {}
+        self._draft_locks = {}
         self.tasks: set[asyncio.Task[object]] = set()
 
     def request_lock(self, request_id: str):
@@ -36,9 +40,33 @@ class FormationService(
                 raise KeyError(f"Unknown team formation request {request_id!r}.")
             return self._request_locks.setdefault(request_id, asyncio.Lock())
 
-    def restore(self, requests, invitations, agent_inboxes) -> None:
+    def draft_lock(self, draft_id: str):
+        import asyncio
+
+        with self._state_lock:
+            if draft_id not in self.drafts:
+                raise KeyError(f"Unknown team formation draft {draft_id!r}.")
+            return self._draft_locks.setdefault(draft_id, asyncio.Lock())
+
+    def restore(
+        self,
+        requests,
+        invitations,
+        revisions,
+        decisions,
+        drafts,
+        agent_inboxes,
+    ) -> None:
         """Replaces all formation state after strict staging validation."""
-        from ...formation import AgentInboxMessage, TeamFormationInvitation, TeamFormationRequest
+        from ...formation import (
+            AgentInboxMessage,
+            FormationDraftStatus,
+            TeamFormationDraft,
+            TeamFormationInvitation,
+            TeamFormationInvitationDecision,
+            TeamFormationRequest,
+            TeamFormationRevision,
+        )
 
         self.requests.clear()
         self.requests.update(
@@ -60,6 +88,43 @@ class FormationService(
                 )
             }
         )
+        self.revisions.clear()
+        self.revisions.update(
+            {
+                item.revision_id: item
+                for item in (
+                    TeamFormationRevision.model_validate(row, strict=False)
+                    for row in revisions
+                )
+            }
+        )
+        self.decisions.clear()
+        self.decisions.update(
+            {
+                item.decision_id: item
+                for item in (
+                    TeamFormationInvitationDecision.model_validate(row, strict=False)
+                    for row in decisions
+                )
+            }
+        )
+        self.drafts.clear()
+        self.drafts.update(
+            {
+                item.draft_id: item
+                for item in (
+                    TeamFormationDraft.model_validate(row, strict=False)
+                    for row in drafts
+                )
+            }
+        )
+        for draft in self.drafts.values():
+            if draft.status is FormationDraftStatus.RUNNING:
+                draft.status = FormationDraftStatus.PENDING
+                draft.reason = (
+                    "The previous process stopped while this detached draft was running; "
+                    "retry is required."
+                )
         for agent in self.manager._agents_by_id.values():
             restored = []
             for row in agent_inboxes.get(agent.agent_id, []):
@@ -69,3 +134,4 @@ class FormationService(
             with agent.inbox_lock:
                 agent.agent_inbox = restored
         self._request_locks = {}
+        self._draft_locks = {}

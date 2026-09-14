@@ -179,6 +179,27 @@ class AgentRegistry:
                 or agent_id in request.invitee_agent_ids
             )
             governance_refs.extend(
+                f"team-formation-revision:{revision.revision_id}"
+                for revision in manager._formations.revisions.values()
+                if revision.revised_by_agent_id == agent_id
+                or agent_id in revision.proposal_snapshot.get("invitee_agent_ids", [])
+            )
+            governance_refs.extend(
+                f"team-formation-decision:{decision.decision_id}"
+                for decision in manager._formations.decisions.values()
+                if decision.agent_id == agent_id
+            )
+            governance_refs.extend(
+                f"team-formation-draft:{draft.draft_id}"
+                for draft in manager._formations.drafts.values()
+                if draft.initiator_agent_id == agent_id
+                or agent_id in draft.participant_agent_ids
+                or (
+                    draft.candidate is not None
+                    and agent_id in draft.candidate.existing_member_ids
+                )
+            )
+            governance_refs.extend(
                 f"communication-ballot:{request_id}"
                 for request_id, ballots in manager.broker.ballots.items()
                 if any(ballot.voter_agent_id == agent_id for ballot in ballots)

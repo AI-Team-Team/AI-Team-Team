@@ -1,12 +1,20 @@
 import asyncio
 from contextlib import closing
+import hashlib
+import json
 import os
 import shutil
 import sqlite3
 import tempfile
 import unittest
 
-from ai_team_team import ATTConfig, ATTManager, Agent, StateRestoreError
+from ai_team_team import (
+    ATTConfig,
+    ATTManager,
+    Agent,
+    StateRestoreError,
+    TeamFormationRevisionPatch,
+)
 
 
 class EchoClient:
@@ -50,6 +58,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         )
         await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=first,
             attitude="accepted",
         )
@@ -66,15 +75,32 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
             loaded = restored.get_team_formation(request.request_id)
             self.assertEqual(loaded.status.value, "collecting_responses")
             self.assertEqual(
-                restored.team_formation_invitations[
-                    (request.request_id, first.agent_id)
-                ].attitude.value,
+                restored.get_team_formation_invitation(
+                    request.request_id,
+                    first.agent_id,
+                ).attitude.value,
                 "accepted",
             )
             self.assertTrue(restored.list_agent_inbox(first.agent_id))
             self.assertTrue(restored.list_agent_inbox(second.agent_id))
         finally:
             await restored.close()
+
+    async def test_restore_rejects_active_detached_formation_work(self):
+        await self.manager.save_state()
+        blocker = asyncio.Event()
+        task = asyncio.create_task(blocker.wait())
+        self.manager._formations.tasks.add(task)
+        try:
+            with self.assertRaisesRegex(
+                StateRestoreError,
+                "detached team-formation work",
+            ):
+                await self.manager.load_state(self.db_path)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            self.manager._formations.tasks.discard(task)
 
     async def test_explicit_empty_optional_maps_preserve_their_restore_fingerprint(self):
         invitees = [
@@ -106,6 +132,312 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(loaded.initial_docs, {})
         finally:
             await restored.close()
+
+    async def test_revision_and_explicit_decision_histories_restore(self):
+        invitees = [
+            Agent(f"HistoryInvitee{index}", "Researcher", self.client)
+            for index in range(2)
+        ]
+        for invitee in invitees:
+            self.manager.register_agent(invitee)
+        request = self.manager.create_agent_team(
+            self.root,
+            member_configs={"NewMember": {"model": "echo"}},
+            existing_members=invitees,
+            team_purpose="Initial purpose",
+        )
+        await self.manager.respond_team_invitation(
+            request.request_id,
+            proposal_revision=1,
+            actor=invitees[0],
+            attitude="accepted",
+        )
+        await self.manager.revise_team_formation(
+            request.request_id,
+            actor=self.root,
+            base_revision=1,
+            changes=TeamFormationRevisionPatch(team_purpose="Revised purpose"),
+        )
+        await self.manager.respond_team_invitation(
+            request.request_id,
+            proposal_revision=2,
+            actor=invitees[0],
+            attitude=None,
+        )
+        await self.manager.save_state()
+        await self.manager.close()
+
+        restored = ATTManager(
+            Agent("Temporary", "Temporary", self.client),
+            ATTConfig(workspace_root=self.tmpdir),
+        )
+        restored.register_llm_client("echo", self.client)
+        try:
+            await restored.load_state(self.db_path)
+            loaded = restored.get_team_formation(request.request_id)
+            self.assertEqual(loaded.proposal_revision, 2)
+            self.assertEqual(loaded.team_purpose, "Revised purpose")
+            revisions = restored.list_team_formation_revisions(request.request_id)
+            self.assertEqual([item.proposal_revision for item in revisions], [1, 2])
+            decisions = restored.list_team_formation_decisions(request.request_id)
+            self.assertEqual(
+                [(item.proposal_revision, item.attitude.value) for item in decisions],
+                [(1, "accepted"), (2, "no_response")],
+            )
+        finally:
+            await restored.close()
+
+    async def test_incremental_revision_removes_obsolete_invitation_rows(self):
+        invitees = [
+            Agent(f"RemovedInvitee{index}", "Researcher", self.client)
+            for index in range(2)
+        ]
+        for invitee in invitees:
+            self.manager.register_agent(invitee)
+        request = self.manager.create_agent_team(
+            self.root,
+            member_configs={
+                "NewAnalyst": {"model": "echo"},
+                "NewReviewer": {"model": "echo"},
+            },
+            existing_members=invitees,
+        )
+        await self.manager.flush_state()
+
+        await self.manager.revise_team_formation(
+            request.request_id,
+            actor=self.root,
+            base_revision=request.proposal_revision,
+            changes=TeamFormationRevisionPatch(
+                existing_member_ids=[invitees[0].agent_id]
+            ),
+        )
+        await self.manager.flush_state()
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            rows = connection.execute(
+                "SELECT agent_id FROM team_formation_invitations "
+                "WHERE request_id = ? ORDER BY agent_id",
+                (request.request_id,),
+            ).fetchall()
+        self.assertEqual(rows, [(invitees[0].agent_id,)])
+
+    async def test_higher_live_team_minimum_restores_open_request_as_ineligible(self):
+        invitees = [
+            Agent(f"MinimumInvitee{index}", "Researcher", self.client)
+            for index in range(2)
+        ]
+        for invitee in invitees:
+            self.manager.register_agent(invitee)
+        request = self.manager.create_agent_team(
+            self.root,
+            member_configs={"NewAnalyst": {"model": "echo"}},
+            existing_members=invitees,
+        )
+        self.manager.config.min_subagent_team_size = 10
+        await self.manager.save_state()
+        await self.manager.close()
+
+        restored = ATTManager(
+            Agent("TemporaryMinimumRoot", "Temporary", self.client),
+            ATTConfig(workspace_root=self.tmpdir),
+        )
+        restored.register_llm_client("echo", self.client)
+        try:
+            await restored.load_state(self.db_path)
+            summary = restored.inspect_team_formation(
+                request.request_id,
+                actor=restored.root_ai,
+            ).summary
+            self.assertFalse(summary.can_create)
+            self.assertEqual(summary.minimum_member_count, 10)
+            self.assertIn("at least 10", summary.eligibility_reason)
+        finally:
+            await restored.close()
+
+    async def test_corrupt_historical_revision_shape_fails_before_restore_commit(self):
+        invitees = [
+            Agent(f"RevisionCorruptionInvitee{index}", "Researcher", self.client)
+            for index in range(2)
+        ]
+        for invitee in invitees:
+            self.manager.register_agent(invitee)
+        request = self.manager.create_agent_team(
+            self.root,
+            member_configs={"NewMember": {"model": "echo"}},
+            existing_members=invitees,
+            team_purpose="Initial purpose",
+        )
+        await self.manager.revise_team_formation(
+            request.request_id,
+            actor=self.root,
+            base_revision=1,
+            changes=TeamFormationRevisionPatch(team_purpose="Current purpose"),
+        )
+        await self.manager.save_state()
+        await self.manager.close()
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            raw_snapshot = connection.execute(
+                "SELECT proposal_snapshot FROM team_formation_revisions "
+                "WHERE request_id = ? AND proposal_revision = 1",
+                (request.request_id,),
+            ).fetchone()[0]
+            snapshot = json.loads(raw_snapshot)
+            snapshot["unexpected_authority"] = "corrupt"
+            encoded = json.dumps(
+                snapshot,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            content_fingerprint = hashlib.sha256(encoded).hexdigest()
+            revision_payload = {
+                "request_id": request.request_id,
+                "proposal_revision": 1,
+                "content_fingerprint": content_fingerprint,
+            }
+            revision_fingerprint = hashlib.sha256(
+                json.dumps(
+                    revision_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            connection.execute(
+                "UPDATE team_formation_revisions SET proposal_snapshot = ?, "
+                "content_fingerprint = ?, revision_fingerprint = ? "
+                "WHERE request_id = ? AND proposal_revision = 1",
+                (
+                    json.dumps(snapshot),
+                    content_fingerprint,
+                    revision_fingerprint,
+                    request.request_id,
+                ),
+            )
+            connection.commit()
+
+        target_root = Agent("TargetRoot", "Architect", self.client)
+        target = ATTManager(
+            target_root,
+            ATTConfig(workspace_root=self.tmpdir),
+        )
+        target.register_llm_client("echo", self.client)
+        try:
+            with self.assertRaisesRegex(StateRestoreError, "exact material field set"):
+                await target.load_state(self.db_path)
+            self.assertIs(target.root_ai, target_root)
+            self.assertFalse(target._formations.requests)
+        finally:
+            await target.close()
+
+    async def test_corrupt_current_invitation_projection_conflicts_with_decision_history(self):
+        invitees = [
+            Agent(f"DecisionProjectionInvitee{index}", "Researcher", self.client)
+            for index in range(2)
+        ]
+        for invitee in invitees:
+            self.manager.register_agent(invitee)
+        request = self.manager.create_agent_team(
+            self.root,
+            member_configs={"NewMember": {"model": "echo"}},
+            existing_members=invitees,
+        )
+        await self.manager.respond_team_invitation(
+            request.request_id,
+            proposal_revision=1,
+            actor=invitees[0],
+            attitude="accepted",
+        )
+        await self.manager.save_state()
+        await self.manager.close()
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute(
+                "UPDATE team_formation_invitations SET attitude = 'declined' "
+                "WHERE request_id = ? AND agent_id = ?",
+                (request.request_id, invitees[0].agent_id),
+            )
+            connection.commit()
+
+        target = ATTManager(
+            Agent("TargetRoot", "Architect", self.client),
+            ATTConfig(workspace_root=self.tmpdir),
+        )
+        target.register_llm_client("echo", self.client)
+        try:
+            with self.assertRaisesRegex(StateRestoreError, "decision history"):
+                await target.load_state(self.db_path)
+            self.assertFalse(target._formations.requests)
+        finally:
+            await target.close()
+
+    async def test_corrupt_persisted_no_op_revision_is_rejected(self):
+        invitees = [
+            Agent(f"NoOpRevisionInvitee{index}", "Researcher", self.client)
+            for index in range(2)
+        ]
+        for invitee in invitees:
+            self.manager.register_agent(invitee)
+        request = self.manager.create_agent_team(
+            self.root,
+            member_configs={"NewMember": {"model": "echo"}},
+            existing_members=invitees,
+            team_purpose="Initial purpose",
+        )
+        await self.manager.revise_team_formation(
+            request.request_id,
+            actor=self.root,
+            base_revision=1,
+            changes=TeamFormationRevisionPatch(team_purpose="Revised purpose"),
+        )
+        await self.manager.save_state()
+        await self.manager.close()
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            revision_two = connection.execute(
+                "SELECT proposal_snapshot, content_fingerprint "
+                "FROM team_formation_revisions "
+                "WHERE request_id = ? AND proposal_revision = 2",
+                (request.request_id,),
+            ).fetchone()
+            revision_fingerprint = hashlib.sha256(
+                json.dumps(
+                    {
+                        "request_id": request.request_id,
+                        "proposal_revision": 1,
+                        "content_fingerprint": revision_two[1],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            connection.execute(
+                "UPDATE team_formation_revisions SET proposal_snapshot = ?, "
+                "content_fingerprint = ?, revision_fingerprint = ? "
+                "WHERE request_id = ? AND proposal_revision = 1",
+                (
+                    revision_two[0],
+                    revision_two[1],
+                    revision_fingerprint,
+                    request.request_id,
+                ),
+            )
+            connection.commit()
+
+        target = ATTManager(
+            Agent("TargetRoot", "Architect", self.client),
+            ATTConfig(workspace_root=self.tmpdir),
+        )
+        target.register_llm_client("echo", self.client)
+        try:
+            with self.assertRaisesRegex(StateRestoreError, "no-op revision"):
+                await target.load_state(self.db_path)
+            self.assertFalse(target._formations.requests)
+        finally:
+            await target.close()
 
     async def test_corrupt_missing_invitation_fails_before_mutating_manager(self):
         invitees = [
@@ -139,7 +471,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
                 await target.load_state(self.db_path)
             self.assertIs(target.root_ai, baseline_root)
             self.assertEqual(target._agents_by_id, baseline_agents)
-            self.assertFalse(target.team_formation_requests)
+            self.assertFalse(target._formations.requests)
         finally:
             await target.close()
 
@@ -172,7 +504,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         try:
             with self.assertRaisesRegex(StateRestoreError, "team formation record"):
                 await target.load_state(self.db_path)
-            self.assertFalse(target.team_formation_requests)
+            self.assertFalse(target._formations.requests)
         finally:
             await target.close()
 
@@ -226,11 +558,13 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             await self.manager.respond_team_invitation(
                 request.request_id,
+                proposal_revision=request.proposal_revision,
                 actor=invitee,
                 attitude="accepted",
             )
         created = await self.manager.create_team_from_formation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.root,
         )
         await self.manager.save_state()
@@ -250,7 +584,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         try:
             with self.assertRaisesRegex(StateRestoreError, "creator provenance"):
                 await target.load_state(self.db_path)
-            self.assertFalse(target.team_formation_requests)
+            self.assertFalse(target._formations.requests)
         finally:
             await target.close()
 
@@ -268,6 +602,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             await self.manager.respond_team_invitation(
                 request.request_id,
+                proposal_revision=request.proposal_revision,
                 actor=invitee,
                 attitude="accepted",
             )
@@ -287,6 +622,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(OSError, "authoritative formation"):
                 await self.manager.create_team_from_formation(
                     request.request_id,
+                    proposal_revision=request.proposal_revision,
                     actor=self.root,
                 )
         finally:
@@ -314,20 +650,23 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             await self.manager.respond_team_invitation(
                 request.request_id,
+                proposal_revision=request.proposal_revision,
                 actor=invitee,
                 attitude="accepted",
             )
         result = await self.manager.create_team_from_formation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.root,
         )
         team = self.manager.teams[result.team_id]
         team.members.remove(invitees[0])
         self.manager._auto_save(teams={team.team_id})
         await self.manager.save_state()
-        joined_at = self.manager.team_formation_invitations[
-            (request.request_id, invitees[0].agent_id)
-        ].joined_at
+        joined_at = self.manager.get_team_formation_invitation(
+            request.request_id,
+            invitees[0].agent_id,
+        ).joined_at
         await self.manager.close()
 
         restored = ATTManager(
@@ -340,9 +679,10 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
             restored_team = restored.teams[team.team_id]
             self.assertNotIn(invitees[0].agent_id, {agent.agent_id for agent in restored_team.members})
             self.assertEqual(
-                restored.team_formation_invitations[
-                    (request.request_id, invitees[0].agent_id)
-                ].joined_at,
+                restored.get_team_formation_invitation(
+                    request.request_id,
+                    invitees[0].agent_id,
+                ).joined_at,
                 joined_at,
             )
         finally:
@@ -365,11 +705,13 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             await self.manager.respond_team_invitation(
                 request.request_id,
+                proposal_revision=request.proposal_revision,
                 actor=invitee,
                 attitude="accepted",
             )
         result = await self.manager.create_team_from_formation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=original_parent.members[0],
         )
         formed_team = self.manager.teams[result.team_id]
@@ -413,6 +755,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
             result = await asyncio.wait_for(
                 self.manager.create_team_from_formation(
                     request.request_id,
+                    proposal_revision=request.proposal_revision,
                     actor=initiator,
                 ),
                 timeout=2,
@@ -451,9 +794,23 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         original_restore = target._formations.restore
         failed_once = False
 
-        def fail_after_inbox_switch(requests, invitations, agent_inboxes):
+        def fail_after_inbox_switch(
+            requests,
+            invitations,
+            revisions,
+            decisions,
+            drafts,
+            agent_inboxes,
+        ):
             nonlocal failed_once
-            original_restore(requests, invitations, agent_inboxes)
+            original_restore(
+                requests,
+                invitations,
+                revisions,
+                decisions,
+                drafts,
+                agent_inboxes,
+            )
             if not failed_once:
                 failed_once = True
                 raise RuntimeError("Injected post-inbox restore failure.")

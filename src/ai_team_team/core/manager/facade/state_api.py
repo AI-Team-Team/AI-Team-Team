@@ -69,6 +69,10 @@ class StateAPI:
                 raise StateRestoreError(
                     "Cannot restore state while a team formation operation is active."
                 )
+            if any(not task.done() for task in self._formations.tasks):
+                raise StateRestoreError(
+                    "Cannot restore state while detached team-formation work is active."
+                )
             if not os.path.exists(path):
                 raise FileNotFoundError(f"State database file '{path}' not found.")
             self._restore_in_progress = True

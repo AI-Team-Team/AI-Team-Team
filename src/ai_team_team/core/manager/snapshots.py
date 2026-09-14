@@ -80,7 +80,12 @@ class SnapshotBuilder:
                     agent_dependency_ids.update(member.agent_id for member in team.members)
                     if isinstance(team.creator, Agent):
                         agent_dependency_ids.add(team.creator.agent_id)
-            for request_id in dirty["formation_requests"] | dirty["formation_invitations"]:
+            for request_id in (
+                dirty["formation_requests"]
+                | dirty["formation_invitations"]
+                | dirty["formation_revisions"]
+                | dirty["formation_decisions"]
+            ):
                 request = manager._formations.requests.get(request_id)
                 if request is None:
                     continue
@@ -88,6 +93,10 @@ class SnapshotBuilder:
                 agent_dependency_ids.update(request.invitee_agent_ids)
                 if request.creator_kind == "agent":
                     agent_dependency_ids.add(request.creator_id)
+            for draft_id in dirty["formation_drafts"]:
+                draft = manager._formations.drafts.get(draft_id)
+                if draft is not None:
+                    agent_dependency_ids.add(draft.initiator_agent_id)
         agent_dependency_ids.difference_update(agent_ids)
         serialized_agents: Dict[str, Dict[str, Any]] = {}
         unresolved_agents: List[str] = []
@@ -334,6 +343,26 @@ class SnapshotBuilder:
                 invitation.model_dump(mode="json")
                 for invitation in manager._formations._request_invitations(request_id)
             )
+        formation_revisions = [
+            revision.model_dump(mode="json")
+            for revision in manager._formations.revisions.values()
+            if full or revision.request_id in dirty["formation_revisions"]
+        ]
+        formation_decisions = [
+            decision.model_dump(mode="json")
+            for decision in manager._formations.decisions.values()
+            if full or decision.request_id in dirty["formation_decisions"]
+        ]
+        formation_draft_ids = (
+            set(manager._formations.drafts)
+            if full
+            else set(dirty["formation_drafts"])
+        )
+        formation_drafts = [
+            manager._formations.drafts[draft_id].model_dump(mode="json")
+            for draft_id in sorted(formation_draft_ids)
+            if draft_id in manager._formations.drafts
+        ]
 
         with manager._memory._lock:
             event_ids = (
@@ -393,6 +422,12 @@ class SnapshotBuilder:
             "proposals": proposals,
             "formation_requests": formation_requests,
             "formation_invitations": formation_invitations,
+            "formation_invitation_request_ids": tuple(
+                sorted(formation_invitation_request_ids)
+            ),
+            "formation_revisions": formation_revisions,
+            "formation_decisions": formation_decisions,
+            "formation_drafts": formation_drafts,
             "communication_requests": communication_requests,
             "communication_approvals": communication_approvals,
             "communication_ballots": communication_ballots,

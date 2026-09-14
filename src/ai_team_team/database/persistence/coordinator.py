@@ -210,6 +210,9 @@ class PersistenceCoordinator:
             ("communication_agreements", "agreement_id"),
             ("peer_messages", "message_id"),
             ("formation_requests", "request_id"),
+            ("formation_revisions", "revision_id"),
+            ("formation_decisions", "decision_id"),
+            ("formation_drafts", "draft_id"),
             ("memory_events", "event_id"),
             ("memory_segments", "segment_id"),
             ("memory_cards", "memory_id"),
@@ -253,9 +256,12 @@ class PersistenceCoordinator:
             approval_records.extend(later.get(key, []))
             merged[key] = approval_records
 
-        replaced_formation_requests = {
+        replaced_formation_requests = set(
+            later.get("formation_invitation_request_ids", ())
+        )
+        replaced_formation_requests.update(
             record["request_id"] for record in later.get("formation_invitations", [])
-        }
+        )
         formation_invitations = [
             record
             for record in earlier.get("formation_invitations", [])
@@ -263,6 +269,10 @@ class PersistenceCoordinator:
         ]
         formation_invitations.extend(later.get("formation_invitations", []))
         merged["formation_invitations"] = formation_invitations
+        merged["formation_invitation_request_ids"] = tuple(
+            set(earlier.get("formation_invitation_request_ids", ()))
+            | replaced_formation_requests
+        )
 
         for key in ("inboxes", "agent_inboxes", "proposals", "permissions", "links"):
             records = dict(earlier.get(key, {}))

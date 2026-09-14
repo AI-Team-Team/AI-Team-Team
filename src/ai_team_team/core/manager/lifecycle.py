@@ -128,6 +128,7 @@ class LifecycleService:
         if manager._closed:
             return
         manager._closing = True
+        manager._formations.cancel_for_shutdown()
         await manager._memory.close()
         current = asyncio.current_task()
         active_tasks = {

@@ -17,11 +17,20 @@ flowchart TD
     Synchronous -- "No" --> Active["AgentTeam active"]
     Discuss --> Active
 
-    Existing -- "Yes" --> ValidateProposal["Validate full possible proposal<br/>without creating entities or files"]
-    ValidateProposal --> PersistRequest["Persist TeamFormationRequest,<br/>invitations, and proposal revision"]
+    Existing -- "Yes" --> Deliberate{"Creator-AgentTeam<br/>deliberation selected or required?"}
+    Deliberate -- "Yes" --> DraftJob["Persist detached draft job<br/>run normal serialized discussion"]
+    DraftJob --> Candidate["Initiator synthesizes strict candidate<br/>without granting invitee consent"]
+    Candidate --> PublishDraft["Initiator explicitly publishes<br/>ready non-stale draft"]
+    Deliberate -- "No" --> ValidateProposal["Validate full possible proposal<br/>without creating entities or files"]
+    PublishDraft --> ValidateProposal
+    ValidateProposal --> PersistRequest["Persist TeamFormationRequest,<br/>revision 1, and invitations"]
     PersistRequest --> IdentityInbox["Notify each stable Agent identity<br/>through its personal inbox"]
     IdentityInbox --> Attitudes["Invitees publish accepted, declined,<br/>explicitly_ignored, or no_response"]
-    Attitudes --> Inspect["Initiator inspects live counts,<br/>eligible membership, and reason"]
+    Attitudes --> Change{"Initiator proposes a<br/>material revision?"}
+    Change -- "Yes" --> Revise["Validate exact base revision<br/>append immutable snapshot"]
+    Revise --> Reset["Increment revision once<br/>reset retained consent and notify invitees"]
+    Reset --> IdentityInbox
+    Change -- "No" --> Inspect["Initiator inspects live counts,<br/>eligible membership, and reason"]
     Inspect --> Eligible{"Accepted membership satisfies<br/>all live creation rules?"}
     Eligible -- "No" --> Attitudes
     Eligible -- "Yes" --> Complete{"Explicit create or configured<br/>unanimous auto-create?"}
@@ -36,7 +45,7 @@ flowchart TD
     Join --> Active
 ```
 
-Formation never synchronously waits for invited Agents or the new team's first discussion, so the invitation itself creates no wait-for dependency. If a committed formation includes an initial task, ATT schedules it after the creating invocation returns and sends the result to the initiator's Agent inbox. The manager-wide wait graph still protects every operation that actually introduces a synchronous Agent wait.
+Formation never synchronously waits for invited Agents or the new team's first discussion, so the invitation itself creates no wait-for dependency. Collaborative proposal deliberation is also detached from the initiating tool invocation so it can later acquire the creator AgentTeam discussion lock and the initiating Agent invocation lock without creating a self-wait. If a committed formation includes an initial task, ATT schedules it after the creating invocation returns and sends the result to the initiator's Agent inbox. The manager-wide wait graph still protects every operation that actually introduces a synchronous Agent wait.
 
 ## 2. Communication Request Routing
 

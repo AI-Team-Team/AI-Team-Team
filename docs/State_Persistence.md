@@ -61,7 +61,7 @@ The database stores:
 - all active and inactive agents by immutable UUID, lifecycle state, private-library ownership, bounded Working Context, and persistent identity-addressed inbox messages;
 - append-only System Memory Journal events with identity snapshots and source provenance, plus optional Agent-owned segments, Memory Cards, normalized tags, retained references, and FTS5 search data;
 - teams, role-neutral `team_id ↔ agent_id` membership rows, lineage, migration counters, AgentTeam inboxes, and proposals;
-- consensual formation requests, proposal fingerprints and revisions, invitation attitudes, creation choices, late-join state, and resulting team references;
+- consensual formation request projections, normalized content and revision fingerprints, immutable revision snapshots, append-only exact-revision invitation decisions, detached collaborative drafts, creation choices, late-join state, and resulting team references;
 - communication requests, ordered approvals, member ballots, directional Agreements, and peer-delivery records;
 - document-library metadata, ACLs, managed cross-library links, paths, and file contents.
 
@@ -95,10 +95,11 @@ await manager.load_state("att.db")
 
 Restoration is transactional.
 
-- ATT validates every Agent UUID, identity inbox message, formation request and invitation, member, creator, parent, model alias, DocLib owner, permission, communication principal and state combination, Agreement, peer delivery, Journal sequence, memory ownership and provenance edge, deterministic segment digest, file path, and managed link before publishing anything.
+- ATT validates every Agent UUID, identity inbox message, formation request, contiguous revision history, invitation decision, detached draft and publication provenance, member, creator, parent, model alias, DocLib owner, permission, communication principal and state combination, Agreement, peer delivery, Journal sequence, memory ownership and provenance edge, deterministic segment digest, file path, and managed link before publishing anything.
 - Multiple membership rows resolve to the same restored Agent object and do not carry team-role metadata.
 - Every agent must own exactly one canonical `PDL-<agent_id>` private library; private libraries must be non-public, have no team ACL or managed links, and match the owner's lifecycle state.
-- Persisted communication `PROCESSING` states reset to `PENDING` after validation.
+- Persisted communication `PROCESSING` states reset to `PENDING` after validation, and a formation draft interrupted in `RUNNING` returns to `PENDING` with an explicit retry-required reason.
+- `load_state()` fails closed while a foreground formation operation or detached formation job is active, so restored registries cannot race ongoing draft synthesis, formation creation, or deferred initial work.
 
 It builds agents and files in a detached manager and a same-filesystem staging directory, recomputes derived team depth, then swaps the DocLib directories and live registries.
 
@@ -118,6 +119,6 @@ The optional [Selective Episodic Memory](Selective_Episodic_Memory.md) catalog c
 
 ## Schema policy
 
-- The current persistence schema version is `8`.
-- Compatibility with schema `7` and earlier SQLite layouts is intentionally unsupported.
+- The current persistence schema version is `9`.
+- Compatibility with schema `8` and earlier SQLite layouts is intentionally unsupported.
 - Create a new database when upgrading.

@@ -372,12 +372,12 @@ Revocation does not delete historical requests, approvals, ballots, Agreements, 
 
 ## 12. Persistence, Restore, and Shutdown
 
-Schema 8 retains the communication request, ordered approval, ballot, Agreement, peer-delivery, and correlated AgentTeam inbox records introduced with the autonomous communication model.
+Schema 9 retains the communication request, ordered approval, ballot, Agreement, peer-delivery, and correlated AgentTeam inbox records introduced with the autonomous communication model.
 
 ```mermaid
 flowchart TD
     Open["Open SQLite state database"] --> Preflight["Read schema version before create_all or DDL"]
-    Preflight --> Version{"Schema version is 7?"}
+    Preflight --> Version{"Schema version is 9?"}
     Version -- "No" --> Reject["StateRestoreError<br/>Database remains unmodified"]
     Version -- "Yes" --> Stage["Read into detached staging manager and staged DocLib root"]
     Stage --> Validate["Validate endpoints, initiators, principal kinds and references,<br/>approval ordering and state combinations,<br/>ballots, fingerprints, successor chains,<br/>Agreement uniqueness and source requests,<br/>delivery routes and inbox correlation"]

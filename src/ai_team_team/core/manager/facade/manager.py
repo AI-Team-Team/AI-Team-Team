@@ -101,8 +101,6 @@ class ATTManager(
         self._runtime = RuntimeRegistry(self)
         self._team_creation = TeamCreationService(self)
         self._formations = FormationService(self)
-        self.team_formation_requests = self._formations.requests
-        self.team_formation_invitations = self._formations.invitations
 
         # Public Tool registries
         self.global_tools: Dict[str, Tool] = {}

@@ -154,7 +154,8 @@ class TeamFormationRequestModel(Base):
     unanimous_acceptance_action: Mapped[str] = mapped_column(String)
     late_join_policy: Mapped[str] = mapped_column(String)
     proposal_revision: Mapped[int] = mapped_column(Integer)
-    proposal_fingerprint: Mapped[str] = mapped_column(String)
+    content_fingerprint: Mapped[str] = mapped_column(String)
+    revision_fingerprint: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String)
     created_team_id: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("teams.team_id", ondelete="RESTRICT"), nullable=True
@@ -221,5 +222,133 @@ class TeamFormationInvitationModel(Base):
         CheckConstraint(
             "late_join_pending IN (0, 1)",
             name="ck_team_formation_late_join_pending_boolean",
+        ),
+    )
+
+
+class TeamFormationRevisionModel(Base):
+    __tablename__ = "team_formation_revisions"
+    revision_id: Mapped[str] = mapped_column(String, primary_key=True)
+    request_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("team_formation_requests.request_id", ondelete="CASCADE"),
+    )
+    proposal_revision: Mapped[int] = mapped_column(Integer)
+    content_fingerprint: Mapped[str] = mapped_column(String)
+    revision_fingerprint: Mapped[str] = mapped_column(String)
+    proposal_snapshot: Mapped[dict] = mapped_column(JSON)
+    revised_by_agent_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("agents.agent_id", ondelete="RESTRICT"),
+    )
+    source_draft_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[float] = mapped_column(Float)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "request_id",
+            "proposal_revision",
+            name="uq_team_formation_revision_number",
+        ),
+        UniqueConstraint(
+            "source_draft_id",
+            name="uq_team_formation_revision_source_draft",
+        ),
+        CheckConstraint(
+            "proposal_revision >= 1",
+            name="ck_team_formation_revision_positive",
+        ),
+    )
+
+
+class TeamFormationInvitationDecisionModel(Base):
+    __tablename__ = "team_formation_invitation_decisions"
+    decision_id: Mapped[str] = mapped_column(String, primary_key=True)
+    request_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("team_formation_requests.request_id", ondelete="CASCADE"),
+    )
+    proposal_revision: Mapped[int] = mapped_column(Integer)
+    agent_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("agents.agent_id", ondelete="RESTRICT"),
+    )
+    attitude: Mapped[str] = mapped_column(String)
+    created_at: Mapped[float] = mapped_column(Float)
+
+    __table_args__ = (
+        CheckConstraint(
+            "proposal_revision >= 1",
+            name="ck_team_formation_decision_revision_positive",
+        ),
+        CheckConstraint(
+            "attitude IN ('accepted', 'declined', 'explicitly_ignored', 'no_response')",
+            name="ck_team_formation_decision_attitude",
+        ),
+    )
+
+
+class TeamFormationDraftModel(Base):
+    __tablename__ = "team_formation_drafts"
+    draft_id: Mapped[str] = mapped_column(String, primary_key=True)
+    initiator_agent_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("agents.agent_id", ondelete="RESTRICT"),
+    )
+    creator_kind: Mapped[str] = mapped_column(String)
+    creator_agent_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        ForeignKey("agents.agent_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    creator_team_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        ForeignKey("teams.team_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    deliberation_team_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        ForeignKey("teams.team_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    request_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        ForeignKey("team_formation_requests.request_id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    base_revision: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    base_revision_fingerprint: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    objective: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)
+    participant_agent_ids: Mapped[list] = mapped_column(JSON)
+    source_discussion_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    candidate: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    reason: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[float] = mapped_column(Float)
+    updated_at: Mapped[float] = mapped_column(Float)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(creator_kind = 'agent' AND creator_agent_id IS NOT NULL "
+            "AND creator_team_id IS NULL AND deliberation_team_id IS NULL) OR "
+            "(creator_kind = 'agent_team' AND creator_agent_id IS NULL "
+            "AND creator_team_id IS NOT NULL "
+            "AND deliberation_team_id = creator_team_id)",
+            name="ck_team_formation_draft_creator",
+        ),
+        CheckConstraint(
+            "(request_id IS NULL AND base_revision IS NULL "
+            "AND base_revision_fingerprint IS NULL) OR "
+            "(request_id IS NOT NULL AND base_revision IS NOT NULL "
+            "AND base_revision_fingerprint IS NOT NULL)",
+            name="ck_team_formation_draft_exact_base",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'ready', 'failed', 'cancelled', 'stale', 'published')",
+            name="ck_team_formation_draft_status",
+        ),
+        CheckConstraint(
+            "base_revision IS NULL OR base_revision >= 1",
+            name="ck_team_formation_draft_revision_positive",
         ),
     )

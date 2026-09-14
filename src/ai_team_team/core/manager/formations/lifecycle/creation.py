@@ -1,7 +1,7 @@
 """Atomic formation creation and abandonment."""
 
 import time
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from ....agent import Agent
 from ....formation import (
@@ -19,6 +19,7 @@ class FormationCreationMixin:
         request_id: str,
         *,
         actor: Agent,
+        proposal_revision: int,
     ) -> FormationOperationResult:
         self._require_active_agent(actor)
         async with self.request_lock(request_id):
@@ -28,6 +29,15 @@ class FormationCreationMixin:
                 raise KeyError(f"Unknown team formation request {request_id!r}.")
             if actor.agent_id != request.initiator_agent_id:
                 raise PermissionError("Only the initiating Agent may create this AgentTeam.")
+            self._assert_request_integrity(request)
+            if (
+                not isinstance(proposal_revision, int)
+                or isinstance(proposal_revision, bool)
+                or proposal_revision < 1
+            ):
+                raise TypeError("proposal_revision must be a positive integer.")
+            if proposal_revision != request.proposal_revision:
+                return self._stale_revision_result(request, proposal_revision)
             try:
                 return await self._finalize_locked(request, automatic=False)
             except ValueError as exc:
@@ -66,8 +76,10 @@ class FormationCreationMixin:
         request: TeamFormationRequest,
         *,
         automatic: bool,
+        extra_dirty: Optional[Dict[str, Any]] = None,
     ) -> FormationOperationResult:
         manager = self.manager
+        self._assert_request_integrity(request)
         if request.status is TeamFormationStatus.CREATED:
             return FormationOperationResult(
                 status="CREATED",
@@ -133,8 +145,11 @@ class FormationCreationMixin:
             if agent_id in manager._agents_by_id
         ]
         old_inboxes = self._copy_inboxes(notified_agents)
+        stale_drafts = {}
         team = None
         dirty = manager._new_dirty_state()
+        if extra_dirty is not None:
+            manager._merge_dirty_state(dirty, extra_dirty)
         batch_token = manager._persistence_batch.set(dirty)
         try:
             try:
@@ -171,6 +186,11 @@ class FormationCreationMixin:
                     if automatic
                     else "Created by the initiating Agent."
                 )
+                stale_drafts = self._stale_ready_drafts(
+                    request.request_id,
+                    reason="The AgentTeam was created before this draft was published.",
+                    updated_at=now,
+                )
                 founding_ids = {agent.agent_id for agent in accepted}
                 for invitation in self._request_invitations(request.request_id):
                     if invitation.agent_id in founding_ids:
@@ -189,6 +209,7 @@ class FormationCreationMixin:
                 manager._auto_save(
                     formation_requests={request.request_id},
                     formation_invitations={request.request_id},
+                    formation_drafts=set(stale_drafts),
                     agent_inboxes={agent.agent_id for agent in notified_agents},
                 )
             finally:
@@ -198,6 +219,8 @@ class FormationCreationMixin:
             self.requests[request.request_id] = old_request
             for agent_id, invitation in old_invitations.items():
                 self.invitations[(request.request_id, agent_id)] = invitation
+            for draft_id, previous in stale_drafts.items():
+                self.drafts[draft_id] = previous
             self._restore_inboxes(notified_agents, old_inboxes)
             if team is not None:
                 with manager._topology_lock:
@@ -240,6 +263,7 @@ class FormationCreationMixin:
         request_id: str,
         *,
         actor: Agent,
+        proposal_revision: int,
         reason: str = "",
     ) -> FormationOperationResult:
         self._require_active_agent(actor)
@@ -250,6 +274,15 @@ class FormationCreationMixin:
                 raise KeyError(f"Unknown team formation request {request_id!r}.")
             if actor.agent_id != request.initiator_agent_id:
                 raise PermissionError("Only the initiating Agent may abandon this formation.")
+            self._assert_request_integrity(request)
+            if (
+                not isinstance(proposal_revision, int)
+                or isinstance(proposal_revision, bool)
+                or proposal_revision < 1
+            ):
+                raise TypeError("proposal_revision must be a positive integer.")
+            if proposal_revision != request.proposal_revision:
+                return self._stale_revision_result(request, proposal_revision)
             if request.status is TeamFormationStatus.CREATED:
                 raise ValueError("A created AgentTeam cannot be abandoned through its formation.")
             if request.status is TeamFormationStatus.ABANDONED:
@@ -266,26 +299,35 @@ class FormationCreationMixin:
                 if agent_id in self.manager._agents_by_id
             ]
             old_inboxes = self._copy_inboxes(recipients)
+            stale_drafts = {}
             now = time.time()
-            request.status = TeamFormationStatus.ABANDONED
-            request.decision_reason = reason
-            request.updated_at = now
-            request.resolved_at = now
-            for recipient in recipients:
-                self._notify_agent(
-                    recipient.agent_id,
-                    "team_formation_abandoned",
-                    {"request_id": request_id, "reason": reason},
-                )
             try:
+                request.status = TeamFormationStatus.ABANDONED
+                request.decision_reason = reason
+                request.updated_at = now
+                request.resolved_at = now
+                stale_drafts = self._stale_ready_drafts(
+                    request_id,
+                    reason="The formation was abandoned before this draft was published.",
+                    updated_at=now,
+                )
+                for recipient in recipients:
+                    self._notify_agent(
+                        recipient.agent_id,
+                        "team_formation_abandoned",
+                        {"request_id": request_id, "reason": reason},
+                    )
                 await self.manager._commit_dirty_state(
                     self._dirty(
                         request_id,
                         inbox_agent_ids={agent.agent_id for agent in recipients},
+                        draft_ids=set(stale_drafts),
                     )
                 )
             except Exception:
                 self.requests[request_id] = old_request
+                for draft_id, previous in stale_drafts.items():
+                    self.drafts[draft_id] = previous
                 self._restore_inboxes(recipients, old_inboxes)
                 raise
             self._emit_event(

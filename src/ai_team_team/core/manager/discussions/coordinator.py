@@ -59,6 +59,7 @@ class DiscussionCoordinator(DiscussionSessionMixin):
         rounds: int = 2,
         skip_audit: bool = False,
         require_complete: bool = False,
+        process_inbox: bool = True,
     ) -> Tuple[Any, List[Agent]]:
         """Runs one serialized session and captures membership after locking."""
         if self.manager._closing:
@@ -81,6 +82,8 @@ class DiscussionCoordinator(DiscussionSessionMixin):
                 }
                 if require_complete:
                     session_kwargs["require_complete"] = True
+                if not process_inbox:
+                    session_kwargs["process_inbox"] = False
                 result = await self.manager._execute_team_discussion_session(
                     team, prompt, **session_kwargs
                 )

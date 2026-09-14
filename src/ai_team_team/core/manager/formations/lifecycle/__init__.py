@@ -1,8 +1,10 @@
 """Composed consensual AgentTeam formation lifecycle."""
 
 from .creation import FormationCreationMixin
+from .drafts import FormationDraftMixin
 from .late_join import FormationLateJoinMixin
 from .responses import FormationInvitationResponseMixin
+from .revisions import FormationRevisionMixin
 from .state import FormationStateMixin
 from .tasks import FormationTaskMixin
 
@@ -11,6 +13,8 @@ class FormationLifecycleMixin(
     FormationInvitationResponseMixin,
     FormationCreationMixin,
     FormationLateJoinMixin,
+    FormationRevisionMixin,
+    FormationDraftMixin,
     FormationTaskMixin,
     FormationStateMixin,
 ):
@@ -18,4 +22,3 @@ class FormationLifecycleMixin(
 
 
 __all__ = ["FormationLifecycleMixin"]
-

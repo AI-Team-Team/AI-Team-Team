@@ -231,6 +231,9 @@ class ATTConfig(BaseModel):
     agent_private_data_policy: Literal[
         "retain", "archive", "delete"
     ] = "archive"
+    formation_deliberation_policy: Literal[
+        "optional", "required_when_team_scoped"
+    ] = "optional"
     file_read: FileReadConfig = Field(default_factory=FileReadConfig)
     episodic_memory: EpisodicMemoryConfig = Field(
         default_factory=EpisodicMemoryConfig

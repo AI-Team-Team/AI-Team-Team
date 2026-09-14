@@ -32,10 +32,15 @@ Agent-facing tools never accept an acting Agent ID. They derive the identity fro
 - `list_agent_inbox(unread_only=True)`
 - `mark_agent_inbox_read(message_ids=None)`
 - `inspect_team_formation(request_id)`
-- `respond_team_invitation(request_id, attitude=None)`
-- `create_team_from_formation(request_id)`
-- `abandon_team_formation(request_id, reason="")`
-- `decide_team_formation_late_join(request_id, invitee_agent_id, approved)`
+- `discuss_team_formation_proposal(objective, request_id=None)`
+- `inspect_team_formation_draft(draft_id)`
+- `retry_team_formation_draft(draft_id)`
+- `publish_team_formation_draft(draft_id)`
+- `revise_team_formation(request_id, base_revision, changes)`
+- `respond_team_invitation(request_id, proposal_revision, attitude=None)`
+- `create_team_from_formation(request_id, proposal_revision)`
+- `abandon_team_formation(request_id, proposal_revision, reason="")`
+- `decide_team_formation_late_join(request_id, invitee_agent_id, proposal_revision, approved)`
 
 ## Invitation Attitudes
 
@@ -52,6 +57,42 @@ The response tool explicitly offers `None` as the choice for withholding a publi
 
 The initiator and invitees may inspect the proposal. The summary reports all four counts, the membership count that would actually commit, the live configured minimum, `can_create`, and an eligibility reason when creation is currently blocked.
 
+## Proposal Revisions and Exact Consent
+
+Every proposal starts at revision `1`. Each invitation response and every authorization-bearing operation names the exact revision reviewed by its caller. A stale response, creation, abandonment, or late-join decision returns `STALE_REVISION` and cannot affect the current request.
+
+Only the original initiating Agent may revise an open proposal. A material change creates one immutable `TeamFormationRevision`, increments the revision exactly once, recomputes both the normalized content fingerprint and revision-bound fingerprint, resets all retained invitations to `no_response`, notifies retained and added invitees, and notifies removed invitees that their invitation ended. All fields that define the resulting AgentTeam are material; initiator and creator provenance cannot be revised.
+
+A no-op revision returns `UNCHANGED` without a write, notification, revision increment, or consent reset. Decisions remain append-only history bound to the revision on which they were expressed, including an explicit `None` decision recorded as `no_response`.
+
+Public request, invitation, revision, decision, and draft reads are detached from the authoritative registries. Mutating a returned object cannot mutate live governance state.
+
+## Collaborative Proposal Deliberation
+
+An initiating Agent may ask its invocation-scoped current AgentTeam to shape an initial proposal or a possible next revision. The work is advisory: it runs later as a detached job under the creator AgentTeam's normal serial discussion lock, freezes the participating members, does not consume unrelated inbox work, and never accepts an invitation for another Agent.
+
+The initiating Agent synthesizes a strict complete `TeamFormationDraftCandidate` after the discussion. Failed, incomplete, cancelled, invalid, or membership-changing deliberation produces no publishable proposal revision. A ready draft remains inert until that same Agent explicitly publishes it, and revision publication fails closed when its immutable base revision has become stale.
+
+`ATTConfig.formation_deliberation_policy` defaults to `"optional"`. Setting it to `"required_when_team_scoped"` requires this draft workflow before a team-scoped initial proposal or revision is published; a standalone Root Agent may still formulate a proposal directly.
+
+```python
+draft = await manager.discuss_team_formation_proposal(
+    actor=initiator,
+    objective="Design an incident investigation team.",
+)
+```
+
+After the initiating Agent receives the `team_formation_draft_completed` notification in its personal inbox, it can inspect the detached result and explicitly publish only a ready candidate:
+
+```python
+ready = manager.get_team_formation_draft(draft.draft_id, actor=initiator)
+if ready.status.value == "ready":
+    published = await manager.publish_team_formation_draft(
+        ready.draft_id,
+        actor=initiator,
+    )
+```
+
 ## Creation and Completion
 
 Only accepted invitees are included. New-Agent specifications and an explicitly joining initiator also count toward `ATTConfig.min_subagent_team_size`.
@@ -62,6 +103,8 @@ The proposal chooses one unanimous-acceptance behavior:
 
 - `auto_create` creates through the same validated commit path when every invitee accepts.
 - `require_confirmation` enters `ready_for_confirmation` and lets the initiator create or abandon the proposal.
+
+When a proposal has no external invitees, includes the initiator, selects `auto_create`, and already satisfies every live team-creation constraint, ATT schedules the same validated formation commit immediately because no invitation response exists to trigger it.
 
 Abandonment is terminal and notifies every invitee. It creates no team entities or files.
 
@@ -85,8 +128,8 @@ If the proposal includes an initial task, ATT schedules that discussion after cr
 
 ## Atomicity and Persistence
 
-Responses, explicit creation, automatic creation, abandonment, and late joining are serialized per request. At most one concurrent path can create the AgentTeam.
+Revision, response, explicit creation, automatic creation, abandonment, and late joining are serialized per request. Draft jobs have independent locks, and publication acquires the relevant request lock before it can change consent-bearing state. At most one concurrent path can create the AgentTeam or commit a particular revision.
 
 Creation stages new Agents, Private DocLibs, the Team DocLib, and initial files outside the live registries. It revalidates under the creation locks, publishes topology and files as one operation, commits the authoritative state before returning `CREATED`, and restores runtime, inbox, formation, and filesystem state if persistence fails.
 
-Persistence schema 8 stores Agent inbox messages, formation requests, invitation attitudes, revisions, timestamps, completion policy, late-join policy, and the resulting team reference. Restore validates every reference and state combination in detached staging; malformed data raises `StateRestoreError` without changing the current manager or its Agent inboxes and DocLibs.
+Persistence schema 9 stores Agent inbox messages, current formation projections, immutable revision snapshots, append-only invitation decisions, detached drafts, timestamps, completion policy, late-join policy, and the resulting team reference. Restore validates complete contiguous revision history, exact fingerprints and material fields, creator provenance, decision-to-revision membership, draft publication provenance, and every related identity reference in detached staging; malformed data raises `StateRestoreError` without changing the current manager or its Agent inboxes and DocLibs.

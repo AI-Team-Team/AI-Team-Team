@@ -80,13 +80,40 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
     async def test_runtime_tool_view_tracks_config_and_depth(self):
         self.manager.config.enable_dynamic_delegation = False
         self.assertNotIn("dispatch_subagent", self.manager.get_available_tools(self.team, self.agent))
+        self.assertNotIn(
+            "discuss_team_formation_proposal",
+            self.manager.get_available_tools(self.team, self.agent),
+        )
         self.manager.config.enable_dynamic_delegation = True
         self.assertIn("dispatch_subagent", self.manager.get_available_tools(self.team, self.agent))
+        self.assertIn(
+            "discuss_team_formation_proposal",
+            self.manager.get_available_tools(self.team, self.agent),
+        )
         self.manager.config.max_delegation_depth = self.team.depth
         self.assertNotIn("dispatch_subagent", self.manager.get_available_tools(self.team, self.agent))
+        self.assertNotIn(
+            "discuss_team_formation_proposal",
+            self.manager.get_available_tools(self.team, self.agent),
+        )
         self.assertNotIn("delegate_escalation", self.manager.get_available_tools(self.team, self.agent))
         self.manager.config.enable_membership_voting = True
         self.assertIn("cast_vote", self.manager.get_available_tools(self.team, self.agent))
+
+    async def test_raw_initial_draft_tool_cannot_bypass_disabled_delegation(self):
+        executor = ToolExecutor(self.team, self.agent, self.manager)
+        self.manager.config.enable_dynamic_delegation = False
+
+        async with self.manager.agent_invocation(self.agent):
+            result = await executor.execute(
+                "discuss_team_formation_proposal",
+                kwargs={"objective": "Attempt a disabled delegation path."},
+                tools=dict(self.team.tools),
+            )
+
+        self.assertIs(result.status, ToolResultStatus.DENIED)
+        self.assertFalse(self.manager._formations.drafts)
+
     async def test_capability_probe_failure_falls_back_and_emits_event(self):
         class BrokenProbe:
             def supports_native_tool_calling(self):

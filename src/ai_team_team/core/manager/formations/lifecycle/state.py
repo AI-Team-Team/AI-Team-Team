@@ -4,6 +4,8 @@ from typing import Any, Dict, Iterable, Optional
 
 from ....agent import Agent
 from ....formation import (
+    FormationDraftStatus,
+    FormationOperationResult,
     FormationStatusSummary,
     InvitationAttitude,
     TeamFormationInvitation,
@@ -15,6 +17,84 @@ from ....team import AgentTeam
 
 
 class FormationStateMixin:
+    def _stale_ready_drafts(
+        self,
+        request_id: str,
+        *,
+        exclude_draft_ids: Iterable[str] = (),
+        reason: str,
+        updated_at: float,
+    ) -> Dict[str, Any]:
+        """Invalidates completed candidates superseded by a request transition."""
+        excluded = set(exclude_draft_ids)
+        previous = {}
+        for draft in self.drafts.values():
+            if (
+                draft.request_id != request_id
+                or draft.draft_id in excluded
+                or draft.status is not FormationDraftStatus.READY
+            ):
+                continue
+            previous[draft.draft_id] = draft.model_copy(deep=True)
+            draft.status = FormationDraftStatus.STALE
+            draft.reason = reason
+            draft.updated_at = updated_at
+        return previous
+
+    def _assert_request_integrity(self, request: TeamFormationRequest) -> None:
+        content_fingerprint = self._proposal_fingerprint(
+            self._request_content(request)
+        )
+        if content_fingerprint != request.content_fingerprint:
+            raise ValueError(
+                "The formation proposal content failed runtime fingerprint validation."
+            )
+        revision_fingerprint = self._revision_fingerprint(
+            request.request_id,
+            request.proposal_revision,
+            content_fingerprint,
+        )
+        if revision_fingerprint != request.revision_fingerprint:
+            raise ValueError(
+                "The formation proposal revision failed runtime fingerprint validation."
+            )
+        invitations = self._request_invitations(request.request_id)
+        if any(
+            invitation.proposal_revision != request.proposal_revision
+            for invitation in invitations
+        ):
+            raise ValueError(
+                "The formation contains invitation state from a stale proposal revision."
+            )
+        revision = self.revisions.get(
+            f"{request.request_id}:{request.proposal_revision}"
+        )
+        if (
+            revision is None
+            or revision.content_fingerprint != content_fingerprint
+            or revision.revision_fingerprint != revision_fingerprint
+            or revision.proposal_snapshot != self._request_content(request)
+        ):
+            raise ValueError(
+                "The formation proposal has no matching immutable revision snapshot."
+            )
+
+    def _stale_revision_result(
+        self,
+        request: TeamFormationRequest,
+        expected_revision: int,
+    ) -> FormationOperationResult:
+        return FormationOperationResult(
+            status="STALE_REVISION",
+            request_id=request.request_id,
+            summary=self.formation_summary(request.request_id),
+            team_id=request.created_team_id,
+            reason=(
+                f"Expected proposal revision {expected_revision}, but the current "
+                f"revision is {request.proposal_revision}."
+            ),
+        )
+
     def _request_invitations(
         self,
         request_id: str,
@@ -156,12 +236,20 @@ class FormationStateMixin:
         *,
         inbox_agent_ids: Iterable[str] = (),
         team_ids: Iterable[str] = (),
+        revision_history: bool = False,
+        decision_history: bool = False,
+        draft_ids: Iterable[str] = (),
     ) -> Dict[str, Any]:
         dirty = self.manager._new_dirty_state()
         dirty["formation_requests"].add(request_id)
         dirty["formation_invitations"].add(request_id)
         dirty["agent_inboxes"].update(inbox_agent_ids)
         dirty["teams"].update(team_ids)
+        if revision_history:
+            dirty["formation_revisions"].add(request_id)
+        if decision_history:
+            dirty["formation_decisions"].add(request_id)
+        dirty["formation_drafts"].update(draft_ids)
         return dirty
 
     def _emit_event(self, event_type: str, payload: Dict[str, Any]) -> None:

@@ -25,8 +25,11 @@ from .memory import (
     SystemMemoryEventModel,
 )
 from .teams import (
+    TeamFormationDraftModel,
     TeamFormationInvitationModel,
+    TeamFormationInvitationDecisionModel,
     TeamFormationRequestModel,
+    TeamFormationRevisionModel,
     TeamInboxModel,
     TeamModel,
     TeamProposalModel,
@@ -55,7 +58,10 @@ __all__ = [
     "RetainedMemoryReferenceModel",
     "SystemMemoryEventModel",
     "TeamFormationInvitationModel",
+    "TeamFormationInvitationDecisionModel",
+    "TeamFormationDraftModel",
     "TeamFormationRequestModel",
+    "TeamFormationRevisionModel",
     "TeamInboxModel",
     "TeamModel",
     "TeamProposalModel",

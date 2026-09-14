@@ -21,6 +21,9 @@ class StateValidationPayload:
     teams: List[Dict[str, Any]]
     formation_requests: List[Dict[str, Any]]
     formation_invitations: List[Dict[str, Any]]
+    formation_revisions: List[Dict[str, Any]]
+    formation_decisions: List[Dict[str, Any]]
+    formation_drafts: List[Dict[str, Any]]
     libraries: List[Dict[str, Any]]
     permissions: Dict[str, Any]
     communication_requests: List[Dict[str, Any]]
@@ -50,6 +53,9 @@ def parse_state_validation_payload(
             teams=state["teams"],
             formation_requests=state["formation_requests"],
             formation_invitations=state["formation_invitations"],
+            formation_revisions=state["formation_revisions"],
+            formation_decisions=state["formation_decisions"],
+            formation_drafts=state["formation_drafts"],
             libraries=state["libraries"],
             permissions=state["permissions"],
             communication_requests=state["communication_requests"],

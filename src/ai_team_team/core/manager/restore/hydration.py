@@ -187,6 +187,9 @@ class RestoreHydrationMixin:
         manager._formations.restore(
             state.get("formation_requests", []),
             state.get("formation_invitations", []),
+            state.get("formation_revisions", []),
+            state.get("formation_decisions", []),
+            state.get("formation_drafts", []),
             state.get("agent_inboxes", {}),
         )
         manager._memory.restore(

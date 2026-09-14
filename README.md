@@ -1,34 +1,191 @@
 # AI-Team-Team (ATT)
 
-A lightweight, generic, hierarchical dynamic multi-agent collaboration framework in Python.
+A generic framework for persistent, hierarchical, and dynamically organized multi-agent collaboration in Python.
 
-Instead of treating AI as isolated chatbots, ATT treats them as members of a living organization.
+ATT models stable Agent identities that can participate in autonomous AgentTeams.
 
-AI can freely form teams, define how they discuss things with each other, how AI teams discuss things, and create all sorts of incredibly complex hierarchical (or dynamic) relationships.
+Agents can propose teams, participate in structured discussions, communicate across teams, and reorganize recursive topology under explicit system-wide rules.
 
-ATT aims to enable hundreds, thousands, or even tens of thousands of AIs to work together in an orderly manner.
-
-<details>
-<summary>More</summary>
-ATT empowers AI agents to transition from passive context consumers to active, self-governing groups. It organizes agents into dynamic, tree-like recursive lineages with built-in consensus debates, ReAct reasoning loops, communication permission gating, effective-model token-bounded file reading, and supervisory health auditing.
-</details>
+ATT keeps identity, authority, memory, and team state as separate system concepts as its coordination structure grows.
 
 Many thanks to Gemini and GPT for their help!
 
 > [!NOTE]
+> ATT is under active development, so public APIs and persistence schemas may change as the organizational model is refined.
+>
 > The project already features a lot of really fun and innovative designs, with an even more groundbreaking architecture in the works. \
 > (It’s still a little rough around the edges though 👀)
 
 > [!TIP]
-> If you notice any issues or have any suggestions and have the time, \
-> please leave them in the Issues section. Thank you.
+> If you notice any issues or have any suggestions and have the time, please leave them in the Issues section. Thank you.
 
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE.txt)
 [![Documentation](https://img.shields.io/badge/docs-specification-orange.svg)](docs/README.md)
 [![Unit Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#)
 
-The ATT framework organizes dynamic multi-agent topologies into clean, recursive lineages with robust governance, safety gates, and state persistence:
+## What ATT Is For
+
+ATT is built to let AIs communicate with one another, form teams, and develop organizational structures through their own actions.
+
+The basic idea is simple: every AI remains an independent Agent, and the relationships between Agents and AgentTeams are explicit, autonomous, and changeable.
+
+An Agent can join several AgentTeams without becoming a different Agent. Its identity, memory, model binding, private workspace, and personal messages remain its own.
+
+An AgentTeam is more than a container for model calls. It can conduct discussions, make team-level decisions, communicate with other AgentTeams, create specialized child teams, and reorganize its position under the shared rules defined by ATT.
+
+ATT therefore separates who an Agent is from the teams it joins, and separates what an AgentTeam decides from the individual member who performs an operation.
+
+## What Matters Most in ATT
+
+The central idea in ATT is the combination of independent Agents and autonomous relationships.
+
+Each Agent retains its own identity, memory, model binding, private workspace, and personal state, while Agents and AgentTeams can establish, change, and end organizational relationships through explicit actions and shared institutions.
+
+These two principles determine how ATT handles membership, communication, governance, memory, concurrency, and persistence.
+
+## Design Model
+
+<details>
+<summary>Details</summary>
+
+### Agents Are Persistent Identities
+
+An `Agent` represents one persistent participant identified by an immutable UUID across its model invocations and team memberships.
+
+Its name, role, instructions, model binding, Working Context, append-only Journal, optional episodic-memory catalog, invocation lock, lifecycle state, Agent inbox, and Private DocLib belong to that Agent identity.
+
+Joining or leaving an AgentTeam changes only the `team_id ↔ agent_id` membership relationship and does not clone, reset, relabel, or transfer Agent-owned state.
+
+When an Agent belongs to several AgentTeams, model invocations for that identity are serialized so concurrent teams cannot mutate its reusable context at the same time.
+
+Cross-team memory continuity is intentional, while framework-recorded messages, memory sources, and model invocations retain team and discussion provenance so their origins remain inspectable.
+
+### AgentTeams Are Autonomous Coordination Units
+
+An `AgentTeam` represents a group-level coordination unit with its own purpose, members, discussion session lock, inbox, proposals, topology position, DocLib, and governance responsibilities.
+
+The AgentTeam is the subject of inter-team communication requests, Agreements, topology migration, and team-level decisions; an individual Agent performs an operation from the authority of its current invocation-scoped AgentTeam.
+
+Member order, creator identity, role labels, and fallback selection do not create an implicit leader, diplomatic representative, or approval authority.
+
+An AgentTeam may assign internal work to a particular member through prompts, roles, or tasks, but that local division of labor does not change the framework's authorization model.
+
+The Root AI uses the same `Agent` type as every other Agent and becomes an approval principal only where the topology or selected institution explicitly assigns the root-level decision to it.
+
+### Membership Is a Relationship, Not Identity Mutation
+
+Existing Agents enter a proposed AgentTeam through revision-bound invitations rather than being copied or inserted by another participant without consent.
+
+Each invitee may publish `accepted`, `declined`, or `explicitly_ignored`, or may choose `None` to publish no attitude; both `None` and an unprocessed invitation appear externally as `no_response`, and only acceptance makes that identity eligible to join.
+
+A material proposal revision creates immutable history and resets the attitudes of retained invitees because consent to one membership, purpose, or policy is not consent to a different proposal.
+
+The initiating Agent may create an eligible accepted subset when the configured minimum team size is satisfied, may require a final confirmation even after unanimous acceptance, and may define whether nonmembers can request a later join.
+
+Creator-AgentTeam deliberation can prepare a detached proposal draft, but the discussion is advisory and cannot supply consent for an invited Agent or publish a proposal on behalf of the initiator.
+
+### Configuration Defines Shared Institutions
+
+`ATTConfig` defines runtime-wide institutions for communication, migration, failover, tool execution, supervision, memory, persistence-related paths, and resource limits.
+
+Agent-facing tools cannot override the configured sender, communication policy, direction, approval path, or governance subject for an individual request.
+
+Communication can be permissive or approval-governed, but the selected institution applies to every AgentTeam at every topology depth rather than granting different rules implicitly from team position.
+
+Governed requests persist an immutable policy snapshot so a configuration change does not retroactively alter an in-progress decision, while active communication Agreements remain valid until an authorized endpoint revokes them.
+
+Strict configuration validation applies during construction and runtime assignment, including changes made through mutable configuration mappings.
+
+### Topology Supports Local Autonomy and Recursive Composition
+
+AgentTeams form a recursive lineage in which a team may create specialized child teams and, when policy permits, migrate to a different valid parent.
+
+Topology depth limits bound recursive delegation, and cycle detection rejects changes that would place a team below itself or introduce an unsatisfiable shared-Agent wait dependency.
+
+The hierarchy provides routing and governance context, while execution authority remains assigned by explicit relationships and institutions.
+
+Top-level AgentTeams are connected through the Root Agent boundary for governance that explicitly requires a root-level principal, while permissive institutions do not introduce approval solely because a team is deep in the tree.
+
+The rendered topology and expert registry provide current organizational context, while discovery and authorization remain separate operations.
+
+### Concurrency Is Scoped to the State Being Protected
+
+Normal, emergency, supervision-related, and governance discussions for the same AgentTeam share one session lock and therefore execute serially.
+
+Different AgentTeams may discuss concurrently unless they need the same Agent invocation lock or another explicitly shared resource.
+
+AgentTeam structural state uses a separate lock for proposals, ballots, membership mutations, and inbox transitions so short authoritative updates do not hold a discussion lock across unrelated work.
+
+Topology mutations are revalidated under a manager-level lock after any external authorization work and before all parent, child, depth, and registry pointers change atomically.
+
+Persistence uses one exclusive writer manager per SQLite state database and coalesces pending deltas without making disk I/O part of the event-loop critical path.
+
+### Failure Semantics Follow the Type of Decision
+
+An ordinary discussion may retain successful member results when another member cannot complete a turn, record a structured incomplete result, and allow that Agent to participate again in the next round.
+
+Cancellation, manager shutdown, persistence failure, and state-consistency violations remain framework-level failures rather than being converted into ordinary incomplete turns.
+
+Governance operations fail closed: communication approval, migration approval, full-member ballots, and parent failover do not authorize an action from missing, invalid, tied, cancelled, or incomplete decisions.
+
+Indeterminate supervisory results remain distinct from confirmed unhealthy content, and degraded execution remains distinct from content health so operational failure does not become an unsupported judgment about the discussion itself.
+
+Typed tool outcomes distinguish invalid arguments, permission denial, business rejection, transient failure, internal failure, and unknown tools instead of inferring semantics from error-message prefixes.
+
+### Memory and Knowledge Have Explicit Ownership Boundaries
+
+Every Agent owns one Working Context and one append-only system Journal, while optional memory compression maintains a bounded recent-message window and advanced episodic indexing produces Agent-owned retrieval metadata without capturing hidden model reasoning.
+
+Every registered Agent also owns one Private DocLib that follows the identity across team memberships and is unavailable to team ACL grants, public discovery, and managed links.
+
+Private material enters a team workspace only through an explicit publish operation initiated by the owning Agent, and explicit private read observations are removed from reusable cross-team model context after the invocation.
+
+Each AgentTeam owns a separate collaborative DocLib whose paths are protected by live prefix ACL checks, normalized path handling, native-symlink rejection, and managed links that revalidate their target permissions on every access.
+
+Model-facing reads are bounded by decoded content tokens and provide stable continuation coordinates, while trusted host-side reads remain a separate administrative capability.
+
+### Tools and Models Remain Provider-Neutral
+
+Provider credentials and SDK integrations remain host-owned, while ATT accepts model clients or a generator handler, stable model aliases, tools, auditors, and observational callbacks through provider-neutral interfaces.
+
+The framework exposes provider-neutral `Tool` objects with JSON Schemas, validates arguments before execution, and lets provider adapters translate those definitions into their native structured-tool format.
+
+When native tool calling is unavailable, Text ReAct uses a balanced scanner and literal-only argument parser rather than evaluating generated Python expressions.
+
+Configured hard model quotas atomically reserve the estimated prompt and configured maximum output capacity before dispatch, include system instructions and complete tool definitions in that estimate, and settle the reservation from reported or estimated actual usage.
+
+Runtime callables and external connections are deliberately not serialized, so a host must rebind the required clients or generator handler before restoring persisted state.
+
+### Organizational State Is Durable and Auditable
+
+ATT persists stable identities, role-neutral memberships, topology, discussions, Agent and AgentTeam inboxes, proposal revisions, invitation decisions, communication requests, approvals, Agreements, memory records, DocLib metadata, files, ACLs, and token usage as structured state.
+
+Incremental persistence records changed entities and file paths through a single asynchronous writer instead of rewriting the entire organization after every operation.
+
+State restoration is staged and validated before publication, including identity references, topology relationships, governance status combinations, model aliases, memory provenance, and DocLib ownership.
+
+A failed restore leaves the existing manager and managed files unchanged rather than publishing a partially reconstructed runtime.
+
+Schema versions are checked before database definition changes, and incompatible databases are rejected explicitly because the project currently favors unambiguous state semantics over legacy-schema compatibility.
+
+Callbacks remain observational extensions: they are dispatched in order outside the discussion path, and callback delay or failure does not change core business outcomes.
+
+</details>
+
+## Core Commitments
+
+* Each Agent retains one identity and its Agent-owned state across all memberships.
+* Each AgentTeam acts as the explicit subject of its discussions, communication, Agreements, and team-level governance.
+* Membership changes modify only the relationship between an Agent ID and an AgentTeam ID.
+* Authority comes from explicit invocation context, topology, and configured institutions.
+* Deliberate Agent memory and work artifacts remain auditable without accessing, inferring, or persisting hidden model reasoning.
+* The host owns model providers, credentials, external systems, and domain-specific tools, while ATT defines identity, governance, concurrency, persistence, and security semantics.
+* Episodic memory, approval-governed communication, dynamic delegation, and membership voting remain independently optional capabilities.
+
+## Technical Overview
+
+ATT represents dynamic multi-agent topologies as recursive lineages with explicit governance, safety boundaries, and persistent state:
 
 ### 🧬 Topology & Lineage Control
 
@@ -60,7 +217,7 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 * **[Token-Bounded File Reading](docs/Gated_Reading.md)**: Limits model-facing reads by the effective model's content-token budget rather than file size or line count, supports exact continuation inside long lines, and rejects stale file cursors.
 * **[Collaborative DocLib Storage](docs/Gated_Reading.md#6-document-libraries-doclib)**: Equips teams with built-in document libraries. Access is governed by prefix path ACL permissions (`READ`/`WRITE`) that inherit recursively downward to subdirectories.
 * **Private Agent DocLibs**: Gives every registered AI one persistent private workspace (`PDL-<agent_id>`). Private files follow a shared AI across teams, remain outside team ACLs and prompts, and enter a team library only through an explicit copy/publish tool.
-* **[Consensual Existing-Agent Membership](docs/Consensual_Team_Formation.md)**: Ordinary Agent and host APIs send persistent identity-inbox invitations before adding a registered Agent to a new AgentTeam. Only accepted Agents may join, while membership remains a role-neutral relation that never rebinds or clears Agent-owned identity, memory, model, lifecycle, lock, inbox, or Private DocLib state.
+* **[Consensual Existing-Agent Membership](docs/Consensual_Team_Formation.md)**: Ordinary Agent and host APIs send revision-bound identity-inbox invitations before adding a registered Agent to a new AgentTeam. Material proposal revisions preserve immutable history and renew consent, while optional detached creator-Team deliberation can shape a structured draft without deciding for invitees. Membership remains a role-neutral relation that never rebinds or clears Agent-owned identity, memory, model, lifecycle, lock, inbox, or Private DocLib state.
 * **Tool Auditor Interception**: Registers pre-execution interception hooks to audit, vet, approve, or reject specific tool calls (e.g. database safety query check).
 
 ### 💾 Persistence & Diagnostics
@@ -71,25 +228,32 @@ The ATT framework organizes dynamic multi-agent topologies into clean, recursive
 
 ## 📦 Installation
 
-To install in editable mode for local developer workspace sync, it is recommended to set up a virtual environment:
+ATT requires Python 3.11 or later.
+
+Create or activate a virtual environment in your application project:
 
 ```bash
-# Clone the repository
-git clone https://github.com/AI-Team-Team/AI-Team-Team.git
-cd AI-Team-Team
-
-# Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install in editable/dev mode (quotes are required in zsh/macOS)
-pip install -e ".[dev]"
+cd your-project
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
-To install directly as a Git dependency in your own project:
+Install ATT directly from the Git repository:
 
 ```bash
-pip install git+https://github.com/AI-Team-Team/AI-Team-Team.git@main
+python -m pip install "ai-team-team @ git+https://github.com/AI-Team-Team/AI-Team-Team.git@main"
+```
+
+For reproducible environments, replace `main` with a release tag or commit hash:
+
+```bash
+python -m pip install "ai-team-team @ git+https://github.com/AI-Team-Team/AI-Team-Team.git@<tag-or-commit>"
+```
+
+Verify the installation:
+
+```bash
+python -c "import ai_team_team; print('ATT is available ^_^')"
 ```
 
 ## 🏛️ System Architecture
@@ -263,373 +427,15 @@ flowchart TB
 
 ## 🛠️ Getting Started
 
-### 1. Initialize Configuration & Manager
+The complete setup and first-use guide has moved to the [Quickstart Guide](docs/user/Quickstart.md).
 
-```python
-from typing import Union, List, Dict, Optional
-from ai_team_team import ATTManager, Agent, ATTConfig, EpisodicMemoryConfig
-
-# 1. Configure the framework
-config = ATTConfig(
-    enable_dynamic_delegation=True,
-    max_delegation_depth=2,
-    min_subagent_team_size=3,
-    subagent_discussion_rounds=2,
-    react_max_steps=5,
-    enable_memory_compression=True,       # Retains a bounded recent-message window
-    episodic_memory=EpisodicMemoryConfig(enabled=False),  # Optional; normally adds one isolated indexing call per terminal Agent turn
-    failover_policy="auto",               # Automatically hot-swaps LLM client on TokenLimitError
-    enable_emergency_wakeup=True,         # Enables deferred inbox processing for emergencies
-    tool_calling_mode="auto",             # Auto-detects Pluggable Reasoning Strategy (Native or TextReAct)
-    audit_unknown_escalation_mode="wake", # Or "queue"
-    agent_private_data_policy="archive"   # Or "retain" / "delete"
-)
-
-# 2. Setup Root Agent (client is dynamically resolved if omitted)
-root_agent = Agent(name="Root_AI", role="Architect")
-
-# 3. Create Manager with SQLite State Snapshotting enabled
-# All actions, tool calls, and debates will auto-save to this file
-manager = ATTManager(root_ai=root_agent, config=config, db_path="att_state.db")
-
-# 4. Register a global generator callback handler before loading state
-# All LLM invocation logic is delegated here, keeping the framework keyless and SDK-independent
-async def my_handler(
-    model_name: str,
-    prompt: Union[str, List[Dict[str, str]]],
-    system_instruction: Optional[str] = None,
-    max_output_tokens: Optional[int] = None,
-    temperature: float = 0.3,
-    require_json: bool = False
-) -> str:
-    # 1. Inspect model_name to call the correct provider/SDK
-    # 2. If require_json=True is requested, return valid JSON string
-    return "Final Answer: Processed successfully."
-
-manager.register_generator_handler(my_handler)
-
-# 5. Persistence APIs are asynchronous
-# if os.path.exists("att_state.db"):
-#     await manager.load_state("att_state.db")
-# await manager.save_state("att_backup.db")
-# await manager.flush_state()
-# await manager.close()
-```
-
-Direct client objects must have one stable identity binding before state is saved.
-
-A client's `model_name` attribute is not accepted unless that same object is registered under the name:
-
-```python
-manager.register_llm_client("analysis", analysis_client)
-```
-
-Every manager registration creates exactly one private DocLib for the stable Agent UUID.
-
-External agents should use the supported registration API:
-
-```python
-researcher = Agent("Researcher", "Evidence analyst", analysis_client)
-manager.register_agent(researcher)
-private_id = manager.get_private_library_id(researcher.agent_id)
-
-# Lifecycle APIs are asynchronous and preserve the same identity/library.
-await manager.retire_agent(researcher.agent_id)  # Default: archive.
-await manager.reactivate_agent(researcher.agent_id, "analysis")
-```
-
-#### 🔌 LLM Client Interface (`LLMClientProto`)
-
-To integrate custom LLM backends (e.g., Google GenAI, OpenAI, Anthropic, or local inference engines), the supplied client must conform to the following signature:
-
-```python
-from typing import Optional, Protocol, Union, List, Dict, Any
-from ai_team_team import Tool
-
-class LLMResponse:
-    text: str
-    tool_calls: Optional[List[Dict[str, Any]]]
-
-class LLMClientProto(Protocol):
-    async def generate(
-        self,
-        prompt: Union[str, List[Dict[str, Any]]],
-        system_instruction: Optional[str] = None,
-        tools: Optional[List[Tool]] = None,
-        max_output_tokens: Optional[int] = None,
-        temperature: float = 0.7,
-        require_json: bool = False
-    ) -> LLMResponse:
-        """
-        Generates a text completion or returns structured tool calls.
-        When require_json=True is requested by SupervisoryTeam consensus audits,
-        the model must return a valid, parsable JSON string via the LLMResponse.text property.
-        """
-        ...
-
-    def supports_native_tool_calling(self) -> bool:
-        """
-        Returns True if the client/model configuration natively supports structured function calling.
-        """
-        ...
-
-    def supports_output_token_limit(self) -> Union[bool, str]:
-        """Returns the supported hard-quota parameter name when available."""
-        ...
-```
-
-### 2. Register Presets & Custom Tools
-
-Presets and custom tools are registered dynamically at runtime to keep the package generic:
-
-```python
-# Register custom presets
-manager.register_preset(
-    name="analysts",
-    description="Refines requirements and specs",
-    system_instructions="Deconstruct tasks into clear constraints.",
-    roles=[
-        ("Integrity_Analyst", "Checks logic compliance"),
-        ("Structural_Planner", "Optimizes flow and layouts"),
-        ("Arbitrator", "Synthesizes final answer")
-    ]
-)
-
-# Register custom tools
-# The manager supports automatic name and description derivation:
-# 1. Automatic derivation from function name and docstring (recommended):
-def query_db(sql_command: str):
-    """Run safe SQL commands directly on the DB. Arguments: sql_command (str)"""
-    return "Query result..."
-
-manager.register_tool(query_db)
-
-# 2. Or explicit/manual registration:
-manager.register_tool(
-    name="query_db",
-    description="Run safe SQL commands directly on the DB. Arguments: sql_command (str)",
-    func=query_db
-)
-```
-
-#### 💡 Tool Argument Convention & Parameter Discovery
-
-ReAct agents learn about available tools by inspecting the registered `description`. To ensure agents pass arguments correctly:
-
-1. Include explicit argument name and type guidelines in the description string (e.g., `Arguments: query_text (str), limit (int)`).
-2. The framework parses ReAct actions using `ast.literal_eval`. Agents can output actions using standard Python argument syntax:
-   * `Action: query_db(sql_command="SELECT * FROM characters")`
-   * `Action: search_faiss("Iris character profile", limit=3)`
-
-#### 🔗 Autonomous AgentTeam Communication
-
-Dynamic teams use one system-wide communication institution. The default is permissive at every topology depth:
-
-```python
-from ai_team_team import ATTConfig, ParentApprovalCommunicationConfig
-
-config = ATTConfig(
-    communication=ParentApprovalCommunicationConfig(
-        request_delivery="queue",
-        direction="bidirectional",
-    )
-)
-```
-
-* **Request a governed channel**: `Action: request_peer_communication(team_id="AT-xyz789", rationale="Coordinate the audit")`
-* **Inter-Team Messaging**: Under permissive policy, messages deliver directly. Under an approval policy, the same action requires an active Agreement:
-  `Action: send_peer_message(team_id="AT-xyz789", message="Verify character status of Iris")`
-* **Revoke a channel**: Either endpoint AgentTeam may call `revoke_peer_agreement(agreement_id, reason)`.
-* **Authority**: The calling Agent must be an active member of the invocation-scoped AgentTeam. Tools never accept a sender, policy, direction, or approval-principal override.
-* **Parent Escalation**: If an agent hits a depth gate or lacks permissions, they escalate issues upward:
-  `Action: delegate_escalation(objective="Failed to verify rule consistency", rationale="Depth limit reached")`
-  The parent team automatically consumes and summarizes these inbox alerts during their next active turn.
-
-### 3. Bind Tool Auditor (Security Hook)
-
-Intercept tool execution transparently before running to check rules or safety:
-
-```python
-def audit_db_query(*args, **kwargs) -> tuple[bool, str]:
-    sql = args[0] if args else kwargs.get("sql_command")
-    if "DROP" in sql.upper():
-        return False, "Dangerous DROP command blocked."
-    return True, "Safe query"
-
-manager.register_tool_auditor("query_db", audit_db_query)
-```
-
-### 4. Setup Event Hooks (UI / Logging)
-
-Connect your terminal console dashboard (e.g. `rich.live`), custom file loggers, and team migration updates using callbacks:
-
-```python
-# Wire status display updates
-manager.on_status_change = lambda name, status: my_dashboard.update_agent_status(name, status)
-manager.on_activity_added = lambda name, act_type, content: my_dashboard.add_log(name, act_type, content)
-
-# Wire logging callback
-def my_log_callback(team_id, title, content, chapter_num):
-    my_file_logger.write(f"[{team_id}] {title}\n{content}")
-    
-manager.on_log_append = my_log_callback
-
-# Wire team migration callback
-def my_migration_callback(team_id, old_parent_id, new_parent_id):
-    print(f"Team {team_id} moved from {old_parent_id} to {new_parent_id}")
-
-manager.on_team_migration = my_migration_callback
-
-# Wire emergency escalation callback
-def my_emergency_callback(team_id, alert_type, alert_reason):
-    print(f"[EMERGENCY ALERT] Team {team_id} encountered {alert_type}: {alert_reason}")
-
-manager.on_emergency_escalation = my_emergency_callback
-
-# Callbacks may also be async. Tests and hosts that need an observation barrier
-# can explicitly wait for all callbacks queued so far.
-await manager.flush_callbacks()
-```
-
-### 5. Spawn Team & Execute Discussion
-
-```python
-# Spawn dynamic level 1 team using analysts preset
-team = manager.create_agent_team(
-    creator=root_agent,
-    member_count=3,
-    preset_name="analysts",
-    team_purpose="Audit the system logic mapping for project A."
-)
-
-# Run cooperative multi-round debate
-transcript = await manager.execute_team_discussion(
-    team=team,
-    prompt="Audit the system logic mapping for project A.",
-    rounds=2
-)
-print("Debate result:", transcript)
-
-# Use the detailed API when the host needs partial-turn and audit metadata.
-detailed = await manager.execute_team_discussion_detailed(
-    team=team,
-    prompt="Audit the system logic mapping for project A.",
-    rounds=2,
-)
-print(detailed.status, detailed.rounds, detailed.audit)
-```
-
-### 6. Dynamic Team Migration & Topology Tree
-
-ATT supports dynamic lineage migration, allowing active teams to request hierarchy updates at runtime. You can also print the active tree hierarchy:
-
-```python
-# Print the current active lineage hierarchy as an indented ASCII tree
-tree_representation = manager.render_topology_tree()
-print(tree_representation)
-# Outputs:
-# - [Root AI: Root_AI] (Level 0)
-#   ├── AT-abc123 (Purpose: Audit the system logic mapping for project A.) [Level 1]
-#   │    └── AT-def456 (Purpose: Security Check) [Level 2]
-#   └── AT-xyz789 (Purpose: Docs Generation) [Level 1]
-```
-
-### 7. Approval-Governed P2P Communication
-
-Select the institution once in `ATTConfig`. Every AgentTeam, regardless of depth, follows the same policy:
-
-```python
-from ai_team_team import ATTConfig, LineageApprovalCommunicationConfig
-
-config = ATTConfig(
-    communication=LineageApprovalCommunicationConfig(
-        request_delivery="wake",
-        direction="one_way",
-    )
-)
-
-# The calling Agent cannot override these choices and requests a channel from its current invocation-scoped AgentTeam.
-# Action: request_peer_communication(team_id="AT-def456", rationale="Share findings")
-```
-
-### 8. Native Strategy (Structured Tool Calling)
-
-By default, ATT uses `tool_calling_mode="auto"`.
-
-Only a literal `True` from the synchronous capability probe selects Native mode; probe errors, awaitables, and non-boolean values emit a system event and fall back to Text ReAct.
-
-Provider adapters receive `List[Tool]` and are responsible for converting each `Tool.json_schema` to the provider SDK format.
-
-```python
-# 1. Force native structured tool calling
-config.tool_calling_mode = "native"
-
-# 2. Ensure your model is registered as supporting native tools
-manager.register_model("gpt-5.6-sol", {
-    "supports_native_tool_calling": True
-})
-
-# Under the hood, ManagerDefaultClientAdapter will route tools as JSON schemas
-# and execute returned ToolCalls concurrently via asyncio.gather.
-```
+The Quickstart now covers manager configuration, LLM integration, model and Agent registration, persistence, custom tools, callbacks, team discussions, migration, governed communication, Native Strategy, and DocLib usage.
 
 ## ⚙️ Advanced Configuration
 
-### `ATTConfig` Parameters
+The complete and current `ATTConfig` reference has moved to the [Public API Reference](docs/user/API_Reference.md).
 
-Configure `ATTConfig` to fine-tune the multi-agent debate loop, depth boundaries, and latency profiles:
-
-| Configuration Property | Type | Default Value | Description |
-| :--- | :--- | :--- | :--- |
-| `enable_dynamic_delegation` | `bool` | `True` | Whether to allow agents to spawn child sub-teams (Level $N$ panels). |
-| `max_delegation_depth` | `int` | `2` | The maximum hierarchy depth limit of recursive dynamic subagent spawning lineages. |
-| `min_subagent_team_size` | `int` | `3` | The minimum number of members allowed when initiating a dynamic team panel. |
-| `subagent_discussion_rounds` | `int` | `2` | The number of debate discussion rounds executed during dynamic child subagent calls. |
-| `react_max_steps` | `int` | `5` | The reasoning step limit capped per agent turn to prevent infinite ReAct loops. |
-| `inbox_summarize_threshold_chars` | `int` | `1500` | The text character threshold above which unread inbox alerts are summarized. |
-| `model_registry` | `dict` | `{}` | Mapping of specialized agent roles to specific LLM models or endpoints. |
-| `max_migrations_per_team_discussion` | `int` | `1` | The maximum hierarchy migration requests a team can execute during a single discussion session. |
-| `enable_membership_voting` | `bool` | `False` | Whether to enable the optional democratic membership voting system. |
-| `llm_max_retries` | `int` | `3` | Number of retries after the initial LLM attempt. `0` performs one attempt without retrying. |
-| `llm_retry_backoff_factor` | `float` | `1.5` | Initial exponential-backoff delay. `0` retries immediately. Only typed/provider-classified transient failures are retried. |
-| `enable_memory_compression` | `bool` | `True` | Whether to enable automatic dialogue compression/pruning of early conversation turns. |
-| `max_memory_turns` | `int` | `20` | The maximum number of conversation messages (turns) retained as high-fidelity context before summarizing older turns. |
-| `episodic_memory` | `EpisodicMemoryConfig` | `enabled=False` | Optional Agent-owned Memory Catalog configuration; disabled mode exposes no memory tools, creates no cards, makes no indexing calls, and does not require FTS5. |
-| `file_read` | `FileReadConfig` | `max_read_tokens=4000, tokenizer_fallback="conservative"` | Model-facing file reads limit only decoded file content tokens. Line and character arguments select source ranges and do not bypass the token budget. |
-| `communication` | `CommunicationConfig` | `PermissiveCommunicationConfig()` | Strict discriminated configuration: permissive, parent approval, or lineage approval. Approval configurations also define `request_delivery` (`"queue"`/`"wake"`) and `direction` (`"one_way"`/`"bidirectional"`). |
-| `migration_policy` | `str` | `"ancestor_approval"` | The strategy used for dynamic lineage migration authorization. Options: `"permissive"`, `"ancestor_approval"`, `"lineage_path"`. |
-| `enable_emergency_wakeup` | `bool` | `True` | Whether to trigger active wake-up discussion on idle parent teams upon receiving high-priority child anomalies. |
-| `emergency_discussion_rounds` | `int` | `1` | The number of emergency discussion rounds executed when a team is woken up. |
-| `tool_calling_mode` | `str` | `"auto"` | Strategy for invoking tools. `"native"`, `"text_react"` (or `"react"`), or `"auto"`. |
-| `max_tool_rounds` | `int` | `5` | Max depth of native parallel tool calls during a reasoning step. |
-| `max_tool_argument_retries` | `int` | `3` | Model correction opportunities after the first unknown-tool, parse, or validation failure. A Native parallel batch consumes at most one opportunity. |
-| `max_tool_execution_retries` | `int` | `2` | Extra execution attempts available to eligible typed transient failures. |
-| `tool_execution_retry_policy` | `str` | `"never"` | Execution replay policy: `"never"`, `"retry_safe"`, or `"typed_transient"`. |
-| `tool_execution_retry_backoff_factor` | `float` | `0.5` | Initial exponential delay for eligible execution retries; `0` retries immediately. |
-| `text_tool_schema_mode` | `str` | `"compact"` | Text prompt schema rendering: `"compact"`, `"full"`, or `"compact_with_examples"`. |
-| `tool_prompt_modes` | `dict` | `{}` | Per-tool prompt schema mode overrides. |
-| `turn_failure_policy` | `TurnFailurePolicyConfig` | `tool="isolate", llm="isolate"` | Controls whether member-scoped tool or LLM failures isolate the current turn or abort the discussion. |
-| `operational_status_decision_mode` | `str` | `"framework"` | Chooses framework, supervisor, or framework-then-supervisor runtime-health determination. |
-| `operational_degraded_escalation_mode` | `str` | `"none"` | Routes degraded runtime alerts as no parent escalation, queue, or wake. |
-| `model_token_limits` | `dict` | `None` | Mapping of model aliases to hard token quotas; `0` disables that model's quota entirely. |
-| `model_max_output_tokens` | `dict` | `None` | Per-model maximum output reservation/request cap used by the atomic hard-quota ledger. |
-| `default_max_output_tokens` | `int` | `1024` | Default maximum output reservation when a model-specific cap is absent. |
-| `model_tokenizer_configs` | `dict` | `{}` | Mapping of model aliases to tokenizer names or tokenizer JSON files used for prompt-token accounting. The `tokenizers` package is a required runtime dependency. |
-| `failover_policy` | `str` | `"auto"` | Fallback strategy on token exhaustion: `"auto"` (next available) or `"parent"` (explicit parent AgentTeam/Root Agent governance). |
-| `parent_failover_timeout_seconds` | `float` | `120` | Positive timeout for parent-governed model selection; failures close without automatic fallback. |
-| `audit_unknown_escalation_mode` | `str` | `"wake"` | Handling for indeterminate audits: immediately `"wake"` the parent or only `"queue"` the alert. |
-| `audit_unknown_soft_threshold` | `int` | `100` | Soft operational warning threshold for unique UNKNOWN alerts; alerts are never dropped or expired automatically. |
-
-### Token-Based File Reading
-
-`FileReadConfig` controls the content returned by `read_library_file` and `read_private_file`. The budget excludes the small structured metadata and tool-protocol framing overhead.
-
-| Configuration Property | Type | Default Value | Description |
-| :--- | :--- | :--- | :--- |
-| `max_read_tokens` | `int` | `4000` | Hard token limit for returned decoded file content. File size and line count are not limits. |
-| `tokenizer_fallback` | `str` | `"conservative"` | Uses a UTF-8-byte upper-bound estimate when no exact counter is available; `"strict"` rejects the read instead. |
-
-Partial results include `next_line`, `next_character`, and `file_version`. Pass the coordinates and version into the next read to continue without gaps and to reject a cursor if the file changed. ATT resolves counting from the active Agent's effective model on every invocation, so model failover immediately changes the selected tokenizer or counter.
+The reference includes every top-level option, nested policy configuration, tokenizer mapping, validation constraint, and the model-facing file-read token-counter rules.
 
 ## 📊 Architecture & Control Flow Diagrams
 

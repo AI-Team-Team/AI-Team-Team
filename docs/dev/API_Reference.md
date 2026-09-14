@@ -55,6 +55,8 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
 
 `create_agent_team()` returns an immediate AgentTeam only for all-new membership. Existing Agent inputs return a persistent `TeamFormationRequest`; accepted identities are revalidated before the staged commit, and membership stores only the team/Agent relationship. `bootstrap_agent_team()` is the explicit audited host-only provisioned-topology bypass and is not registered as a tool.
 
+Formation consent is revision-scoped. `revise_team_formation()` commits immutable material snapshots and resets retained invitations, while `discuss_team_formation_proposal()` schedules detached advisory creator-Team work whose validated draft must be explicitly published by the initiating Agent. `formation_deliberation_policy="required_when_team_scoped"` blocks direct team-scoped proposal and revision publication.
+
 Synchronous and asynchronous callbacks share one ordered background dispatcher; callback failures are logged and never alter core transaction outcomes.
 
 * **Constructor**:
@@ -92,8 +94,8 @@ Synchronous and asynchronous callbacks share one ordered background dispatcher; 
     Validates all-new creation before mutation or opens a consent request without creating team entities when existing identities participate.
   * `bootstrap_agent_team(...) -> AgentTeam`
     Performs explicit trusted-host topology provisioning, preserves every Agent-owned field, and emits a durable administrative audit event.
-  * `inspect_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, `decide_team_formation_late_join`
-    Coordinate persistent invitation attitudes, live eligibility, accepted-subset creation, abandonment, and explicitly initiated late joining under a per-request lock.
+  * `inspect_team_formation`, `discuss_team_formation_proposal`, `get_team_formation_draft`, `retry_team_formation_draft`, `publish_team_formation_draft`, `revise_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, `decide_team_formation_late_join`
+    Coordinate detached advisory drafts, immutable revision history, exact-revision invitation attitudes, live eligibility, accepted-subset creation, abandonment, and explicitly initiated late joining under per-draft and per-request locks.
   * `list_agent_inbox` / `mark_agent_inbox_read`
     Read and acknowledge identity-owned persistent notifications independently of any AgentTeam inbox.
   * `suppress_auto_save() -> AsyncContextManager`
@@ -271,7 +273,7 @@ Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/
 
 ## Database Schema & ORM Models
 
-SQLAlchemy Declarative Models mapping schema 8 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
+SQLAlchemy Declarative Models mapping schema 9 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
 * **`AgentModel`, `AgentMessageModel`, and `AgentInboxModel`**: Use immutable `agent_id` primary/foreign keys and persist lifecycle profiles, bounded Working Context, and identity-addressed notifications.
@@ -279,7 +281,7 @@ SQLAlchemy Declarative Models mapping schema 8 are grouped in the [`models`](../
 * **`AgentMemorySegmentModel`, `AgentMemoryCardModel`, `MemoryCardTagModel`, `MemoryCardSourceEventModel`, and `RetainedMemoryReferenceModel`**: Store Agent-owned deterministic segments, searchable card metadata, source provenance, and explicit compact Working Context retention.
 * **`TeamModel`**: Tracks active topologies, migration counts, and UUID-backed creator/member references.
 * **`TeamInboxModel` & `TeamProposalModel`**: Persists child escalations, peer messages, and democratic proposal votes.
-* **`TeamFormationRequestModel` & `TeamFormationInvitationModel`**: Persist proposal configuration, revisions, invitation attitudes, accepted founding records, completion choices, and late-join state.
+* **`TeamFormationRequestModel`, `TeamFormationInvitationModel`, `TeamFormationRevisionModel`, `TeamFormationInvitationDecisionModel`, and `TeamFormationDraftModel`**: Persist the current proposal projection, current invitations, immutable material revision snapshots, append-only exact-revision attitudes, detached collaborative drafts, accepted founding records, completion choices, and late-join state.
 * **`CommunicationRequestModel`, `CommunicationApprovalModel`, `CommunicationBallotModel`**: Persist the request lifecycle, ordered explicit principals, and member ballots.
 * **`CommunicationAgreementModel` & `PeerMessageModel`**: Persist directional endpoint channels, revocation state, and idempotent delivery lifecycle.
 * **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel` & `DocLibLinkModel`**: Persists library kind, mutually exclusive team/agent ownership, lifecycle, ACL segments, physical document contents, and managed team-library link targets.

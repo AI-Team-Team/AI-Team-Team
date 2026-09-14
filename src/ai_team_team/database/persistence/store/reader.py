@@ -27,8 +27,11 @@ from ai_team_team.database.models import (
     RetainedMemoryReferenceModel,
     SystemMemoryEventModel,
     TeamInboxModel,
+    TeamFormationDraftModel,
     TeamFormationInvitationModel,
+    TeamFormationInvitationDecisionModel,
     TeamFormationRequestModel,
+    TeamFormationRevisionModel,
     TeamModel,
     TeamProposalModel,
     team_members,
@@ -249,7 +252,8 @@ class StoreReadMixin:
                     "unanimous_acceptance_action": row.unanimous_acceptance_action,
                     "late_join_policy": row.late_join_policy,
                     "proposal_revision": row.proposal_revision,
-                    "proposal_fingerprint": row.proposal_fingerprint,
+                    "content_fingerprint": row.content_fingerprint,
+                    "revision_fingerprint": row.revision_fingerprint,
                     "status": row.status,
                     "created_team_id": row.created_team_id,
                     "decision_reason": row.decision_reason,
@@ -272,6 +276,52 @@ class StoreReadMixin:
                     "late_join_decision": row.late_join_decision,
                 }
                 for row in session.query(TeamFormationInvitationModel).all()
+            ]
+            formation_revisions = [
+                {
+                    "revision_id": row.revision_id,
+                    "request_id": row.request_id,
+                    "proposal_revision": row.proposal_revision,
+                    "content_fingerprint": row.content_fingerprint,
+                    "revision_fingerprint": row.revision_fingerprint,
+                    "proposal_snapshot": row.proposal_snapshot,
+                    "revised_by_agent_id": row.revised_by_agent_id,
+                    "source_draft_id": row.source_draft_id,
+                    "created_at": row.created_at,
+                }
+                for row in session.query(TeamFormationRevisionModel).all()
+            ]
+            formation_decisions = [
+                {
+                    "decision_id": row.decision_id,
+                    "request_id": row.request_id,
+                    "proposal_revision": row.proposal_revision,
+                    "agent_id": row.agent_id,
+                    "attitude": row.attitude,
+                    "created_at": row.created_at,
+                }
+                for row in session.query(TeamFormationInvitationDecisionModel).all()
+            ]
+            formation_drafts = [
+                {
+                    "draft_id": row.draft_id,
+                    "initiator_agent_id": row.initiator_agent_id,
+                    "creator_kind": row.creator_kind,
+                    "creator_id": row.creator_agent_id or row.creator_team_id,
+                    "creator_team_id": row.deliberation_team_id,
+                    "request_id": row.request_id,
+                    "base_revision": row.base_revision,
+                    "base_revision_fingerprint": row.base_revision_fingerprint,
+                    "objective": row.objective,
+                    "status": row.status,
+                    "participant_agent_ids": row.participant_agent_ids,
+                    "source_discussion_id": row.source_discussion_id,
+                    "candidate": row.candidate,
+                    "reason": row.reason,
+                    "created_at": row.created_at,
+                    "updated_at": row.updated_at,
+                }
+                for row in session.query(TeamFormationDraftModel).all()
             ]
             communication_approvals = [
                 {
@@ -431,6 +481,9 @@ class StoreReadMixin:
                 "communication_requests": communication_requests,
                 "formation_requests": formation_requests,
                 "formation_invitations": formation_invitations,
+                "formation_revisions": formation_revisions,
+                "formation_decisions": formation_decisions,
+                "formation_drafts": formation_drafts,
                 "communication_approvals": communication_approvals,
                 "communication_ballots": communication_ballots,
                 "communication_agreements": communication_agreements,

@@ -147,7 +147,7 @@ Team creation fault-injection tests should fail before validation, during Agent/
 
 Shared-membership tests must use the consensual formation workflow for ordinary APIs or `bootstrap_agent_team()` only in fixtures that explicitly provision topology. Tests must assert exact object identity across teams and after restore, verify that every Agent-owned field remains unchanged, and confirm that removing one membership leaves every other membership, invitation history, Agent inbox, and Private DocLib intact. `member_configs` is reserved for creating new Agent identities and must reject legacy existing-Agent forms.
 
-Formation tests must cover all four public invitation attitudes, explicit `None` as externally indistinguishable no-response, accepted-subset eligibility, automatic versus confirmed completion, abandonment notifications, optional late joining, initiator self-membership with deferred discussion, per-request concurrency, trusted bootstrap auditing/tool exclusion, Agent inbox persistence, schema corruption, and restore rollback after inbox publication.
+Formation tests must cover all four public invitation attitudes, explicit `None` as externally indistinguishable no-response, exact-revision authorization, material and no-op revisions, renewed consent, detached collaborative drafts, explicit publication, accepted-subset eligibility, zero-invitee automatic creation, confirmed completion, abandonment notifications, optional late joining, initiator self-membership with deferred discussion, per-request concurrency, trusted bootstrap auditing/tool exclusion, Agent inbox persistence, schema corruption, and restore rollback after inbox publication.
 
 Reliability changes should cover schema preflight without mutation, competing processes, abrupt writer termination, pending-delta coalescing, cancellation, shared-agent context/tool scope, durable UNKNOWN alert states, callback ordering and isolation, and hanging-provider shutdown behavior.
 
@@ -155,7 +155,7 @@ The suite's `test/test_att/test_high_hardening/` package contains reference patt
 
 Private Agent DocLib tests must create agents through `register_agent` or a supported team-creation path.
 
-Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, schema 8 corruption, and the absence of private body text from transcripts, callbacks, and message history. The `test/test_att/test_private_doclib/` package contains the baseline end-to-end cases.
+Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, schema 9 corruption, and the absence of private body text from transcripts, callbacks, and message history. The `test/test_att/test_private_doclib/` package contains the baseline end-to-end cases.
 
 Selective episodic-memory tests must cover disabled-mode zero indexing/tool exposure, one card per completed or incomplete turn, cancelled-turn exclusion, isolated label calls, owner-only search and recall, character- and token-bounded continuation that reconstructs long single lines and Unicode without gaps or duplication, Segment-version mismatch rejection, ephemeral recall cleanup, explicit compact retention, Journal immutability, private/tool-body redaction, FTS5 gating, Agent deletion semantics, restore corruption, and membership changes that leave all Agent-owned memory untouched.
 
@@ -169,4 +169,4 @@ Token-based file-reading tests must cover many short lines, extremely long singl
 
 The suite's `test/test_att/test_file_reading/` package contains the model-context integration cases, while `test/test_gated_reader.py` covers the standalone reader.
 
-Communication changes must cover strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes, full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation, idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations. Schema 6 and earlier databases must be rejected before DDL.
+Communication changes must cover strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes, full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation, idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations. Schema 8 and earlier databases must be rejected before DDL.

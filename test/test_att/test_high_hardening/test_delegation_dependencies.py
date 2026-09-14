@@ -389,10 +389,10 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(team.child_teams), 0)
         self.assertEqual(set(self.manager.teams), teams_before)
         self.assertEqual(set(self.manager._agents_by_id), agents_before)
-        self.assertEqual(len(self.manager.team_formation_requests), 2)
+        self.assertEqual(len(self.manager._formations.requests), 2)
         self.assertFalse(self.manager._agent_wait_edge_counts)
         self.assertEqual(
-            {request.status.value for request in self.manager.team_formation_requests.values()},
+            {request.status.value for request in self.manager._formations.requests.values()},
             {"collecting_responses"},
         )
         self.assertEqual(set(self.manager.libraries), libraries_before)

@@ -56,7 +56,7 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
     async def test_auto_fallback_failover(self):
         """Verify that agent automatically falls back to another model under budget when auto failover is set."""
         config = ATTConfig(
-            model_token_limits={"default": 5, "gemini-3.5": 5000},
+            model_token_limits={"default": 5, "gemini-3.5": 10000},
             failover_policy="auto"
         )
         manager = ATTManager(root_ai=self.root_ai, config=config)

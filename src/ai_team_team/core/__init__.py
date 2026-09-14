@@ -40,13 +40,19 @@ from .memory import (
 )
 from .formation import (
     AgentInboxMessage,
+    FormationDraftStatus,
     FormationOperationResult,
     FormationStatusSummary,
     InvitationAttitude,
     LateJoinPolicy,
+    TeamFormationDraft,
+    TeamFormationDraftCandidate,
     TeamFormationInvitation,
+    TeamFormationInvitationDecision,
     TeamFormationInspection,
     TeamFormationRequest,
+    TeamFormationRevision,
+    TeamFormationRevisionPatch,
     TeamFormationStatus,
     UnanimousAcceptanceAction,
 )

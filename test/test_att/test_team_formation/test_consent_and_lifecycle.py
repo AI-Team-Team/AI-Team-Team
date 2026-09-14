@@ -116,10 +116,13 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         initiator_messages = len(self.manager.list_agent_inbox(self.root.agent_id))
         unchanged = await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.invitees[3],
             attitude=None,
         )
-        self.assertIn("unchanged", unchanged.reason)
+        self.assertIn("explicitly chose", unchanged.reason)
+        decisions = self.manager.list_team_formation_decisions(request.request_id)
+        self.assertEqual(decisions[-1].attitude, InvitationAttitude.NO_RESPONSE)
         self.assertEqual(
             len(self.manager.list_agent_inbox(self.root.agent_id)),
             initiator_messages,
@@ -127,16 +130,19 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
 
         await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.invitees[0],
             attitude="accepted",
         )
         await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.invitees[1],
             attitude="declined",
         )
         await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.invitees[2],
             attitude="explicitly_ignored",
         )
@@ -157,6 +163,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
 
         result = await self.manager.create_team_from_formation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.root,
         )
         team = self.manager.teams[result.team_id]
@@ -174,12 +181,14 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         for invitee in self.invitees[:2]:
             result = await self.manager.respond_team_invitation(
                 auto_request.request_id,
+                proposal_revision=auto_request.proposal_revision,
                 actor=invitee,
                 attitude="accepted",
             )
             self.assertEqual(result.status, "INVITATION_UPDATED")
         result = await self.manager.respond_team_invitation(
             auto_request.request_id,
+            proposal_revision=auto_request.proposal_revision,
             actor=self.invitees[2],
             attitude="accepted",
         )
@@ -197,12 +206,14 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         for invitee in self.invitees[:3]:
             result = await self.manager.respond_team_invitation(
                 confirmation.request_id,
+                proposal_revision=confirmation.proposal_revision,
                 actor=invitee,
                 attitude="accepted",
             )
         self.assertEqual(result.status, "READY_FOR_CONFIRMATION")
         abandoned = await self.manager.abandon_team_formation(
             confirmation.request_id,
+            proposal_revision=confirmation.proposal_revision,
             actor=self.root,
             reason="The initiating Agent changed its plan.",
         )
@@ -223,17 +234,20 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         )
         await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.invitees[0],
             attitude="accepted",
         )
         created = await self.manager.create_team_from_formation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.root,
         )
         team = self.manager.teams[created.team_id]
         self.assertNotIn(self.invitees[1], team.members)
         joined = await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.invitees[1],
             attitude="accepted",
         )
@@ -246,16 +260,19 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         )
         await self.manager.respond_team_invitation(
             confirmed_request.request_id,
+            proposal_revision=confirmed_request.proposal_revision,
             actor=self.invitees[2],
             attitude="accepted",
         )
         confirmed_created = await self.manager.create_team_from_formation(
             confirmed_request.request_id,
+            proposal_revision=confirmed_request.proposal_revision,
             actor=self.root,
         )
         confirmed_team = self.manager.teams[confirmed_created.team_id]
         pending = await self.manager.respond_team_invitation(
             confirmed_request.request_id,
+            proposal_revision=confirmed_request.proposal_revision,
             actor=self.invitees[3],
             attitude="accepted",
         )
@@ -264,6 +281,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         approved = await self.manager.decide_team_formation_late_join(
             confirmed_request.request_id,
             self.invitees[3].agent_id,
+            proposal_revision=confirmed_request.proposal_revision,
             actor=self.root,
             approved=True,
         )
@@ -277,7 +295,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
                 existing_members=self.invitees[:3],
                 initiator_joins="false",
             )
-        self.assertFalse(self.manager.team_formation_requests)
+        self.assertFalse(self.manager._formations.requests)
 
         request = self._proposal(
             existing_members=self.invitees[:2],
@@ -285,15 +303,18 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         )
         await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.invitees[0],
             attitude="accepted",
         )
         created = await self.manager.create_team_from_formation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.root,
         )
         pending = await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.invitees[1],
             attitude="accepted",
         )
@@ -302,6 +323,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
             await self.manager.decide_team_formation_late_join(
                 request.request_id,
                 self.invitees[1].agent_id,
+                proposal_revision=request.proposal_revision,
                 actor=self.root,
                 approved="false",
             )
@@ -314,11 +336,13 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         )
         await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.invitees[0],
             attitude="accepted",
         )
         created = await self.manager.create_team_from_formation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.root,
         )
         team = self.manager.teams[created.team_id]
@@ -335,19 +359,98 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(RuntimeError, "late-join persistence"):
                 await self.manager.respond_team_invitation(
                     request.request_id,
+                    proposal_revision=request.proposal_revision,
                     actor=late_invitee,
                     attitude="accepted",
                 )
         finally:
             self.manager._commit_dirty_state = original_commit
         self.assertNotIn(late_invitee, team.members)
-        invitation = self.manager.team_formation_invitations[
-            (request.request_id, late_invitee.agent_id)
-        ]
+        invitation = self.manager.get_team_formation_invitation(
+            request.request_id,
+            late_invitee.agent_id,
+        )
         self.assertEqual(invitation.attitude, InvitationAttitude.NO_RESPONSE)
         self.assertIsNone(invitation.responded_at)
         self.assertEqual(self.root.agent_inbox, initiator_inbox)
         self.assertEqual(late_invitee.agent_inbox, invitee_inbox)
+
+    async def test_notification_failure_rolls_back_invitation_decision_and_late_join_state(self):
+        request = self._proposal(existing_members=self.invitees[:1])
+        invitee = self.invitees[0]
+        original_notify = self.manager._formations._notify_agent
+        original_inboxes = {
+            agent.agent_id: [dict(message) for message in agent.agent_inbox]
+            for agent in (self.root, invitee)
+        }
+        original_decisions = set(self.manager._formations.decisions)
+
+        def fail_notify(*_args, **_kwargs):
+            raise RuntimeError("Injected formation notification failure.")
+
+        self.manager._formations._notify_agent = fail_notify
+        try:
+            with self.assertRaisesRegex(RuntimeError, "notification failure"):
+                await self.manager.respond_team_invitation(
+                    request.request_id,
+                    proposal_revision=request.proposal_revision,
+                    actor=invitee,
+                    attitude="declined",
+                )
+        finally:
+            self.manager._formations._notify_agent = original_notify
+
+        invitation = self.manager.get_team_formation_invitation(
+            request.request_id,
+            invitee.agent_id,
+        )
+        self.assertEqual(invitation.attitude, InvitationAttitude.NO_RESPONSE)
+        self.assertEqual(set(self.manager._formations.decisions), original_decisions)
+        for agent in (self.root, invitee):
+            self.assertEqual(agent.agent_inbox, original_inboxes[agent.agent_id])
+
+        late_request = self._proposal(
+            existing_members=self.invitees[:2],
+            late_join_policy="require_initiator_confirmation",
+        )
+        await self.manager.respond_team_invitation(
+            late_request.request_id,
+            proposal_revision=late_request.proposal_revision,
+            actor=self.invitees[0],
+            attitude="accepted",
+        )
+        await self.manager.create_team_from_formation(
+            late_request.request_id,
+            proposal_revision=late_request.proposal_revision,
+            actor=self.root,
+        )
+        late_invitee = self.invitees[1]
+        original_decisions = set(self.manager._formations.decisions)
+        original_inboxes = {
+            agent.agent_id: [dict(message) for message in agent.agent_inbox]
+            for agent in (self.root, late_invitee)
+        }
+        self.manager._formations._notify_agent = fail_notify
+        try:
+            with self.assertRaisesRegex(RuntimeError, "notification failure"):
+                await self.manager.respond_team_invitation(
+                    late_request.request_id,
+                    proposal_revision=late_request.proposal_revision,
+                    actor=late_invitee,
+                    attitude="accepted",
+                )
+        finally:
+            self.manager._formations._notify_agent = original_notify
+
+        invitation = self.manager.get_team_formation_invitation(
+            late_request.request_id,
+            late_invitee.agent_id,
+        )
+        self.assertEqual(invitation.attitude, InvitationAttitude.NO_RESPONSE)
+        self.assertFalse(invitation.late_join_pending)
+        self.assertEqual(set(self.manager._formations.decisions), original_decisions)
+        for agent in (self.root, late_invitee):
+            self.assertEqual(agent.agent_inbox, original_inboxes[agent.agent_id])
 
     async def test_late_join_revalidates_agent_lifecycle_after_waiting_for_team_lock(self):
         late_invitee = self.invitees[0]
@@ -362,6 +465,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         )
         created = await self.manager.create_team_from_formation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.root,
         )
         team = self.manager.teams[created.team_id]
@@ -369,15 +473,17 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         late_join = asyncio.create_task(
             self.manager.respond_team_invitation(
                 request.request_id,
+                proposal_revision=request.proposal_revision,
                 actor=late_invitee,
                 attitude="accepted",
             )
         )
         try:
             for _ in range(100):
-                invitation = self.manager.team_formation_invitations[
-                    (request.request_id, late_invitee.agent_id)
-                ]
+                invitation = self.manager.get_team_formation_invitation(
+                    request.request_id,
+                    late_invitee.agent_id,
+                )
                 if invitation.attitude is InvitationAttitude.ACCEPTED:
                     break
                 await asyncio.sleep(0)
@@ -389,9 +495,10 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(PermissionError, "active and registered"):
             await late_join
         self.assertNotIn(late_invitee, team.members)
-        invitation = self.manager.team_formation_invitations[
-            (request.request_id, late_invitee.agent_id)
-        ]
+        invitation = self.manager.get_team_formation_invitation(
+            request.request_id,
+            late_invitee.agent_id,
+        )
         self.assertEqual(invitation.attitude, InvitationAttitude.NO_RESPONSE)
         self.assertIsNone(invitation.responded_at)
 
@@ -408,6 +515,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         )
         created = await self.manager.create_team_from_formation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.root,
         )
         team = self.manager.teams[created.team_id]
@@ -415,15 +523,17 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         late_join = asyncio.create_task(
             self.manager.respond_team_invitation(
                 request.request_id,
+                proposal_revision=request.proposal_revision,
                 actor=late_invitee,
                 attitude="accepted",
             )
         )
         try:
             for _ in range(100):
-                invitation = self.manager.team_formation_invitations[
-                    (request.request_id, late_invitee.agent_id)
-                ]
+                invitation = self.manager.get_team_formation_invitation(
+                    request.request_id,
+                    late_invitee.agent_id,
+                )
                 if invitation.attitude is InvitationAttitude.ACCEPTED:
                     break
                 await asyncio.sleep(0)
@@ -436,9 +546,10 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         finally:
             team.state_lock.release()
         self.assertNotIn(late_invitee, team.members)
-        invitation = self.manager.team_formation_invitations[
-            (request.request_id, late_invitee.agent_id)
-        ]
+        invitation = self.manager.get_team_formation_invitation(
+            request.request_id,
+            late_invitee.agent_id,
+        )
         self.assertEqual(invitation.attitude, InvitationAttitude.NO_RESPONSE)
         self.assertIsNone(invitation.responded_at)
         self.assertNotIn(late_join, self.manager._formation_operation_tasks)
@@ -454,19 +565,25 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         ):
             await tool.invoke(
                 request_id=request.request_id,
+                proposal_revision=request.proposal_revision,
                 attitude="accepted",
             )
         executor = ToolExecutor(None, self.invitees[0], self.manager)
         result = await executor.execute(
             "respond_team_invitation",
-            kwargs={"request_id": request.request_id, "attitude": "accepted"},
+            kwargs={
+                "request_id": request.request_id,
+                "proposal_revision": request.proposal_revision,
+                "attitude": "accepted",
+            },
             tools={"respond_team_invitation": tool},
         )
         self.assertEqual(result.status.value, "success")
         self.assertEqual(
-            self.manager.team_formation_invitations[
-                (request.request_id, self.invitees[0].agent_id)
-            ].attitude,
+            self.manager.get_team_formation_invitation(
+                request.request_id,
+                self.invitees[0].agent_id,
+            ).attitude,
             InvitationAttitude.ACCEPTED,
         )
         self.assertNotIn("acting_agent_id", tool.json_schema["properties"])
@@ -523,13 +640,22 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         for invitee in self.invitees[:3]:
             await self.manager.respond_team_invitation(
                 request.request_id,
+                proposal_revision=request.proposal_revision,
                 actor=invitee,
                 attitude="accepted",
             )
         teams_before = set(self.manager.teams)
         results = await asyncio.gather(
-            self.manager.create_team_from_formation(request.request_id, actor=self.root),
-            self.manager.create_team_from_formation(request.request_id, actor=self.root),
+            self.manager.create_team_from_formation(
+                request.request_id,
+                actor=self.root,
+                proposal_revision=request.proposal_revision,
+            ),
+            self.manager.create_team_from_formation(
+                request.request_id,
+                actor=self.root,
+                proposal_revision=request.proposal_revision,
+            ),
         )
         self.assertEqual({result.team_id for result in results}, {results[0].team_id})
         self.assertEqual(len(set(self.manager.teams) - teams_before), 1)
@@ -539,6 +665,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         invitee = self.invitees[0]
         await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=invitee,
             attitude="accepted",
         )
@@ -560,6 +687,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "active"):
             await self.manager.create_team_from_formation(
                 request.request_id,
+                proposal_revision=request.proposal_revision,
                 actor=self.root,
             )
 
@@ -577,6 +705,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(OSError, "eligibility-reason"):
                 await self.manager.create_team_from_formation(
                     request.request_id,
+                    proposal_revision=request.proposal_revision,
                     actor=self.root,
                 )
         finally:
@@ -596,6 +725,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         )
         await self.manager.respond_team_invitation(
             request.request_id,
+            proposal_revision=request.proposal_revision,
             actor=self.invitees[0],
             attitude="accepted",
         )
@@ -613,6 +743,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, "left the creating AgentTeam"):
                 await self.manager.create_team_from_formation(
                     request.request_id,
+                    proposal_revision=request.proposal_revision,
                     actor=initiator,
                 )
         finally:

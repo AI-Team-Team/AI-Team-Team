@@ -1,5 +1,6 @@
 """Formation proposal validation and creation."""
 
+import copy
 import hashlib
 import json
 import time
@@ -11,9 +12,14 @@ from ...formation import (
     LateJoinPolicy,
     TeamFormationInvitation,
     TeamFormationRequest,
+    TeamFormationRevision,
+    TeamFormationStatus,
     UnanimousAcceptanceAction,
 )
 from ...team import AgentTeam
+
+
+_INFER_PARENT = object()
 
 
 class FormationProposalMixin:
@@ -26,6 +32,62 @@ class FormationProposalMixin:
             separators=(",", ":"),
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
+
+    @classmethod
+    def _revision_fingerprint(
+        cls,
+        request_id: str,
+        proposal_revision: int,
+        content_fingerprint: str,
+    ) -> str:
+        return cls._proposal_fingerprint(
+            {
+                "request_id": request_id,
+                "proposal_revision": proposal_revision,
+                "content_fingerprint": content_fingerprint,
+            }
+        )
+
+    @staticmethod
+    def _request_content(request: TeamFormationRequest) -> Dict[str, Any]:
+        return {
+            "creator_kind": request.creator_kind,
+            "creator_id": request.creator_id,
+            "parent_team_id": request.parent_team_id,
+            "task": request.task,
+            "member_count": request.member_count,
+            "roles_and_presets": request.roles_and_presets,
+            "preset_name": request.preset_name,
+            "system_instructions": request.system_instructions,
+            "team_purpose": request.team_purpose,
+            "roles_and_models": request.roles_and_models,
+            "member_configs": request.member_configs,
+            "invitee_agent_ids": request.invitee_agent_ids,
+            "initial_docs": request.initial_docs,
+            "is_public_visible": request.is_public_visible,
+            "initiator_joins": request.initiator_joins,
+            "unanimous_acceptance_action": request.unanimous_acceptance_action.value,
+            "late_join_policy": request.late_join_policy.value,
+        }
+
+    def _revision_record(
+        self,
+        request: TeamFormationRequest,
+        *,
+        revised_by_agent_id: str,
+        source_draft_id: Optional[str] = None,
+    ) -> TeamFormationRevision:
+        return TeamFormationRevision(
+            revision_id=f"{request.request_id}:{request.proposal_revision}",
+            request_id=request.request_id,
+            proposal_revision=request.proposal_revision,
+            content_fingerprint=request.content_fingerprint,
+            revision_fingerprint=request.revision_fingerprint,
+            proposal_snapshot=copy.deepcopy(self._request_content(request)),
+            revised_by_agent_id=revised_by_agent_id,
+            source_draft_id=source_draft_id,
+            created_at=request.updated_at,
+        )
 
     def _resolve_initiator(
         self,
@@ -92,6 +154,11 @@ class FormationProposalMixin:
         unanimous_acceptance_action: str = "require_confirmation",
         late_join_policy: str = "disabled",
         task: Optional[str] = None,
+        _deliberated: bool = False,
+        _source_draft_id: Optional[str] = None,
+        _emit_event: bool = True,
+        _schedule_auto_create: bool = True,
+        _parent_team: Any = _INFER_PARENT,
     ) -> TeamFormationRequest:
         manager = self.manager
         if manager._closing:
@@ -137,7 +204,24 @@ class FormationProposalMixin:
             team_purpose=team_purpose,
             is_public_visible=is_public_visible,
         )
-        parent = self._resolve_parent(creator, initiator)
+        if _parent_team is _INFER_PARENT:
+            parent = self._resolve_parent(creator, initiator)
+        else:
+            if _parent_team is not None and (
+                not isinstance(_parent_team, AgentTeam)
+                or manager.teams.get(_parent_team.team_id) is not _parent_team
+            ):
+                raise ValueError("The explicit formation parent is not registered.")
+            parent = _parent_team
+        if (
+            parent is not None
+            and manager.config.formation_deliberation_policy
+            == "required_when_team_scoped"
+            and not _deliberated
+        ):
+            raise PermissionError(
+                "Team-scoped formation requires a published collaborative draft."
+            )
         now = time.time()
         request_id = f"TFR-{uuid.uuid4().hex}"
         roles_payload = (
@@ -147,7 +231,7 @@ class FormationProposalMixin:
         )
         creator_kind = "agent_team" if isinstance(creator, AgentTeam) else "agent"
         creator_id = creator.team_id if isinstance(creator, AgentTeam) else creator.agent_id
-        fingerprint_payload = {
+        content_payload = {
             "creator_kind": creator_kind,
             "creator_id": creator_id,
             "parent_team_id": parent.team_id if parent else None,
@@ -165,8 +249,13 @@ class FormationProposalMixin:
             "initiator_joins": initiator_joins,
             "unanimous_acceptance_action": completion.value,
             "late_join_policy": late_join.value,
-            "proposal_revision": 1,
         }
+        content_fingerprint = self._proposal_fingerprint(content_payload)
+        revision_fingerprint = self._revision_fingerprint(
+            request_id,
+            1,
+            content_fingerprint,
+        )
         request = TeamFormationRequest(
             request_id=request_id,
             initiator_agent_id=initiator.agent_id,
@@ -193,7 +282,14 @@ class FormationProposalMixin:
             initiator_joins=initiator_joins,
             unanimous_acceptance_action=completion,
             late_join_policy=late_join,
-            proposal_fingerprint=self._proposal_fingerprint(fingerprint_payload),
+            content_fingerprint=content_fingerprint,
+            revision_fingerprint=revision_fingerprint,
+            status=(
+                TeamFormationStatus.READY_FOR_CONFIRMATION
+                if not invitees
+                and completion is UnanimousAcceptanceAction.REQUIRE_CONFIRMATION
+                else TeamFormationStatus.COLLECTING_RESPONSES
+            ),
             created_at=now,
             updated_at=now,
         )
@@ -208,6 +304,12 @@ class FormationProposalMixin:
         inbox_ids = set()
         with self._state_lock:
             self.requests[request_id] = request
+            revision = self._revision_record(
+                request,
+                revised_by_agent_id=initiator.agent_id,
+                source_draft_id=_source_draft_id,
+            )
+            self.revisions[revision.revision_id] = revision
             for invitation in invitations:
                 self.invitations[(request_id, invitation.agent_id)] = invitation
                 self._notify_agent(
@@ -218,6 +320,7 @@ class FormationProposalMixin:
                         "initiator_agent_id": initiator.agent_id,
                         "team_purpose": team_purpose,
                         "proposal_revision": request.proposal_revision,
+                        "revision_fingerprint": request.revision_fingerprint,
                     },
                 )
                 inbox_ids.add(invitation.agent_id)
@@ -228,6 +331,8 @@ class FormationProposalMixin:
                     "request_id": request_id,
                     "invitee_count": len(invitations),
                     "team_purpose": team_purpose,
+                    "proposal_revision": request.proposal_revision,
+                    "revision_fingerprint": request.revision_fingerprint,
                 },
             )
             inbox_ids.add(initiator.agent_id)
@@ -235,15 +340,23 @@ class FormationProposalMixin:
             configs=True,
             formation_requests={request_id},
             formation_invitations={request_id},
+            formation_revisions={request_id},
             agent_inboxes=inbox_ids,
         )
-        manager._emit_callback(
-            "on_system_event",
-            "team_formation_proposed",
-            {
-                "request_id": request_id,
-                "initiator_agent_id": initiator.agent_id,
-                "invitee_count": len(invitations),
-            },
-        )
-        return request
+        if _emit_event:
+            manager._emit_callback(
+                "on_system_event",
+                "team_formation_proposed",
+                {
+                    "request_id": request_id,
+                    "initiator_agent_id": initiator.agent_id,
+                    "invitee_count": len(invitations),
+                },
+            )
+        if (
+            _schedule_auto_create
+            and not invitations
+            and completion is UnanimousAcceptanceAction.AUTO_CREATE
+        ):
+            self._schedule_empty_auto_creation(request)
+        return request.model_copy(deep=True)

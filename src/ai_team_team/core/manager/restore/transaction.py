@@ -118,6 +118,9 @@ class RestoreTransactionMixin:
                 "peer_messages": manager.broker.peer_messages,
                 "formation_requests": dict(manager._formations.requests),
                 "formation_invitations": dict(manager._formations.invitations),
+                "formation_revisions": dict(manager._formations.revisions),
+                "formation_decisions": dict(manager._formations.decisions),
+                "formation_drafts": dict(manager._formations.drafts),
                 "agent_inboxes": {
                     agent.agent_id: [dict(message) for message in agent.agent_inbox]
                     for agent in manager._agents_by_id.values()
@@ -168,6 +171,18 @@ class RestoreTransactionMixin:
                         item.model_dump(mode="json")
                         for item in staged._formations.invitations.values()
                     ),
+                    (
+                        item.model_dump(mode="json")
+                        for item in staged._formations.revisions.values()
+                    ),
+                    (
+                        item.model_dump(mode="json")
+                        for item in staged._formations.decisions.values()
+                    ),
+                    (
+                        item.model_dump(mode="json")
+                        for item in staged._formations.drafts.values()
+                    ),
                     {
                         agent.agent_id: [dict(message) for message in agent.agent_inbox]
                         for agent in staged._agents_by_id.values()
@@ -213,6 +228,12 @@ class RestoreTransactionMixin:
                 manager._formations.requests.update(old_state["formation_requests"])
                 manager._formations.invitations.clear()
                 manager._formations.invitations.update(old_state["formation_invitations"])
+                manager._formations.revisions.clear()
+                manager._formations.revisions.update(old_state["formation_revisions"])
+                manager._formations.decisions.clear()
+                manager._formations.decisions.update(old_state["formation_decisions"])
+                manager._formations.drafts.clear()
+                manager._formations.drafts.update(old_state["formation_drafts"])
                 for old_agent in manager._agents_by_id.values():
                     with old_agent.inbox_lock:
                         old_agent.agent_inbox = [
