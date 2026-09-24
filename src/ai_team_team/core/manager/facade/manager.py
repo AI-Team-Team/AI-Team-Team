@@ -9,7 +9,6 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ai_team_team.doc_library import DocumentLibrary
 from ai_team_team.tool import Tool
 
-from ...adapters import ManagerDefaultClientAdapter
 from ...agent import Agent
 from ...broker import NegotiationBroker
 from ...config import ATTConfig
@@ -32,6 +31,7 @@ from ..runtime import RuntimeRegistry
 from ..snapshots import SnapshotBuilder
 from ..state import StateCoordinator
 from ..state_validation import StateValidator
+from ..supervision import SupervisionService
 from ..team_creation import TeamCreationService
 from ..topology import TopologyService
 from .agents_api import AgentAPI
@@ -81,9 +81,7 @@ class ATTManager(
         self.token_counters: Dict[str, Callable[[str], Any]] = {}
         self._tokenizer_cache: Dict[str, Any] = {}
 
-        from ai_team_team.supervision import SupervisoryTeam
-
-        self.supervisor = SupervisoryTeam(root_ai, ManagerDefaultClientAdapter(self), manager=self)
+        self.supervisor = SupervisionService(self)
         self.logger = logging.getLogger("ATTManager")
         self.tools_context: Dict[str, Any] = {"att_manager": self}
         self.libraries: Dict[str, DocumentLibrary] = {}

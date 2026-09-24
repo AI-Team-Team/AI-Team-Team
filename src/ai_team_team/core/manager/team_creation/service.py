@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING
 
 from .staging import TeamCreationStagingMixin
+from .lifecycle import TeamLifecycleMixin
 from .transaction import TeamCreationTransactionMixin
 from .validation import TeamCreationValidationMixin
 
@@ -11,6 +12,7 @@ if TYPE_CHECKING:
 
 
 class TeamCreationService(
+    TeamLifecycleMixin,
     TeamCreationTransactionMixin,
     TeamCreationValidationMixin,
     TeamCreationStagingMixin,

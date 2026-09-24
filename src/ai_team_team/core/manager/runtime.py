@@ -52,7 +52,8 @@ class RuntimeRegistry:
         manager.global_tools[tool.name] = tool
         # Bind to existing teams
         for team in manager.teams.values():
-            team.tools[tool.name] = tool
+            if team.team_kind == "ordinary":
+                team.tools[tool.name] = tool
 
     def register_tool_auditor(self, tool_name: str, auditor_func: Callable[..., Tuple[bool, str]]):
         """Registers an auditing hook executed before specific tool calls."""
@@ -372,6 +373,8 @@ class RuntimeRegistry:
 
         # Bind generic tools to existing teams
         for team in manager.teams.values():
+            if team.team_kind != "ordinary":
+                continue
             team.tools.update(get_default_tools(manager.tools_context, team))
             # Also bind globally registered tools
             team.tools.update(manager.global_tools)
@@ -379,6 +382,8 @@ class RuntimeRegistry:
     def get_available_tools(self, team: AgentTeam, agent: Optional[Agent] = None) -> Dict[str, Any]:
         """Returns the invocation-time tool view for one AgentTeam."""
         manager = self.manager
+        if team.team_kind == "supervisory":
+            return {}
         tools = dict(getattr(team, "tools", {}) or {})
         if (
             not manager.config.enable_dynamic_delegation

@@ -87,6 +87,17 @@ class CleanupWriteMixin:
                 synchronize_session=False
             )
             session.query(LibraryModel).filter_by(lib_id=lib_id).delete(synchronize_session=False)
+        for team_id in snapshot.get("deleted_teams", ()):
+            session.query(TeamInboxModel).filter_by(team_id=team_id).delete(
+                synchronize_session=False
+            )
+            session.query(TeamProposalModel).filter_by(team_id=team_id).delete(
+                synchronize_session=False
+            )
+            session.execute(delete(team_members).where(team_members.c.team_id == team_id))
+            session.query(TeamModel).filter_by(team_id=team_id).delete(
+                synchronize_session=False
+            )
         for agent_id in snapshot.get("deleted_agents", ()):
             fts_exists = session.execute(
                 text(

@@ -29,6 +29,7 @@ class TeamCreationValidationMixin:
                 manager._agents_by_id.get(agent.agent_id) is not agent
                 or manager.agents.get(agent.name) is not agent
                 or agent.lifecycle_state != "active"
+                or manager.supervisor.is_supervisory_agent(agent.agent_id)
             ):
                 raise ValueError(
                     f"Existing Agent {agent.name!r} must be actively registered with this manager."
@@ -43,6 +44,7 @@ class TeamCreationValidationMixin:
                 agent is None
                 or manager.agents.get(agent.name) is not agent
                 or agent.lifecycle_state != "active"
+                or manager.supervisor.is_supervisory_agent(agent.agent_id)
             ):
                 raise ValueError(f"Existing Agent ID {agent_id!r} is not actively registered.")
             resolved.append(agent)
@@ -73,9 +75,12 @@ class TeamCreationValidationMixin:
             raise TypeError("creator must be an Agent or AgentTeam.")
         if isinstance(creator, AgentTeam) and manager.teams.get(creator.team_id) is not creator:
             raise ValueError("The creator AgentTeam must be registered.")
+        if isinstance(creator, AgentTeam) and creator.team_kind != "ordinary":
+            raise ValueError("A system AgentTeam cannot create child teams.")
         if isinstance(creator, Agent) and (
             creator.lifecycle_state != "active"
             or manager._agents_by_id.get(creator.agent_id) is not creator
+            or manager.supervisor.is_supervisory_agent(creator.agent_id)
         ):
             raise ValueError("The creator Agent must be active and registered.")
         for name, value in {

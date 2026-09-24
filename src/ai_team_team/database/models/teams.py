@@ -39,6 +39,7 @@ team_members = Table(
 class TeamModel(Base):
     __tablename__ = "teams"
     team_id: Mapped[str] = mapped_column(String, primary_key=True)
+    team_kind: Mapped[str] = mapped_column(String, nullable=False)
     preset_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     team_purpose: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     team_progress: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -84,6 +85,10 @@ class TeamModel(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "team_kind = 'ordinary'",
+            name="ck_persisted_team_kind",
+        ),
         CheckConstraint(
             "(creator_agent_id IS NOT NULL AND creator_team_id IS NULL) OR "
             "(creator_agent_id IS NULL AND creator_team_id IS NOT NULL)",

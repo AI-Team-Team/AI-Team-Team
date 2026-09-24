@@ -109,8 +109,8 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         with open(db_path, "rb") as stream:
             after = stream.read()
         self.assertEqual(before, after)
-    def test_schema_five_is_rejected_before_ddl(self):
-        db_path = os.path.join(self.tmpdir, "schema-five.db")
+    def test_schema_nine_is_rejected_before_ddl(self):
+        db_path = os.path.join(self.tmpdir, "schema-nine.db")
         with closing(sqlite3.connect(db_path)) as connection:
             connection.execute(
                 "CREATE TABLE manager_config "
@@ -118,17 +118,17 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             )
             connection.execute(
                 "INSERT INTO manager_config VALUES "
-                "('schema_version', '5')"
+                "('schema_version', '9')"
             )
-            connection.execute("CREATE TABLE schema_five_only (value TEXT)")
+            connection.execute("CREATE TABLE schema_nine_only (value TEXT)")
             connection.execute(
-                "INSERT INTO schema_five_only VALUES ('unchanged')"
+                "INSERT INTO schema_nine_only VALUES ('unchanged')"
             )
             connection.commit()
         with open(db_path, "rb") as stream:
             before = stream.read()
 
-        with self.assertRaisesRegex(StateRestoreError, "version '5'"):
+        with self.assertRaisesRegex(StateRestoreError, "version '9'"):
             DatabaseStore(db_path)
 
         with open(db_path, "rb") as stream:

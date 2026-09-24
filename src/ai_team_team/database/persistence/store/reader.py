@@ -160,6 +160,7 @@ class StoreReadMixin:
                 teams.append(
                     {
                         "team_id": row.team_id,
+                        "team_kind": row.team_kind,
                         "preset_name": row.preset_name,
                         "team_purpose": row.team_purpose,
                         "team_progress": row.team_progress,

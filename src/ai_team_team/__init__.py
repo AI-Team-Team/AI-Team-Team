@@ -113,7 +113,7 @@ from .core.exceptions import (
     ToolPermissionError,
     RetryableToolError,
 )
-from .supervision import AuditResult, AuditStatus
+from .core.response import AuditResult, AuditStatus
 from .tool import Tool
 from .gated_reader import (
     FileDecodingError,

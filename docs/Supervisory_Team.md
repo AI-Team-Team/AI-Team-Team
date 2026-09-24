@@ -1,6 +1,24 @@
 # Supervisory Team
 
-ATT audits completed team discussions with three isolated roles: Integrity, Continuity, and Deadlock auditors. Their two-round committee discussion runs with `skip_audit=True`, so supervision does not recursively audit itself.
+For each completed ordinary AgentTeam discussion, `ATTManager` creates a real, registered, privileged supervisory AgentTeam through the same staged team-creation mechanism used for other teams.
+
+It has fresh Integrity, Continuity, and Deadlock auditors (and additional Review auditors if the configured minimum team size is larger than three), its own team identity and discussion lock, and no ordinary business tools.
+
+Its two-round discussion runs with `skip_audit=True`, so supervision does not recursively audit itself.
+
+Each audit has new Agent identities and private working contexts.
+
+Concurrent audits can run in separate supervisory teams without sharing auditor messages.
+
+Supervisory identities are not advertised as ordinary membership candidates or included in the ordinary topology view.
+
+The temporary team, Agent identities, and DocLibs are excluded from persistence snapshots so an interrupted process cannot restore an abandoned audit as an active team.
+
+After the audit, ATT durably records its input transcript, committee debate, result, and audit identity as system-memory evidence, then dissolves the supervisory team and removes its temporary auditors and DocLibs from active state.
+
+Restoring a completed audit restores the evidence, not its auditors.
+
+The old shared `SupervisoryTeam` runtime object no longer exists; `manager.supervisor` is an orchestration service for these managed lifecycle operations.
 
 ## Result model
 

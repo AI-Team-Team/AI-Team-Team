@@ -223,7 +223,8 @@ ATT represents dynamic multi-agent topologies as recursive lineages with explici
 ### 💾 Persistence & Diagnostics
 
 * **[Asynchronous SQLite Persistence](docs/State_Persistence.md)**: Serializes changed topology, memory, DocLib, ACL, and governance records through an exclusive cross-process writer lease with one active and one coalesced pending delta, explicit flush, and transactional restore validation.
-* **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: A non-participating 3-AI Supervisory Team executes parallel LLM evaluations (Integrity Auditor, Continuity Auditor, Deadlock Auditor) to review round transcripts, recursively escalating anomalies up the tree lineage.
+* **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: Each audit creates a short-lived, registered supervisory AgentTeam with fresh Integrity, Continuity, and Deadlock auditors.
+  It reviews the discussion through normal team execution, retains durable audit evidence, dissolves the temporary team, and escalates confirmed anomalies up the tree lineage.
 * **Decoupled Dashboards**: Dispatches synchronous or asynchronous runtime callbacks (`on_status_change`, `on_activity_added`, `on_log_append`) in order on an isolated background channel, so slow or failing observers cannot block discussions.
 
 ## 📦 Installation
@@ -325,7 +326,7 @@ flowchart TB
         Governance["Membership, Migration,<br/>and Parent Failover Governance"]
         Communication["Peer Communication<br/>policy, requests, approvals, agreements, delivery"]
         Knowledge["Private Publish, Team Files,<br/>Gated Reading, and Managed Links"]
-        Supervision["Content and Operational Audits"]
+        Supervision["Fresh Managed Supervisory ATs<br/>content and operational audits"]
         Alerts["Deduplicated Parent or Root Alerts"]
 
         Supervision --> Alerts

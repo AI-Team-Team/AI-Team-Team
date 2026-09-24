@@ -88,8 +88,11 @@ class RestoreTransactionMixin:
             for team in staged.teams.values():
                 team.manager = manager
                 team.invalidate_depth_cache(recursive=False)
-                team.tools = get_default_tools(manager.tools_context, team)
-                team.tools.update(manager.global_tools)
+                if team.team_kind == "ordinary":
+                    team.tools = get_default_tools(manager.tools_context, team)
+                    team.tools.update(manager.global_tools)
+                else:
+                    team.tools = {}
             for team in staged.teams.values():
                 _ = team.depth
 
@@ -195,7 +198,6 @@ class RestoreTransactionMixin:
                     staged_memory["memory_cards"],
                     staged_memory["memory_references"],
                 )
-                manager.supervisor.root_ai = manager.root_ai
                 manager.tools_context["att_manager"] = manager
                 manager.token_budget.reset_reservations()
             except Exception:
@@ -250,7 +252,6 @@ class RestoreTransactionMixin:
                     old_memory["memory_cards"],
                     old_memory["memory_references"],
                 )
-                manager.supervisor.root_ai = manager.root_ai
                 manager._rollback_published_libraries(published)
                 published = []
                 raise

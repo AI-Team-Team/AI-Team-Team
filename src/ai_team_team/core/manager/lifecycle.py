@@ -131,6 +131,10 @@ class LifecycleService:
         manager._formations.cancel_for_shutdown()
         await manager._memory.close()
         current = asyncio.current_task()
+        audit_tasks = {
+            task for task in manager.supervisor.active_tasks
+            if not task.done() and task is not current
+        }
         active_tasks = {
             task
             for task in (
@@ -138,20 +142,42 @@ class LifecycleService:
                 | manager._emergency_tasks
                 | manager._formations.tasks
                 | manager._formation_operation_tasks
+                | manager.supervisor.active_tasks
             )
             if not task.done() and task is not current
         }
         for task in active_tasks:
             task.cancel()
+        audit_error: Optional[BaseException] = None
         if active_tasks:
             # Deliver cancellation without waiting on providers that suppress it.
             await asyncio.sleep(0)
+            if audit_tasks:
+                # Give cooperative model calls time to unwind and register their
+                # durable finalizers. This bounds only external cancellation;
+                # finalizer commits and persistence flush remain unbounded.
+                await asyncio.wait(audit_tasks, timeout=2.0)
             for task in active_tasks:
                 if task.done():
                     try:
                         task.result()
-                    except BaseException:
+                    except asyncio.CancelledError:
                         pass
+                    except BaseException as exc:
+                        if task in audit_tasks and audit_error is None:
+                            audit_error = exc
+
+        # Audit finalizers contain only durable state commits and team teardown.
+        # They must complete before the persistence writer is closed.
+        finalizer_error: Optional[BaseException] = None
+        if manager.supervisor.finalizers:
+            results = await asyncio.gather(
+                *tuple(manager.supervisor.finalizers), return_exceptions=True
+            )
+            finalizer_error = next(
+                (result for result in results if isinstance(result, BaseException)),
+                None,
+            )
 
         await manager._callbacks.close()
         reset_error: Optional[BaseException] = None
@@ -168,6 +194,10 @@ class LifecycleService:
                     agent._manager = None
         if reset_error is not None:
             raise reset_error
+        if finalizer_error is not None:
+            raise finalizer_error
+        if audit_error is not None:
+            raise audit_error
 
     @asynccontextmanager
     async def agent_invocation(self, agent: Agent, *, allow_runtime: bool = False):

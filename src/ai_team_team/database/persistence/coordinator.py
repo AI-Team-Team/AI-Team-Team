@@ -288,6 +288,9 @@ class PersistenceCoordinator:
         merged["deleted_agents"] = list(
             set(earlier.get("deleted_agents", ())) | set(later.get("deleted_agents", ()))
         )
+        merged["deleted_teams"] = list(
+            set(earlier.get("deleted_teams", ())) | set(later.get("deleted_teams", ()))
+        )
         merged["deleted_libraries"] = list(
             set(earlier.get("deleted_libraries", ())) | set(later.get("deleted_libraries", ()))
         )
@@ -296,7 +299,12 @@ class PersistenceCoordinator:
             | set(later.get("deleted_memory_references", ()))
         )
         deleted_agents = set(merged["deleted_agents"])
+        deleted_teams = set(merged["deleted_teams"])
         deleted_libraries = set(merged["deleted_libraries"])
+        merged["teams"] = [
+            record for record in merged.get("teams", [])
+            if record["team_id"] not in deleted_teams
+        ]
         merged["agents"] = [
             record
             for record in merged.get("agents", [])
@@ -317,6 +325,12 @@ class PersistenceCoordinator:
             for agent_id, inbox in merged.get("agent_inboxes", {}).items()
             if agent_id not in deleted_agents
         }
+        for key in ("inboxes", "proposals"):
+            merged[key] = {
+                team_id: value
+                for team_id, value in merged.get(key, {}).items()
+                if team_id not in deleted_teams
+            }
         for key in (
             "memory_segments",
             "memory_cards",

@@ -245,7 +245,10 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
         }
         experts_lines = []
         for name, exp_agent in sorted(manager.agents.items()):
-            if exp_agent.agent_id in dependency_ids:
+            if (
+                exp_agent.agent_id in dependency_ids
+                or manager.supervisor.is_supervisory_agent(exp_agent.agent_id)
+            ):
                 continue
             role_desc = getattr(exp_agent, "role_description", "") or "No description"
             experts_lines.append(

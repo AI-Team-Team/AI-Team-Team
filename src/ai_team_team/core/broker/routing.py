@@ -169,6 +169,8 @@ class BrokerRoutingMixin:
             raise ValueError("The sender AgentTeam is not registered.")
         if self.manager.teams.get(recipient.team_id) is not recipient:
             raise ValueError("The recipient AgentTeam is not registered.")
+        if sender.team_kind != "ordinary" or recipient.team_kind != "ordinary":
+            raise PermissionError("System AgentTeams cannot be peer communication endpoints.")
         actor = self.manager._agents_by_id.get(initiated_by_agent_id)
         if (
             actor is None
@@ -210,4 +212,3 @@ class BrokerRoutingMixin:
             ):
                 return request
         return None
-

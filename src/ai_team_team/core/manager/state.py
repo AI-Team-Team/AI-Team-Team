@@ -51,6 +51,7 @@ class StateCoordinator:
             "links": set(),
             "file_changes": {},
             "deleted_agents": set(),
+            "deleted_teams": set(),
             "deleted_libraries": set(),
             "deleted_memory_references": set(),
         }
@@ -86,6 +87,7 @@ class StateCoordinator:
         for lib_id, changes in source["file_changes"].items():
             target["file_changes"].setdefault(lib_id, {}).update(changes)
         target["deleted_agents"].update(source["deleted_agents"])
+        target["deleted_teams"].update(source["deleted_teams"])
         target["deleted_libraries"].update(source["deleted_libraries"])
         target["deleted_memory_references"].update(
             source["deleted_memory_references"]
@@ -136,6 +138,7 @@ class StateCoordinator:
             or dirty["links"]
             or dirty["file_changes"]
             or dirty["deleted_agents"]
+            or dirty["deleted_teams"]
             or dirty["deleted_libraries"]
             or dirty["deleted_memory_references"]
         )
@@ -168,6 +171,7 @@ class StateCoordinator:
         file_changes: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
         full: bool = False,
         deleted_agents: Optional[set[str]] = None,
+        deleted_teams: Optional[set[str]] = None,
         deleted_libraries: Optional[set[str]] = None,
         deleted_memory_references: Optional[set[str]] = None,
     ) -> None:
@@ -198,6 +202,7 @@ class StateCoordinator:
         dirty["permissions"].update(permissions or set())
         dirty["links"].update(links or set())
         dirty["deleted_agents"].update(deleted_agents or set())
+        dirty["deleted_teams"].update(deleted_teams or set())
         dirty["deleted_libraries"].update(deleted_libraries or set())
         dirty["deleted_memory_references"].update(
             deleted_memory_references or set()
@@ -258,9 +263,10 @@ class StateCoordinator:
         dirty = self.manager._new_dirty_state(full=full)
         if not full:
             dirty["configs"] = True
-        with self.manager._snapshot_lock:
-            snapshot = self.manager._capture_state_snapshot(dirty)
-            future = self.manager._persistence.submit(target_path, snapshot)
+        async with self.manager._runtime_gate:
+            with self.manager._snapshot_lock:
+                snapshot = self.manager._capture_state_snapshot(dirty)
+                future = self.manager._persistence.submit(target_path, snapshot)
         await asyncio.shield(asyncio.wrap_future(future))
 
     async def flush_state(self) -> None:

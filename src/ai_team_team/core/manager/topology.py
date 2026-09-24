@@ -20,6 +20,8 @@ class TopologyService:
         self.lock = threading.RLock()
 
     def find_parent_team(self, target: AgentTeam) -> Optional[AgentTeam]:
+        if target.team_kind == "supervisory":
+            return None
         if target._parent_team is not None:
             return target._parent_team
 
@@ -59,7 +61,10 @@ class TopologyService:
 
     def render_tree(self) -> str:
         lines = [f"- [Root AI: {self.manager.root_ai.name}] (Level 0)"]
-        level_one = [team for team in self.manager.teams.values() if team.parent_team is None]
+        level_one = [
+            team for team in self.manager.teams.values()
+            if team.team_kind == "ordinary" and team.parent_team is None
+        ]
 
         def traverse(team: AgentTeam, depth: int = 1, is_last: bool = True) -> None:
             indent = "  " * depth

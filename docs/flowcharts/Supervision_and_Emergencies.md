@@ -5,7 +5,8 @@ flowchart TD
     Discussion["Team discussion completes with structured turn results"] --> Framework["Framework derives operational status from completed and incomplete turns"]
     Framework --> Skip{"skip_audit?"}
     Skip -- "Yes" --> Return["Return DiscussionResult and transcript"]
-    Skip -- "No" --> Committee["Three-auditor committee"]
+    Skip -- "No" --> Create["Manager creates registered supervisory AgentTeam with fresh auditors"]
+    Create --> Committee["Run two-round supervisory team discussion with skip_audit=True"]
     Committee --> DecisionMode{"operational status decision mode"}
     DecisionMode -- "framework" --> Content["Supervisor decides content status; framework operational status is retained"]
     DecisionMode -- "supervisor" --> Both["Supervisor strictly decides content and operational status"]
@@ -13,8 +14,9 @@ flowchart TD
     Content --> Audit["AuditResult"]
     Both --> Audit
     Review --> Audit
-    Audit --> Result{"content status"}
-    Audit --> Operational{"operational status"}
+    Audit --> Evidence["Persist audit evidence and dissolve temporary team"]
+    Evidence --> Result{"content status"}
+    Evidence --> Operational{"operational status"}
     Result -- "HEALTHY" --> Return
     Result -- "UNHEALTHY" --> Emergency["Send child_failure_escalation"]
     Result -- "UNKNOWN" --> Event["Emit audit_unknown system event"]

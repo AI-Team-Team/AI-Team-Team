@@ -35,6 +35,12 @@ def validate_teams(
     parent_map: Dict[str, Optional[str]] = {}
     for row in payload.teams:
         team_id = row["team_id"]
+        team_kind = row.get("team_kind")
+        if team_kind != "ordinary":
+            raise StateRestoreError(
+                f"Team {team_id!r} has invalid persisted kind {team_kind!r}; "
+                "audit-scoped supervisory teams cannot be restored."
+            )
         try:
             json.loads(row.get("status_map") or "{}")
         except Exception as exc:

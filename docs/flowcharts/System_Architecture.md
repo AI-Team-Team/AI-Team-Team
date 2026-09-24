@@ -238,7 +238,7 @@ flowchart TB
 
     subgraph Supervision["Independent Content and Operational Supervision"]
         AuditInput["Complete Transcript<br/>incomplete placeholders and redacted failure metadata"]
-        Supervisors["Three-Agent Supervisory Audit<br/>integrity, continuity, deadlock"]
+        Supervisors["Short-lived managed Supervisory AgentTeam<br/>fresh auditors per audit, durable evidence"]
         ContentStatus{"AuditStatus<br/>HEALTHY, UNHEALTHY, UNKNOWN"}
         OperationalMode["Operational Decision Mode<br/>framework, supervisor, framework then supervisor"]
         OperationalStatus{"OperationalStatus<br/>HEALTHY, DEGRADED, UNKNOWN"}
@@ -269,7 +269,7 @@ flowchart TB
         Materialize["Background Materialization<br/>deep copy, JSON serialization, ORM record assembly"]
         Coordinator["Single-Writer Coordinator<br/>one executing delta plus one coalesced pending delta"]
         Lease["Exclusive Cross-Process Writer Lease<br/>second writer fails immediately"]
-        Database[(SQLite Schema 9<br/>foreign keys, WAL, busy timeout, optional FTS5)]
+        Database[(SQLite Schema 10<br/>foreign keys, WAL, busy timeout, optional FTS5)]
         RestoreRead["Read Schema Version Before Mutation<br/>load all records into detached staging"]
         RestoreValidate["Strict Restore Validation<br/>identity, topology, model aliases, governance,<br/>memory ownership/digests, DocLibs, ACL, links"]
         RestoreFiles["Stage DocLib Files in Temporary Directories"]

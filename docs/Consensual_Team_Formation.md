@@ -18,7 +18,9 @@ The trusted host-only `manager.bootstrap_agent_team(...)` API is the explicit ex
 
 Every registered Agent owns one persistent `agent_inbox` in addition to any AgentTeam inboxes. Formation invitations and results are delivered to the Agent identity because the same Agent may participate in several AgentTeams and no team should own that Agent's personal decision.
 
-The unread Agent inbox is included in that Agent's next model context together with tools for listing and acknowledging messages. Framework-only runtime auditors are not registered identities and do not receive fabricated Agent inboxes.
+The unread Agent inbox is included in that Agent's next model context together with tools for listing and acknowledging messages.
+
+Audit-scoped supervisory Agents are registered for the lifetime of their managed supervisory AgentTeam, but they do not receive ordinary business tools or invitations; their identities are removed after the audit while audit evidence remains durable.
 
 Host APIs may address an Agent ID directly for administration:
 
@@ -132,4 +134,4 @@ Revision, response, explicit creation, automatic creation, abandonment, and late
 
 Creation stages new Agents, Private DocLibs, the Team DocLib, and initial files outside the live registries. It revalidates under the creation locks, publishes topology and files as one operation, commits the authoritative state before returning `CREATED`, and restores runtime, inbox, formation, and filesystem state if persistence fails.
 
-Persistence schema 9 stores Agent inbox messages, current formation projections, immutable revision snapshots, append-only invitation decisions, detached drafts, timestamps, completion policy, late-join policy, and the resulting team reference. Restore validates complete contiguous revision history, exact fingerprints and material fields, creator provenance, decision-to-revision membership, draft publication provenance, and every related identity reference in detached staging; malformed data raises `StateRestoreError` without changing the current manager or its Agent inboxes and DocLibs.
+Persistence schema 10 stores Agent inbox messages, current formation projections, immutable revision snapshots, append-only invitation decisions, detached drafts, timestamps, completion policy, late-join policy, and the resulting team reference. Restore validates complete contiguous revision history, exact fingerprints and material fields, creator provenance, decision-to-revision membership, draft publication provenance, and every related identity reference in detached staging; malformed data raises `StateRestoreError` without changing the current manager or its Agent inboxes and DocLibs.

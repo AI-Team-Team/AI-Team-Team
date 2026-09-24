@@ -200,9 +200,15 @@ Owns durable communication requests, approvals, ballots, Agreements, and peer-de
 
 Executes governance decisions for explicit principals. AgentTeam decisions use the team's discussion lock and a complete frozen-member ballot; Agent decisions use only that Agent's invocation lock. Strict Pydantic JSON parsing accepts only literal booleans or a valid model alias from the supplied candidate set.
 
-### `SupervisoryTeam`
+### `SupervisionService` and supervisory AgentTeams
 
-A 3-AI supervisory committee checking transcripts for logical deadlocks, circular reasoning, and dialogue health.
+`ATTManager.supervisor` is a `SupervisionService`, not a separate team implementation.
+
+Each audit creates a registered, root-created `AgentTeam(team_kind="supervisory")` with fresh Agents through staged team creation, runs its discussion through the standard coordinator, commits audit evidence, and dissolves the team through managed lifecycle machinery.
+
+The live supervisory team, its Agents, and its DocLibs are excluded from state snapshots; the System Memory Journal retains completed audit evidence.
+
+Supervisory Agents do not retain memory across audits and have no ordinary tool view.
 
 * **Methods**:
   * `audit_team_dialog(team: AgentTeam, transcript: str) -> AuditResult`
@@ -273,7 +279,7 @@ Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/
 
 ## Database Schema & ORM Models
 
-SQLAlchemy Declarative Models mapping schema 9 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
+SQLAlchemy Declarative Models mapping schema 10 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
 * **`AgentModel`, `AgentMessageModel`, and `AgentInboxModel`**: Use immutable `agent_id` primary/foreign keys and persist lifecycle profiles, bounded Working Context, and identity-addressed notifications.

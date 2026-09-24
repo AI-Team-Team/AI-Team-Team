@@ -141,6 +141,10 @@ class MemoryJournalMixin:
             },
         )
         self._recalled_by_turn.pop(turn_id, None)
+        if team.team_kind == "supervisory":
+            # Audit-scoped Agents leave durable Journal evidence, but never
+            # create Agent-owned retrieval jobs that can outlive their team.
+            return
         if not self.manager.config.episodic_memory.enabled:
             self.ensure_enabled()
             return
@@ -196,4 +200,3 @@ class MemoryJournalMixin:
             payload={"reason": reason},
             redacted=True,
         )
-

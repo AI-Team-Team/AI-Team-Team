@@ -378,6 +378,7 @@ class FormationDraftMixin:
             }
             for agent in self.manager._agents_by_id.values()
             if agent.lifecycle_state == "active"
+            and not self.manager.supervisor.is_supervisory_agent(agent.agent_id)
         ]
         return (
             "Collaboratively design an AgentTeam formation proposal. This discussion is "

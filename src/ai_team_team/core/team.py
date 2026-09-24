@@ -17,8 +17,18 @@ if TYPE_CHECKING:
 
 class AgentTeam:
     """Represents a recursive team panel of Agents collaborating to debate/solve goals."""
-    def __init__(self, creator: Any, preset_name: str, team_purpose: str = "Unspecified team purpose"):
+    def __init__(
+        self,
+        creator: Any,
+        preset_name: str,
+        team_purpose: str = "Unspecified team purpose",
+        *,
+        team_kind: str = "ordinary",
+    ):
+        if team_kind not in {"ordinary", "supervisory"}:
+            raise ValueError("team_kind must be ordinary or supervisory.")
         self.team_id = f"AT-{uuid.uuid4().hex[:6]}"
+        self.team_kind = team_kind
         self.creator = creator
         self.preset_name = preset_name
         self.team_purpose = team_purpose
@@ -228,7 +238,6 @@ class AgentTeam:
         if (
             manager is None
             or manager._memory_internal_operation.get()
-            or bool(getattr(self, "_runtime_only", False))
         ):
             return await self._execute_reasoning_step_detailed_inner(
                 agent,
@@ -342,12 +351,7 @@ class AgentTeam:
         failover_attempts = 0
 
         invocation = (
-            manager.agent_invocation(
-                agent,
-                allow_runtime=bool(
-                    getattr(self, "_runtime_only", False)
-                ),
-            )
+            manager.agent_invocation(agent)
             if manager is not None
             else agent.invocation_guard()
         )

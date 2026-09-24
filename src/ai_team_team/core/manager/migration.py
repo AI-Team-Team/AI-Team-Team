@@ -32,6 +32,8 @@ class MigrationService:
                 return False, "Rejected: Migrating AgentTeam is not registered."
             if manager.teams.get(target_parent.team_id) is not target_parent:
                 return False, "Rejected: Target parent AgentTeam is not registered."
+            if team.team_kind != "ordinary" or target_parent.team_kind != "ordinary":
+                return False, "Rejected: System AgentTeams do not participate in topology migration."
             current_count = getattr(team, "migration_count", 0)
             if current_count >= limit:
                 return (
@@ -74,6 +76,8 @@ class MigrationService:
                             "Rejected: Target parent AgentTeam was unregistered "
                             "while authorization was pending."
                         )
+                    if team.team_kind != "ordinary" or target_parent.team_kind != "ordinary":
+                        return False, "Rejected: System AgentTeams cannot migrate."
                     current_parent = team.parent_team
                     current_count = team.migration_count
                     if current_parent is not initial_parent:

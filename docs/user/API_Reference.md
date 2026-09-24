@@ -391,11 +391,17 @@ lib = DocumentLibrary(
 * **`list_contents(path: str = "/") -> List[str]`**
   Lists relative file paths and directory paths under the target path.
 
-## 🔍 `SupervisoryTeam`
+## 🔍 Supervisory AgentTeams
 
-A non-participating 3-AI committee (comprising Integrity, Continuity, and Deadlock Auditors) that automatically monitors dialogue logs for deadlocks and anomalies.
+After an ordinary discussion, `ATTManager` creates a short-lived, registered AgentTeam with fresh Integrity, Continuity, and Deadlock auditors, plus additional auditors if required by `min_subagent_team_size`.
 
-The Supervisory Team is managed and called automatically by `ATTManager` at the end of each debate session. External users do not typically interact with this class directly, but it coordinates dialogue health audits using the manager's `critic_client` or falls back to the manager's global `generator_handler` under the `"critic"` model alias.
+The supervisory team uses the normal discussion lock and Agent invocation machinery but cannot use ordinary team tools.
+
+`manager.supervisor` coordinates the audit; there is no separate public `SupervisoryTeam` class.
+
+A completed audit leaves durable system-memory evidence and dissolves its temporary team, Agents, and DocLibs.
+
+Auditors use the manager's default generator handler when configured, or the Root AI's default client.
 
 * Audits separate content health (`AuditStatus.HEALTHY`, `UNHEALTHY`, or `UNKNOWN`) from runtime health (`OperationalStatus.HEALTHY`, `DEGRADED`, or `UNKNOWN`). Confirmed content anomalies preserve emergency escalation. UNKNOWN audits use `audit_unknown_escalation_mode`; degraded runtime alerts emit structured events and optionally queue or wake through `operational_degraded_escalation_mode`.
 

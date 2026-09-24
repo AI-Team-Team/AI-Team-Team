@@ -70,8 +70,7 @@ class DiscussionCoordinator(DiscussionSessionMixin):
             async with self.manager._runtime_gate:
                 if self.manager._closing:
                     raise RuntimeError("ATTManager is closing and rejects new discussions.")
-                is_runtime_audit = bool(skip_audit and getattr(team, "_runtime_only", False))
-                if self.manager.teams.get(team.team_id) is not team and not is_runtime_audit:
+                if self.manager.teams.get(team.team_id) is not team:
                     raise ValueError("The discussion team is not registered.")
                 team.is_running = True
                 member_snapshot = list(team.members)

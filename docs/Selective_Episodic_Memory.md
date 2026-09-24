@@ -110,7 +110,7 @@ Private DocLib and episodic-memory tools are always metadata-only, and their tra
 
 ## Persistence and Restore
 
-Schema 9 stores Working Context, Journal events, source-linked segments, Memory Cards, normalized tags, retained references, and the FTS5 search index in separate structures.
+Schema 10 stores Working Context, Journal events, source-linked segments, Memory Cards, normalized tags, retained references, and the FTS5 search index in separate structures.
 
 Full saves never delete Journal rows, while incremental journal updates are insert-only and reject attempts to modify an existing event ID.
 

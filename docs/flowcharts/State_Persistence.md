@@ -39,5 +39,6 @@ flowchart TD
 
 - SQLite uses foreign keys, WAL, and an explicit busy timeout.
 - A second manager or process fails its non-blocking writer lease immediately.
-- Schema 9 stores Agent inboxes, consensual formation revisions, invitation decisions, detached formation drafts, autonomous communication records, separated Working Context, the append-only Journal, the optional episodic-memory catalog, source provenance, retained references, and the FTS5 index.
+- Schema 10 stores Agent inboxes, consensual formation revisions, invitation decisions, detached formation drafts, autonomous communication records, separated Working Context, the append-only Journal, the optional episodic-memory catalog, source provenance, retained references, and the FTS5 index.
+- Audit-scoped supervisory teams and auditors stay live only during their audit; snapshots exclude their identities and DocLibs, while the Journal retains completed audit evidence.
 - It intentionally does not migrate old databases.

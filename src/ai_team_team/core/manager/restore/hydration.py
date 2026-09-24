@@ -90,7 +90,6 @@ class RestoreHydrationMixin:
         if root_id not in manager._agents_by_id:
             raise StateRestoreError(f"Persisted root agent {root_id!r} was not found.")
         manager.root_ai = manager._agents_by_id[root_id]
-        manager.supervisor.root_ai = manager.root_ai
 
         manager.libraries.clear()
         manager._library_files.clear()
@@ -124,6 +123,7 @@ class RestoreHydrationMixin:
                 creator=creator,
                 preset_name=row["preset_name"],
                 team_purpose=row["team_purpose"],
+                team_kind=row["team_kind"],
             )
             team.team_id = row["team_id"]
             team.logger = logging.getLogger(f"AgentTeam:{team.team_id}")
@@ -174,8 +174,11 @@ class RestoreHydrationMixin:
 
         for team in manager.teams.values():
             team.doc_library = manager.libraries.get(f"DL-{team.team_id}")
-            team.tools = get_default_tools(manager.tools_context, team)
-            team.tools.update(manager.global_tools)
+            if team.team_kind == "ordinary":
+                team.tools = get_default_tools(manager.tools_context, team)
+                team.tools.update(manager.global_tools)
+            else:
+                team.tools = {}
 
         manager.broker.restore(
             state.get("communication_requests", []),

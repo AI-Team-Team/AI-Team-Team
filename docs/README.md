@@ -17,9 +17,9 @@ To understand specific systems in detail, please refer to the following document
 
 1. **[Hierarchical Dynamic Delegation](Dynamic_Delegation.md)**: Explains the recursive `Agent` and `AgentTeam` lineages (Level 0 Root AI spawning Level 1 ATs, which recursively spawn deeper sub-teams of Level $N$), ReAct execution loops with safe literal evaluation, and the lineage escalation channels.
 2. **[Token-Based File Reading](Gated_Reading.md)**: Details effective-model token budgets, line and character continuation, collaborative team DocLib ACLs, and persistent Private Agent DocLib boundaries.
-3. **[Supervisor Auditor Team](Supervisory_Team.md)**: Details the dynamic **3-AI Supervisory Team** (Integrity, Continuity, and Deadlock Auditors) which monitors dialogue transcripts with explicit `messages.clear()` memory isolation to prevent OOM errors, and performs recursive lineage parent escalations.
+3. **[Supervisory Team](Supervisory_Team.md)**: Details the short-lived, registered supervisory AgentTeam created for each audit, its fresh auditors, durable evidence, and lineage escalation.
 4. **[State Persistence & Multi-Turn Memory](State_Persistence.md)**: Explains the asynchronous single-writer SQLite design, incremental deltas, validated recovery, multi-turn memory, and turn-based pruning.
-5. **[Selective Episodic Memory](Selective_Episodic_Memory.md)**: Defines the optional Agent-owned Memory Catalog, immutable Journal boundary, isolated indexing, ephemeral recall, tool capture policy, and schema 9 recovery rules.
+5. **[Selective Episodic Memory](Selective_Episodic_Memory.md)**: Defines the optional Agent-owned Memory Catalog, immutable Journal boundary, isolated indexing, ephemeral recall, tool capture policy, and current-schema recovery rules.
 6. **[Consensual Existing-Agent Team Formation](Consensual_Team_Formation.md)**: Defines persistent Agent identity inboxes, revision-bound invitation attitudes, immutable proposal history, optional detached creator-Team deliberation, accepted-subset creation, late joining, trusted bootstrap, and the invariant that membership never mutates Agent-owned state.
 7. **[Team Governance & Communication Policies](Team_Governance.md)**: Details configuration-owned communication, explicit AgentTeam/Root Agent principals, durable Requests and Agreements, migration policies, token-budget failover, and emergency wakeups.
 8. **[Tool Execution & Development System](Tool_System.md)**: Explains the native tool-calling loop, Thorough Abstraction schema extraction, concurrent parallel executions, tool registration, and `ToolAuditor` pre-execution hooks.
@@ -45,8 +45,8 @@ The ATT Topology transitions AI agents from passive context-consumers to active,
 
 ```plaintext
                      ┌──────────────────────────────┐
-                     │    Supervisory Auditor Team  │
-                     │       (Exactly 3 AIs)        │
+                     │ Supervisory AgentTeam       │
+                     │ (Fresh per audit, >= 3 AIs) │
                      └──────────────┬───────────────┘
                                     │ Audits Dialogue Logs
                                     ▼

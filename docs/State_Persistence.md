@@ -60,12 +60,16 @@ The database stores:
 - schema version, `ATTConfig`, model metadata, presets, and token usage;
 - all active and inactive agents by immutable UUID, lifecycle state, private-library ownership, bounded Working Context, and persistent identity-addressed inbox messages;
 - append-only System Memory Journal events with identity snapshots and source provenance, plus optional Agent-owned segments, Memory Cards, normalized tags, retained references, and FTS5 search data;
-- teams, role-neutral `team_id ↔ agent_id` membership rows, lineage, migration counters, AgentTeam inboxes, and proposals;
+- ordinary teams with role-neutral `team_id ↔ agent_id` membership rows, lineage, migration counters, AgentTeam inboxes, and proposals;
 - consensual formation request projections, normalized content and revision fingerprints, immutable revision snapshots, append-only exact-revision invitation decisions, detached collaborative drafts, creation choices, late-join state, and resulting team references;
 - communication requests, ordered approvals, member ballots, directional Agreements, and peer-delivery records;
 - document-library metadata, ACLs, managed cross-library links, paths, and file contents.
 
 An incremental membership change rewrites the affected team's `team_members` rows without rewriting an already persisted Agent record, Working Context, Journal, Memory Catalog, model binding, lifecycle state, or Private DocLib.
+
+Each audit's supervisory AgentTeam and fresh auditors are fully registered in the running Manager but deliberately omitted from state snapshots, including full saves taken during an audit.
+
+The completed audit's source transcript, debate, and result remain in the System Memory Journal after the temporary team, auditors, and DocLibs are removed.
 
 Insert-only dependency records are used solely to satisfy foreign keys when a referenced registered identity has not yet been written to a new database.
 
@@ -119,6 +123,6 @@ The optional [Selective Episodic Memory](Selective_Episodic_Memory.md) catalog c
 
 ## Schema policy
 
-- The current persistence schema version is `9`.
-- Compatibility with schema `8` and earlier SQLite layouts is intentionally unsupported.
+- The current persistence schema version is `10`.
+- Compatibility with schema `9` and earlier SQLite layouts is intentionally unsupported.
 - Create a new database when upgrading.

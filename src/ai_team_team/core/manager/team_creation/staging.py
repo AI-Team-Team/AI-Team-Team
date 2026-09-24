@@ -43,6 +43,7 @@ class TeamCreationStagingMixin:
         parent_override: Optional[AgentTeam] = None,
         parent_override_provided: bool = False,
         required_creator_member_agent_id: Optional[str] = None,
+        team_kind: str = "ordinary",
     ) -> Dict[str, Any]:
         """Builds a complete AgentTeam transaction without live registration."""
         manager = self.manager
@@ -50,6 +51,7 @@ class TeamCreationStagingMixin:
             creator=creator,
             preset_name=preset_name,
             team_purpose=team_purpose,
+            team_kind=team_kind,
         )
         team.manager = manager
         parent = (
@@ -66,6 +68,8 @@ class TeamCreationStagingMixin:
             team.chapter_num = parent.chapter_num
 
         def client_by_alias(alias: Optional[str]) -> Any:
+            if team_kind == "supervisory" and alias in {None, "default"}:
+                return ManagerDefaultClientAdapter(manager)
             if alias and alias != "default":
                 if alias in manager.llm_clients:
                     return manager.llm_clients[alias]
@@ -145,8 +149,9 @@ class TeamCreationStagingMixin:
 
         from ai_team_team.tool import get_default_tools
 
-        team.tools.update(get_default_tools(manager.tools_context, team))
-        team.tools.update(manager.global_tools)
+        if team_kind == "ordinary":
+            team.tools.update(get_default_tools(manager.tools_context, team))
+            team.tools.update(manager.global_tools)
 
         registered_agents: List[Agent] = []
         for agent in [creator, *members]:

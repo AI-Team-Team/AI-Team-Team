@@ -372,7 +372,7 @@ Revocation does not delete historical requests, approvals, ballots, Agreements, 
 
 ## 12. Persistence, Restore, and Shutdown
 
-Schema 9 retains the communication request, ordered approval, ballot, Agreement, peer-delivery, and correlated AgentTeam inbox records introduced with the autonomous communication model.
+Schema 10 retains the communication request, ordered approval, ballot, Agreement, peer-delivery, and correlated AgentTeam inbox records introduced with the autonomous communication model.
 
 ```mermaid
 flowchart TD

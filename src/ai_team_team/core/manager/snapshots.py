@@ -31,6 +31,20 @@ class SnapshotBuilder:
         manager = self.manager
         full = dirty["full"]
         now = time.time()
+        temporary_teams = {
+            team_id: team
+            for team_id, team in manager.teams.items()
+            if team.team_kind == "supervisory"
+        }
+        temporary_team_ids = set(temporary_teams)
+        temporary_agent_ids = {
+            agent.agent_id
+            for team in temporary_teams.values()
+            for agent in team.members
+        }
+        temporary_library_ids = {
+            f"DL-{team_id}" for team_id in temporary_team_ids
+        } | {f"PDL-{agent_id}" for agent_id in temporary_agent_ids}
         configs = None
         if full or dirty["configs"]:
             configs = {
@@ -52,9 +66,13 @@ class SnapshotBuilder:
 
         agent_lookup = dict(manager._agents_by_id)
         relevant_teams = (
-            manager.teams.values()
+            (team for team in manager.teams.values() if team.team_kind == "ordinary")
             if full
-            else (manager.teams[team_id] for team_id in dirty["teams"] if team_id in manager.teams)
+            else (
+                manager.teams[team_id]
+                for team_id in dirty["teams"]
+                if team_id in manager.teams and team_id not in temporary_team_ids
+            )
         )
         for relevant_team in relevant_teams:
             for member in relevant_team.members:
@@ -64,7 +82,7 @@ class SnapshotBuilder:
                     relevant_team.creator.agent_id,
                     relevant_team.creator,
                 )
-        agent_ids = set(agent_lookup) if full else set()
+        agent_ids = set(agent_lookup) - temporary_agent_ids if full else set()
         if not full:
             for identifier in dirty["agents"]:
                 if identifier in agent_lookup:
@@ -76,7 +94,7 @@ class SnapshotBuilder:
             agent_dependency_ids.update(dirty["agent_inboxes"])
             for team_id in dirty["teams"]:
                 team = manager.teams.get(team_id)
-                if team is not None:
+                if team is not None and team_id not in temporary_team_ids:
                     agent_dependency_ids.update(member.agent_id for member in team.members)
                     if isinstance(team.creator, Agent):
                         agent_dependency_ids.add(team.creator.agent_id)
@@ -97,7 +115,8 @@ class SnapshotBuilder:
                 draft = manager._formations.drafts.get(draft_id)
                 if draft is not None:
                     agent_dependency_ids.add(draft.initiator_agent_id)
-        agent_dependency_ids.difference_update(agent_ids)
+        agent_ids.difference_update(temporary_agent_ids)
+        agent_dependency_ids.difference_update(agent_ids | temporary_agent_ids)
         serialized_agents: Dict[str, Dict[str, Any]] = {}
         unresolved_agents: List[str] = []
         for agent_id in sorted(agent_ids | agent_dependency_ids):
@@ -151,7 +170,9 @@ class SnapshotBuilder:
             if agent_id in serialized_agents
         ]
 
-        team_ids = set(manager.teams) if full else set(dirty["teams"])
+        team_ids = (
+            set(manager.teams) if full else set(dirty["teams"])
+        ) - temporary_team_ids
         teams = []
         for team_id in sorted(team_ids):
             team = manager.teams.get(team_id)
@@ -168,6 +189,7 @@ class SnapshotBuilder:
             teams.append(
                 {
                     "team_id": team.team_id,
+                    "team_kind": team.team_kind,
                     "preset_name": team.preset_name,
                     "team_purpose": team.team_purpose,
                     "team_progress": team.team_progress,
@@ -184,7 +206,9 @@ class SnapshotBuilder:
                 }
             )
 
-        inbox_ids = set(manager.teams) if full else set(dirty["inboxes"])
+        inbox_ids = (
+            set(manager.teams) if full else set(dirty["inboxes"])
+        ) - temporary_team_ids
         inboxes = {}
         for team_id in sorted(inbox_ids):
             team = manager.teams.get(team_id)
@@ -196,7 +220,9 @@ class SnapshotBuilder:
                 "messages": messages,
                 "message_timestamp": now,
             }
-        agent_inbox_ids = set(agent_lookup) if full else set(dirty["agent_inboxes"])
+        agent_inbox_ids = (
+            set(agent_lookup) if full else set(dirty["agent_inboxes"])
+        ) - temporary_agent_ids
         agent_inboxes = {}
         for agent_id in sorted(agent_inbox_ids):
             agent = agent_lookup.get(agent_id)
@@ -205,7 +231,9 @@ class SnapshotBuilder:
             with agent.inbox_lock:
                 messages = tuple(dict(message) for message in agent.agent_inbox)
             agent_inboxes[agent_id] = {"messages": messages}
-        proposal_ids = set(manager.teams) if full else set(dirty["proposals"])
+        proposal_ids = (
+            set(manager.teams) if full else set(dirty["proposals"])
+        ) - temporary_team_ids
         proposals = {
             team_id: [
                 {
@@ -221,13 +249,15 @@ class SnapshotBuilder:
             if team_id in manager.teams
         }
 
-        library_ids = set(manager.libraries) if full else set(dirty["libraries"])
+        library_ids = (
+            set(manager.libraries) if full else set(dirty["libraries"])
+        ) - temporary_library_ids
         library_dependency_ids = {
             agent_lookup[agent_id].private_doc_library_id
             for agent_id in agent_dependency_ids
             if agent_id in agent_lookup and agent_lookup[agent_id].private_doc_library_id
         }
-        library_dependency_ids.difference_update(library_ids)
+        library_dependency_ids.difference_update(library_ids | temporary_library_ids)
         serialized_libraries: Dict[str, Dict[str, Any]] = {}
         for lib_id in sorted(library_ids | library_dependency_ids):
             library = manager.libraries.get(lib_id)
@@ -257,7 +287,9 @@ class SnapshotBuilder:
             if lib_id in serialized_libraries
         ]
 
-        permission_ids = set(manager.libraries) if full else set(dirty["permissions"])
+        permission_ids = (
+            set(manager.libraries) if full else set(dirty["permissions"])
+        ) - temporary_library_ids
         permissions = {
             lib_id: {
                 path: dict(team_map)
@@ -265,7 +297,9 @@ class SnapshotBuilder:
             }
             for lib_id in permission_ids
         }
-        link_ids = set(manager.libraries) if full else set(dirty["links"])
+        link_ids = (
+            set(manager.libraries) if full else set(dirty["links"])
+        ) - temporary_library_ids
         links = {
             lib_id: {
                 path: dict(target) for path, target in manager.library_links.get(lib_id, {}).items()
@@ -273,9 +307,13 @@ class SnapshotBuilder:
             for lib_id in link_ids
         }
 
-        file_changes = {lib_id: dict(changes) for lib_id, changes in dirty["file_changes"].items()}
+        file_changes = {
+            lib_id: dict(changes)
+            for lib_id, changes in dirty["file_changes"].items()
+            if lib_id not in temporary_library_ids
+        }
         if full:
-            for lib_id in manager.libraries:
+            for lib_id in library_ids:
                 file_changes[lib_id] = dict(manager._library_files.get(lib_id, {}))
 
         request_ids = (
@@ -443,6 +481,7 @@ class SnapshotBuilder:
             "links": links,
             "file_changes": file_changes,
             "deleted_agents": tuple(dirty["deleted_agents"]),
+            "deleted_teams": tuple(dirty["deleted_teams"]),
             "deleted_libraries": tuple(dirty["deleted_libraries"]),
             "deleted_memory_references": tuple(
                 dirty["deleted_memory_references"]

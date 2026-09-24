@@ -224,8 +224,8 @@ class TestStatePersistence(StatePersistenceTestCase):
         )
         await new_manager.close()
 
-    async def test_supervisor_reference_sync_on_load_state(self):
-        """Verify that SupervisoryTeam.root_ai reference is updated to the newly loaded root_ai in load_state."""
+    async def test_supervision_service_uses_restored_manager_root(self):
+        """The supervision service reads the manager's restored root identity."""
         await self.manager.save_state()
         self.assertTrue(os.path.exists(self.db_path))
         await self.manager.close()
@@ -236,11 +236,11 @@ class TestStatePersistence(StatePersistenceTestCase):
             db_path=self.db_path
         )
         new_manager.register_llm_client("critic", self.mock_react_client)
-        self.assertIs(new_manager.supervisor.root_ai, temp_root_ai)
+        self.assertIs(new_manager.supervisor.manager.root_ai, temp_root_ai)
 
         await new_manager.load_state(self.db_path)
 
-        self.assertIsNot(new_manager.supervisor.root_ai, temp_root_ai)
-        self.assertIs(new_manager.supervisor.root_ai, new_manager.root_ai)
+        self.assertIsNot(new_manager.supervisor.manager.root_ai, temp_root_ai)
+        self.assertIs(new_manager.supervisor.manager.root_ai, new_manager.root_ai)
         self.assertEqual(new_manager.root_ai.name, "Root_AI")
         await new_manager.close()

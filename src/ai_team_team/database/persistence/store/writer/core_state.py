@@ -84,6 +84,7 @@ class CoreStateWriteMixin:
             session.merge(
                 TeamModel(
                     team_id=team["team_id"],
+                    team_kind=team["team_kind"],
                     preset_name=team["preset_name"],
                     team_purpose=team["team_purpose"],
                     team_progress=team["team_progress"],

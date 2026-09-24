@@ -12,6 +12,30 @@ from ...formation import TeamFormationRequest
 
 
 class TeamCreationTransactionMixin:
+    def create_supervisory_team(self) -> AgentTeam:
+        """Provision one audit-scoped AgentTeam through the normal staged transaction."""
+        roles = [
+            ("Auditor_Integrity_01", "Integrity_Auditor"),
+            ("Auditor_Continuity_02", "Continuity_Auditor"),
+            ("Auditor_Deadlock_03", "Deadlock_Auditor"),
+        ]
+        for index in range(len(roles), self.manager.config.min_subagent_team_size):
+            roles.append((f"Auditor_Review_{index + 1:02d}", "Review_Auditor"))
+        return self.create_immediate(
+            creator=self.manager.root_ai,
+            roles_and_presets=roles,
+            preset_name="supervisor_audit",
+            team_purpose="Audit one AgentTeam discussion for content and operational health.",
+            system_instructions=(
+                "You are an objective supervisory audit team. Review the supplied "
+                "discussion for reasoning continuity, deadlocks, and role alignment. "
+                "Do not perform ordinary team operations or request tools."
+            ),
+            team_kind="supervisory",
+            parent_override=None,
+            parent_override_provided=True,
+        )
+
     def create_agent_team(
         self,
         creator: Any,
@@ -134,6 +158,7 @@ class TeamCreationTransactionMixin:
         parent_override_provided: bool = False,
         required_creator_member_agent_id: Optional[str] = None,
         record_registration_events: bool = True,
+        team_kind: str = "ordinary",
     ) -> AgentTeam:
         """Stages off-registry objects and atomically publishes one AgentTeam."""
         manager = self.manager
@@ -145,6 +170,17 @@ class TeamCreationTransactionMixin:
             )
         if manager._closing:
             raise RuntimeError("ATTManager is closing and rejects new teams.")
+        if team_kind not in {"ordinary", "supervisory"}:
+            raise ValueError("team_kind must be ordinary or supervisory.")
+        if team_kind == "supervisory" and (
+            creator is not manager.root_ai
+            or not parent_override_provided
+            or parent_override is not None
+            or existing_members
+            or existing_member_ids
+            or is_public_visible
+        ):
+            raise ValueError("A supervisory team must be a private, root-created system leaf.")
         manager._validate_team_creation_inputs(
             creator=creator,
             member_count=member_count,
@@ -188,6 +224,7 @@ class TeamCreationTransactionMixin:
                 parent_override_provided=parent_override_provided,
                 required_creator_member_agent_id=required_creator_member_agent_id,
                 staging_root=staging_root,
+                team_kind=team_kind,
             )
             with manager._topology_lock:
                 manager._validate_team_creation_commit(stage)
@@ -219,6 +256,10 @@ class TeamCreationTransactionMixin:
             team.team_id,
             len(team.members),
         )
+        if team_kind == "supervisory":
+            # Audit-scoped identities never enter state snapshots. The audit
+            # completion event records their IDs and work before teardown.
+            return team
         registration_event_ids = set()
         if record_registration_events:
             registration_event_ids = {

@@ -44,7 +44,9 @@ class TestATTSupervision(unittest.IsolatedAsyncioTestCase):
         await self.manager.supervisor.report_anomaly(child_team, "Deadlock", self.manager)
         
         # We verify that both child_team and parent_team are registered as having failure logs
-        self.assertTrue(len(self.manager.supervisor.auditors) == 3)
+        self.assertFalse(
+            any(team.team_kind == "supervisory" for team in self.manager.teams.values())
+        )
 
     async def test_discussion_inbox_alerts_injection(self):
         """Verify that inbox messages are prepended to discussion prompts."""
@@ -172,8 +174,11 @@ class TestATTSupervision(unittest.IsolatedAsyncioTestCase):
         captured_compression_prompt = None
         async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False, **kwargs):
             nonlocal captured_compression_prompt
-            if "Summarize the following multi-agent conversation transcript" in str(prompt):
-                captured_compression_prompt = prompt
+            if (
+                captured_compression_prompt is None
+                and "Summarize the following multi-agent conversation transcript" in str(prompt)
+            ):
+                captured_compression_prompt = str(prompt)
             return mock_responses.pop(0) if mock_responses else "Final Answer: done"
             
         self.mock_client.generate = mock_generate
