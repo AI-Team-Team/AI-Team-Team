@@ -224,6 +224,7 @@ class PersistenceCoordinator:
 
         for dependency_key, authoritative_key, identity in (
             ("agent_dependencies", "agents", "agent_id"),
+            ("team_dependencies", "teams", "team_id"),
             ("library_dependencies", "libraries", "lib_id"),
         ):
             dependencies = {record[identity]: record for record in earlier.get(dependency_key, [])}
@@ -319,6 +320,11 @@ class PersistenceCoordinator:
             record
             for record in merged.get("agent_dependencies", [])
             if record["agent_id"] not in deleted_agents
+        ]
+        merged["team_dependencies"] = [
+            record
+            for record in merged.get("team_dependencies", [])
+            if record["team_id"] not in deleted_teams
         ]
         merged["agent_inboxes"] = {
             agent_id: inbox

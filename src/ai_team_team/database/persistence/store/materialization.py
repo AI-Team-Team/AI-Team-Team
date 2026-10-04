@@ -35,13 +35,14 @@ class StoreMaterializationMixin:
             }
             for library in snapshot.get("library_dependencies", ())
         ]
-        result["teams"] = [
-            {
-                **team,
-                "status_map": json.dumps(team["status_map"]),
-            }
-            for team in snapshot.get("teams", ())
-        ]
+        for key in ("teams", "team_dependencies"):
+            result[key] = [
+                {
+                    **team,
+                    "status_map": json.dumps(team["status_map"]),
+                }
+                for team in snapshot.get(key, ())
+            ]
         result["inboxes"] = {
             team_id: {
                 **inbox,

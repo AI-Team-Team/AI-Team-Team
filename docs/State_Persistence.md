@@ -38,6 +38,10 @@ A delta rewrites only the selected rows.
 
 Replacing one Agent's persisted Working Context does not rewrite another Agent's messages, Journal events, Memory Cards, or retained references.
 
+Memory deltas include the referenced cards, segments, and immutable source Journal events in the same transaction, even when a background indexer runs before the originating discussion's auto-save batch is submitted.
+
+Missing owner identities, provenance teams and their parent/creator dependencies, Private DocLibs, and built-in team DocLibs are inserted as dependencies without rewriting existing Agent-owned state, team topology, or library contents.
+
 - SQLite connections explicitly enable foreign keys, WAL journal mode, and a five-second busy timeout.
 - ATT reads schema metadata in read-only mode before running `create_all()`, so an unsupported database is rejected without DDL or other modification.
 
@@ -71,7 +75,7 @@ Each audit's supervisory AgentTeam and fresh auditors are fully registered in th
 
 The completed audit's source transcript, debate, and result remain in the System Memory Journal after the temporary team, auditors, and DocLibs are removed.
 
-Insert-only dependency records are used solely to satisfy foreign keys when a referenced registered identity has not yet been written to a new database.
+Insert-only dependency records satisfy identity and provenance references when registered Agents or teams have not yet been written to the database.
 
 Callables and external connections are runtime bindings and are not serialized.
 

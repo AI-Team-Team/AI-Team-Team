@@ -78,8 +78,31 @@ class CoreStateWriteMixin:
         cls._write_agents(session, missing)
 
     @staticmethod
+    def _missing_team_dependencies(
+        session: Any,
+        teams: Iterable[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Selects missing provenance teams without rewriting existing topology."""
+        return [
+            team for team in teams if session.get(TeamModel, team["team_id"]) is None
+        ]
+
+    @staticmethod
     def _write_teams(session: Any, teams: Iterable[Dict[str, Any]]) -> None:
-        teams = list(teams)
+        # Team creators have immediate self-FKs, unlike the deferred parent pointers.
+        pending = {team["team_id"]: team for team in teams}
+        teams = []
+        while pending:
+            ready = [
+                team
+                for team in pending.values()
+                if team["creator_type"] != "team" or team["creator_id"] not in pending
+            ]
+            if not ready:
+                raise ValueError("Cannot persist cyclic AgentTeam creator dependencies.")
+            for team in sorted(ready, key=lambda record: record["team_id"]):
+                teams.append(team)
+                del pending[team["team_id"]]
         for team in teams:
             session.merge(
                 TeamModel(

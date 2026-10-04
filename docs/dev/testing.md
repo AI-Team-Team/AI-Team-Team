@@ -169,6 +169,10 @@ Synchronous delegation tests must reject direct self-inclusion and inherited anc
 
 The suite's `test/test_att/test_episodic_memory/` package contains the baseline end-to-end cases for this optional mode.
 
+Incremental memory tests use real SQLite and independently gated member/indexer responses to verify commits before a discussion's auto-save batch exits, both with constructor-bound persistence and after restore.
+
+Cover new nested teams whose identity registration is still batched, segment/card/reference-only deltas, index failure and cancellation, actual recovery of processing index jobs, distinct parent/creator dependencies after migration, immutable source replay, and insert-only dependencies that leave existing Agent, team, and DocLib rows and files unchanged.
+
 Token-based file-reading tests must cover many short lines, extremely long single lines, Unicode, normalized mixed line endings, exact continuation without gaps, range validation, file-version changes, registered/provider/host/conservative/strict counters, failover counter changes, private and team reads, ACL and managed-link checks, decoding failures, and the rule that only returned content counts against `max_read_tokens`. Invoke model-facing reads through `ToolExecutor` or establish both active Agent and AgentTeam ContextVars; direct `Tool.__call__()` has no model identity from which to resolve a counter.
 
 The suite's `test/test_att/test_file_reading/` package contains the model-context integration cases, while `test/test_gated_reader.py` covers the standalone reader.

@@ -6,8 +6,13 @@ from typing import TYPE_CHECKING, Any, Dict, List
 from ai_team_team.database.persistence import STATE_SCHEMA_VERSION
 
 from ..agent import Agent
+from ..exceptions import StatePersistenceError
 from ..memory.sanitization import sanitize_working_context_message
 from ..team import AgentTeam
+from .snapshot_dependencies import (
+    capture_memory_records,
+    collect_memory_identity_dependencies,
+)
 
 if TYPE_CHECKING:
     from .facade import ATTManager
@@ -45,6 +50,10 @@ class SnapshotBuilder:
         temporary_library_ids = {
             f"DL-{team_id}" for team_id in temporary_team_ids
         } | {f"PDL-{agent_id}" for agent_id in temporary_agent_ids}
+        memory_records = capture_memory_records(manager, dirty)
+        memory_agent_ids, memory_team_ids = collect_memory_identity_dependencies(
+            manager, memory_records
+        )
         configs = None
         if full or dirty["configs"]:
             configs = {
@@ -91,6 +100,7 @@ class SnapshotBuilder:
                     agent_ids.add(manager.agents[identifier].agent_id)
         agent_dependency_ids: set[str] = set()
         if not full:
+            agent_dependency_ids.update(memory_agent_ids)
             agent_dependency_ids.update(dirty["agent_inboxes"])
             for team_id in dirty["teams"]:
                 team = manager.teams.get(team_id)
@@ -173,8 +183,9 @@ class SnapshotBuilder:
         team_ids = (
             set(manager.teams) if full else set(dirty["teams"])
         ) - temporary_team_ids
-        teams = []
-        for team_id in sorted(team_ids):
+        team_dependency_ids = memory_team_ids - team_ids if not full else set()
+        serialized_teams = {}
+        for team_id in sorted(team_ids | team_dependency_ids):
             team = manager.teams.get(team_id)
             if team is None:
                 continue
@@ -186,25 +197,31 @@ class SnapshotBuilder:
             elif isinstance(team.creator, AgentTeam):
                 creator_type = "team"
                 creator_id = team.creator.team_id
-            teams.append(
-                {
-                    "team_id": team.team_id,
-                    "team_kind": team.team_kind,
-                    "preset_name": team.preset_name,
-                    "team_purpose": team.team_purpose,
-                    "team_progress": team.team_progress,
-                    "depth": team.depth,
-                    "chapter_num": team.chapter_num,
-                    "parent_team_id": (team.parent_team.team_id if team.parent_team else None),
-                    "migration_count": team.migration_count,
-                    "creator_type": creator_type,
-                    "creator_id": creator_id,
-                    "status_map": team.status_snapshot(),
-                    "system_instructions": getattr(team, "system_instructions", ""),
-                    "members": [member.agent_id for member in team.members],
-                    "message_timestamp": now,
-                }
-            )
+            serialized_teams[team_id] = {
+                "team_id": team.team_id,
+                "team_kind": team.team_kind,
+                "preset_name": team.preset_name,
+                "team_purpose": team.team_purpose,
+                "team_progress": team.team_progress,
+                "depth": team.depth,
+                "chapter_num": team.chapter_num,
+                "parent_team_id": (team.parent_team.team_id if team.parent_team else None),
+                "migration_count": team.migration_count,
+                "creator_type": creator_type,
+                "creator_id": creator_id,
+                "status_map": team.status_snapshot(),
+                "system_instructions": getattr(team, "system_instructions", ""),
+                "members": [member.agent_id for member in team.members],
+                "message_timestamp": now,
+            }
+        teams = [
+            serialized_teams[team_id]
+            for team_id in sorted(team_ids)
+            if team_id in serialized_teams
+        ]
+        team_dependencies = [
+            serialized_teams[team_id] for team_id in sorted(team_dependency_ids)
+        ]
 
         inbox_ids = (
             set(manager.teams) if full else set(dirty["inboxes"])
@@ -257,6 +274,18 @@ class SnapshotBuilder:
             for agent_id in agent_dependency_ids
             if agent_id in agent_lookup and agent_lookup[agent_id].private_doc_library_id
         }
+        if not full:
+            library_dependency_ids.update(f"PDL-{agent_id}" for agent_id in memory_agent_ids)
+            library_dependency_ids.update(f"DL-{team_id}" for team_id in memory_team_ids)
+        required_memory_libraries = {
+            f"PDL-{agent_id}" for agent_id in memory_agent_ids
+        } | {f"DL-{team_id}" for team_id in memory_team_ids}
+        missing_memory_libraries = required_memory_libraries - set(manager.libraries)
+        if missing_memory_libraries:
+            raise StatePersistenceError(
+                "Cannot persist episodic memory: missing DocLib dependencies: "
+                + ", ".join(sorted(missing_memory_libraries))
+            )
         library_dependency_ids.difference_update(library_ids | temporary_library_ids)
         serialized_libraries: Dict[str, Dict[str, Any]] = {}
         for lib_id in sorted(library_ids | library_dependency_ids):
@@ -402,51 +431,6 @@ class SnapshotBuilder:
             if draft_id in manager._formations.drafts
         ]
 
-        with manager._memory._lock:
-            event_ids = (
-                set(manager._memory.events)
-                if full
-                else set(dirty["memory_events"])
-            )
-            segment_ids = (
-                set(manager._memory.segments)
-                if full
-                else set(dirty["memory_segments"])
-            )
-            card_ids = (
-                set(manager._memory.cards)
-                if full
-                else set(dirty["memory_cards"])
-            )
-            reference_ids = (
-                set(manager._memory.references)
-                if full
-                else set(dirty["memory_references"])
-            )
-            memory_events = [
-                manager._memory.events[event_id].model_dump(mode="json")
-                for event_id in sorted(
-                    event_ids,
-                    key=lambda identifier: manager._memory.events[identifier].sequence,
-                )
-                if event_id in manager._memory.events
-            ]
-            memory_segments = [
-                manager._memory.segments[segment_id].model_dump(mode="json")
-                for segment_id in sorted(segment_ids)
-                if segment_id in manager._memory.segments
-            ]
-            memory_cards = [
-                manager._memory.cards[memory_id].model_dump(mode="json")
-                for memory_id in sorted(card_ids)
-                if memory_id in manager._memory.cards
-            ]
-            memory_references = [
-                manager._memory.references[reference_id].model_dump(mode="json")
-                for reference_id in sorted(reference_ids)
-                if reference_id in manager._memory.references
-            ]
-
         return {
             "state_version": manager._state_version,
             "full": full,
@@ -455,6 +439,7 @@ class SnapshotBuilder:
             "agents": agents,
             "agent_dependencies": agent_dependencies,
             "teams": teams,
+            "team_dependencies": team_dependencies,
             "inboxes": inboxes,
             "agent_inboxes": agent_inboxes,
             "proposals": proposals,
@@ -471,10 +456,7 @@ class SnapshotBuilder:
             "communication_ballots": communication_ballots,
             "communication_agreements": communication_agreements,
             "peer_messages": peer_messages,
-            "memory_events": memory_events,
-            "memory_segments": memory_segments,
-            "memory_cards": memory_cards,
-            "memory_references": memory_references,
+            **memory_records,
             "libraries": libraries,
             "library_dependencies": library_dependencies,
             "permissions": permissions,

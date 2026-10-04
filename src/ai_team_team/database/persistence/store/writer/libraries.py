@@ -33,7 +33,7 @@ class LibraryWriteMixin:
         session: Any,
         libraries: Iterable[Dict[str, Any]],
     ) -> None:
-        """Inserts a missing private library dependency without updating an existing one."""
+        """Inserts a missing owner/provenance library without updating an existing one."""
         for library in libraries:
             if session.get(LibraryModel, library["lib_id"]) is not None:
                 continue

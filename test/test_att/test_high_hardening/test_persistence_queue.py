@@ -116,11 +116,14 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
     def test_tombstones_dominate_coalesced_entity_updates(self):
         agent_id = "00000000-0000-0000-0000-000000000001"
         lib_id = f"PDL-{agent_id}"
+        team_id = "AT-deleted"
+        dependency_team_id = "AT-deleted-dependency"
         earlier = {
             "full": False,
             "state_version": 1,
             "agents": [{"agent_id": agent_id, "name": "Deleted"}],
-            "teams": [],
+            "teams": [{"team_id": team_id}],
+            "team_dependencies": [{"team_id": dependency_team_id}],
             "libraries": [{"lib_id": lib_id, "name": "Deleted"}],
             "inboxes": {},
             "agent_inboxes": {agent_id: {"messages": [{"stale": True}]}},
@@ -144,12 +147,15 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             "links": {},
             "file_changes": {},
             "deleted_agents": [agent_id],
+            "deleted_teams": [team_id, dependency_team_id],
             "deleted_libraries": [lib_id],
         }
 
         merged = PersistenceCoordinator._merge_snapshots(earlier, deletion)
 
         self.assertEqual(merged["agents"], [])
+        self.assertEqual(merged["teams"], [])
+        self.assertEqual(merged["team_dependencies"], [])
         self.assertEqual(merged["libraries"], [])
         self.assertNotIn(agent_id, merged["agent_inboxes"])
         self.assertNotIn(lib_id, merged["permissions"])
@@ -159,12 +165,14 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
     def test_authoritative_deltas_dominate_insert_only_dependencies(self):
         agent_id = "00000000-0000-0000-0000-000000000001"
         lib_id = f"PDL-{agent_id}"
+        team_id = "AT-provenance"
         dependencies = {
             "full": False,
             "state_version": 1,
             "agents": [],
             "agent_dependencies": [{"agent_id": agent_id, "role": "old"}],
             "teams": [],
+            "team_dependencies": [{"team_id": team_id, "team_purpose": "old"}],
             "libraries": [],
             "library_dependencies": [{"lib_id": lib_id, "description": "old"}],
             "inboxes": {},
@@ -180,6 +188,8 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             "state_version": 2,
             "agents": [{"agent_id": agent_id, "role": "current"}],
             "agent_dependencies": [],
+            "teams": [{"team_id": team_id, "team_purpose": "current"}],
+            "team_dependencies": [],
             "libraries": [{"lib_id": lib_id, "description": "current"}],
             "library_dependencies": [],
         }
@@ -192,7 +202,9 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 merged = PersistenceCoordinator._merge_snapshots(earlier, later)
                 self.assertEqual(merged["agents"][0]["role"], "current")
                 self.assertEqual(merged["libraries"][0]["description"], "current")
+                self.assertEqual(merged["teams"][0]["team_purpose"], "current")
                 self.assertEqual(merged["agent_dependencies"], [])
+                self.assertEqual(merged["team_dependencies"], [])
                 self.assertEqual(merged["library_dependencies"], [])
 
     def test_coalesced_approval_delta_replaces_request_ballots(self):

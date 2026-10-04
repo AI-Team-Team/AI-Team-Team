@@ -114,6 +114,12 @@ Schema 10 stores Working Context, Journal events, source-linked segments, Memory
 
 Full saves never delete Journal rows, while incremental journal updates are insert-only and reject attempts to modify an existing event ID.
 
+Each incremental catalog update includes its referenced cards, segments, and sanitized source Journal events, rather than relying on a discussion's task-local batch to have already submitted those records.
+
+Indexing can therefore commit safely while other members are still running, including after restore or during a new team's first discussion, without replacing an existing Agent's identity or Working Context.
+
+Missing source or owner dependencies fail explicitly, and persistence errors remain observable through `save_state()`, `flush_state()`, and `close()`.
+
 Restore validates event and sequence uniqueness, Agent ownership, source-event existence and ordering, turn boundaries, deterministic content and digest, normalized tags, card-to-segment provenance, retained-reference ownership, and FTS5 availability when enabled.
 
 Persisted `processing` index jobs return to `pending` after restore, and `await manager.flush_memory_indexing()` waits for every currently runnable background job.

@@ -8,7 +8,7 @@ Agents can propose teams, participate in structured discussions, communicate acr
 
 ATT keeps identity, authority, memory, and team state as separate system concepts as its coordination structure grows.
 
-Many thanks to Gemini and GPT for their help!
+Many thanks to Gemini, GPT and Qwen for their help!
 
 > [!NOTE]
 > ATT is under active development, so public APIs and persistence schemas may change as the organizational model is refined.

@@ -55,7 +55,10 @@ class StoreWriteMixin(
                 session, snapshot.get("memory_references", [])
             )
             self._sync_memory_fts(session, snapshot)
-            self._write_teams(session, snapshot.get("teams", []))
+            team_dependencies = self._missing_team_dependencies(
+                session, snapshot.get("team_dependencies", [])
+            )
+            self._write_teams(session, team_dependencies + snapshot.get("teams", []))
             session.flush()
             self._write_formation_requests(
                 session, snapshot.get("formation_requests", [])
