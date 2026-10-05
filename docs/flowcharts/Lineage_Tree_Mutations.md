@@ -88,15 +88,20 @@ sequenceDiagram
     participant Team as AgentTeam Principal
     participant Members as Frozen Team Members
     participant Root as Explicit Agent Principal
+    participant Inbox as Personal Agent Inboxes
     participant DB as Persistence Writer
 
     Broker->>Team: Queue or wake governance request
     Team->>Team: Acquire normal discussion_lock
     Team->>Members: Run governance discussion
-    Members-->>Team: Every member returns strict JSON boolean ballot
+    Team->>DB: Persist identified frozen voting round and personal emails
+    Team->>Team: Release discussion_lock
+    Inbox->>Members: Ordinary notices identify open and submit tools
+    Members->>DB: Voluntarily submit explicit strict boolean choices
     opt Route includes Root AI Agent
-        Broker->>Root: Run serialized strict Agent decision
-        Root-->>Broker: APPROVED, DENIED, or transient PENDING
+        Broker->>Inbox: Persist Root's own voting email
+        Inbox->>Root: Ordinary notice with continuing personal memory
+        Root->>DB: Voluntarily submit its own strict boolean choice
     end
     alt Any principal denies
         Broker->>DB: Persist DENIED and cancel unfinished Approvals
@@ -127,20 +132,21 @@ sequenceDiagram
 
     T->>Manager: request_migration(target_parent_id, rationale)
     Manager->>Manager: Validate migration limit and cycle constraints
-    Manager->>Policy: authorize_migration outside topology lock
-    Policy->>Principals: AgentTeam ballots or Root Agent decision
-    Principals-->>Policy: Strict governance outcomes
-    Policy-->>Manager: Authorization result and approved path
+    Manager->>Policy: Resolve configured explicit approval principals
+    Manager->>Manager: Persist MigrationRequest and captured path
+    Manager-->>T: PENDING with request_id; initiating invocation may finish
+    Policy->>Principals: Detached normal discussions and personal voting emails
+    Principals-->>Manager: Explicit choices form complete principal outcomes
     Manager->>Manager: Acquire topology lock
     Manager->>Manager: Revalidate parents, path, cycle, and migration count
     alt Revalidation fails
-        Manager-->>T: Fail closed
+        Manager->>Manager: Persist STALE; keep topology unchanged
     else Revalidation succeeds
         Manager->>Old: Remove child pointer
         Manager->>New: Add child pointer
         Manager->>T: Replace parent pointer and invalidate descendant depth caches
         Manager->>Manager: Commit topology and inbox deltas
-        Manager-->>T: Return success status
+        Manager->>Manager: Persist EXECUTED for later progress inspection
     end
 ```
 
@@ -186,25 +192,27 @@ sequenceDiagram
     participant LCA as LCA Principal
 
     T->>Manager: request_migration(target_parent_id, rationale)
-    Manager->>Manager: Capture current parent, target parent, LCA, and topology version
-    Manager->>Policy: authorize_migration(T, target, Manager, rationale)
+    Manager->>Manager: Capture current parent, target parent, and LCA
+    Manager->>Policy: Resolve the configured principal path
     Note over Policy: Ordinary authorities are agent_team principals<br/>Root-level authority is the Root AI agent principal<br/>Duplicate principals are removed
-    Policy->>Old: Request strict AgentTeam ballot or Agent decision
-    Old-->>Policy: Governance outcome
-    Policy->>New: Request strict AgentTeam ballot or Agent decision
-    New-->>Policy: Governance outcome
-    Policy->>LCA: Request strict AgentTeam ballot or Agent decision
-    LCA-->>Policy: Governance outcome
+    Manager->>Manager: Persist durable MigrationRequest
+    Manager-->>T: PENDING with request_id
+    Policy->>Old: Discuss and deliver personal voting emails
+    Old-->>Manager: Outcome from complete explicit choices
+    Policy->>New: Discuss and deliver personal voting emails
+    New-->>Manager: Outcome from complete explicit choices
+    Policy->>LCA: Discuss and deliver personal voting emails
+    LCA-->>Manager: Outcome from complete explicit choices
     alt Every required principal approves
-        Policy-->>Manager: approved=True
         Manager->>Manager: Lock and revalidate the exact authorized topology path
         Manager->>Manager: Atomically relink pointers and invalidate moved branch depth cache
         Manager->>Old: Queue migration alert
         Manager->>New: Queue migration alert
         Manager->>T: Queue migration confirmation
-        Manager-->>T: Success
-    else Any decision is invalid, unavailable, pending, or denied
-        Policy-->>Manager: approved=False
-        Manager-->>T: Fail closed without topology mutation
+        Manager->>Manager: Persist EXECUTED
+    else A principal explicitly denies
+        Manager->>Manager: Persist DENIED and cancel unfinished rounds
+    else Any decision is invalid, unavailable, tied, or incomplete
+        Manager->>Manager: Preserve PENDING without topology mutation
     end
 ```

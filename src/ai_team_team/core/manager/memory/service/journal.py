@@ -110,7 +110,7 @@ class MemoryJournalMixin:
             redacted=redacted,
         )
 
-    def start_turn(self, agent: "Agent", team: "AgentTeam", turn_id: str) -> None:
+    def start_turn(self, agent: "Agent", team: Optional["AgentTeam"], turn_id: str) -> None:
         self.record_event(
             "agent_turn_started",
             agent=agent,
@@ -122,7 +122,7 @@ class MemoryJournalMixin:
     async def finalize_turn(
         self,
         agent: "Agent",
-        team: "AgentTeam",
+        team: Optional["AgentTeam"],
         result: AgentTurnResult,
     ) -> None:
         """Closes a terminal turn and optionally queues exactly one Memory Card."""
@@ -141,7 +141,7 @@ class MemoryJournalMixin:
             },
         )
         self._recalled_by_turn.pop(turn_id, None)
-        if team.team_kind == "supervisory":
+        if team is not None and team.team_kind == "supervisory":
             # Audit-scoped Agents leave durable Journal evidence, but never
             # create Agent-owned retrieval jobs that can outlive their team.
             return
@@ -169,7 +169,7 @@ class MemoryJournalMixin:
                 segment_id=f"SEG-{uuid.uuid4().hex}",
                 agent_id=agent.agent_id,
                 turn_id=turn_id,
-                origin_team_id=team.team_id,
+                origin_team_id=team.team_id if team else None,
                 discussion_id=result.discussion_id,
                 source_event_ids=source_event_ids,
                 recall_content=recall_content,
@@ -189,7 +189,7 @@ class MemoryJournalMixin:
         self._schedule_segment(segment.segment_id)
 
     def cancel_turn(
-        self, agent: "Agent", team: "AgentTeam", turn_id: str, reason: str
+        self, agent: "Agent", team: Optional["AgentTeam"], turn_id: str, reason: str
     ) -> None:
         self._recalled_by_turn.pop(turn_id, None)
         self.record_event(

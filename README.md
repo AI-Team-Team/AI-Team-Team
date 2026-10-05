@@ -95,6 +95,10 @@ Communication can be permissive or approval-governed, but the selected instituti
 
 Governed requests persist an immutable policy snapshot so a configuration change does not retroactively alter an in-progress decision, while active communication Agreements remain valid until an authorized endpoint revokes them.
 
+Governance choice requests arrive in each eligible Agent's personal inbox and are processed through that same individual's ordinary instructions, memory, and tools.
+
+The framework announces a voting email, while the Agent independently chooses whether to open it and submit a valid public response; reading or acknowledging the email never implies a vote or consent.
+
 Strict configuration validation applies during construction and runtime assignment, including changes made through mutable configuration mappings.
 
 ### Topology Supports Local Autonomy and Recursive Composition
@@ -277,7 +281,7 @@ flowchart TB
     subgraph Organization["Identity and Recursive Organization"]
         Root["Root AI Agent<br/>root governance principal"]
         Agents["Stable Agent Registry<br/>one identity and memory per Agent"]
-        AgentInbox["Persistent Agent Inbox<br/>identity-addressed invitations and results"]
+        AgentInbox["Persistent Agent Inbox<br/>invitations, voting emails, and results"]
         Membership["Role-Neutral Membership<br/>team_id ↔ agent_id"]
         Teams["Recursive AgentTeam Tree<br/>dynamic creation and migration"]
         Formation["Consensual Team Formation<br/>persistent invitations, attitudes, and late join"]

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ...agent import Agent
 from ...formation import TeamFormationRequest
+from ...governance import MigrationOperationResult, MigrationRequest
 from ...team import AgentTeam
 
 
@@ -86,8 +87,11 @@ class TeamAPI:
 
     async def negotiate_and_execute_migration(
         self, team: AgentTeam, target_parent: AgentTeam, rationale: str
-    ) -> Tuple[bool, str]:
+    ) -> MigrationOperationResult:
         return await self._migration.negotiate_and_execute_migration(team, target_parent, rationale)
+
+    def inspect_migration_request(self, request_id: str) -> MigrationRequest:
+        return self._migration.requests[request_id].model_copy(deep=True)
 
     async def _apply_deferred_membership_changes(self, team: AgentTeam) -> None:
         return await self._membership._apply_deferred_membership_changes(team)

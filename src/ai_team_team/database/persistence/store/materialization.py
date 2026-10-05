@@ -70,6 +70,8 @@ class StoreMaterializationMixin:
             "formation_revisions",
             "formation_decisions",
             "formation_drafts",
+            "governance_rounds",
+            "migration_requests",
             "memory_events",
             "memory_segments",
             "memory_cards",

@@ -308,10 +308,10 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
         original_parent = manager.create_agent_team(manager.root_ai, member_count=3)
         current_parent = manager.create_agent_team(manager.root_ai, member_count=3)
         team = manager.create_agent_team(original_parent, member_count=3)
-        approved, reason = await manager.negotiate_and_execute_migration(
+        result = await manager.negotiate_and_execute_migration(
             team, current_parent, "Move to a different parent."
         )
-        self.assertTrue(approved, reason)
+        self.assertEqual(result.status, "EXECUTED", result.reason)
         client.release_turn.set()
         client.release_index.set()
         await team.execute_reasoning_step_detailed(

@@ -67,6 +67,7 @@ The database stores:
 - ordinary teams with role-neutral `team_id ↔ agent_id` membership rows, lineage, migration counters, AgentTeam inboxes, and proposals;
 - consensual formation request projections, normalized content and revision fingerprints, immutable revision snapshots, append-only exact-revision invitation decisions, detached collaborative drafts, creation choices, late-join state, and resulting team references;
 - communication requests, ordered approvals, member ballots, directional Agreements, and peer-delivery records;
+- identified governance rounds with frozen electorates, immutable explicit personal-email ballots, and asynchronous migration requests;
 - document-library metadata, ACLs, managed cross-library links, paths, and file contents.
 
 An incremental membership change rewrites the affected team's `team_members` rows without rewriting an already persisted Agent record, Working Context, Journal, Memory Catalog, model binding, lifecycle state, or Private DocLib.
@@ -107,7 +108,9 @@ Restoration is transactional.
 - Multiple membership rows resolve to the same restored Agent object and do not carry team-role metadata.
 - Every agent must own exactly one canonical `PDL-<agent_id>` private library; private libraries must be non-public, have no team ACL or managed links, and match the owner's lifecycle state.
 - Persisted communication `PROCESSING` states reset to `PENDING` after validation, and a formation draft interrupted in `RUNNING` returns to `PENDING` with an explicit retry-required reason.
-- `load_state()` fails closed while a foreground formation operation or detached formation job is active, so restored registries cannot race ongoing draft synthesis, formation creation, or deferred initial work.
+- Personal governance emails, eligible voters, round histories, complete tallies, and authoritative communication or migration outcomes are cross-validated; email read state never supplies a missing ballot.
+- Pending failover rounds become `EXPIRED` because their original resource invocation did not survive the process interruption; the retained email and choice history are not deleted.
+- `load_state()` fails closed while foreground formation, governance submission, migration commit, or detached formation/governance work is active, so restored registries cannot race ongoing authoritative operations.
 
 It builds agents and files in a detached manager and a same-filesystem staging directory, recomputes derived team depth, then swaps the DocLib directories and live registries.
 
@@ -127,6 +130,6 @@ The optional [Selective Episodic Memory](Selective_Episodic_Memory.md) catalog c
 
 ## Schema policy
 
-- The current persistence schema version is `10`.
-- Compatibility with schema `9` and earlier SQLite layouts is intentionally unsupported.
+- The current persistence schema version is `11`.
+- Compatibility with schema `10` and earlier SQLite layouts is intentionally unsupported.
 - Create a new database when upgrading.

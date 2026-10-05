@@ -56,6 +56,7 @@ from .formation import (
     TeamFormationStatus,
     UnanimousAcceptanceAction,
 )
+from .governance import BooleanGovernanceChoice, ModelGovernanceChoice, GovernanceBallot, GovernanceRound, GovernanceSubmissionResult, MigrationRequest, MigrationOperationResult
 from .communication import (
     AgreementDirection,
     ApprovalPrincipal,

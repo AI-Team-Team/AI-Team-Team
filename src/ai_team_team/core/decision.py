@@ -1,30 +1,13 @@
-"""Autonomous AgentTeam and Agent governance decisions."""
-
-from __future__ import annotations
+"""Publish formal decisions through continuing Agents' personal inboxes."""
 
 import asyncio
 import json
+import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Sequence
 
-from pydantic import BaseModel, ConfigDict, StrictBool, ValidationError
-
 from .communication import ApprovalPrincipal, CommunicationBallot
-from .utils import generate_with_retry
-
-
-class StrictBooleanDecision(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-
-    approved: StrictBool
-    reason: str = ""
-
-
-class StrictModelDecision(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-
-    model_alias: str
-    reason: str = ""
 
 
 @dataclass
@@ -33,80 +16,63 @@ class DecisionOutcome:
     reason: str
     ballots: List[CommunicationBallot] = field(default_factory=list)
     selected_value: Optional[str] = None
-
-
-def _response_text(response: Any) -> str:
-    if isinstance(response, str):
-        return response
-    text = getattr(response, "text", None)
-    if isinstance(text, str):
-        return text
-    raise ValueError("The governance client returned no text response.")
-
-
-def _clean_json(text: str) -> str:
-    cleaned = text.strip()
-    if cleaned.startswith("```json"):
-        cleaned = cleaned[len("```json") :]
-    elif cleaned.startswith("```"):
-        cleaned = cleaned[3:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
-    return cleaned.strip()
+    round_id: Optional[str] = None
 
 
 class TeamDecisionProvider:
-    """Forms decisions only for explicitly configured principals."""
+    """Deliberates, publishes email rounds, and observes explicit tool choices."""
 
     def __init__(self, manager: Any):
         self.manager = manager
 
-    async def _generate(self, agent: Any, prompt: str, system: str) -> str:
-        if agent.lifecycle_state != "active" or agent.llm_client is None:
-            raise RuntimeError(f"Approval Agent {agent.agent_id!r} is unavailable.")
-        async with self.manager.agent_invocation(agent):
-            response = await generate_with_retry(
-                llm_client=agent.llm_client,
-                prompt=prompt,
-                system_instruction=system,
-                temperature=0.1,
-                require_json=True,
-                retries=self.manager.config.llm_max_retries,
-                backoff_factor=self.manager.config.llm_retry_backoff_factor,
-                manager=self.manager,
+    @staticmethod
+    def outcome(item) -> DecisionOutcome:
+        if item is None:
+            return DecisionOutcome("pending", "No eligible unchanged electorate is available.")
+        status = item.status.lower() if item.status in {"APPROVED", "DENIED"} else "pending"
+        ballots = []
+        if item.choice_kind == "boolean" and item.principal.kind == "agent_team":
+            ballots = [
+                CommunicationBallot(
+                    request_id=item.business_id,
+                    principal=item.principal,
+                    voter_agent_id=ballot.voter_agent_id,
+                    approved=ballot.choice["approved"],
+                    reason=ballot.choice["reason"],
+                    created_at=ballot.created_at,
+                )
+                for ballot in item.ballots
+            ]
+        selected = None
+        if item.choice_kind == "model" and item.status == "APPROVED":
+            selected = next(
+                alias
+                for alias in item.candidates
+                if sum(ballot.choice["model_alias"] == alias for ballot in item.ballots)
+                > len(item.ballots) / 2
             )
-        return _response_text(response)
+        return DecisionOutcome(
+            status,
+            item.reason or "Personal voting emails are awaiting explicit choices.",
+            ballots,
+            selected,
+            item.round_id,
+        )
 
     async def decide_agent_boolean(
-        self, principal: ApprovalPrincipal, prompt: str
+        self,
+        principal: ApprovalPrincipal,
+        prompt: str,
+        *,
+        request_id: str,
+        business_kind: str = "communication",
     ) -> DecisionOutcome:
         if principal.kind != "agent":
             raise ValueError("Agent decision requires an agent principal.")
-        agent = self.manager._agents_by_id.get(principal.principal_id)
-        if agent is None:
-            return DecisionOutcome("pending", "The approval Agent is missing.")
-        try:
-            raw = await self._generate(
-                agent,
-                prompt
-                + "\n\nReturn exactly JSON: "
-                '{"approved": true | false, "reason": "..."}',
-                "You are an explicitly configured ATT governance principal. "
-                "Decide only for your own authority and return strict JSON.",
-            )
-            decision = StrictBooleanDecision.model_validate_json(
-                _clean_json(raw), strict=True
-            )
-        except asyncio.CancelledError:
-            raise
-        except (ValidationError, ValueError, TypeError, RuntimeError) as exc:
-            return DecisionOutcome(
-                "pending", f"Agent governance decision failed: {exc}"
-            )
-        return DecisionOutcome(
-            "approved" if decision.approved else "denied",
-            decision.reason,
+        item = await self.manager._governance.create_round(
+            principal, business_kind, request_id, prompt
         )
+        return self.outcome(item)
 
     async def ballot_team_boolean(
         self,
@@ -115,80 +81,15 @@ class TeamDecisionProvider:
         prompt: str,
         transcript: str,
         members: Sequence[Any],
+        *,
+        business_kind: str = "communication",
     ) -> DecisionOutcome:
         if principal.kind != "agent_team":
             raise ValueError("AgentTeam ballot requires an agent_team principal.")
-        team = self.manager.teams.get(principal.principal_id)
-        if team is None or not members:
-            return DecisionOutcome(
-                "pending", "The approval AgentTeam has no active members."
-            )
-
-        async def vote(agent: Any) -> Any:
-            ballot_prompt = (
-                f"Governance request:\n{prompt}\n\n"
-                f"AgentTeam discussion transcript:\n{transcript}\n\n"
-                "Cast your own final ballot. Return exactly JSON: "
-                '{"approved": true | false, "reason": "..."}'
-            )
-            raw = await self._generate(
-                agent,
-                ballot_prompt,
-                "You are voting as one member of an autonomous AgentTeam. "
-                "Your ballot is one vote, not team authority. Return strict JSON.",
-            )
-            return StrictBooleanDecision.model_validate_json(
-                _clean_json(raw), strict=True
-            )
-
-        results = await asyncio.gather(
-            *(vote(agent) for agent in members), return_exceptions=True
+        item = await self.manager._governance.create_round(
+            principal, business_kind, request_id, prompt, transcript=transcript, members=members
         )
-        if any(isinstance(result, asyncio.CancelledError) for result in results):
-            raise asyncio.CancelledError
-        if list(team.members) != list(members):
-            return DecisionOutcome(
-                "pending", "AgentTeam membership changed during the decision."
-            )
-        if any(isinstance(result, BaseException) for result in results):
-            errors = [
-                str(result)
-                for result in results
-                if isinstance(result, BaseException)
-            ]
-            return DecisionOutcome(
-                "pending",
-                "Not every AgentTeam member produced a valid ballot: "
-                + "; ".join(errors),
-            )
-
-        ballots = [
-            CommunicationBallot(
-                request_id=request_id,
-                principal=principal,
-                voter_agent_id=agent.agent_id,
-                approved=result.approved,
-                reason=result.reason,
-            )
-            for agent, result in zip(members, results)
-        ]
-        approvals = sum(ballot.approved for ballot in ballots)
-        denials = len(ballots) - approvals
-        if approvals > len(ballots) / 2:
-            return DecisionOutcome(
-                "approved",
-                f"AgentTeam approved by {approvals}/{len(ballots)} ballots.",
-                ballots,
-            )
-        if denials > len(ballots) / 2:
-            return DecisionOutcome(
-                "denied",
-                f"AgentTeam denied by {denials}/{len(ballots)} ballots.",
-                ballots,
-            )
-        return DecisionOutcome(
-            "pending", "AgentTeam ballot was tied.", ballots
-        )
+        return self.outcome(item)
 
     async def decide_team_boolean(
         self,
@@ -197,31 +98,24 @@ class TeamDecisionProvider:
         prompt: str,
         *,
         rounds: int = 1,
+        business_kind: str = "communication",
     ) -> DecisionOutcome:
         team = self.manager.teams.get(principal.principal_id)
         if team is None:
             return DecisionOutcome("pending", "The approval AgentTeam is missing.")
-        try:
-            discussion, members = (
-                await self.manager._execute_team_discussion_with_members(
-                    team,
-                    prompt,
-                    rounds=rounds,
-                    require_complete=True,
-                )
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            return DecisionOutcome(
-                "pending", f"AgentTeam governance discussion failed: {exc}"
-            )
-        if not members:
-            return DecisionOutcome(
-                "pending", "The approval AgentTeam has no active members."
-            )
+        discussion, members = await self.manager._execute_team_discussion_with_members(
+            team,
+            prompt,
+            rounds=rounds,
+            require_complete=True,
+        )
         return await self.ballot_team_boolean(
-            principal, request_id, prompt, discussion.transcript, members
+            principal,
+            request_id,
+            prompt,
+            discussion.transcript,
+            members,
+            business_kind=business_kind,
         )
 
     async def decide_principal_boolean(
@@ -229,130 +123,92 @@ class TeamDecisionProvider:
         principal: ApprovalPrincipal,
         request_id: str,
         prompt: str,
+        *,
+        business_kind: str = "migration",
     ) -> DecisionOutcome:
         if principal.kind == "agent":
-            return await self.decide_agent_boolean(principal, prompt)
+            return await self.decide_agent_boolean(
+                principal, prompt, request_id=request_id, business_kind=business_kind
+            )
         return await self.decide_team_boolean(
-            principal, request_id, prompt
+            principal, request_id, prompt, business_kind=business_kind
         )
 
+    async def _decide_model(
+        self, principal: ApprovalPrincipal, prompt: str, candidates: Sequence[str]
+    ) -> DecisionOutcome:
+        candidates = list(candidates)
+        if (
+            not candidates
+            or any(not isinstance(alias, str) or not alias.strip() for alias in candidates)
+            or len(candidates) != len(set(candidates))
+        ):
+            raise ValueError("Model selection requires non-empty unique eligible aliases.")
+        prompt += "\nEligible model aliases: " + json.dumps(candidates)
+        # This bounded resource attempt does not survive an interrupted caller.
+        request_id = f"FAILOVER-{uuid.uuid4().hex}"
+        expires_at = time.time() + self.manager.config.parent_failover_timeout_seconds
+        transcript = ""
+        members = None
+        if principal.kind == "agent_team":
+            team = self.manager.teams.get(principal.principal_id)
+            if team is None:
+                return DecisionOutcome("pending", "The approval AgentTeam is missing.")
+            discussion, members = await self.manager._execute_team_discussion_with_members(
+                team,
+                prompt,
+                rounds=1,
+                require_complete=True,
+            )
+            transcript = discussion.transcript
+        try:
+            if time.time() >= expires_at:
+                return DecisionOutcome("pending", "The bounded failover attempt expired.")
+            item = await self.manager._governance.create_round(
+                principal,
+                "failover",
+                request_id,
+                prompt,
+                transcript=transcript,
+                members=members,
+                candidates=candidates,
+                expires_at=expires_at,
+            )
+            if item is None:
+                return self.outcome(None)
+            waiter = self.manager._governance.waiters.setdefault(item.round_id, asyncio.Event())
+            if item.status == "PENDING":
+                await asyncio.wait_for(waiter.wait(), timeout=max(0, expires_at - time.time()))
+            current = self.manager._governance.rounds[item.round_id]
+            if not self.manager._governance.electorate_valid(current):
+                return DecisionOutcome(
+                    "pending", "Membership changed before the resource decision."
+                )
+            return self.outcome(current)
+        finally:
+            # Creation itself can be cancelled after the email transaction commits.
+            # Resolve by execution identity, not just a returned local variable.
+            current = self.manager._governance.latest("failover", request_id, principal)
+            if current is not None and current.status == "PENDING":
+                await asyncio.shield(
+                    self.manager._governance.expire(
+                        current.round_id,
+                        "The bounded failover attempt ended without a complete decision.",
+                    )
+                )
+            if current is not None:
+                self.manager._governance.waiters.pop(current.round_id, None)
+
     async def decide_agent_model(
-        self,
-        principal: ApprovalPrincipal,
-        prompt: str,
-        candidates: Sequence[str],
+        self, principal: ApprovalPrincipal, prompt: str, candidates: Sequence[str]
     ) -> DecisionOutcome:
         if principal.kind != "agent":
             raise ValueError("Agent model selection requires an agent principal.")
-        agent = self.manager._agents_by_id.get(principal.principal_id)
-        if agent is None:
-            return DecisionOutcome("pending", "The approval Agent is missing.")
-        try:
-            raw = await self._generate(
-                agent,
-                prompt
-                + "\n\nAllowed model aliases: "
-                + json.dumps(list(candidates))
-                + '\nReturn exactly JSON: {"model_alias": "...", "reason": "..."}',
-                "You are an explicitly configured ATT resource governance principal.",
-            )
-            decision = StrictModelDecision.model_validate_json(
-                _clean_json(raw), strict=True
-            )
-            if decision.model_alias not in candidates:
-                raise ValueError("The selected model alias is not a candidate.")
-        except asyncio.CancelledError:
-            raise
-        except (ValidationError, ValueError, TypeError, RuntimeError) as exc:
-            return DecisionOutcome(
-                "pending", f"Agent model selection failed: {exc}"
-            )
-        return DecisionOutcome(
-            "approved", decision.reason, selected_value=decision.model_alias
-        )
+        return await self._decide_model(principal, prompt, candidates)
 
     async def decide_team_model(
-        self,
-        principal: ApprovalPrincipal,
-        prompt: str,
-        candidates: Sequence[str],
+        self, principal: ApprovalPrincipal, prompt: str, candidates: Sequence[str]
     ) -> DecisionOutcome:
         if principal.kind != "agent_team":
             raise ValueError("AgentTeam model selection requires an agent_team principal.")
-        team = self.manager.teams.get(principal.principal_id)
-        if team is None:
-            return DecisionOutcome(
-                "pending", "The approval AgentTeam has no active members."
-            )
-        try:
-            discussion, members = (
-                await self.manager._execute_team_discussion_with_members(
-                    team,
-                    prompt
-                    + "\n\nDiscuss which model alias should be selected from: "
-                    + json.dumps(list(candidates)),
-                    rounds=1,
-                    require_complete=True,
-                )
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            return DecisionOutcome(
-                "pending", f"AgentTeam model-selection discussion failed: {exc}"
-            )
-        if not members:
-            return DecisionOutcome(
-                "pending", "The approval AgentTeam has no active members."
-            )
-
-        async def vote(agent: Any) -> Any:
-            raw = await self._generate(
-                agent,
-                prompt
-                + "\n\nDiscussion transcript:\n"
-                + discussion.transcript
-                + "\n\nAllowed aliases: "
-                + json.dumps(list(candidates))
-                + '\nReturn exactly JSON: {"model_alias": "...", "reason": "..."}',
-                "Vote independently as one member of the AgentTeam. Return strict JSON.",
-            )
-            decision = StrictModelDecision.model_validate_json(
-                _clean_json(raw), strict=True
-            )
-            if decision.model_alias not in candidates:
-                raise ValueError("The selected model alias is not a candidate.")
-            return decision
-
-        results = await asyncio.gather(
-            *(vote(agent) for agent in members), return_exceptions=True
-        )
-        if any(isinstance(result, asyncio.CancelledError) for result in results):
-            raise asyncio.CancelledError
-        if list(team.members) != members or any(
-            isinstance(result, BaseException) for result in results
-        ):
-            return DecisionOutcome(
-                "pending",
-                "Not every AgentTeam member produced a valid model-selection ballot.",
-            )
-        counts = {
-            candidate: sum(
-                result.model_alias == candidate for result in results
-            )
-            for candidate in candidates
-        }
-        winners = [
-            candidate
-            for candidate, count in counts.items()
-            if count > len(members) / 2
-        ]
-        if len(winners) != 1:
-            return DecisionOutcome(
-                "pending", "No model alias received a strict majority."
-            )
-        return DecisionOutcome(
-            "approved",
-            f"AgentTeam selected {winners[0]!r} by strict majority.",
-            selected_value=winners[0],
-        )
+        return await self._decide_model(principal, prompt, candidates)

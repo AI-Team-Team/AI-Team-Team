@@ -8,6 +8,7 @@ from .cleanup import CleanupWriteMixin
 from .communication import CommunicationWriteMixin
 from .core_state import CoreStateWriteMixin
 from .formations import FormationWriteMixin
+from .governance import GovernanceWriteMixin
 from .libraries import LibraryWriteMixin
 from .memory import MemoryWriteMixin
 
@@ -18,6 +19,7 @@ class StoreWriteMixin(
     CoreStateWriteMixin,
     CommunicationWriteMixin,
     FormationWriteMixin,
+    GovernanceWriteMixin,
     LibraryWriteMixin,
 ):
     session_factory: Any
@@ -92,6 +94,7 @@ class StoreWriteMixin(
                 session, snapshot.get("communication_agreements", [])
             )
             self._write_peer_messages(session, snapshot.get("peer_messages", []))
+            self._write_governance(session, snapshot.get("governance_rounds", []), snapshot.get("migration_requests", []))
             self._write_library_dependencies(session, snapshot.get("library_dependencies", []))
             self._write_libraries(session, snapshot.get("libraries", []))
             session.flush()

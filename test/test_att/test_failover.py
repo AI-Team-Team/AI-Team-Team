@@ -12,6 +12,7 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from ai_team_team import AgentTurnStatus, ATTManager, Agent, ATTConfig, DiscussionStatus, TokenLimitExceededError
+from test.governance_client import governance_action
 
 class TestATTFailover(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -102,7 +103,7 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         self.mock_client.generate = root_generate
         config = ATTConfig(
             model_token_limits={
-                "default": 5000,
+                "default": 50000,
                 "low-budget": 5,
                 "opus-4.8": 5000,
             },
@@ -122,8 +123,9 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         governor = MagicMock()
 
         async def govern(prompt=None, require_json=False, **kwargs):
-            if "Allowed aliases" in str(prompt):
-                return '{"model_alias": "opus-4.8", "reason": "majority"}'
+            action = governance_action(prompt, model_alias="opus-4.8")
+            if action is not None:
+                return action
             if require_json:
                 return '{"is_healthy": true, "reason": "healthy"}'
             return "Final Answer: Parent discussion."
@@ -159,8 +161,9 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
 
     async def test_top_level_parent_failover_uses_root_agent(self):
         async def root_govern(prompt=None, require_json=False, **kwargs):
-            if "Allowed model aliases" in str(prompt):
-                return '{"model_alias": "high", "reason": "root choice"}'
+            action = governance_action(prompt, model_alias="high")
+            if action is not None:
+                return action
             if require_json:
                 return '{"is_healthy": true, "reason": "healthy"}'
             return "Final Answer: Done."
@@ -168,7 +171,7 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         self.mock_client.generate = root_govern
         config = ATTConfig(
             model_token_limits={
-                "default": 5000,
+                "default": 50000,
                 "low": 5,
                 "high": 5000,
             },

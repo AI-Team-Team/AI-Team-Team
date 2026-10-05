@@ -19,6 +19,9 @@ from ai_team_team.database.models import (
     LibraryModel,
     LibraryPermissionModel,
     ManagerConfigModel,
+    GovernanceBallotModel,
+    GovernanceRoundModel,
+    MigrationRequestModel,
     MemoryCardSourceEventModel,
     MemoryCardTagModel,
     PeerMessageModel,
@@ -39,6 +42,9 @@ class CleanupWriteMixin:
     @staticmethod
     def _clear_all(session: Any) -> None:
         for model in (
+            GovernanceBallotModel,
+            GovernanceRoundModel,
+            MigrationRequestModel,
             RetainedMemoryReferenceModel,
             MemoryCardTagModel,
             MemoryCardSourceEventModel,

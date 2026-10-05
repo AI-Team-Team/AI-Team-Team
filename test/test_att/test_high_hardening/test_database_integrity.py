@@ -109,30 +109,28 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         with open(db_path, "rb") as stream:
             after = stream.read()
         self.assertEqual(before, after)
-    def test_schema_nine_is_rejected_before_ddl(self):
-        db_path = os.path.join(self.tmpdir, "schema-nine.db")
-        with closing(sqlite3.connect(db_path)) as connection:
-            connection.execute(
-                "CREATE TABLE manager_config "
-                "(config_key TEXT PRIMARY KEY, config_value TEXT)"
-            )
-            connection.execute(
-                "INSERT INTO manager_config VALUES "
-                "('schema_version', '9')"
-            )
-            connection.execute("CREATE TABLE schema_nine_only (value TEXT)")
-            connection.execute(
-                "INSERT INTO schema_nine_only VALUES ('unchanged')"
-            )
-            connection.commit()
-        with open(db_path, "rb") as stream:
-            before = stream.read()
-
-        with self.assertRaisesRegex(StateRestoreError, "version '9'"):
-            DatabaseStore(db_path)
-
-        with open(db_path, "rb") as stream:
-            self.assertEqual(stream.read(), before)
+    def test_prior_schemas_are_rejected_before_ddl(self):
+        for version in ("9", "10"):
+            with self.subTest(version=version):
+                db_path = os.path.join(self.tmpdir, f"schema-{version}.db")
+                with closing(sqlite3.connect(db_path)) as connection:
+                    connection.execute(
+                        "CREATE TABLE manager_config "
+                        "(config_key TEXT PRIMARY KEY, config_value TEXT)"
+                    )
+                    connection.execute(
+                        "INSERT INTO manager_config VALUES ('schema_version', ?)",
+                        (version,),
+                    )
+                    connection.execute("CREATE TABLE prior_schema_only (value TEXT)")
+                    connection.execute("INSERT INTO prior_schema_only VALUES ('unchanged')")
+                    connection.commit()
+                with open(db_path, "rb") as stream:
+                    before = stream.read()
+                with self.assertRaisesRegex(StateRestoreError, f"version '{version}'"):
+                    DatabaseStore(db_path)
+                with open(db_path, "rb") as stream:
+                    self.assertEqual(stream.read(), before)
     async def test_corrupt_database_reference_matrix_is_atomic(self):
         def missing_creator(connection, ids):
             connection.execute(

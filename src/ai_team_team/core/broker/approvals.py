@@ -18,11 +18,22 @@ from ..communication import (
     route_fingerprint,
 )
 from ..config import _parse_communication_config
-from ..decision import DecisionOutcome
+from ..decision import DecisionOutcome, TeamDecisionProvider
 from ..team import AgentTeam
 
 
 class BrokerApprovalMixin:
+    def _refresh_pending_request_status(self, request: CommunicationRequest) -> None:
+        """Preserves claims held by other principals when one returns to pending."""
+        request.status = (
+            CommunicationRequestStatus.PROCESSING
+            if any(
+                item.status is CommunicationApprovalStatus.PROCESSING
+                for item in self.approvals_for_request(request.request_id)
+            )
+            else CommunicationRequestStatus.PENDING
+        )
+
     async def _claim_approval(
         self, request_id: str, principal: ApprovalPrincipal
     ) -> Optional[CommunicationApproval]:
@@ -58,7 +69,7 @@ class BrokerApprovalMixin:
         request = self.communication_requests[request_id]
         try:
             outcome = await self.decision_provider.decide_agent_boolean(
-                principal, self._request_prompt(request, principal)
+                principal, self._request_prompt(request, principal), request_id=request_id
             )
         except asyncio.CancelledError:
             await asyncio.shield(
@@ -199,9 +210,10 @@ class BrokerApprovalMixin:
         outcome: DecisionOutcome,
     ) -> None:
         async with self._transaction_lock:
-            await self._complete_approval_transaction(
-                request_id, principal, outcome
-            )
+            async with self.manager._governance.lock:
+                await self._complete_approval_transaction(
+                    request_id, principal, outcome
+                )
 
     async def _complete_approval_transaction(
         self,
@@ -209,6 +221,26 @@ class BrokerApprovalMixin:
         principal: ApprovalPrincipal,
         outcome: DecisionOutcome,
     ) -> None:
+        if outcome.status not in {"pending", "approved", "denied"}:
+            outcome = DecisionOutcome(
+                "pending", "The decision provider did not return a recognized explicit decision."
+            )
+        if outcome.status in {"approved", "denied"}:
+            voting_round = self.manager._governance.rounds.get(outcome.round_id)
+            if (
+                voting_round is None
+                or voting_round.business_kind != "communication"
+                or voting_round.business_id != request_id
+                or voting_round.principal != principal
+                or voting_round.status.lower() != outcome.status
+                or not self.manager._governance.electorate_valid(voting_round)
+                or self.manager._governance.latest("communication", request_id, principal) is not voting_round
+            ):
+                outcome = DecisionOutcome("pending", "The explicit voting round is missing, superseded, or no longer eligible.")
+            else:
+                # The round is the authority, not an independently supplied
+                # summary or projection that can omit or alter accepted votes.
+                outcome = TeamDecisionProvider.outcome(voting_round)
         successor: Optional[CommunicationRequest] = None
         new_agreement: Optional[CommunicationAgreement] = None
         changed_agreements: set[str] = set()
@@ -219,6 +251,8 @@ class BrokerApprovalMixin:
         request_notifications_before: Dict[
             str, List[Dict[str, Any]]
         ] = {}
+        invalidated_inboxes: set[str] = set()
+        rounds_before = {}
         async with self._locked_state():
             request = self.communication_requests.get(request_id)
             approval = self.communication_approvals.get(
@@ -270,6 +304,7 @@ class BrokerApprovalMixin:
             approval.reason = outcome.reason
             if outcome.status == "pending":
                 approval.status = CommunicationApprovalStatus.PENDING
+                approval.resolved_at = None
                 request.status = CommunicationRequestStatus.PENDING
             elif outcome.status == "denied":
                 approval.status = CommunicationApprovalStatus.DENIED
@@ -289,6 +324,19 @@ class BrokerApprovalMixin:
                 approval.status = CommunicationApprovalStatus.APPROVED
                 approval.resolved_at = time.time()
                 approvals = self.approvals_for_request(request_id)
+                for decided in approvals:
+                    if decided.status is not CommunicationApprovalStatus.APPROVED:
+                        continue
+                    voting_round = self.manager._governance.latest("communication", request_id, decided.principal)
+                    if (
+                        voting_round is None
+                        or voting_round.status != "APPROVED"
+                        or not self.manager._governance.electorate_valid(voting_round)
+                    ):
+                        decided.status = CommunicationApprovalStatus.PENDING
+                        decided.reason = "The electorate changed; another explicit round is required."
+                        decided.resolved_at = None
+                invalidated_inboxes.update(self._enqueue_request_notifications(request))
                 if all(
                     item.status is CommunicationApprovalStatus.APPROVED
                     for item in approvals
@@ -342,11 +390,24 @@ class BrokerApprovalMixin:
                 else:
                     request.status = CommunicationRequestStatus.PENDING
 
+            if request.status in {
+                CommunicationRequestStatus.PENDING,
+                CommunicationRequestStatus.PROCESSING,
+            }:
+                self._refresh_pending_request_status(request)
+
             terminal = request.status in {
                 CommunicationRequestStatus.APPROVED,
                 CommunicationRequestStatus.DENIED,
                 CommunicationRequestStatus.STALE,
             }
+            if terminal:
+                for voting_round in self.manager._governance.rounds.values():
+                    if voting_round.business_kind == "communication" and voting_round.business_id == request_id and voting_round.status == "PENDING":
+                        rounds_before[voting_round.round_id] = voting_round.model_copy(deep=True)
+                        voting_round.status = "CANCELLED"
+                        voting_round.reason = "The originating communication request is resolved or stale."
+                        voting_round.resolved_at = time.time()
             changed_inboxes = (
                 self._remove_request_notifications(request_id)
                 if terminal
@@ -356,6 +417,7 @@ class BrokerApprovalMixin:
                 if outcome.status == "approved"
                 else set()
             )
+            changed_inboxes.update(invalidated_inboxes)
             if successor is not None:
                 changed_inboxes.update(
                     self._enqueue_request_notifications(successor)
@@ -366,12 +428,14 @@ class BrokerApprovalMixin:
         dirty["communication_approvals"].add(request_id)
         dirty["communication_agreements"].update(changed_agreements)
         dirty["inboxes"].update(changed_inboxes)
+        dirty["governance_rounds"].update(rounds_before)
         if successor is not None:
             dirty["communication_requests"].add(successor.request_id)
             dirty["communication_approvals"].add(successor.request_id)
         try:
             await self.manager._commit_dirty_state(dirty)
         except Exception:
+            self.manager._governance.rounds.update(rounds_before)
             async with self._locked_state():
                 if request_before is not None:
                     self.communication_requests[request_id] = request_before
@@ -385,17 +449,17 @@ class BrokerApprovalMixin:
                     f"{request_id}:{principal.key}"
                 )
                 if (
-                    restored_request is not None
-                    and restored_request.status
-                    is CommunicationRequestStatus.PROCESSING
-                ):
-                    restored_request.status = CommunicationRequestStatus.PENDING
-                if (
                     restored_approval is not None
                     and restored_approval.status
                     is CommunicationApprovalStatus.PROCESSING
                 ):
                     restored_approval.status = CommunicationApprovalStatus.PENDING
+                    restored_approval.resolved_at = None
+                if restored_request is not None and restored_request.status in {
+                    CommunicationRequestStatus.PENDING,
+                    CommunicationRequestStatus.PROCESSING,
+                }:
+                    self._refresh_pending_request_status(restored_request)
                 if successor is not None:
                     for item in list(
                         self.approvals_for_request(successor.request_id)

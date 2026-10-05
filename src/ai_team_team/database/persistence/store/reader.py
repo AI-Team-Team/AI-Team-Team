@@ -37,6 +37,7 @@ from ai_team_team.database.models import (
     team_members,
 )
 from ai_team_team.database.persistence.constants import STATE_SCHEMA_VERSION
+from .governance_reader import read_governance_state
 
 
 class StoreReadMixin:
@@ -471,7 +472,10 @@ class StoreReadMixin:
                 for row in session.query(RetainedMemoryReferenceModel).all()
             ]
 
+            governance_rounds, migration_requests = read_governance_state(session)
             return {
+                "governance_rounds": governance_rounds,
+                "migration_requests": migration_requests,
                 "configs": config_map,
                 "agents": agents,
                 "agent_inboxes": agent_inboxes,

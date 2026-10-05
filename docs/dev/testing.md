@@ -159,7 +159,9 @@ The suite's `test/test_att/test_high_hardening/` package contains reference patt
 
 Private Agent DocLib tests must create agents through `register_agent` or a supported team-creation path.
 
-Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, schema 10 corruption, and the absence of private body text from transcripts, callbacks, and message history. The `test/test_att/test_private_doclib/` package contains the baseline end-to-end cases.
+Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, current-schema corruption, and the absence of private body text from transcripts, callbacks, and message history.
+
+The `test/test_att/test_private_doclib/` package contains the baseline end-to-end cases.
 
 Selective episodic-memory tests must cover disabled-mode zero indexing/tool exposure, one card per completed or incomplete turn, cancelled-turn exclusion, isolated label calls, owner-only search and recall, character- and token-bounded continuation that reconstructs long single lines and Unicode without gaps or duplication, Segment-version mismatch rejection, ephemeral recall cleanup, explicit compact retention, Journal immutability, private/tool-body redaction, FTS5 gating, Agent deletion semantics, restore corruption, and membership changes that leave all Agent-owned memory untouched.
 
@@ -177,4 +179,24 @@ Token-based file-reading tests must cover many short lines, extremely long singl
 
 The suite's `test/test_att/test_file_reading/` package contains the model-context integration cases, while `test/test_gated_reader.py` covers the standalone reader.
 
-Communication changes must cover strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes, full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation, idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations. Schema 9 and earlier databases must be rejected before DDL.
+Communication changes must cover strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes, full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation, idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations.
+
+Schema 10 and earlier databases must be rejected before DDL.
+
+### Personal-Inbox Governance
+
+Use normal Text ReAct or Native clients that explicitly invoke `open_agent_mail` and `submit_governance_choice`; standalone synthetic JSON responses must not stand in for Agent ballots.
+
+Cover continuing personal instructions and history, no automatic private-file injection, read-receipt independence, voluntary unanswered mail, strict choice schemas, immutable idempotent votes, complete participation, ties and new rounds, shared-Agent serialization, and session-lock release while answers remain pending.
+
+Preserve all four formation attitudes and prove that `None` and `no_response` remain domain semantics rather than email states.
+
+Cover failover timeout and caller cancellation, late-choice rejection, durable migration progress, submission rollback, schema corruption, exact mailbox-to-round ownership, append-only ballots, and authoritative commits made inside an outer auto-save suppression batch.
+
+Reject unrecognized decision statuses and derive authoritative communication ballot projections from the accepted round rather than independently supplied summaries.
+
+Cover interrupted Native submissions and their next ordinary interaction, fatal parallel-tool cleanup before invocation-lock release, and admission checks after waiting for a lock during shutdown or restore.
+
+Verify multi-principal `PROCESSING` consistency, exact sibling-order rollback after failed migration commits, and rejection of non-finite governance timestamps without changing the live manager.
+
+The `test/test_att/test_personal_governance/` package contains focused integration cases.

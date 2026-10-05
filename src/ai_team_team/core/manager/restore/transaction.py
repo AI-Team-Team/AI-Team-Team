@@ -41,6 +41,17 @@ class RestoreTransactionMixin:
             raise StateRestoreError(
                 "Cannot restore state while model token reservations are active."
             )
+        if (
+            any(not task.done() for task in manager._governance.tasks.values())
+            or any(not task.done() for task in manager.broker._approval_tasks.values())
+            or manager._governance.waiters
+            or manager._governance.lock.locked()
+            or manager._migration.lock.locked()
+            or manager._inbox._read_lock.locked()
+            or manager.broker._transaction_lock.locked()
+            or manager.broker._state_lock.locked()
+        ):
+            raise StateRestoreError("Cannot restore state while a personal governance operation is active.")
         try:
             target_config = manager._validate_state_snapshot(state)
             if target_config.episodic_memory.enabled:
@@ -129,6 +140,8 @@ class RestoreTransactionMixin:
                     for agent in manager._agents_by_id.values()
                 },
                 "memory": manager._memory.snapshot(),
+                "governance_rounds": manager._governance.snapshot(),
+                "migration_requests": [item.model_dump(mode="json") for item in manager._migration.requests.values()],
             }
             try:
                 manager.config = target_config
@@ -199,6 +212,8 @@ class RestoreTransactionMixin:
                     staged_memory["memory_references"],
                 )
                 manager.tools_context["att_manager"] = manager
+                manager._governance.restore(staged._governance.snapshot())
+                manager._migration.restore(item.model_dump(mode="json") for item in staged._migration.requests.values())
                 manager.token_budget.reset_reservations()
             except Exception:
                 for staged_agent in manager._agents_by_id.values():
@@ -246,6 +261,8 @@ class RestoreTransactionMixin:
                             )
                         ]
                 old_memory = old_state["memory"]
+                manager._governance.restore(old_state["governance_rounds"], interrupted=False)
+                manager._migration.restore(old_state["migration_requests"])
                 manager._memory.restore(
                     old_memory["memory_events"],
                     old_memory["memory_segments"],

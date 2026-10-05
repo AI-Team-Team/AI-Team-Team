@@ -379,9 +379,30 @@ class RuntimeRegistry:
             # Also bind globally registered tools
             team.tools.update(manager.global_tools)
 
-    def get_available_tools(self, team: AgentTeam, agent: Optional[Agent] = None) -> Dict[str, Any]:
-        """Returns the invocation-time tool view for one AgentTeam."""
+    def get_available_tools(
+        self, team: Optional[AgentTeam], agent: Optional[Agent] = None
+    ) -> Dict[str, Any]:
+        """Returns the invocation-time team or identity-only personal tool view."""
         manager = self.manager
+        if team is None:
+            from ai_team_team.tool import get_default_tools
+            personal_names = {
+                "list_agent_inbox", "mark_agent_inbox_read", "open_agent_mail",
+                "submit_governance_choice", "list_governance_requests",
+                "inspect_team_formation", "respond_team_invitation",
+                "list_private_files", "read_private_file", "write_private_file",
+                "delete_private_file", "move_private_file", "search_memories",
+                "recall_memory", "keep_memory_in_context", "forget_memory",
+            }
+            tools = {
+                name: tool
+                for name, tool in get_default_tools(manager.tools_context, agent).items()
+                if name in personal_names
+            }
+            if not manager.config.episodic_memory.enabled:
+                for name in {"search_memories", "recall_memory", "keep_memory_in_context", "forget_memory"}:
+                    tools.pop(name, None)
+            return tools
         if team.team_kind == "supervisory":
             return {}
         tools = dict(getattr(team, "tools", {}) or {})

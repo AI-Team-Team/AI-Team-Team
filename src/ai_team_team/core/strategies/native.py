@@ -35,6 +35,47 @@ from .shared import (
 )
 
 
+def _close_interrupted_tool_batch(team: Any, agent: Agent, manager: Any) -> None:
+    """Closes an interrupted provider exchange without guessing tool side effects."""
+    pending = {}
+    for message in agent.messages:
+        if message.get("tool_calls"):
+            pending = {
+                call["id"]: call["function"]["name"] for call in message["tool_calls"]
+            }
+        elif message.get("role") == "tool":
+            pending.pop(message.get("tool_call_id"), None)
+    for call_id, name in pending.items():
+        _append_agent_message(
+            agent,
+            {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "name": name,
+                "content": (
+                    "[interrupted] The invocation ended before its response was recorded. "
+                    "Its effects may already have committed; inspect authoritative state "
+                    "before deciding whether to retry."
+                ),
+            },
+            team,
+            manager,
+        )
+
+
+async def _execute_tool_batch(executions: List[Any]) -> List[ToolResult]:
+    """Settles sibling tools before releasing the shared Agent's invocation lock."""
+    tasks = [asyncio.create_task(execution) for execution in executions]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 class NativeReasoningStrategy(BaseReasoningStrategy):
     """Native parallel tool loop backed by the shared tool runtime."""
 
@@ -50,6 +91,9 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
         failures: List[ToolFailureSummary] = []
         argument_failure_rounds = 0
         try:
+            # Recovery may restore a committed ballot before its native tool
+            # reply was recorded. Keep the continuous window provider-valid.
+            _close_interrupted_tool_batch(team, agent, manager)
             identity_header = await _prepare_agent_context(
                 team, agent, prompt, manager
             )
@@ -162,7 +206,7 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                                 ),
                             )
                         )
-                results = await asyncio.gather(*executions)
+                results = await _execute_tool_batch(executions)
                 invalid_batch = False
                 fatal_tool_result = None
                 for result in results:
@@ -277,10 +321,12 @@ class NativeReasoningStrategy(BaseReasoningStrategy):
                 failures=failures,
             )
         finally:
+            _close_interrupted_tool_batch(team, agent, manager)
             _scrub_private_window_messages(agent)
-            team.set_status(agent.name, "Idle")
+            if team is not None:
+                team.set_status(agent.name, "Idle")
             if manager:
                 manager._emit_callback("on_status_change", agent.name, "Idle")
                 manager._auto_save(
-                    agents={agent.agent_id}, teams={team.team_id}
+                    agents={agent.agent_id}, teams={team.team_id} if team else set()
                 )

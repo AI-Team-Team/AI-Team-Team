@@ -114,7 +114,7 @@ Synchronous and asynchronous callbacks share one ordered background dispatcher; 
     Atomically moves a normal library file after checking both path ACLs.
   * `render_topology_tree() -> str`
     Renders the active lineage tree map in ASCII format.
-  * `negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`
+  * `await negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> MigrationOperationResult`
     Arbitrates dynamic team reorganizations and updates parental references.
   * `await save_state(path: Optional[str] = None, full: bool = True)`
     Queues and waits for a full snapshot, or a configuration delta when `full=False`.
@@ -198,7 +198,19 @@ Owns durable communication requests, approvals, ballots, Agreements, and peer-de
 
 ### `TeamDecisionProvider`
 
-Executes governance decisions for explicit principals. AgentTeam decisions use the team's discussion lock and a complete frozen-member ballot; Agent decisions use only that Agent's invocation lock. Strict Pydantic JSON parsing accepts only literal booleans or a valid model alias from the supplied candidate set.
+Publishes personal-inbox governance rounds for explicit principals rather than making standalone generic ballot model calls.
+
+AgentTeam deliberation uses the normal discussion lock and freezes the electorate; complete discussion publishes durable personal emails and releases the session before awaiting responses.
+
+Each Agent receives a detached ordinary notice through its continuing instructions, memory, and invocation lock, and may explicitly use `open_agent_mail` and `submit_governance_choice` or leave the email unanswered.
+
+`GovernanceService` validates eligibility, immutable per-round choices, complete participation, and strict majority independently of email read receipts.
+
+Root uses its own Agent context without an artificial AgentTeam, and model-selection rounds are bounded by the original failover attempt's deadline and cancellation.
+
+`GovernanceRound`, `GovernanceBallot`, and `GovernanceSubmissionResult` expose round identity, frozen voters, accepted public choices, and idempotent submission results.
+
+`MigrationRequest` and `MigrationOperationResult` expose durable asynchronous migration progress while preserving final topology revalidation.
 
 ### `SupervisionService` and supervisory AgentTeams
 
@@ -272,14 +284,14 @@ Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/
 
 ### Migration Policies
 
-* **`BaseMigrationPolicy`**: Base protocol defining `authorize_migration(team, target_parent, manager, rationale) -> Tuple[bool, str]`.
-* **`PermissiveMigrationPolicy`**: Always returns `(True, "Allowed")`.
-* **`AncestorApprovalMigrationPolicy`**: Consults explicit current-parent, target-parent, and Least Common Ancestor principals (default strategy).
-* **`LineagePathMigrationPolicy`**: Traverses every explicit AgentTeam/Root Agent principal along the affected lineage path.
+* **`BaseMigrationPolicy`**: Delegates `authorize_migration(team, target_parent, manager, rationale) -> MigrationOperationResult` to the manager's durable migration service; a policy instance cannot override `ATTConfig`.
+* **`PermissiveMigrationPolicy`**: Uses configured permissive authorization without ballots and still enforces topology admission and revalidation.
+* **`AncestorApprovalMigrationPolicy`**: Resolves explicit current-parent, target-parent, and Least Common Ancestor principals when configured (default strategy).
+* **`LineagePathMigrationPolicy`**: Resolves every explicit AgentTeam/Root Agent principal along the affected lineage path when configured.
 
 ## Database Schema & ORM Models
 
-SQLAlchemy Declarative Models mapping schema 10 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
+SQLAlchemy Declarative Models mapping schema 11 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
 * **`AgentModel`, `AgentMessageModel`, and `AgentInboxModel`**: Use immutable `agent_id` primary/foreign keys and persist lifecycle profiles, bounded Working Context, and identity-addressed notifications.
@@ -290,6 +302,7 @@ SQLAlchemy Declarative Models mapping schema 10 are grouped in the [`models`](..
 * **`TeamFormationRequestModel`, `TeamFormationInvitationModel`, `TeamFormationRevisionModel`, `TeamFormationInvitationDecisionModel`, and `TeamFormationDraftModel`**: Persist the current proposal projection, current invitations, immutable material revision snapshots, append-only exact-revision attitudes, detached collaborative drafts, accepted founding records, completion choices, and late-join state.
 * **`CommunicationRequestModel`, `CommunicationApprovalModel`, `CommunicationBallotModel`**: Persist the request lifecycle, ordered explicit principals, and member ballots.
 * **`CommunicationAgreementModel` & `PeerMessageModel`**: Persist directional endpoint channels, revocation state, and idempotent delivery lifecycle.
+* **`GovernanceRoundModel`, `GovernanceBallotModel`, and `MigrationRequestModel`**: Persist frozen personal-email rounds, append-only explicit choices, and revalidated asynchronous migration requests.
 * **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel` & `DocLibLinkModel`**: Persists library kind, mutually exclusive team/agent ownership, lifecycle, ACL segments, physical document contents, and managed team-library link targets.
 
 ### Database Session Factory

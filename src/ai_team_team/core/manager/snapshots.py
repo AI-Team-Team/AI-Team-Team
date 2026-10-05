@@ -51,11 +51,85 @@ class SnapshotBuilder:
             f"DL-{team_id}" for team_id in temporary_team_ids
         } | {f"PDL-{agent_id}" for agent_id in temporary_agent_ids}
         memory_records = capture_memory_records(manager, dirty)
+        round_ids = (
+            set(manager._governance.rounds)
+            if full
+            else set(dirty["governance_rounds"])
+        )
+        governance_rounds = [
+            manager._governance.rounds[identifier].model_dump(mode="json")
+            for identifier in sorted(round_ids)
+            if identifier in manager._governance.rounds
+        ]
+        migration_ids = (
+            set(manager._migration.requests)
+            if full
+            else set(dirty["migration_requests"])
+        )
+        migration_ids.update(
+            item["business_id"]
+            for item in governance_rounds
+            if item["business_kind"] == "migration"
+        )
+        migration_requests = [
+            manager._migration.requests[identifier].model_dump(mode="json")
+            for identifier in sorted(migration_ids)
+            if identifier in manager._migration.requests
+        ]
+        governance_agents = {
+            agent_id
+            for item in governance_rounds
+            for agent_id in item["voter_agent_ids"]
+        }
+        governance_teams = {
+            item["principal"]["principal_id"]
+            for item in governance_rounds
+            if item["principal"]["kind"] == "agent_team"
+        }
+        for item in migration_requests:
+            governance_teams.update(
+                identifier
+                for identifier in (
+                    item["team_id"],
+                    item["target_parent_id"],
+                    item["original_parent_id"],
+                )
+                if identifier is not None
+            )
+        dependency_request_ids = (
+            set(dirty["communication_requests"])
+            | set(dirty["communication_approvals"])
+            | {
+                item["business_id"]
+                for item in governance_rounds
+                if item["business_kind"] == "communication"
+            }
+        )
+        for identifier in dependency_request_ids:
+            request = manager.broker.communication_requests.get(identifier)
+            if request is not None:
+                governance_teams.update((request.sender_team_id, request.recipient_team_id))
+                governance_teams.update(
+                    principal.principal_id
+                    for principal in request.approval_principals
+                    if principal.kind == "agent_team"
+                )
+                governance_agents.update(
+                    principal.principal_id
+                    for principal in request.approval_principals
+                    if principal.kind == "agent"
+                )
+                if request.initiated_by_agent_id is not None:
+                    governance_agents.add(request.initiated_by_agent_id)
+        governance_teams.update(dirty["inboxes"])
         memory_agent_ids, memory_team_ids = collect_memory_identity_dependencies(
-            manager, memory_records
+            manager,
+            memory_records,
+            extra_agents=governance_agents,
+            extra_teams=governance_teams,
         )
         configs = None
-        if full or dirty["configs"]:
+        if full or dirty["configs"] or dependency_request_ids or migration_requests:
             configs = {
                 "schema_version": STATE_SCHEMA_VERSION,
                 "att_config": manager.config.to_dict(),
@@ -350,11 +424,13 @@ class SnapshotBuilder:
             if full
             else set(dirty["communication_requests"])
         )
+        request_ids.update(item["business_id"] for item in governance_rounds if item["business_kind"] == "communication")
         approval_request_ids = (
             set(manager.broker.communication_requests)
             if full
             else set(dirty["communication_approvals"])
         )
+        approval_request_ids.update(item["business_id"] for item in governance_rounds if item["business_kind"] == "communication")
         agreement_ids = (
             set(manager.broker.agreements) if full else set(dirty["communication_agreements"])
         )
@@ -456,6 +532,8 @@ class SnapshotBuilder:
             "communication_ballots": communication_ballots,
             "communication_agreements": communication_agreements,
             "peer_messages": peer_messages,
+            "governance_rounds": governance_rounds,
+            "migration_requests": migration_requests,
             **memory_records,
             "libraries": libraries,
             "library_dependencies": library_dependencies,

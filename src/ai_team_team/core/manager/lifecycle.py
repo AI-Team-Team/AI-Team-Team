@@ -183,6 +183,9 @@ class LifecycleService:
         reset_error: Optional[BaseException] = None
         try:
             await manager.broker.reset_processing_for_shutdown()
+            for item in list(manager._governance.rounds.values()):
+                if item.business_kind == "failover" and item.status == "PENDING":
+                    await manager._governance.expire(item.round_id, "The manager closed the originating failover attempt.")
         except BaseException as exc:
             reset_error = exc
         try:

@@ -102,7 +102,7 @@ The recipient, every intermediate AgentTeam on the unique route, and the Root AI
 
 `request_delivery="queue"` places AgentTeam approvals in their inboxes for the next normal discussion.
 
-Agent principals have no AgentTeam inbox, so their approvals always enter the Agent's serial approval worker immediately.
+Agent principals have no AgentTeam inbox, so their approvals are delivered directly to their personal Agent inbox and notified through a detached ordinary interaction.
 
 `request_delivery="wake"` schedules an AgentTeam governance discussion immediately while still respecting that AgentTeam's discussion lock.
 
@@ -114,15 +114,45 @@ Agent principals have no AgentTeam inbox, so their approvals always enter the Ag
 
 An AgentTeam decision freezes the active membership at discussion start and requires one valid ballot from every frozen member.
 
+After a complete governance discussion, ATT persists a voting round and delivers a personal voting email to each frozen member.
+
+Each Agent receives a normal-context notice identifying `open_agent_mail()` and `submit_governance_choice()` rather than a separate model call with a generic ballot persona.
+
+The same Agent's personal instructions, working memory, message history, and invocation lock apply to this activity.
+
+Opening the email and submitting a choice are voluntary separate operations; the AgentTeam session lock is released while personal responses are outstanding.
+
 Strictly more than half JSON literal `true` ballots approve, and strictly more than half JSON literal `false` ballots deny.
 
 A tie, membership change, missing ballot, invalid ballot, model error, incomplete discussion, or cancellation keeps the Approval pending.
 
 An Agent principal decides under that Agent's invocation lock and cannot be replaced by another Agent.
 
+The Root Agent uses its own personal inbox and ordinary interaction context without a fabricated AgentTeam.
+
 Only the JSON literal `true` grants approval.
 
 Strings, numbers, null, missing fields, and extra fields are invalid governance results.
+
+An accepted ballot is immutable within its identified round, and resubmitting the same choice is idempotent.
+
+A tie or changed electorate can start a new identified round while retaining the preceding round, emails, and public choices.
+
+### Personal Email Is Not a Ballot
+
+`open_agent_mail(message_id)` neither marks the message read nor votes.
+
+`mark_agent_inbox_read()` changes only the read receipt, and `submit_governance_choice(round_id, choice)` changes only the ballot and public response history.
+
+`list_governance_requests()` keeps unanswered pending requests discoverable even after their emails are marked read.
+
+The four team-formation attitudes remain `accepted`, `declined`, `explicitly_ignored`, and `no_response`; explicit `None` withholds a public attitude and still projects to `no_response`.
+
+Those attitudes are independent of email states and do not become a universal governance vocabulary.
+
+Communication and migration use strict boolean choices, parent failover uses eligible model aliases, and membership proposals keep `Agree`, `Disagree`, and `Abstain` with their existing rules.
+
+Optional episodic memory is not required for voting, and ATT does not automatically read a private DocLib to prepare a choice.
 
 ### F. Request and Agreement Lifecycle
 
@@ -164,7 +194,11 @@ Every explicit principal along the affected lineage path decides.
 
 Ordinary topology authorities are AgentTeam principals, while a root-level authority is the Root AI Agent principal.
 
-AgentTeam principals use full-member structured ballots, and the Root AI Agent decides directly.
+AgentTeam principals use full-member personal-email ballots, and the Root AI Agent submits its own explicit personal-email choice.
+
+The API returns a `MigrationOperationResult` with a durable request ID and `PENDING` status while approvals are outstanding instead of waiting inside the initiating tool invocation.
+
+`inspect_migration_request(request_id)` lets the moving, target, or original-parent AgentTeam inspect progress without granting authority to decide for another principal.
 
 Authorization runs outside the topology lock.
 
@@ -194,11 +228,15 @@ For parent failover, an AgentTeam principal discusses the choice and every membe
 
 Strictly more than half of the ballots must select the same eligible alias.
 
-At the top level, the Root AI Agent selects the eligible alias directly.
+At the top level, the Root AI Agent receives a personal model-selection email and explicitly submits an eligible alias through its ordinary tools and memory context.
 
 Timeout, lock conflict, invalid output, missing majority, model failure, or unavailable authority fails closed without falling back to `auto`.
 
 `parent_failover_timeout_seconds` defaults to `120` and must be positive.
+
+The bounded failover attempt expires after timeout, caller cancellation, shutdown, or process interruption; a late reply cannot change the replacement client after that attempt ends.
+
+Expiration closes execution authority but retains the email, accepted public choices, and personal memory.
 
 ## 6. Code Configuration Example
 

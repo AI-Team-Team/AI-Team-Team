@@ -9,33 +9,13 @@ from ai_team_team import ATTConfig, ATTManager, Agent
 from ai_team_team.core.decision import DecisionOutcome
 
 
-class MigrationClient:
-    def __init__(self, approved=True):
-        self.approved = approved
+from test.governance_client import PersonalGovernanceClient
+import asyncio
 
-    async def generate(
-        self,
-        prompt=None,
-        system_instruction=None,
-        require_json=False,
-        **kwargs,
-    ):
-        text = str(prompt)
-        if "final ballot" in text or "governance principal" in str(
-            system_instruction
-        ):
-            return json.dumps(
-                {"approved": self.approved, "reason": "migration vote"}
-            )
-        if require_json:
-            return '{"is_healthy": true, "reason": "healthy"}'
-        return "Final Answer: discussed"
 
-    def supports_output_token_limit(self):
-        return True
+class MigrationClient(PersonalGovernanceClient):
+    pass
 
-    def supports_native_tool_calling(self):
-        return False
 
 
 class TestMigrationPolicies(unittest.IsolatedAsyncioTestCase):
@@ -63,10 +43,10 @@ class TestMigrationPolicies(unittest.IsolatedAsyncioTestCase):
         second = self.manager.create_agent_team(self.root, member_count=3)
         child = self.manager.create_agent_team(first, member_count=3)
 
-        approved, _ = await self.manager.negotiate_and_execute_migration(
+        result = await self.manager.negotiate_and_execute_migration(
             child, second, "move"
         )
-        self.assertTrue(approved)
+        self.assertEqual(result.status, "EXECUTED")
         self.assertIs(child.parent_team, second)
 
     async def test_ancestor_approval_uses_agent_teams_and_root_agent(self):
@@ -74,10 +54,11 @@ class TestMigrationPolicies(unittest.IsolatedAsyncioTestCase):
         second = self.manager.create_agent_team(self.root, member_count=3)
         child = self.manager.create_agent_team(first, member_count=3)
 
-        approved, reason = await self.manager.negotiate_and_execute_migration(
+        result = await self.manager.negotiate_and_execute_migration(
             child, second, "move"
         )
-        self.assertTrue(approved, reason)
+        self.assertEqual(result.status, "PENDING")
+        await self.finish(result.request_id)
         self.assertIs(child.parent_team, second)
 
     async def test_lineage_path_uses_every_explicit_principal(self):
@@ -87,23 +68,10 @@ class TestMigrationPolicies(unittest.IsolatedAsyncioTestCase):
         target = self.manager.create_agent_team(second, member_count=3)
         child = self.manager.create_agent_team(first, member_count=3)
 
-        decide = AsyncMock(
-            return_value=DecisionOutcome("approved", "approved")
-        )
-        with patch.object(
-            self.manager.broker.decision_provider,
-            "decide_principal_boolean",
-            decide,
-        ):
-            approved, reason = (
-                await self.manager.negotiate_and_execute_migration(
-                    child, target, "move across branches"
-                )
-            )
-
-        self.assertTrue(approved, reason)
+        result = await self.manager.negotiate_and_execute_migration(child, target, "move across branches")
+        await self.finish(result.request_id)
         self.assertEqual(
-            [call.args[0].key for call in decide.await_args_list],
+            [principal.key for principal in self.manager.inspect_migration_request(result.request_id).principals],
             [
                 f"agent_team:{first.team_id}",
                 f"agent_team:{target.team_id}",
@@ -111,6 +79,12 @@ class TestMigrationPolicies(unittest.IsolatedAsyncioTestCase):
                 f"agent:{self.root.agent_id}",
             ],
         )
+
+    async def finish(self, request_id):
+        async with asyncio.timeout(10):
+            while self.manager.inspect_migration_request(request_id).status == "PENDING":
+                await asyncio.sleep(0.01)
+        self.assertEqual(self.manager.inspect_migration_request(request_id).status, "EXECUTED")
 
 
 if __name__ == "__main__":

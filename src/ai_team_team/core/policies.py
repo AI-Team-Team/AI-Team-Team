@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from typing import Any, List, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, StrictBool, ValidationError
 
 from .communication import ApprovalPrincipal
+from .governance import MigrationOperationResult
 
 logger = logging.getLogger("ATT.Policies")
 
@@ -80,39 +80,24 @@ def get_path_to_ancestor(start: Any, ancestor: Any) -> List[Any]:
         if current is ancestor:
             break
         current = current.parent_team
+
     return path
 
 
 class BaseMigrationPolicy:
-    async def authorize_migration(
-        self,
-        team: Any,
-        target_parent: Any,
-        manager: Any,
-        rationale: str,
-    ) -> Tuple[bool, str]:
-        raise NotImplementedError
+    async def authorize_migration(self, team: Any, target_parent: Any, manager: Any, rationale: str) -> MigrationOperationResult:
+        """Returns the durable operation; missing personal choices are pending."""
+        return await manager.negotiate_and_execute_migration(team, target_parent, rationale)
 
 
 class PermissiveMigrationPolicy(BaseMigrationPolicy):
-    async def authorize_migration(
-        self,
-        team: Any,
-        target_parent: Any,
-        manager: Any,
-        rationale: str,
-    ) -> Tuple[bool, str]:
-        return True, "Migration allowed by permissive policy."
+    pass
 
 
 def _principal_for_team(team: Any, manager: Any) -> ApprovalPrincipal:
     if team is None:
-        return ApprovalPrincipal(
-            kind="agent", principal_id=manager.root_ai.agent_id
-        )
-    return ApprovalPrincipal(
-        kind="agent_team", principal_id=team.team_id
-    )
+        return ApprovalPrincipal(kind="agent", principal_id=manager.root_ai.agent_id)
+    return ApprovalPrincipal(kind="agent_team", principal_id=team.team_id)
 
 
 def _deduplicate(principals: List[ApprovalPrincipal]) -> List[ApprovalPrincipal]:
@@ -123,52 +108,6 @@ def _deduplicate(principals: List[ApprovalPrincipal]) -> List[ApprovalPrincipal]
             seen.add(principal.key)
             result.append(principal)
     return result
-
-
-async def _authorize_principals(
-    principals: List[ApprovalPrincipal],
-    team: Any,
-    target_parent: Any,
-    manager: Any,
-    rationale: str,
-) -> Tuple[bool, str]:
-    request_id = f"MIG-{uuid.uuid4().hex}"
-    prompt = (
-        "Decide whether your governance principal approves an ATT topology "
-        "migration.\n\n"
-        f"Moving AgentTeam: {team.team_id}\n"
-        f"Current parent: {team.parent_team.team_id if team.parent_team else 'Root Agent'}\n"
-        f"Target parent: {target_parent.team_id}\n"
-        f"Rationale: {rationale}"
-    )
-    for principal in principals:
-        active_actor = manager._active_tool_agent.get()
-        if principal.kind == "agent_team" and active_actor is not None:
-            approver_team = manager.teams.get(principal.principal_id)
-            if approver_team is not None and any(
-                member.agent_id == active_actor.agent_id
-                for member in approver_team.members
-            ):
-                return (
-                    False,
-                    "Migration approval cannot synchronously re-enter the "
-                    "active Agent through another AgentTeam.",
-                )
-        if principal.kind == "agent" and active_actor is not None:
-            if principal.principal_id == active_actor.agent_id:
-                return (
-                    False,
-                    "Migration approval cannot synchronously re-enter the active Agent.",
-                )
-        outcome = await manager.broker.decision_provider.decide_principal_boolean(
-            principal, request_id, prompt
-        )
-        if outcome.status != "approved":
-            return False, (
-                f"Migration {outcome.status} by "
-                f"{principal.kind}:{principal.principal_id}: {outcome.reason}"
-            )
-    return True, "Every required governance principal approved the migration."
 
 
 def migration_approval_principals(
@@ -201,39 +140,11 @@ def migration_approval_principals(
 
 
 class AncestorApprovalMigrationPolicy(BaseMigrationPolicy):
-    async def authorize_migration(
-        self,
-        team: Any,
-        target_parent: Any,
-        manager: Any,
-        rationale: str,
-    ) -> Tuple[bool, str]:
-        principals = migration_approval_principals(
-            "ancestor_approval", team, target_parent, manager
-        )
-        return await _authorize_principals(
-            principals, team, target_parent, manager, rationale
-        )
+    pass
 
 
 class LineagePathMigrationPolicy(BaseMigrationPolicy):
-    async def authorize_migration(
-        self,
-        team: Any,
-        target_parent: Any,
-        manager: Any,
-        rationale: str,
-    ) -> Tuple[bool, str]:
-        principals = migration_approval_principals(
-            "lineage_path", team, target_parent, manager
-        )
-        return await _authorize_principals(
-            principals,
-            team,
-            target_parent,
-            manager,
-            rationale,
-        )
+    pass
 
 
 def resolve_migration_policy(policy_name: str) -> BaseMigrationPolicy:

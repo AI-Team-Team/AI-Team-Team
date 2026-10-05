@@ -21,6 +21,8 @@ from ..communication_validation import CommunicationStateValidator
 from ..discussions import DiscussionCoordinator
 from ..failover import FailoverService
 from ..formations import FormationService
+from ..governance import GovernanceService
+from ..inbox import PersonalInboxService
 from ..libraries import LibraryService
 from ..lifecycle import LifecycleService
 from ..membership import MembershipService
@@ -37,6 +39,7 @@ from ..topology import TopologyService
 from .agents_api import AgentAPI
 from .discussions_api import DiscussionAPI
 from .formations_api import FormationAPI
+from .governance_api import GovernanceAPI
 from .libraries_api import LibraryAPI
 from .memory_api import MemoryAPI
 from .runtime_api import RuntimeAPI
@@ -53,6 +56,7 @@ class ATTManager(
     DiscussionAPI,
     MemoryAPI,
     FormationAPI,
+    GovernanceAPI,
 ):
     """Master controller managing the overall ATT topology."""
 
@@ -99,6 +103,8 @@ class ATTManager(
         self._runtime = RuntimeRegistry(self)
         self._team_creation = TeamCreationService(self)
         self._formations = FormationService(self)
+        self._inbox = PersonalInboxService(self)
+        self._governance = GovernanceService(self)
 
         # Public Tool registries
         self.global_tools: Dict[str, Tool] = {}

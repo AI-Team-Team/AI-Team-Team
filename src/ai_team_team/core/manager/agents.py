@@ -168,6 +168,11 @@ class AgentRegistry:
                 or agent_id in proposal.get("votes", {})
             ]
             governance_refs.extend(
+                f"governance-round:{item.round_id}"
+                for item in manager._governance.rounds.values()
+                if agent_id in item.voter_agent_ids
+            )
+            governance_refs.extend(
                 f"communication-request:{request.request_id}"
                 for request in manager.broker.communication_requests.values()
                 if request.initiated_by_agent_id == agent_id

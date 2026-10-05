@@ -82,6 +82,9 @@ class StateAPI:
                 await self._apply_state_snapshot(state)
                 self.db_path = path
                 self.broker.resume_pending_requests()
+                self._governance.resume()
+                self._migration.resume()
+                self._auto_save(governance_rounds={item.round_id for item in self._governance.rounds.values() if item.status == "EXPIRED"})
             finally:
                 self._restore_in_progress = False
                 if self._memory._restore_suspended:

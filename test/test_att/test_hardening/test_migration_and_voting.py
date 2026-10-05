@@ -30,49 +30,48 @@ class TestATTHardening(ATTHardeningTestCase):
         self.assertEqual(descendant.depth, 3)
         self.assertEqual(right_child.depth, 2)
 
-        success, _ = await self.manager.negotiate_and_execute_migration(
+        result = await self.manager.negotiate_and_execute_migration(
             moving, right_child, "Move the complete branch."
         )
 
-        self.assertTrue(success)
+        self.assertEqual(result.status, "EXECUTED")
         self.assertEqual(moving.depth, 3)
         self.assertEqual(descendant.depth, 4)
     async def test_migration_rejects_changed_approval_path(self):
+        from types import SimpleNamespace
+
         left = self.manager.create_agent_team(self.root)
         right = self.manager.create_agent_team(self.root)
         moving = self.manager.create_agent_team(left)
         self.manager.config.migration_policy = "ancestor_approval"
-        started = asyncio.Event()
-        release = asyncio.Event()
 
-        class BlockingApproval:
-            async def authorize_migration(
-                self, team, target_parent, manager, rationale
-            ):
-                started.set()
-                await release.wait()
-                return True, "approved on old path"
+        async def discuss(team, *args, **kwargs):
+            return SimpleNamespace(transcript="Public migration discussion."), list(team.members)
 
-        with patch(
-            "ai_team_team.core.policies.resolve_migration_policy",
-            return_value=BlockingApproval(),
-        ):
-            task = asyncio.create_task(
-                self.manager.negotiate_and_execute_migration(
-                    moving, right, "path changes"
-                )
-            )
-            await started.wait()
-            with self.manager._topology_lock:
-                left.add_child_team(right)
-                right._parent_team = left
-                self.manager._team_parent_map[right.team_id] = left.team_id
-                right.invalidate_depth_cache(recursive=True)
-            release.set()
-            success, reason = await task
+        with patch.object(self.manager, "_execute_team_discussion_with_members", side_effect=discuss):
+            result = await self.manager.negotiate_and_execute_migration(moving, right, "path changes")
+            while self.manager._emergency_tasks:
+                await asyncio.gather(*tuple(self.manager._emergency_tasks))
+                await asyncio.sleep(0)
 
-        self.assertFalse(success)
-        self.assertIn("approval path changed", reason)
+        with self.manager._topology_lock:
+            left.add_child_team(right)
+            right._parent_team = left
+            self.manager._team_parent_map[right.team_id] = left.team_id
+            right.invalidate_depth_cache(recursive=True)
+
+        for item in list(self.manager._governance.rounds.values()):
+            for agent_id in item.voter_agent_ids:
+                actor = self.manager._agents_by_id[agent_id]
+                token = self.manager._active_tool_agent.set(actor)
+                try:
+                    await self.manager.submit_governance_choice(item.round_id, {"approved": True}, actor=actor)
+                finally:
+                    self.manager._active_tool_agent.reset(token)
+        await self.manager._migration.complete_request(result.request_id)
+        current = self.manager.inspect_migration_request(result.request_id)
+        self.assertEqual(current.status, "STALE")
+        self.assertIn("approval path changed", current.reason)
         self.assertIs(moving.parent_team, left)
     async def test_parallel_votes_are_atomic_and_execute_once(self):
         team = self.manager.create_agent_team(self.root)

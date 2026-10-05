@@ -17,35 +17,12 @@ from ai_team_team import (
 from ai_team_team.core.decision import DecisionOutcome
 
 
-class GovernanceClient:
-    def __init__(self, approved=True):
-        self.approved = approved
+from test.governance_client import PersonalGovernanceClient
 
-    async def generate(
-        self,
-        prompt=None,
-        system_instruction=None,
-        require_json=False,
-        **kwargs,
-    ):
-        prompt_text = str(prompt)
-        system_text = str(system_instruction)
-        if (
-            "final ballot" in prompt_text
-            or "governance principal" in system_text
-        ):
-            return json.dumps(
-                {"approved": self.approved, "reason": "governance vote"}
-            )
-        if require_json:
-            return '{"is_healthy": true, "reason": "healthy"}'
-        return "Final Answer: discussed"
 
-    def supports_output_token_limit(self):
-        return True
+class GovernanceClient(PersonalGovernanceClient):
+    pass
 
-    def supports_native_tool_calling(self):
-        return False
 
 class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -163,6 +140,7 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
             recipient.invalidate_depth_cache()
 
         await manager.execute_team_discussion(parent_b, "old route", rounds=1)
+        await self.wait_for_status(request, "STALE")
 
         self.assertEqual(request.status.value, "STALE")
         self.assertIsNotNone(request.superseded_by_request_id)
@@ -187,14 +165,9 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
         )
         request = manager.broker.communication_requests[result.request_id]
         first, second = manager.broker.approvals_for_request(request.request_id)
-        await manager.broker._claim_approval(request.request_id, first.principal)
-        await manager.broker._claim_approval(request.request_id, second.principal)
-
-        await manager.broker._complete_approval(
-            request.request_id,
-            first.principal,
-            DecisionOutcome("denied", "first denied"),
-        )
+        self.client.approved = False
+        await manager.execute_team_discussion(parent_a, "deny", rounds=1)
+        await self.wait_for_status(request, "DENIED")
         await manager.broker._complete_approval(
             request.request_id,
             second.principal,

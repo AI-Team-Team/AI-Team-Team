@@ -31,7 +31,7 @@ class ToolExecutor:
         raw: Any = None,
         tools: Optional[Mapping[str, Any]] = None,
     ) -> ToolResult:
-        registry = tools if tools is not None else self.team.tools
+        registry = tools if tools is not None else getattr(self.team, "tools", {})
         tool = registry.get(tool_name)
         if tool is None:
             return ToolResult(

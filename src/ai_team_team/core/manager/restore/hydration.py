@@ -201,6 +201,8 @@ class RestoreHydrationMixin:
             state.get("memory_cards", []),
             state.get("memory_references", []),
         )
+        manager._migration.restore(state["migration_requests"])
+        manager._governance.restore(state["governance_rounds"], interrupted=False)
         for agent in manager._agents_by_id.values():
             agent.message_history = [
                 dict(event.payload)

@@ -82,7 +82,7 @@ class AgentTurnResult(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     agent_id: str
-    team_id: str
+    team_id: Optional[str] = None
     turn_id: Optional[str] = None
     discussion_id: Optional[str] = None
     round_number: Optional[int] = None

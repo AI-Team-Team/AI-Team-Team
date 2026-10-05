@@ -153,13 +153,13 @@ AgentTeam and Agent principals use different scheduling because only AgentTeams 
 ```mermaid
 flowchart TD
     Approval["Pending Approval"] --> Principal{"Principal kind"}
-    Principal -- "agent" --> AgentWorker["Schedule serialized Agent approval worker immediately"]
+    Principal -- "agent" --> AgentWorker["Persist personal voting email<br/>schedule ordinary Agent notification"]
     Principal -- "agent_team" --> Delivery{"Stored request_delivery"}
     Delivery -- "queue" --> Queue["Keep notification in AgentTeam inbox<br/>Wait for next normal discussion"]
     Delivery -- "wake" --> Wake["Schedule governance discussion immediately"]
     Queue --> TeamLock["Wait for the same discussion_lock used by normal and emergency sessions"]
     Wake --> TeamLock
-    AgentWorker --> AgentLock["Wait for that Agent's invocation lock"]
+    AgentWorker --> AgentLock["Use that Agent's normal invocation lock,<br/>instructions, memory, and tools"]
 ```
 
 Scheduling is deduplicated by `request_id + principal`.
@@ -180,6 +180,7 @@ sequenceDiagram
     participant Broker as NegotiationBroker
     participant Team as Approval AgentTeam
     participant Members as Frozen Active Members
+    participant Inbox as Personal Agent Inboxes
     participant DB as Single SQLite Writer
 
     Broker->>Team: Claim Approval as PROCESSING
@@ -189,18 +190,29 @@ sequenceDiagram
     Team->>Members: Run formal governance discussion
     alt Discussion, audit, or member reasoning fails
         Team-->>Broker: Incomplete decision
-        Broker->>DB: Restore Approval and Request to PENDING
+        Broker->>DB: Restore this Approval to PENDING; preserve other active claims
     else Discussion succeeds
-        Team->>Members: Request one strict final JSON ballot from every frozen member
-        Members-->>Team: {"approved": true|false, "reason": "..."}
+        Team->>DB: Persist frozen GovernanceRound and voting emails
+        Team->>Inbox: Deliver one email per frozen member
+        Team->>Team: Release discussion_lock without waiting for replies
+        Inbox->>Members: Detached ordinary notice identifies open and submit tools
+        Note over Inbox,Members: Same continuing identity, personal instructions, memory, and invocation lock
+        opt Agent voluntarily opens the email
+            Members->>Inbox: open_agent_mail(message_id)
+            Inbox-->>Members: Public request and exact round schema
+        end
+        opt Agent independently chooses to vote
+            Members->>DB: submit_governance_choice(round_id, choice)
+            Note over Members,DB: Strict boolean choice; accepted ballot immutable and idempotent
+        end
         alt Membership changed or any ballot is missing/invalid
-            Team-->>Broker: PENDING
+            DB-->>Broker: PENDING; missing reply is not consent
         else Strictly more than half true
-            Team-->>Broker: APPROVED with durable ballots
+            DB-->>Broker: APPROVED with complete durable ballots
         else Strictly more than half false
-            Team-->>Broker: DENIED with durable ballots
+            DB-->>Broker: DENIED with complete durable ballots
         else Tie
-            Team-->>Broker: PENDING with durable ballots
+            DB-->>Broker: TIED round; Approval remains PENDING
         end
     end
 ```
@@ -208,6 +220,14 @@ sequenceDiagram
 Strings, numbers, null, missing fields, and extra fields are invalid ballots.
 
 Every frozen member must produce a valid ballot before a majority can become authoritative.
+
+Reading or marking an email read never votes, and voting never changes its read receipt.
+
+An unanswered Approval returns to `PENDING`, but its Request remains `PROCESSING` while another principal still holds an active claim.
+
+Unanswered eligible rounds remain discoverable through `list_governance_requests()` even after their emails are read.
+
+Changed membership or another deliberation after a tie creates a new identified round without rewriting preceding choices.
 
 ## 7. Agent Governance Decision
 
@@ -220,22 +240,31 @@ sequenceDiagram
     autonumber
     participant Broker as NegotiationBroker
     participant Agent as Explicit Agent Principal
+    participant Inbox as Personal Agent Inbox
     participant DB as Single SQLite Writer
 
     Broker->>Broker: Claim Approval as PROCESSING
-    Broker->>Agent: Wait for Agent invocation lock
-    Broker->>Agent: Request strict JSON literal boolean decision
-    alt Explicit literal true
-        Agent-->>Broker: APPROVED
-    else Explicit literal false
-        Agent-->>Broker: DENIED
-    else Invalid JSON, unavailable Agent, model failure, or cancellation
-        Agent-->>Broker: PENDING with reason
+    Broker->>DB: Persist Agent-owned GovernanceRound and email
+    Broker->>Inbox: Deliver voting request
+    Inbox->>Agent: Detached normal-context notice under Agent invocation lock
+    opt Agent voluntarily opens and answers
+        Agent->>Inbox: open_agent_mail(message_id)
+        Inbox-->>Agent: Public request and strict choice schema
+        Agent->>DB: submit_governance_choice(round_id, choice)
+    end
+    alt Explicit valid literal true
+        DB-->>Broker: APPROVED
+    else Explicit valid literal false
+        DB-->>Broker: DENIED
+    else Unanswered, invalid choice, unavailable Agent, model failure, or cancellation
+        DB-->>Broker: PENDING with reason
     end
     Broker->>DB: Commit resulting Approval state
 ```
 
 Root AI approvals use this exact Agent path without a special Root principal type.
+
+No temporary AgentTeam, generic ballot persona, or alternate memory chain is created for Root.
 
 ## 8. Approval Completion, Denial, and STALE Successors
 
@@ -372,20 +401,20 @@ Revocation does not delete historical requests, approvals, ballots, Agreements, 
 
 ## 12. Persistence, Restore, and Shutdown
 
-Schema 10 retains the communication request, ordered approval, ballot, Agreement, peer-delivery, and correlated AgentTeam inbox records introduced with the autonomous communication model.
+Schema 11 retains communication requests, ordered approvals, Agreements, deliveries, and correlated AgentTeam inboxes, and adds explicit personal-email voting rounds, append-only choices, and durable migration requests.
 
 ```mermaid
 flowchart TD
     Open["Open SQLite state database"] --> Preflight["Read schema version before create_all or DDL"]
-    Preflight --> Version{"Schema version is 9?"}
+    Preflight --> Version{"Schema version is 11?"}
     Version -- "No" --> Reject["StateRestoreError<br/>Database remains unmodified"]
     Version -- "Yes" --> Stage["Read into detached staging manager and staged DocLib root"]
-    Stage --> Validate["Validate endpoints, initiators, principal kinds and references,<br/>approval ordering and state combinations,<br/>ballots, fingerprints, successor chains,<br/>Agreement uniqueness and source requests,<br/>delivery routes and inbox correlation"]
+    Stage --> Validate["Validate endpoints, initiators, principal kinds and references,<br/>approval ordering, frozen rounds, and explicit tallies,<br/>personal emails, fingerprints, successor chains,<br/>Agreement uniqueness and source requests,<br/>delivery routes and inbox correlation"]
     Validate --> Valid{"All invariants valid?"}
     Valid -- "No" --> Preserve["StateRestoreError<br/>Original manager and DocLibs remain unchanged"]
-    Valid -- "Yes" --> Reset["Reset persisted PROCESSING Request and Approval states to PENDING"]
+    Valid -- "Yes" --> Reset["Reset communication PROCESSING states to PENDING<br/>expire interrupted failover attempts"]
     Reset --> Publish["Atomically publish staged runtime state and DocLib directories"]
-    Publish --> Resume["Resume pending Root Agent workers and wake-mode AgentTeam work"]
+    Publish --> Resume["Resume ordinary personal notifications,<br/>pending decisions, and wake-mode AgentTeam work"]
 
     Shutdown["manager.close()"] --> Stop["Stop accepting new tasks and cancel external LLM waits"]
     Stop --> Release["Reset claimed PROCESSING Approvals to PENDING"]

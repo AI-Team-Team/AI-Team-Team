@@ -75,7 +75,9 @@ class RuntimeAPI:
     def register_tools_context(self, context: Dict[str, Any]):
         return self._runtime.register_tools_context(context)
 
-    def get_available_tools(self, team: AgentTeam, agent: Optional[Agent] = None) -> Dict[str, Any]:
+    def get_available_tools(
+        self, team: Optional[AgentTeam], agent: Optional[Agent] = None
+    ) -> Dict[str, Any]:
         return self._runtime.get_available_tools(team, agent)
 
     def probe_native_tool_capability(

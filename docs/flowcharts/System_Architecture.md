@@ -24,7 +24,7 @@ flowchart TB
         Root["Root AI Agent<br/>stable Agent UUID and root governance principal"]
         AgentRegistry["Agent Registry<br/>active, retained, archived identities"]
         AgentState["Agent-Owned State<br/>identity role, instructions, model binding,<br/>memory, locks, lifecycle, Private DocLib ID"]
-        AgentInbox["Persistent Agent Inbox<br/>identity-addressed invitations and results"]
+        AgentInbox["Persistent Agent Inbox<br/>invitations, voting emails, and results"]
         Membership["Role-Neutral Membership Relation<br/>team_id ↔ agent_id only"]
         TeamRegistry["AgentTeam Registry<br/>creator, members, parent, children, purpose"]
         Topology["Recursive AgentTeam Lineage<br/>top-level, child, and descendant teams"]
@@ -163,15 +163,15 @@ flowchart TB
         CommRequest["CommunicationRequest<br/>immutable policy snapshot, ordered principals,<br/>route fingerprint, PENDING or PROCESSING"]
         ApprovalRecords["Per-Principal Approvals and Agent Ballots<br/>pending, processing, approved, denied, cancelled"]
         DeliveryMode{"Request Delivery<br/>queue or wake"}
-        PrincipalDecision["Explicit Principal Decision<br/>AgentTeam full-member ballot or Root Agent decision"]
+        PrincipalDecision["Explicit Principal Decision<br/>personal-email choices with continuing Agent memory"]
         PathCheck["Final Route Revalidation<br/>changed route → STALE and successor Request"]
         Agreement["Directional CommunicationAgreement<br/>one-way or bidirectional, endpoint-revocable"]
         PeerMessage["Idempotent Peer Message Delivery<br/>durable message and recipient inbox record"]
         MigrationPolicy{"Migration Policy<br/>permissive, ancestor approval, lineage path"}
-        MigrationDecision["Explicit Migration Principals<br/>AgentTeam ballot or Root Agent decision"]
+        MigrationDecision["Durable Pending Migration<br/>explicit principals and personal-email rounds"]
         MigrationCommit["Revalidate lineage, cycle, parent, and limit<br/>then atomically relink topology"]
         FailoverPolicy{"Failover Policy<br/>auto, parent, none"}
-        ParentResourceDecision["Parent AgentTeam Model Ballot<br/>or Root Agent model decision"]
+        ParentResourceDecision["Bounded Parent Model-Choice Attempt<br/>complete personal-email ballots or explicit Root choice"]
 
         ToolExecutor --> MembershipProposal
         MembershipProposal --> TeamStateLock
@@ -269,7 +269,7 @@ flowchart TB
         Materialize["Background Materialization<br/>deep copy, JSON serialization, ORM record assembly"]
         Coordinator["Single-Writer Coordinator<br/>one executing delta plus one coalesced pending delta"]
         Lease["Exclusive Cross-Process Writer Lease<br/>second writer fails immediately"]
-        Database[(SQLite Schema 10<br/>foreign keys, WAL, busy timeout, optional FTS5)]
+        Database[(SQLite Schema 11<br/>foreign keys, WAL, busy timeout, optional FTS5)]
         RestoreRead["Read Schema Version Before Mutation<br/>load all records into detached staging"]
         RestoreValidate["Strict Restore Validation<br/>identity, topology, model aliases, governance,<br/>memory ownership/digests, DocLibs, ACL, links"]
         RestoreFiles["Stage DocLib Files in Temporary Directories"]

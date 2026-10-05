@@ -245,6 +245,14 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
   Lets the initiating Agent approve or deny one pending late join against the exact current proposal revision.
 * **`list_agent_inbox(agent_id, *, unread_only=True) -> list[AgentInboxMessage]`** / **`await mark_agent_inbox_read(agent_id, message_ids=None) -> int`**
   Provides trusted-host access to persistent notifications owned by a stable Agent identity.
+* **`open_agent_mail(message_id: str, *, actor: Agent) -> dict`**
+  Inspects an email addressed to that Agent, including its public governance request, without marking it read or supplying a choice.
+* **`list_governance_requests(*, actor: Agent, pending_only: bool = True) -> list[dict]`**
+  Lists that Agent's rounds and unanswered eligible requests independently of email read state.
+* **`await submit_governance_choice(round_id: str, choice: dict, *, actor: Agent) -> GovernanceSubmissionResult`**
+  Requires the actor's current tool-invocation context and records one immutable strict boolean or eligible model-alias choice for the exact round.
+* **`await execute_agent_interaction(agent: Agent, prompt: str, *, team: Optional[AgentTeam] = None) -> AgentTurnResult`**
+  Runs an ordinary serialized personal turn with continuing instructions and memory; `team=None` grants no AgentTeam authority and creates no artificial team.
 
 * **`await execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
   Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits. Sessions for the same team, including emergency sessions, wait on one serial lock; different teams may run concurrently.
@@ -252,8 +260,10 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
   Returns the structured discussion ID, `COMPLETED` or `PARTIAL` status, transcript, per-round `AgentTurnResult` values, and dual-axis `AuditResult`.
 * **`render_topology_tree() -> str`**
   Renders the active hierarchical agent team lineage as an indented ASCII tree.
-* **`negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> Tuple[bool, str]`**
-  Arbitrates migration through explicit AgentTeam and Root Agent principals, revalidates the topology under its mutation lock, updates structure atomically, and broadcasts alerts.
+* **`await negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> MigrationOperationResult`**
+  Returns a durable request ID with `PENDING` while explicit principals deliberate and submit personal-email choices, or a terminal `EXECUTED`, `DENIED`, or `STALE` result after topology revalidation.
+* **`inspect_migration_request(request_id: str) -> MigrationRequest`**
+  Returns a detached copy of a durable migration request for trusted-host inspection.
 * **`await save_state(path: Optional[str] = None, full: bool = True)`**
   Queues and waits for a versioned snapshot commit.
 * **`await load_state(path: str)`**
@@ -457,6 +467,13 @@ These tools are automatically registered and bound to all agent teams by default
   Creates and synchronously discusses an all-new child AgentTeam when no existing identity participates. If existing Agent IDs or initiator self-membership are requested, it returns `PENDING_RESPONSES` with a persistent formation request instead; no team or DocLib is created and the first discussion is deferred until after a successful formation commit.
 * **`list_agent_inbox(unread_only: bool = True) -> str`** / **`mark_agent_inbox_read(message_ids: Optional[List[str]] = None) -> str`**
   Lists or acknowledges persistent notifications for the current invocation-scoped Agent identity.
+* **`open_agent_mail(message_id: str) -> JSON`**
+  Opens only the current Agent's own email and expands its governance round without changing its read receipt or voting.
+* **`submit_governance_choice(round_id: str, choice: BooleanGovernanceChoice | ModelGovernanceChoice) -> JSON`**
+  Submits `{"approved": true | false, "reason": "..."}` for communication or migration, or `{"model_alias": "eligible-alias", "reason": "..."}` for parent failover.
+  Only explicit strictly validated choices count; repeated identical submissions return `ALREADY_SUBMITTED`, changed accepted ballots are rejected, and obsolete rounds return `CLOSED`.
+* **`list_governance_requests(pending_only: bool = True) -> JSON`**
+  Lists the current Agent's eligible rounds, including outstanding requests whose emails have already been marked read.
 * **`discuss_team_formation_proposal(objective: str, request_id: Optional[str] = None) -> str`** / **`inspect_team_formation_draft(draft_id: str) -> str`** / **`retry_team_formation_draft(draft_id: str) -> str`** / **`publish_team_formation_draft(draft_id: str) -> str`**
   Lets the current Agent schedule, inspect, retry, and explicitly publish its own detached advisory formation draft.
 * **`inspect_team_formation(request_id: str) -> str`** / **`revise_team_formation(request_id: str, base_revision: int, changes: TeamFormationRevisionPatch) -> str`**
@@ -502,8 +519,10 @@ These tools are automatically registered and bound to all agent teams by default
 
 ### Reorganization
 
-* **`request_migration(target_parent_id: str, rationale: str) -> str`**
-  Requests to migrate the caller's team to a new parent in the hierarchy, audited by the configured `migration_policy`.
+* **`request_migration(target_parent_id: str, rationale: str) -> JSON`**
+  Requests to migrate the current invocation-scoped team under the configured policy and returns a durable `request_id` with `PENDING` instead of synchronously waiting for another Agent's approval.
+* **`inspect_migration_request(request_id: str) -> JSON`**
+  Lets the moving, target, or original-parent AgentTeam inspect its request without deciding for another approval principal.
 
 ### Selective Episodic Memory
 

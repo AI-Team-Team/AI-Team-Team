@@ -315,9 +315,10 @@ class TextReactReasoningStrategy(BaseReasoningStrategy):
             )
         finally:
             _scrub_private_window_messages(agent)
-            team.set_status(agent.name, "Idle")
+            if team is not None:
+                team.set_status(agent.name, "Idle")
             if manager:
                 manager._emit_callback("on_status_change", agent.name, "Idle")
                 manager._auto_save(
-                    agents={agent.agent_id}, teams={team.team_id}
+                    agents={agent.agent_id}, teams={team.team_id} if team else set()
                 )

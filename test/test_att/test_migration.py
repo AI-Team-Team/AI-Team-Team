@@ -11,6 +11,9 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from ai_team_team import ATTManager, Agent, ATTConfig
+from test.governance_client import PersonalGovernanceClient
+import asyncio
+import json
 
 class TestATTMigration(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -21,17 +24,11 @@ class TestATTMigration(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(os.chdir, self._test_old_cwd)
         self.addCleanup(shutil.rmtree, self._test_tmpdir, ignore_errors=True)
 
-        self.mock_client = MagicMock()
-        async def governance_generate(prompt=None, require_json=False, **kwargs):
-            if require_json:
-                if "is_healthy" in str(prompt):
-                    return '{"is_healthy": true, "reason": "Healthy"}'
-                return '{"approved": true, "reason": "Approved by Arbiter"}'
-            return "Final Answer: The migration is appropriate."
-
-        self.mock_client.generate = governance_generate
+        self.mock_client = PersonalGovernanceClient()
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
         self.manager = ATTManager(root_ai=self.root_ai)
+        self.manager.register_llm_client("default", self.mock_client)
+        self.addAsyncCleanup(self.manager.close)
 
     async def test_negotiate_and_execute_migration(self):
         """Verify that team migration updates parent-child relationships, dispatches alerts, and enforces count limits."""
@@ -54,9 +51,14 @@ class TestATTMigration(unittest.IsolatedAsyncioTestCase):
         
         # Call migration tool
         res = await c1.tools["request_migration"](t2.team_id, "Need to align with P2 objectives")
+        handle = json.loads(res)
+        self.assertEqual(handle["status"], "PENDING")
+        async with asyncio.timeout(10):
+            while self.manager.inspect_migration_request(handle["request_id"]).status == "PENDING":
+                await asyncio.sleep(0.01)
         await self.manager.flush_callbacks()
         
-        self.assertIn("Success", res)
+        self.assertEqual(self.manager.inspect_migration_request(handle["request_id"]).status, "EXECUTED")
         self.assertEqual(c1.parent_team, t2)
         self.assertEqual(c1.depth, 2)
         self.assertIn(c1, t2.child_teams)
@@ -77,8 +79,8 @@ class TestATTMigration(unittest.IsolatedAsyncioTestCase):
         
         # Verify migration limit enforcement (max limit is 1)
         res_limit = await c1.tools["request_migration"](t1.team_id, "Migrate back")
-        self.assertIn("Error", res_limit)
-        self.assertIn("Maximum migrations", res_limit)
+        self.assertEqual(json.loads(res_limit)["status"], "DENIED")
+        self.assertIn("migration limit", json.loads(res_limit)["reason"])
         
     async def test_migration_circular_check(self):
         """Verify that circular migrations (migrating under own descendant) are blocked."""

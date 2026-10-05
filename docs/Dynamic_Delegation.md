@@ -91,7 +91,8 @@ The available tool set is resolved for every invocation. `dispatch_subagent` and
 * **`initiate_membership_vote(action: str, target: str, rationale: str, initiator_type: str = "individual", proposed_details: dict = None) -> str`**: Initiates a democratic membership proposal to add/remove a member.
 * **`cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str`**: Casts a vote ("Agree", "Disagree", or "Abstain") on an active membership proposal. If `public` is set to `False`, the ballot is cast anonymously, hiding the voter's identity in the team discussion context.
 * **`retract_membership_vote(proposal_id: str) -> str`**: Allows the initiator of an active proposal to withdraw it.
-* **`request_migration(target_parent_id: str, rationale: str) -> str`**: Requests to migrate the caller's team. The configured migration policy uses explicit AgentTeam principals and the Root Agent at the topology root, then revalidates the topology atomically before committing.
+* **`request_migration(target_parent_id: str, rationale: str) -> JSON`**: Returns a durable migration request ID and `PENDING` while explicit AgentTeam or Root principals submit personal-email choices under the configured policy; successful approval still requires atomic topology revalidation.
+* **`inspect_migration_request(request_id: str) -> JSON`**: Lets the moving, target, or original-parent AgentTeam inspect pending or terminal migration progress.
 * **`create_doc_library(name: str, description: str, is_public: bool) -> str`**: Creates a new document library owned by the caller's team.
 * **`update_library_metadata(lib_id: str, description: Optional[str], is_public: Optional[bool]) -> str`**: Updates metadata or visibility of a library owned by the caller's team.
 * **`list_public_libraries() -> str`**: Lists all document libraries registered as publicly visible.

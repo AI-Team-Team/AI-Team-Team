@@ -716,12 +716,12 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         )
         formed_team = self.manager.teams[result.team_id]
         self.manager.config.migration_policy = "permissive"
-        migrated, reason = await self.manager.negotiate_and_execute_migration(
+        result = await self.manager.negotiate_and_execute_migration(
             formed_team,
             target_parent,
             "Move the established AgentTeam.",
         )
-        self.assertTrue(migrated, reason)
+        self.assertEqual(result.status, "EXECUTED", result.reason)
         self.assertIs(formed_team.parent_team, target_parent)
         self.assertEqual(request.parent_team_id, original_parent.team_id)
         await self.manager.save_state()

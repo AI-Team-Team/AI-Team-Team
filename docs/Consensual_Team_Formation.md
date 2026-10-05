@@ -134,4 +134,12 @@ Revision, response, explicit creation, automatic creation, abandonment, and late
 
 Creation stages new Agents, Private DocLibs, the Team DocLib, and initial files outside the live registries. It revalidates under the creation locks, publishes topology and files as one operation, commits the authoritative state before returning `CREATED`, and restores runtime, inbox, formation, and filesystem state if persistence fails.
 
-Persistence schema 10 stores Agent inbox messages, current formation projections, immutable revision snapshots, append-only invitation decisions, detached drafts, timestamps, completion policy, late-join policy, and the resulting team reference. Restore validates complete contiguous revision history, exact fingerprints and material fields, creator provenance, decision-to-revision membership, draft publication provenance, and every related identity reference in detached staging; malformed data raises `StateRestoreError` without changing the current manager or its Agent inboxes and DocLibs.
+Persistence schema 11 stores Agent inbox messages, current formation projections, immutable revision snapshots, append-only invitation decisions, detached drafts, timestamps, completion policy, late-join policy, and the resulting team reference.
+
+Restore validates complete contiguous revision history, exact fingerprints and material fields, creator provenance, decision-to-revision membership, draft publication provenance, and every related identity reference in detached staging; malformed data raises `StateRestoreError` without changing the current manager or its Agent inboxes and DocLibs.
+
+Personal inbox delivery, opening, and read receipts remain independent of all four formation attitudes.
+
+Marking an invitation read never changes its public attitude, and responding with `accepted`, `declined`, `explicitly_ignored`, or `None` never marks the email read.
+
+Personal-email governance for communication, migration, and failover uses its own choice schemas rather than replacing or reinterpreting this formation vocabulary.

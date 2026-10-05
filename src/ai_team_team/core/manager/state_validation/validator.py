@@ -7,6 +7,7 @@ from .agents import validate_agents
 from .libraries import validate_libraries
 from .memory import validate_memory_state
 from .formations import validate_formations
+from .governance import validate_governance
 from .payload import parse_state_validation_payload
 from .permissions import validate_permissions_and_links
 from .teams import validate_teams
@@ -41,6 +42,7 @@ class SnapshotValidationMixin:
             team_ids,
         )
         validate_memory_state(payload, agent_ids, team_ids)
+        validate_governance(payload, agent_ids, team_ids, root_id)
         manager._validate_communication_state(
             payload.communication_requests,
             payload.communication_approvals,

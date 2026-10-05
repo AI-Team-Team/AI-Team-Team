@@ -71,7 +71,7 @@ def capture_memory_records(manager: Any, dirty: Dict[str, Any]) -> Dict[str, lis
 
 
 def collect_memory_identity_dependencies(
-    manager: Any, records: Dict[str, list]
+    manager: Any, records: Dict[str, list], *, extra_agents=(), extra_teams=()
 ) -> tuple[set[str], set[str]]:
     """Include insert-only identity and provenance targets, not historical event owners."""
     agent_ids = {
@@ -85,6 +85,8 @@ def collect_memory_identity_dependencies(
         for record in records[key]
         if record["origin_team_id"] is not None
     }
+    agent_ids.update(extra_agents)
+    team_ids.update(extra_teams)
     pending_agents = list(agent_ids)
     pending_teams = list(team_ids)
     seen_agents: set[str] = set()

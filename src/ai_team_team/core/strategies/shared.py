@@ -97,7 +97,7 @@ def _append_agent_message(
 ) -> None:
     """Records a message with its invocation-scoped team and discussion."""
     enriched = dict(message)
-    enriched["team_id"] = team.team_id
+    enriched["team_id"] = getattr(team, "team_id", None)
     discussion_id = (
         manager._active_discussion_id.get() if manager else None
     )
@@ -134,7 +134,7 @@ def _append_transient_window_message(
     """Keeps one observation for this invocation without persisting its body."""
     actual = dict(message)
     actual["content"] = f"{marker}\n{actual.get('content', '')}"
-    actual["team_id"] = team.team_id
+    actual["team_id"] = getattr(team, "team_id", None)
     actual["discussion_id"] = (
         manager._active_discussion_id.get() if manager else None
     )
@@ -214,7 +214,8 @@ def _redact_private_tool_calls(
 
 async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: Any) -> str:
     """Prepares the agent context, memory compression, transition notice, and returns the identity header."""
-    team.set_status(agent.name, "Thinking...")
+    if team is not None:
+        team.set_status(agent.name, "Thinking...")
     if manager:
         manager._emit_callback("on_status_change", agent.name, "Thinking...")
 
@@ -285,15 +286,20 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
     )
     autonomy_text = "\n".join(autonomy_lines) + "\n"
 
+    team_context = (
+        f"- **Current AgentTeam**: {team.team_id} (Preset: {team.preset_name})\n"
+        f"- **Team Purpose**: {team.team_purpose}\n"
+        f"- **AT Delegation Depth**: {team.depth} / {max_depth}\n"
+        if team is not None
+        else "- **Current Context**: Personal interaction; no AgentTeam authority.\n"
+    )
     identity_header = (
         f"## AGENT IDENTITY PROFILE\n"
         f"- **Identity Role**: {agent.role}\n"
         f"{role_desc_str}"
         f"- **Agent Name**: {agent.name}\n"
-        f"- **Current AgentTeam**: {team.team_id} (Preset: {team.preset_name})\n"
-        f"- **Team Purpose**: {team.team_purpose}\n"
-        f"- **Current Objective**: Cooperate in team tasks.\n"
-        f"- **AT Delegation Depth**: {team.depth} / {max_depth}\n"
+        f"{team_context}"
+        f"- **Current Objective**: Continue your work as the same individual.\n"
         f"{peer_context}"
         f"{experts_str}"
         f"{autonomy_text}"
@@ -304,22 +310,21 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
         identity_header += manager._memory.retained_context(agent.agent_id)
 
     current_context = {
-        "team_id": team.team_id,
-        "preset_name": team.preset_name,
-        "team_purpose": team.team_purpose,
+        "team_id": getattr(team, "team_id", None),
+        "preset_name": getattr(team, "preset_name", None),
+        "team_purpose": getattr(team, "team_purpose", None),
         "role": agent.role,
         "role_description": getattr(agent, "role_description", ""),
         "system_instructions": getattr(agent, "system_instructions", ""),
         "tools": sorted(visible_tools)
     }
-    if agent.last_context and agent.last_context.get("team_id") != team.team_id:
+    if agent.last_context and agent.last_context.get("team_id") != current_context["team_id"]:
         notice = (
             f"*** TRANSITION NOTICE: ACTIVE TEAM UPDATE ***\n"
-            f"You have transitioned to work with another team group:\n"
-            f"- Active Team: {team.team_id} (Preset: {team.preset_name})\n"
-            f"- Team Purpose: {team.team_purpose}\n"
+            f"Your current activity has changed:\n"
+            f"{team_context}"
             f"- Your Identity Role: {agent.role}\n"
-            f"Please continue your work and cooperate in this team based on your prior memory."
+            f"Please continue this activity based on your prior memory."
         )
         _append_agent_message(
             agent, {"role": "system", "content": notice}, team, manager
@@ -373,7 +378,8 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
             )
             summary_text = summary_text.strip()
         except Exception as e:
-            team.logger.warning(f"Memory compression summarization failed: {e}. Using a generic fallback summary.")
+            logger = team.logger if team is not None else manager.logger
+            logger.warning(f"Memory compression summarization failed: {e}. Using a generic fallback summary.")
             summary_text = "Early execution history compressed due to context limits."
 
         archive_message = {
@@ -429,7 +435,7 @@ def _turn_result(
 ) -> AgentTurnResult:
     return AgentTurnResult(
         agent_id=agent.agent_id,
-        team_id=team.team_id,
+        team_id=getattr(team, "team_id", None),
         turn_id=(manager._active_agent_turn_id.get() if manager else None),
         discussion_id=(
             manager._active_discussion_id.get() if manager else None
@@ -464,7 +470,7 @@ def _record_tool_result(
         return
     payload = {
         "agent_id": agent.agent_id,
-        "team_id": team.team_id,
+        "team_id": getattr(team, "team_id", None),
         "discussion_id": manager._active_discussion_id.get(),
         "tool_name": result.name,
         "status": result.status.value,
@@ -474,7 +480,7 @@ def _record_tool_result(
     manager.logger.info(
         "Tool invocation failed: agent=%s team=%s tool=%s status=%s attempts=%s",
         agent.agent_id,
-        team.team_id,
+        getattr(team, "team_id", None),
         result.name,
         result.status.value,
         result.attempts,

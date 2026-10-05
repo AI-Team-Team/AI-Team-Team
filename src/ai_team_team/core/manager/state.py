@@ -42,6 +42,8 @@ class StateCoordinator:
             "communication_approvals": set(),
             "communication_agreements": set(),
             "peer_messages": set(),
+            "governance_rounds": set(),
+            "migration_requests": set(),
             "memory_events": set(),
             "memory_segments": set(),
             "memory_cards": set(),
@@ -78,6 +80,8 @@ class StateCoordinator:
             "communication_approvals",
             "communication_agreements",
             "peer_messages",
+            "governance_rounds",
+            "migration_requests",
             "memory_events",
             "memory_segments",
             "memory_cards",
@@ -119,6 +123,8 @@ class StateCoordinator:
             or dirty["communication_approvals"]
             or dirty["communication_agreements"]
             or dirty["peer_messages"]
+            or dirty["governance_rounds"]
+            or dirty["migration_requests"]
             or dirty["memory_events"]
             or dirty["memory_segments"]
             or dirty["memory_cards"]
@@ -161,6 +167,8 @@ class StateCoordinator:
         communication_approvals: Optional[set[str]] = None,
         communication_agreements: Optional[set[str]] = None,
         peer_messages: Optional[set[str]] = None,
+        governance_rounds: Optional[set[str]] = None,
+        migration_requests: Optional[set[str]] = None,
         memory_events: Optional[set[str]] = None,
         memory_segments: Optional[set[str]] = None,
         memory_cards: Optional[set[str]] = None,
@@ -194,6 +202,8 @@ class StateCoordinator:
         dirty["communication_approvals"].update(communication_approvals or set())
         dirty["communication_agreements"].update(communication_agreements or set())
         dirty["peer_messages"].update(peer_messages or set())
+        dirty["governance_rounds"].update(governance_rounds or set())
+        dirty["migration_requests"].update(migration_requests or set())
         dirty["memory_events"].update(memory_events or set())
         dirty["memory_segments"].update(memory_segments or set())
         dirty["memory_cards"].update(memory_cards or set())

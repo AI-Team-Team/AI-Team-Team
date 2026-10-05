@@ -213,6 +213,8 @@ class PersistenceCoordinator:
             ("formation_revisions", "revision_id"),
             ("formation_decisions", "decision_id"),
             ("formation_drafts", "draft_id"),
+            ("governance_rounds", "round_id"),
+            ("migration_requests", "request_id"),
             ("memory_events", "event_id"),
             ("memory_segments", "segment_id"),
             ("memory_cards", "memory_id"),

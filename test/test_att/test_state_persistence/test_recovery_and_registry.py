@@ -1,25 +1,20 @@
+import asyncio
+
+from ai_team_team import ParentApprovalCommunicationConfig
+from test.governance_client import governance_action
 from test.test_att.test_state_persistence._support import (
     ATTConfig,
     ATTManager,
     Agent,
     AgentTeam,
-    AgreementDirection,
-    ApprovalPrincipal,
     AsyncMock,
-    CommunicationAgreement,
-    CommunicationApproval,
-    CommunicationApprovalStatus,
-    CommunicationRequest,
-    CommunicationRequestStatus,
     DocumentLibrary,
     MagicMock,
     StatePersistenceTestCase,
     json,
     os,
-    route_fingerprint,
     shutil,
     sqlite3,
-    time,
 )
 
 
@@ -93,46 +88,26 @@ class TestStatePersistence(StatePersistenceTestCase):
         team_parent.doc_library.write_file("readme.md", "Parent Readme Content")
         team_child.doc_library.write_file("child_docs/spec.txt", "Child Spec Content")
         
-        # Setup proposals & inbox & broker agreements
+        # Build a real governed channel with accepted personal-email choices.
+        original_generate = self.mock_react_client.generate
+
+        async def governance_generate(prompt, **kwargs):
+            return governance_action(prompt) or await original_generate(prompt, **kwargs)
+
+        self.mock_react_client.generate = governance_generate
+        self.manager.config.communication = ParentApprovalCommunicationConfig()
+        result = await self.manager.broker.request_peer_communication(
+            team_parent, team_child, team_parent.members[0].agent_id, "Persist a governed channel"
+        )
+        await self.manager.execute_team_discussion(team_parent, "Consider the channel.", rounds=1, skip_audit=True)
+        async with asyncio.timeout(5):
+            while self.manager._emergency_tasks:
+                await asyncio.gather(*tuple(self.manager._emergency_tasks))
+                await asyncio.sleep(0)
+        self.assertEqual(self.manager.broker.communication_requests[result.request_id].status.value, "APPROVED")
+        agreement = next(iter(self.manager.broker.agreements.values()))
+        self.mock_react_client.generate = original_generate
         team_parent.receive_message({"from": "Child", "type": "escalation", "payload": "Help needed"})
-        
-        principal = ApprovalPrincipal(
-            kind="agent", principal_id=self.root_ai.agent_id
-        )
-        resolved_at = time.time()
-        request = CommunicationRequest(
-            sender_team_id=team_parent.team_id,
-            recipient_team_id=team_child.team_id,
-            initiated_by_agent_id=self.root_ai.agent_id,
-            rationale="Persist a governed channel",
-            direction=AgreementDirection.BIDIRECTIONAL,
-            policy_snapshot={
-                "policy": "parent_approval",
-                "request_delivery": "queue",
-                "direction": "bidirectional",
-            },
-            approval_principals=[principal],
-            route_fingerprint=route_fingerprint([principal]),
-            status=CommunicationRequestStatus.APPROVED,
-            resolved_at=resolved_at,
-        )
-        approval = CommunicationApproval(
-            request_id=request.request_id,
-            principal=principal,
-            sequence=0,
-            status=CommunicationApprovalStatus.APPROVED,
-            resolved_at=resolved_at,
-        )
-        agreement = CommunicationAgreement(
-            source_team_id=team_parent.team_id,
-            target_team_id=team_child.team_id,
-            direction=AgreementDirection.BIDIRECTIONAL,
-            created_from_request_id=request.request_id,
-            policy_snapshot=request.policy_snapshot,
-        )
-        self.manager.broker.communication_requests[request.request_id] = request
-        self.manager.broker.communication_approvals[approval.key] = approval
-        self.manager.broker.agreements[agreement.agreement_id] = agreement
         
         # Proposal
         team_parent.proposals["prop-123"] = {

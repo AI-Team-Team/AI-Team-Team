@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from typing import Any, List, Optional
 
 from ..communication import (
@@ -58,6 +59,9 @@ class BrokerRequestMixin:
         for principal in request.approval_principals:
             if principal.kind != "agent_team":
                 continue
+            approval = self.communication_approvals.get(f"{request.request_id}:{principal.key}")
+            if approval is None or approval.status not in {CommunicationApprovalStatus.PENDING, CommunicationApprovalStatus.PROCESSING}:
+                continue
             team = self.manager.teams.get(principal.principal_id)
             if team is None:
                 continue
@@ -102,6 +106,10 @@ class BrokerRequestMixin:
         initiated_by_agent_id: str,
         rationale: str,
     ) -> CommunicationOperationResult:
+        if self.manager._closing or self.manager._restore_in_progress:
+            raise RuntimeError(
+                "ATTManager rejects communication requests during shutdown or restore."
+            )
         self._validate_endpoints_and_actor(
             sender, recipient, initiated_by_agent_id
         )
@@ -206,17 +214,18 @@ class BrokerRequestMixin:
 
     def _track_task(self, key: str, coroutine: Any) -> None:
         existing = self._approval_tasks.get(key)
-        if existing is not None and not existing.done():
+        if self.manager._closing or existing is not None and not existing.done():
             close = getattr(coroutine, "close", None)
             if close is not None:
                 close()
             return
-        task = asyncio.create_task(coroutine, name=f"att-approval-{key}")
+        task = asyncio.create_task(coroutine, name=f"att-approval-{key}", context=contextvars.Context())
         self._approval_tasks[key] = task
         self.manager._emergency_tasks.add(task)
 
         def completed(done: asyncio.Task[Any]) -> None:
-            self._approval_tasks.pop(key, None)
+            if self._approval_tasks.get(key) is done:
+                self._approval_tasks.pop(key, None)
             self.manager._emergency_tasks.discard(done)
             try:
                 done.result()
@@ -281,4 +290,3 @@ class BrokerRequestMixin:
             f"Rationale: {request.rationale}\n"
             f"Approving principal: {principal.kind}:{principal.principal_id}"
         )
-

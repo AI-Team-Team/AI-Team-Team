@@ -224,6 +224,28 @@ Strict governance discussions require every member turn to complete.
 
 Any incomplete communication, migration, full-member ballot, or parent-failover discussion fails closed and leaves its request or approval pending instead of authorizing from a partial transcript.
 
+### Personal-Inbox Governance Tools
+
+Governance emails are announced through the eligible Agent's ordinary interaction context, using its existing instructions, history, memory, and invocation lock.
+
+`open_agent_mail(message_id)` opens only that Agent's own email and public request without changing the read receipt or supplying a vote.
+
+`submit_governance_choice(round_id, choice)` records an explicit immutable strict boolean or eligible model-alias choice, independently of mailbox state.
+
+`list_governance_requests(pending_only=True)` includes unanswered eligible requests even when their emails are already read.
+
+The Agent may open without choosing, defer a choice, or leave the email unanswered; no missing response becomes consent.
+
+Public requests and submitted reasons join the same ordinary history, while optional episodic memory stays optional and private document content is never automatically loaded for voting.
+
+Personal turns without an AgentTeam expose only identity-scoped tools and do not acquire team permissions or a fabricated team context.
+
+If cancellation or a fatal error interrupts a Native tool batch, unfinished sibling invocations are cancelled and settled before the Agent's invocation lock is released.
+
+Missing tool replies receive a safe interruption marker so the next ordinary interaction retains a valid provider message sequence without assuming that already committed effects were rolled back.
+
+The four team-formation attitudes remain a separate domain vocabulary, and marking a formation email read cannot accept, decline, explicitly ignore, or withdraw a public attitude.
+
 ## 10. Persistence & Serialization
 
 To support complete state recovery and shared-agent provenance, the `AgentMessageModel` table stores structured tool calls plus invocation context:

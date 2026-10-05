@@ -10,6 +10,7 @@ from .communication import (
     PeerMessageModel,
 )
 from .config import ManagerConfigModel
+from .governance import GovernanceBallotModel, GovernanceRoundModel, MigrationRequestModel
 from .libraries import (
     DocLibFileModel,
     DocLibLinkModel,
@@ -52,6 +53,9 @@ __all__ = [
     "LibraryModel",
     "LibraryPermissionModel",
     "ManagerConfigModel",
+    "GovernanceRoundModel",
+    "GovernanceBallotModel",
+    "MigrationRequestModel",
     "MemoryCardSourceEventModel",
     "MemoryCardTagModel",
     "PeerMessageModel",
