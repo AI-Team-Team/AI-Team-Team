@@ -121,7 +121,7 @@ class RestoreTransactionMixin:
                 "library_permissions": manager.library_permissions,
                 "library_links": manager.library_links,
                 "library_files": manager._library_files,
-                "team_parent_map": manager._team_parent_map,
+                "team_parent_map": dict(manager._team_parent_map),
                 "model_configs": manager.model_configs,
                 "presets": manager.presets,
                 "model_token_usage": manager.model_token_usage,
@@ -143,135 +143,138 @@ class RestoreTransactionMixin:
                 "governance_rounds": manager._governance.snapshot(),
                 "migration_requests": [item.model_dump(mode="json") for item in manager._migration.requests.values()],
             }
-            try:
-                manager.config = target_config
-                manager.root_ai = staged.root_ai
-                manager._agent_registry.replace_indexes(
-                    staged.agents,
-                    staged._agents_by_id,
-                )
-                for agent in manager._agents_by_id.values():
-                    agent._manager = manager
-                manager.teams = staged.teams
-                manager.libraries = staged.libraries
-                manager.library_permissions = staged.library_permissions
-                manager.library_links = staged.library_links
-                manager._library_files = staged._library_files
-                manager._team_parent_map = staged._team_parent_map
-                manager.model_configs = staged.model_configs
-                manager.presets = staged.presets
-                manager.model_token_usage = staged.model_token_usage
-                manager.broker.restore(
-                    (
-                        item.model_dump(mode="json")
-                        for item in staged.broker.communication_requests.values()
-                    ),
-                    (
-                        item.model_dump(mode="json")
-                        for item in staged.broker.communication_approvals.values()
-                    ),
-                    (
-                        item.model_dump(mode="json")
-                        for values in staged.broker.ballots.values()
-                        for item in values
-                    ),
-                    (item.model_dump(mode="json") for item in staged.broker.agreements.values()),
-                    (item.model_dump(mode="json") for item in staged.broker.peer_messages.values()),
-                )
-                manager._formations.restore(
-                    (
-                        item.model_dump(mode="json")
-                        for item in staged._formations.requests.values()
-                    ),
-                    (
-                        item.model_dump(mode="json")
-                        for item in staged._formations.invitations.values()
-                    ),
-                    (
-                        item.model_dump(mode="json")
-                        for item in staged._formations.revisions.values()
-                    ),
-                    (
-                        item.model_dump(mode="json")
-                        for item in staged._formations.decisions.values()
-                    ),
-                    (
-                        item.model_dump(mode="json")
-                        for item in staged._formations.drafts.values()
-                    ),
-                    {
-                        agent.agent_id: [dict(message) for message in agent.agent_inbox]
-                        for agent in staged._agents_by_id.values()
-                    },
-                )
-                staged_memory = staged._memory.snapshot()
-                manager._memory.restore(
-                    staged_memory["memory_events"],
-                    staged_memory["memory_segments"],
-                    staged_memory["memory_cards"],
-                    staged_memory["memory_references"],
-                )
-                manager.tools_context["att_manager"] = manager
-                manager._governance.restore(staged._governance.snapshot())
-                manager._migration.restore(item.model_dump(mode="json") for item in staged._migration.requests.values())
-                manager.token_budget.reset_reservations()
-            except Exception:
-                for staged_agent in manager._agents_by_id.values():
-                    if old_state["agents_by_id"].get(staged_agent.agent_id) is not staged_agent:
-                        staged_agent._manager = None
-                manager.config = old_state["config"]
-                manager.root_ai = old_state["root_ai"]
-                manager._agent_registry.replace_indexes(
-                    old_state["agents"],
-                    old_state["agents_by_id"],
-                )
-                for old_agent in manager._agents_by_id.values():
-                    old_agent._manager = manager
-                manager.teams = old_state["teams"]
-                manager.libraries = old_state["libraries"]
-                manager.library_permissions = old_state["library_permissions"]
-                manager.library_links = old_state["library_links"]
-                manager._library_files = old_state["library_files"]
-                manager._team_parent_map = old_state["team_parent_map"]
-                manager.model_configs = old_state["model_configs"]
-                manager.presets = old_state["presets"]
-                manager.model_token_usage = old_state["model_token_usage"]
-                manager.broker.communication_requests = old_state["communication_requests"]
-                manager.broker.communication_approvals = old_state["communication_approvals"]
-                manager.broker.ballots = old_state["communication_ballots"]
-                manager.broker.agreements = old_state["communication_agreements"]
-                manager.broker.peer_messages = old_state["peer_messages"]
-                manager._formations.requests.clear()
-                manager._formations.requests.update(old_state["formation_requests"])
-                manager._formations.invitations.clear()
-                manager._formations.invitations.update(old_state["formation_invitations"])
-                manager._formations.revisions.clear()
-                manager._formations.revisions.update(old_state["formation_revisions"])
-                manager._formations.decisions.clear()
-                manager._formations.decisions.update(old_state["formation_decisions"])
-                manager._formations.drafts.clear()
-                manager._formations.drafts.update(old_state["formation_drafts"])
-                for old_agent in manager._agents_by_id.values():
-                    with old_agent.inbox_lock:
-                        old_agent.agent_inbox = [
-                            dict(message)
-                            for message in old_state["agent_inboxes"].get(
-                                old_agent.agent_id,
-                                [],
-                            )
-                        ]
-                old_memory = old_state["memory"]
-                manager._governance.restore(old_state["governance_rounds"], interrupted=False)
-                manager._migration.restore(old_state["migration_requests"])
-                manager._memory.restore(
-                    old_memory["memory_events"],
-                    old_memory["memory_segments"],
-                    old_memory["memory_cards"],
-                    old_memory["memory_references"],
-                )
-                manager._rollback_published_libraries(published)
-                published = []
-                raise
+            # Readers must see the entire publication or its completed rollback.
+            # Staging and persistence awaits remain outside this synchronous lock.
+            with manager._topology_lock:
+                try:
+                    manager.config = target_config
+                    manager.root_ai = staged.root_ai
+                    manager._agent_registry.replace_indexes(
+                        staged.agents,
+                        staged._agents_by_id,
+                    )
+                    for agent in manager._agents_by_id.values():
+                        agent._manager = manager
+                    manager.teams = staged.teams
+                    manager.libraries = staged.libraries
+                    manager.library_permissions = staged.library_permissions
+                    manager.library_links = staged.library_links
+                    manager._library_files = staged._library_files
+                    manager._topology.replace_parent_map(staged._team_parent_map)
+                    manager.model_configs = staged.model_configs
+                    manager.presets = staged.presets
+                    manager.model_token_usage = staged.model_token_usage
+                    manager.broker.restore(
+                        (
+                            item.model_dump(mode="json")
+                            for item in staged.broker.communication_requests.values()
+                        ),
+                        (
+                            item.model_dump(mode="json")
+                            for item in staged.broker.communication_approvals.values()
+                        ),
+                        (
+                            item.model_dump(mode="json")
+                            for values in staged.broker.ballots.values()
+                            for item in values
+                        ),
+                        (item.model_dump(mode="json") for item in staged.broker.agreements.values()),
+                        (item.model_dump(mode="json") for item in staged.broker.peer_messages.values()),
+                    )
+                    manager._formations.restore(
+                        (
+                            item.model_dump(mode="json")
+                            for item in staged._formations.requests.values()
+                        ),
+                        (
+                            item.model_dump(mode="json")
+                            for item in staged._formations.invitations.values()
+                        ),
+                        (
+                            item.model_dump(mode="json")
+                            for item in staged._formations.revisions.values()
+                        ),
+                        (
+                            item.model_dump(mode="json")
+                            for item in staged._formations.decisions.values()
+                        ),
+                        (
+                            item.model_dump(mode="json")
+                            for item in staged._formations.drafts.values()
+                        ),
+                        {
+                            agent.agent_id: [dict(message) for message in agent.agent_inbox]
+                            for agent in staged._agents_by_id.values()
+                        },
+                    )
+                    staged_memory = staged._memory.snapshot()
+                    manager._memory.restore(
+                        staged_memory["memory_events"],
+                        staged_memory["memory_segments"],
+                        staged_memory["memory_cards"],
+                        staged_memory["memory_references"],
+                    )
+                    manager.tools_context["att_manager"] = manager
+                    manager._governance.restore(staged._governance.snapshot())
+                    manager._migration.restore(item.model_dump(mode="json") for item in staged._migration.requests.values())
+                    manager.token_budget.reset_reservations()
+                except Exception:
+                    for staged_agent in manager._agents_by_id.values():
+                        if old_state["agents_by_id"].get(staged_agent.agent_id) is not staged_agent:
+                            staged_agent._manager = None
+                    manager.config = old_state["config"]
+                    manager.root_ai = old_state["root_ai"]
+                    manager._agent_registry.replace_indexes(
+                        old_state["agents"],
+                        old_state["agents_by_id"],
+                    )
+                    for old_agent in manager._agents_by_id.values():
+                        old_agent._manager = manager
+                    manager.teams = old_state["teams"]
+                    manager.libraries = old_state["libraries"]
+                    manager.library_permissions = old_state["library_permissions"]
+                    manager.library_links = old_state["library_links"]
+                    manager._library_files = old_state["library_files"]
+                    manager._topology.replace_parent_map(old_state["team_parent_map"])
+                    manager.model_configs = old_state["model_configs"]
+                    manager.presets = old_state["presets"]
+                    manager.model_token_usage = old_state["model_token_usage"]
+                    manager.broker.communication_requests = old_state["communication_requests"]
+                    manager.broker.communication_approvals = old_state["communication_approvals"]
+                    manager.broker.ballots = old_state["communication_ballots"]
+                    manager.broker.agreements = old_state["communication_agreements"]
+                    manager.broker.peer_messages = old_state["peer_messages"]
+                    manager._formations.requests.clear()
+                    manager._formations.requests.update(old_state["formation_requests"])
+                    manager._formations.invitations.clear()
+                    manager._formations.invitations.update(old_state["formation_invitations"])
+                    manager._formations.revisions.clear()
+                    manager._formations.revisions.update(old_state["formation_revisions"])
+                    manager._formations.decisions.clear()
+                    manager._formations.decisions.update(old_state["formation_decisions"])
+                    manager._formations.drafts.clear()
+                    manager._formations.drafts.update(old_state["formation_drafts"])
+                    for old_agent in manager._agents_by_id.values():
+                        with old_agent.inbox_lock:
+                            old_agent.agent_inbox = [
+                                dict(message)
+                                for message in old_state["agent_inboxes"].get(
+                                    old_agent.agent_id,
+                                    [],
+                                )
+                            ]
+                    old_memory = old_state["memory"]
+                    manager._governance.restore(old_state["governance_rounds"], interrupted=False)
+                    manager._migration.restore(old_state["migration_requests"])
+                    manager._memory.restore(
+                        old_memory["memory_events"],
+                        old_memory["memory_segments"],
+                        old_memory["memory_cards"],
+                        old_memory["memory_references"],
+                    )
+                    manager._rollback_published_libraries(published)
+                    published = []
+                    raise
             for old_agent in old_state["agents_by_id"].values():
                 if manager._agents_by_id.get(old_agent.agent_id) is not old_agent:
                     old_agent._manager = None

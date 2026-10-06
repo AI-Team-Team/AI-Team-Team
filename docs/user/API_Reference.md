@@ -259,7 +259,13 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 * **`await execute_team_discussion_detailed(team: AgentTeam, prompt: str, rounds: int = 2, skip_audit: bool = False) -> DiscussionResult`**
   Returns the structured discussion ID, `COMPLETED` or `PARTIAL` status, transcript, per-round `AgentTurnResult` values, and dual-axis `AuditResult`.
 * **`render_topology_tree() -> str`**
-  Renders the active hierarchical agent team lineage as an indented ASCII tree.
+  Renders the ordinary AgentTeam lineage as a trusted-host ASCII diagnostic, not an automatically injected Agent context.
+* **`list_entities(entity_type: Literal["agent", "agent_team", "all"] = "all", start_index: int = 1, end_index: Optional[int] = None) -> EntityDiscoveryResult`**
+  Lists public records using one-based inclusive entity positions, defaulting to 30 records from the requested start.
+* **`search_entities(keywords: List[str], entity_type: Literal["agent", "agent_team", "all"] = "all", start_index: int = 1, end_index: Optional[int] = None) -> EntityDiscoveryResult`**
+  Filters public directory fields by case-insensitive OR substrings before ordering and selecting the requested positions.
+* **`inspect_entity(entity_type: Literal["agent", "agent_team"], entity_id: str) -> AgentDirectoryRecord | AgentTeamDirectoryRecord`**
+  Returns the latest eligible public record by stable ID without granting membership, communication, or file permissions.
 * **`await negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> MigrationOperationResult`**
   Returns a durable request ID with `PENDING` while explicit principals deliberate and submit personal-email choices, or a terminal `EXECUTED`, `DENIED`, or `STALE` result after topology revalidation.
 * **`inspect_migration_request(request_id: str) -> MigrationRequest`**
@@ -288,6 +294,12 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
   Explicitly acknowledges and removes one durable UNKNOWN alert.
 * **`clear_unknown_alerts(team_id: str, fingerprints: Optional[set[str]] = None) -> int`**
   Explicitly removes selected or all UNKNOWN alerts for one team.
+
+The discovery models are exported from `ai_team_team`.
+
+`EntityDiscoveryResult` distinguishes requested and actual ranges and includes `maximum_index`, `total_results`, `returned_count`, and detached `items`.
+
+See [Agent and AgentTeam Discovery](../Agent_and_AgentTeam_Discovery.md) for exact public fields, strict validation, lifecycle scope, ordering, and live-pagination behavior.
 
 ### Callbacks
 
@@ -460,6 +472,19 @@ class LLMClientProto(Protocol):
 ## 🛠️ Built-in ReAct Tools Reference
 
 These tools are automatically registered and bound to all agent teams by default. ReAct agents can invoke them using standard positional/keyword call syntax:
+
+### Entity Discovery
+
+* **`list_entities(entity_type: str = "all", start_index: int = 1, end_index: Optional[int] = None) -> JSON`**
+  Lists public Agent, AgentTeam, or combined records with inclusive entity-position pagination.
+* **`search_entities(keywords: List[str], entity_type: str = "all", start_index: int = 1, end_index: Optional[int] = None) -> JSON`**
+  Uses nonblank string keywords with case-insensitive OR matching over the same public directory fields.
+* **`inspect_entity(entity_type: str, entity_id: str) -> JSON`**
+  Inspects an eligible Agent or AgentTeam by its stable ID; `"all"` is not valid for inspection.
+
+These tools are available to active ordinary Agents in both AgentTeam and personal interactions and never accept an acting-Agent override.
+
+Neither the global directory nor the full topology is automatically injected into model prompts.
 
 ### Spawning & Communication
 

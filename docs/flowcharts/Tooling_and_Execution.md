@@ -129,8 +129,8 @@ This flowchart outlines prompt compilation, invocation-time tool visibility, str
 flowchart TD
     StartStep["Call execute_reasoning_step(agent, team, prompt)"] --> TransitionCheck{"agent.last_context.get('team_id') != team.team_id?"}
     
-    TransitionCheck -- "Yes" --> InjectTransition["Inject Transition Notice into Working Context\n(Updates role, team purpose, and active preset details)"]
-    TransitionCheck -- "No" --> BuildContext["Compile Prompt Context:\n1. Get Identity Header\n2. Render Topology Tree map\n3. Format Active Voting Proposals\n4. Inject Global Expert Directory"]
+    TransitionCheck -- "Yes" --> InjectTransition["Record Current AgentTeam Context\n(Preserves the Agent's own identity and memory)"]
+    TransitionCheck -- "No" --> BuildContext["Compile Prompt Context:\n1. Own Identity and Current AgentTeam\n2. Applicable Rules and Available Discovery Tools\n3. Active Proposals and Inbox Work\n4. Bounded Personal Working Context"]
     
     InjectTransition --> BuildContext
     BuildContext --> InboxAlerts["Check unread inbox alerts"]

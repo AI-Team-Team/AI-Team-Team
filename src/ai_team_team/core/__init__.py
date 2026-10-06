@@ -57,6 +57,14 @@ from .formation import (
     UnanimousAcceptanceAction,
 )
 from .governance import BooleanGovernanceChoice, ModelGovernanceChoice, GovernanceBallot, GovernanceRound, GovernanceSubmissionResult, MigrationRequest, MigrationOperationResult
+from .discovery import (
+    AgentDirectoryRecord,
+    AgentTeamDirectoryRecord,
+    EntityDirectoryRecord,
+    EntityDiscoveryResult,
+    EntitySelection,
+    EntityType,
+)
 from .communication import (
     AgreementDirection,
     ApprovalPrincipal,

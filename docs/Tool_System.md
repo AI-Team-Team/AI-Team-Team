@@ -35,7 +35,9 @@ The system supports two core execution modes:
 
 Reasoning strategies are encapsulated as pluggable classes inheriting from `BaseReasoningStrategy`.
 
-Every business-turn strategy receives the same composed identity contract: invocation-scoped AgentTeam instructions, the persistent Agent's own `system_instructions`, the current identity/topology header, and only then the mode-specific tool protocol. Switching between Text ReAct, Native, and auto-selected Native execution therefore cannot remove the Agent's individual mission.
+Every business-turn strategy receives the same composed identity contract: invocation-scoped AgentTeam instructions, the persistent Agent's own `system_instructions`, the current identity and AgentTeam header, and only then the mode-specific tool protocol.
+
+Switching between Text ReAct, Native, and auto-selected Native execution therefore cannot remove the Agent's individual mission.
 
 ### Class Hierarchy
 
@@ -223,6 +225,18 @@ Cancellation, manager shutdown, persistence failures, and framework state-integr
 Strict governance discussions require every member turn to complete.
 
 Any incomplete communication, migration, full-member ballot, or parent-failover discussion fails closed and leaves its request or approval pending instead of authorizing from a partial transcript.
+
+### Entity Discovery Tools
+
+`list_entities`, `search_entities`, and `inspect_entity` let active ordinary Agents discover public people and organizations explicitly in both Text ReAct and Native modes, including personal interactions without a team.
+
+They expose only existing directory fields, never select collaborators or grant consent, communication Agreements, or DocLib ACLs, and remain available independently of delegation depth and optional episodic memory.
+
+Prompt assembly and formation deliberation no longer inject the full global Agent directory or AgentTeam topology.
+
+The operations are read-only, while their explicit observations may join the calling Agent's ordinary memory.
+
+See [Agent and AgentTeam Discovery](Agent_and_AgentTeam_Discovery.md) for strict argument validation, inclusive entity-position ranges, keyword semantics, lifecycle filtering, and live-page behavior.
 
 ### Personal-Inbox Governance Tools
 

@@ -5,6 +5,7 @@ from typing import Any, Dict
 from .communication import build_communication_tools
 from .contract import Tool
 from .delegation import build_delegation_tools
+from .discovery import build_discovery_tools
 from .formation import build_formation_tools
 from .governance import build_governance_tools
 from .libraries import build_library_tools
@@ -18,6 +19,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
     att_manager = context.get("att_manager")
 
     tools: Dict[str, Tool] = {}
+    tools.update(build_discovery_tools(att_manager))
     tools.update(build_delegation_tools(att_manager, caller_node))
     tools.update(build_formation_tools(att_manager, caller_node))
     tools.update(build_governance_tools(att_manager))

@@ -157,6 +157,12 @@ Reliability changes should cover schema preflight without mutation, competing pr
 
 The suite's `test/test_att/test_high_hardening/` package contains reference patterns for these cases.
 
+Topology recovery tests must keep the Manager and its parent resolver on the same authoritative index across successful restore, failed restore publication, and team creation rollback.
+
+Exercise save, migrate, restore, and tool-view lookup to reject obsolete parents, then force a parent-cache miss after a new migration to verify that the restored index remains live.
+
+The `test/test_att/test_state_persistence/test_topology_index.py` module covers these parent-index recovery cases.
+
 Private Agent DocLib tests must create agents through `register_agent` or a supported team-creation path.
 
 Cover one-library-per-UUID ownership, shared-agent reuse, missing invocation context, team-ACL/public/link denial, archive read-only behavior, explicit publish collision/overwrite behavior, lifecycle rollback, current-schema corruption, and the absence of private body text from transcripts, callbacks, and message history.
@@ -182,6 +188,24 @@ The suite's `test/test_att/test_file_reading/` package contains the model-contex
 Communication changes must cover strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes, full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation, idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations.
 
 Schema 10 and earlier databases must be rejected before DDL.
+
+### Agent and AgentTeam Discovery
+
+Run the focused cases with `./venv/bin/python -m unittest discover -s test/test_att/test_discovery -t .`.
+
+Cover one-based inclusive entity positions, the 30-result default without an explicit-range cap, empty and truncated range metadata, strict integers, type selection, case-insensitive OR substring matching, and deterministic `A, a, B, b` ordering with stable ties.
+
+Verify active Root, idle, busy, shared, membership-free, and dependency-chain Agents remain discoverable while inactive and audit-scoped identities and teams are excluded.
+
+Assert the exact public field allowlist, no private-content search, no Agent-owned mutation or depth-cache update, and unchanged consent, communication Agreement, and document ACL checks.
+
+Capture actual Text ReAct, Native, personal, governance, and formation inputs to reject automatic global directory injection while preserving personal identity and existing memory.
+
+Check explicit tool observations, unsupported actor or pagination-mode overrides, live-page changes, internally consistent counts under parallel changes, migration freshness, and save/restore without a discovery index.
+
+Exercise synchronous discovery through the real background callback dispatcher while registering, archiving, reactivating, and deleting Agents.
+
+Use controlled publication barriers to reject mixed team-status fields, mixed old/new restore registries, failed-restore state, and audit identities exposed during a failed team creation.
 
 ### Personal-Inbox Governance
 

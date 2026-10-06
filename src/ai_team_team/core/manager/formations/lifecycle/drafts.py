@@ -370,24 +370,14 @@ class FormationDraftMixin:
         draft: TeamFormationDraft,
         current_snapshot: Optional[dict[str, Any]],
     ) -> str:
-        available_agents = [
-            {
-                "agent_id": agent.agent_id,
-                "name": agent.name,
-                "role": agent.role,
-            }
-            for agent in self.manager._agents_by_id.values()
-            if agent.lifecycle_state == "active"
-            and not self.manager.supervisor.is_supervisory_agent(agent.agent_id)
-        ]
         return (
             "Collaboratively design an AgentTeam formation proposal. This discussion is "
             "advisory: it does not invite Agents, publish a proposal, or grant membership.\n\n"
             f"Initiator objective:\n{draft.objective}\n\n"
             f"Current proposal snapshot (null means a new proposal):\n"
             f"{json.dumps(current_snapshot, ensure_ascii=False, sort_keys=True)}\n\n"
-            f"Active Agent identities that may be proposed as invitees:\n"
-            f"{json.dumps(available_agents, ensure_ascii=False, sort_keys=True)}\n\n"
+            "Use the available entity-discovery tools to find additional collaborators when needed. "
+            "Discovering an Agent never supplies its membership consent.\n\n"
             "Discuss purpose, membership, new-Agent configurations, instructions, initial "
             "documents, initial task, visibility, completion behavior, and late-join policy."
         )

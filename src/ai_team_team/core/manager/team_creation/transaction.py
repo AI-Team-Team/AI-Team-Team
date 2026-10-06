@@ -229,17 +229,27 @@ class TeamCreationTransactionMixin:
             with manager._topology_lock:
                 manager._validate_team_creation_commit(stage)
                 snapshot = manager._team_creation_snapshot()
-                published = manager._publish_new_staged_libraries(stage["libraries"], managed_root)
-                manager.libraries.update(stage["libraries"])
-                manager._library_files.update(stage["library_files"])
-                for agent in stage["new_agents"]:
-                    manager.register_agent(agent, auto_save=False)
-                team = stage["team"]
-                manager.teams[team.team_id] = team
-                parent = stage["parent"]
-                if parent is not None:
-                    manager._team_parent_map[team.team_id] = parent.team_id
-                    parent.add_child_team(team)
+                try:
+                    published = manager._publish_new_staged_libraries(stage["libraries"], managed_root)
+                    manager.libraries.update(stage["libraries"])
+                    manager._library_files.update(stage["library_files"])
+                    for agent in stage["new_agents"]:
+                        manager.register_agent(agent, auto_save=False)
+                    team = stage["team"]
+                    manager.teams[team.team_id] = team
+                    parent = stage["parent"]
+                    if parent is not None:
+                        manager._team_parent_map[team.team_id] = parent.team_id
+                        parent.add_child_team(team)
+                except Exception:
+                    # Keep rollback in the same publication critical section;
+                    # directory readers must never see uncommitted Agents.
+                    if published:
+                        manager._rollback_published_libraries(published)
+                        published = []
+                    manager._rollback_team_creation(snapshot)
+                    snapshot = None
+                    raise
             manager._discard_library_backups(published)
         except Exception:
             if published:
@@ -315,6 +325,6 @@ class TeamCreationTransactionMixin:
         manager.teams = snapshot["teams"]
         manager.libraries = snapshot["libraries"]
         manager._library_files = snapshot["library_files"]
-        manager._team_parent_map = snapshot["parent_map"]
+        manager._topology.replace_parent_map(snapshot["parent_map"])
         for team_id, children in snapshot["children"].items():
             manager.teams[team_id].child_teams = children

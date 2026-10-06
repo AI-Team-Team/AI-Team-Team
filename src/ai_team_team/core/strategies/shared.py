@@ -219,10 +219,6 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
     if manager:
         manager._emit_callback("on_status_change", agent.name, "Thinking...")
 
-    peer_context = ""
-    if manager:
-        peer_context = f"\n### ACTIVE AGENT TEAMS TOPOLOGY (Global Map)\n{manager.render_topology_tree()}\n"
-
     max_depth = manager.config.max_delegation_depth if manager else 2
     min_size = manager.config.min_subagent_team_size if manager else 3
 
@@ -236,38 +232,24 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
 
     model_options = "\n".join([f"  - {k}: {note}" for k, note in all_models.items()])
     role_desc_str = f"- **Role Description**: {agent.role_description}\n" if getattr(agent, "role_description", "") else ""
-    experts_str = ""
-    if manager:
-        active_tokens = manager._active_agent_invocation_tokens
-        dependency_ids = {
-            agent_id
-            for agent_id, invocation_id in manager._agent_invocation_chain.get()
-            if invocation_id in active_tokens
-        }
-        experts_lines = []
-        for name, exp_agent in sorted(manager.agents.items()):
-            if (
-                exp_agent.agent_id in dependency_ids
-                or manager.supervisor.is_supervisory_agent(exp_agent.agent_id)
-            ):
-                continue
-            role_desc = getattr(exp_agent, "role_description", "") or "No description"
-            experts_lines.append(
-                f"  - **{name}** (agent_id: `{exp_agent.agent_id}`; identity role: {exp_agent.role}): {role_desc}"
-            )
-        if experts_lines:
-            experts_str = (
-                "## ACTIVE REGISTERED AGENTS AVAILABLE FOR MEMBERSHIP\n"
-                + "\n".join(experts_lines)
-                + "\n\n"
-            )
-
     visible_tools = (
         manager.get_available_tools(team, agent)
         if manager and hasattr(manager, "get_available_tools")
         else dict(getattr(team, "tools", {}) or {})
     )
     autonomy_lines = ["### AUTONOMY RULES"]
+    discovery_names = [
+        f"`{name}`"
+        for name in ("list_entities", "search_entities", "inspect_entity")
+        if name in visible_tools
+    ]
+    if discovery_names:
+        autonomy_lines.extend(
+            [
+                "- Discover Agents and AgentTeams on demand with " + ", ".join(discovery_names) + ".",
+                "- Discovery is read-only; knowing an entity does not grant membership consent, communication authorization, or document access.",
+            ]
+        )
     if "dispatch_subagent" in visible_tools:
         autonomy_lines.append(
             "- You can dynamically spawn child ATs using the `dispatch_subagent` tool to solve sub-problems."
@@ -298,10 +280,9 @@ async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: 
         f"- **Identity Role**: {agent.role}\n"
         f"{role_desc_str}"
         f"- **Agent Name**: {agent.name}\n"
+        f"- **Agent ID**: {agent.agent_id}\n"
         f"{team_context}"
         f"- **Current Objective**: Continue your work as the same individual.\n"
-        f"{peer_context}"
-        f"{experts_str}"
         f"{autonomy_text}"
     )
     if manager:

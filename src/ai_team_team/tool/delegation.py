@@ -197,8 +197,9 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
             raise ToolPermissionError("The active AgentTeam could not be resolved.")
         
         async with actual_team.state_lock:
-            old_purpose = actual_team.team_purpose
-            actual_team.team_purpose = new_purpose
+            with att_manager._topology_lock:
+                old_purpose = actual_team.team_purpose
+                actual_team.team_purpose = new_purpose
         att_manager._auto_save(teams={actual_team.team_id})
         return f"Successfully updated team purpose from '{old_purpose}' to '{new_purpose}'."
 
@@ -209,8 +210,9 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
             raise ToolPermissionError("The active AgentTeam could not be resolved.")
         
         async with actual_team.state_lock:
-            actual_team.team_purpose = purpose
-            actual_team.team_progress = progress
+            with att_manager._topology_lock:
+                actual_team.team_purpose = purpose
+                actual_team.team_progress = progress
         att_manager._auto_save(teams={actual_team.team_id})
         return f"Successfully updated team purpose to '{purpose}' and progress to '{progress}'."
 

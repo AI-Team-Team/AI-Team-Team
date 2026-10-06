@@ -387,6 +387,7 @@ class RuntimeRegistry:
         if team is None:
             from ai_team_team.tool import get_default_tools
             personal_names = {
+                "list_entities", "search_entities", "inspect_entity",
                 "list_agent_inbox", "mark_agent_inbox_read", "open_agent_mail",
                 "submit_governance_choice", "list_governance_requests",
                 "inspect_team_formation", "respond_team_invitation",

@@ -19,6 +19,7 @@ from ..alerts import AlertService
 from ..callbacks import CallbackDispatcher
 from ..communication_validation import CommunicationStateValidator
 from ..discussions import DiscussionCoordinator
+from ..discovery import DiscoveryService
 from ..failover import FailoverService
 from ..formations import FormationService
 from ..governance import GovernanceService
@@ -38,6 +39,7 @@ from ..team_creation import TeamCreationService
 from ..topology import TopologyService
 from .agents_api import AgentAPI
 from .discussions_api import DiscussionAPI
+from .discovery_api import DiscoveryAPI
 from .formations_api import FormationAPI
 from .governance_api import GovernanceAPI
 from .libraries_api import LibraryAPI
@@ -57,6 +59,7 @@ class ATTManager(
     MemoryAPI,
     FormationAPI,
     GovernanceAPI,
+    DiscoveryAPI,
 ):
     """Master controller managing the overall ATT topology."""
 
@@ -113,6 +116,7 @@ class ATTManager(
         self._team_parent_map = self._topology.parent_map
         self._topology_lock = self._topology.lock
         self._snapshot_lock = threading.RLock()
+        self._discovery = DiscoveryService(self)
         self._runtime_gate = asyncio.Lock()
         self._active_formation_operations = 0
         self._formation_operation_tasks: set[asyncio.Task[Any]] = set()

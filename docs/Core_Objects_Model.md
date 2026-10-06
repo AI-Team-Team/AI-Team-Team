@@ -26,6 +26,7 @@ The `ATTManager` is the public orchestration facade exported by the `ai_team_tea
 - **Snapshot and Restore Services**: Build immutable persistence snapshots, validate state and communication references, stage DocLib files, and publish a restore only after every validation succeeds.
 - **Team Creation, Migration, Membership, and Failover Services**: Own their respective governance workflows while the facade preserves the public manager API.
 - **Runtime Registry**: Owns model bindings, tool registration, tokenizer selection, presets, capability probes, and invocation-time tool visibility.
+- **Discovery Service**: Projects existing public Agent and AgentTeam fields into read-only list, keyword-search, and stable-ID inspection results without injecting global directories, modifying identity or membership, or adding a persisted index.
 - **Memory Service**: Owns the append-only Journal and the optional Agent-owned segment, card, FTS5 search, ephemeral recall, retained-reference, and indexing-job state.
 
 ## 2. `AgentTeam`: The Dynamic Group Unit

@@ -19,8 +19,8 @@ from test.test_att.test_state_persistence._support import (
 
 
 class TestStatePersistence(StatePersistenceTestCase):
-    async def test_global_expert_listing(self):
-        """Verify that all global experts are injected into the agent's identity profile header."""
+    async def test_experts_are_discovered_on_demand_without_global_prompt_injection(self):
+        """Keep global directory records out of prompts and available through explicit queries."""
         expert_a = Agent(
             name="Expert_A",
             role="Database Analyst",
@@ -59,13 +59,17 @@ class TestStatePersistence(StatePersistenceTestCase):
         
         self.assertTrue(len(captured_sys_instruction) > 0)
         sys_inst = captured_sys_instruction[0]
-        self.assertIn("## ACTIVE REGISTERED AGENTS AVAILABLE FOR MEMBERSHIP", sys_inst)
-        self.assertIn("Expert_A", sys_inst)
-        self.assertIn("Expert_B", sys_inst)
-        self.assertIn(expert_a.agent_id, sys_inst)
-        self.assertIn(expert_b.agent_id, sys_inst)
-        self.assertIn("Database Analyst", sys_inst)
-        self.assertIn("Handles DB queries", sys_inst)
+        self.assertNotIn("## ACTIVE REGISTERED AGENTS AVAILABLE FOR MEMBERSHIP", sys_inst)
+        for person in (expert_a, expert_b):
+            self.assertNotIn(person.name, sys_inst)
+            self.assertNotIn(person.agent_id, sys_inst)
+            self.assertNotIn(person.role, sys_inst)
+            self.assertNotIn(person.role_description, sys_inst)
+        for name in ("list_entities", "search_entities", "inspect_entity"):
+            self.assertIn(name, sys_inst)
+        page = self.manager.search_entities(["Expert_"], entity_type="agent")
+        self.assertEqual([item.agent_id for item in page.items], [expert_a.agent_id, expert_b.agent_id])
+        self.assertEqual(self.manager.inspect_entity("agent", expert_a.agent_id).role_description, "Handles DB queries")
 
     async def test_state_persistence_and_recovery(self):
         """Verify the complete serialization & deserialization pipeline."""

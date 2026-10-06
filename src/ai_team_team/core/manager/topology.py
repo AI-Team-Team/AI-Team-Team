@@ -1,7 +1,7 @@
 """Topology lookup and rendering for an ATT manager."""
 
 import threading
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Mapping, Optional
 
 from ..agent import Agent
 from ..exceptions import AmbiguousTeamContextError
@@ -12,14 +12,27 @@ if TYPE_CHECKING:
 
 
 class TopologyService:
-    """Owns the parent index and topology-level synchronization lock."""
+    """Owns the parent index and shared topology/directory publication lock."""
 
     def __init__(self, manager: "ATTManager") -> None:
         self.manager = manager
         self.parent_map: dict[str, str] = {}
         self.lock = threading.RLock()
 
+    def replace_parent_map(self, parent_map: Mapping[str, str]) -> None:
+        """Replace index contents without breaking the Manager's shared reference."""
+        with self.lock:
+            # Copy before clearing: restore/rollback inputs may be this index.
+            replacement = dict(parent_map)
+            self.parent_map.clear()
+            self.parent_map.update(replacement)
+
     def find_parent_team(self, target: AgentTeam) -> Optional[AgentTeam]:
+        # Resolving a missing cache also publishes a parent pointer.
+        with self.lock:
+            return self._find_parent_team_locked(target)
+
+    def _find_parent_team_locked(self, target: AgentTeam) -> Optional[AgentTeam]:
         if target.team_kind == "supervisory":
             return None
         if target._parent_team is not None:

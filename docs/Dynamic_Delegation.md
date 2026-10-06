@@ -48,8 +48,10 @@ The ATT framework abstracts reasoning execution into distinct strategies to deco
    * **Balanced Python-Call Scanner**: The standard Action scanner tracks `()`, `[]`, `{}`, single and double quotes, triple quotes, escapes, multiline content, Markdown fences, and Unicode. It closes the invocation only when the outer call delimiter closes, so parentheses inside string values cannot truncate the call.
    * **Literal-Only Arguments**: Arguments must be valid Python literals or keyword assignments. Truncated expressions, duplicate keywords, expanded `*args`/`**kwargs`, identifiers, unknown parameters, and type mismatches become `invalid_arguments` observations and never execute the tool. There is no positional-string fallback.
 
-3. **Hierarchical Topology Map**:
-   To support organizational awareness and structural modifications, the ReAct prompt's `identity_header` dynamically injects a rendered indented ASCII tree topology map representing all active teams (`manager.render_topology_tree()`). Agents use this map to discover sibling and peer teams and locate potential migration parents.
+3. **On-Demand Entity Discovery**:
+   Text ReAct, Native, and personal interactions advertise the available `list_entities`, `search_entities`, and `inspect_entity` tools instead of automatically injecting the global Agent directory or full AgentTeam topology.
+   Agents may discover collaborators, peer teams, and potential migration parents across ordinary topology branches, while every action still performs its own consent and authorization checks.
+   `manager.render_topology_tree()` remains a trusted-host diagnostic; see [Agent and AgentTeam Discovery](Agent_and_AgentTeam_Discovery.md) for public directory fields, ordering, and entity-position pagination.
 
 ## 3. Bidirectional Escalation Channel
 
@@ -78,6 +80,7 @@ The available tool set is resolved for every invocation. `dispatch_subagent` and
 
 * **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, existing_member_ids: list[str] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: dict = None, initiator_joins: bool = False, unanimous_acceptance_action: str = "require_confirmation", late_join_policy: str = "disabled") -> str`**: All-new delegation creates the child and synchronously runs its discussion. Naming existing Agent IDs or choosing initiator self-membership opens a persistent consent workflow and returns `PENDING_RESPONSES`; ATT creates no team entities or files until an eligible accepted membership commits, and any initial task runs later without holding the initiating Agent's invocation lock.
 * **Formation and Agent inbox tools**: `list_agent_inbox`, `mark_agent_inbox_read`, `inspect_team_formation`, `discuss_team_formation_proposal`, `inspect_team_formation_draft`, `retry_team_formation_draft`, `publish_team_formation_draft`, `revise_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, and `decide_team_formation_late_join` operate from the invocation-scoped Agent identity. Every authorization-bearing action names the exact proposal revision it reviewed, and no tool accepts an acting-Agent override. See [Consensual Existing-Agent Team Formation](Consensual_Team_Formation.md).
+* **Entity discovery tools**: `list_entities`, `search_entities`, and `inspect_entity` expose only public Agent and AgentTeam records and remain available independently of delegation depth or optional episodic memory.
 * **`delegate_escalation(objective: str, rationale: str) -> str`**: Escalates task objectives upward in the lineage tree to the direct parent.
 * **`update_team_purpose(new_purpose: str) -> str`**: Updates the purpose string of the caller's team.
 * **`update_team_status(purpose: str, progress: str) -> str`**: Allows a team to dynamically update its globally broadcasted purpose and progress metrics.

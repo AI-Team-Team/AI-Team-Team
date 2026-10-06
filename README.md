@@ -111,7 +111,7 @@ The hierarchy provides routing and governance context, while execution authority
 
 Top-level AgentTeams are connected through the Root Agent boundary for governance that explicitly requires a root-level principal, while permissive institutions do not introduce approval solely because a team is deep in the tree.
 
-The rendered topology and expert registry provide current organizational context, while discovery and authorization remain separate operations.
+Agents discover current people and organizations on demand through listing, keyword search, and stable-ID inspection, while discovery and authorization remain separate operations.
 
 ### Concurrency Is Scoped to the State Being Protected
 
@@ -196,8 +196,8 @@ ATT represents dynamic multi-agent topologies as recursive lineages with explici
 * **[Tree-like Lineage Spawning](docs/Dynamic_Delegation.md)**: Spawns recursive child agent teams (`AgentTeam`) at runtime to arbitrary depths, strictly bounded by depth limits to prevent stack overflow.
 * **[Autonomous Member Configs](docs/Dynamic_Delegation.md#1-dynamic-spawning-&-lineage-hierarchy)**: Defines dynamic child memberships mapping role presets, custom system instructions, and LLM aliases to shape custom agent personalities.
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Permits active teams to request parent-hierarchy migrations, arbitrated by modular strategies with loop/cycle detection and parent notification logs.
-* **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Injects an ASCII-drawn indented tree map of active teams (displaying purposes, status, and progress metrics in real-time) directly into the agent prompt context.
-* **[Global Expert Discovery](docs/State_Persistence.md)**: Automatically appends a directory of all active system experts (names, roles, and profiles) into the agent's identity context to facilitate peer discovery.
+* **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Provides a trusted-host ASCII map of ordinary teams, purposes, status, and progress without automatically inserting the full map into Agent prompts.
+* **[Agent and AgentTeam Discovery](docs/Agent_and_AgentTeam_Discovery.md)**: Lets Agents explicitly list public directory records, search case-insensitive OR keywords, and inspect stable IDs, using inclusive entity-position ranges with a default page of 30 and no implicit collaborator selection or authority grant.
 * **[Shared-Agent Continuity](docs/Consensual_Team_Formation.md)**: One `Agent` may participate in several teams with one identity, one persistent Agent inbox, and complete memory. Invocation-scoped team/discussion context keeps prompts and team-sensitive tools correctly scoped while the agent's own model calls remain serialized.
 * **[Resilient Failover Routing](docs/Team_Governance.md#5-token-budget--failover-policies)**: Dynamically hot-swaps exhausted or failing model clients. `"auto"` selects from available bindings; `"parent"` uses an explicit parent AgentTeam ballot or a Root Agent decision and fails closed.
 
@@ -284,6 +284,7 @@ flowchart TB
         AgentInbox["Persistent Agent Inbox<br/>invitations, voting emails, and results"]
         Membership["Role-Neutral Membership<br/>team_id ↔ agent_id"]
         Teams["Recursive AgentTeam Tree<br/>dynamic creation and migration"]
+        Discovery["On-Demand Public Entity Discovery<br/>list, keyword search, inspect; no authority grant"]
         Formation["Consensual Team Formation<br/>persistent invitations, attitudes, and late join"]
         DelegationAdmission["Atomic Delegation Admission<br/>manager-wide Agent wait graph"]
         PrivateDocLib["Private Agent DocLibs"]
@@ -293,6 +294,8 @@ flowchart TB
         Agents --> AgentInbox
         Agents --> Membership
         Membership --> Teams
+        Agents --> Discovery
+        Teams --> Discovery
         AgentInbox --> Formation
         Formation --> Membership
         DelegationAdmission --> Teams
@@ -370,6 +373,7 @@ flowchart TB
     Manager --> DiscussionLock
     Teams --> DiscussionLock
     Tools --> Governance
+    Tools --> Discovery
     Tools --> Formation
     Governance -->|governance session| DiscussionLock
     Model -->|parent failover request| Governance
@@ -418,7 +422,7 @@ flowchart TB
     style Durability fill:#f5f3ff,stroke:#5e35b1,stroke-width:2px,color:#1f2937;
 
     class HostApp,Config,Bindings,Manager host;
-    class Root,Agents,AgentInbox,Membership,Teams,Formation,DelegationAdmission identity;
+    class Root,Agents,AgentInbox,Membership,Teams,Discovery,Formation,DelegationAdmission identity;
     class DiscussionLock,Rounds,Turns,AgentLock,WaitGraph,Strategy,Model,Tools,RoundResults,DiscussionResult execution;
     class Governance,Communication governance;
     class PrivateDocLib,TeamDocLib,Knowledge knowledge;

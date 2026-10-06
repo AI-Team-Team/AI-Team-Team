@@ -28,6 +28,7 @@ flowchart TB
         Membership["Role-Neutral Membership Relation<br/>team_id ↔ agent_id only"]
         TeamRegistry["AgentTeam Registry<br/>creator, members, parent, children, purpose"]
         Topology["Recursive AgentTeam Lineage<br/>top-level, child, and descendant teams"]
+        Discovery["Read-Only Public Entity Discovery<br/>list, keyword search, stable-ID inspection"]
         Delegation["Dynamic Delegation<br/>depth and team-size gates, presets,<br/>new identities or existing Agent IDs"]
         Formation["Consensual Team Formation<br/>detached collaborative drafts, immutable revisions,<br/>exact consent, accepted subsets, and optional late join"]
         TeamCreation["Atomic Team Creation<br/>validate → stage Agents and DocLibs → publish"]
@@ -41,6 +42,8 @@ flowchart TB
         AgentRegistry --> Membership
         Membership --> TeamRegistry
         TeamRegistry --> Topology
+        AgentRegistry -->|public fields only| Discovery
+        TeamRegistry -->|public fields only| Discovery
         Root -->|top-level governance| Topology
         Delegation --> TeamCreation
         Delegation -->|existing identity| Formation
@@ -83,7 +86,7 @@ flowchart TB
         InvocationContext["ContextVars<br/>active Agent, AgentTeam, discussion, tool call"]
         AgentInvocationLock["Per-Agent invocation lock<br/>serializes one shared Agent across teams"]
         AgentWaitGraph["Reference-Counted Agent Wait Graph<br/>atomic dependency reservation and<br/>transitive cycle rejection"]
-        Prompt["Prompt Assembly<br/>identity, current AgentTeam, topology, experts,<br/>Agent and team inboxes, proposals, previous round, bounded memory"]
+        Prompt["Prompt Assembly<br/>own identity, current AgentTeam, available discovery tools,<br/>Agent and team inboxes, proposals, previous round, bounded memory"]
         ToolView["Invocation-Scoped Tool Resolver<br/>hide unavailable delegation or escalation tools"]
         Strategy{"Reasoning Strategy"}
         TextMode["Text ReAct<br/>balanced Action scanner and literal parser"]
@@ -319,6 +322,8 @@ flowchart TB
     Manager --> MigrationPolicy
     Manager --> FailoverPolicy
     ToolExecutor --> Delegation
+    ToolExecutor -->|explicit directory query| Discovery
+    Discovery -->|permitted public records| ToolResult
     RuntimeLifecycle --> Coordinator
     RuntimeLifecycle --> Events
     DiscussionCleanup --> DirtyTracking
@@ -348,7 +353,7 @@ flowchart TB
     style Persistence fill:#f5f3ff,stroke:#5e35b1,stroke-width:2px,color:#1f2937;
 
     class HostApp,Config,Bindings,Manager,RuntimeLifecycle,Events host;
-    class Root,AgentRegistry,AgentState,Membership,TeamRegistry,Topology,Delegation,TeamCreation,AgentLifecycle,TeamStateLock,TopologyLock identity;
+    class Root,AgentRegistry,AgentState,Membership,TeamRegistry,Topology,Discovery,Delegation,TeamCreation,AgentLifecycle,TeamStateLock,TopologyLock identity;
     class DiscussionEntry,DiscussionLock,Session,InboxClaim,Round,ParallelTurns,RoundResult,Transcript,DiscussionResult,DiscussionCleanup discussion;
     class InvocationContext,AgentInvocationLock,AgentWaitGraph,Prompt,ToolView,Strategy,TextMode,NativeMode,ToolExecutor,ToolAuditor,RetryPolicy,ToolResult,TurnResult,WorkingContext,Window,Adapter,TokenLedger,Provider,FailoverGate execution;
     class MemoryJournal,AdvancedGate,MemorySegment,MemoryIndexer,MemoryCatalog,MemoryFTS,MemoryRecall,MemoryRetention memory;

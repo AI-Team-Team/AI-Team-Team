@@ -113,7 +113,13 @@ Synchronous and asynchronous callbacks share one ordered background dispatcher; 
   * `move_library_file(...)`
     Atomically moves a normal library file after checking both path ACLs.
   * `render_topology_tree() -> str`
-    Renders the active lineage tree map in ASCII format.
+    Renders the ordinary lineage tree as a trusted-host diagnostic without automatically injecting it into Agent prompts.
+  * `list_entities(entity_type="all", start_index=1, end_index=None) -> EntityDiscoveryResult`
+    Captures public eligible records, sorts their labels deterministically, and selects inclusive entity positions.
+  * `search_entities(keywords, entity_type="all", start_index=1, end_index=None) -> EntityDiscoveryResult`
+    Applies case-insensitive OR substring matching to public fields before sorting and pagination.
+  * `inspect_entity(entity_type, entity_id) -> AgentDirectoryRecord | AgentTeamDirectoryRecord`
+    Resolves one latest public record by stable Agent or AgentTeam ID, using the same eligibility boundary.
   * `await negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> MigrationOperationResult`
     Arbitrates dynamic team reorganizations and updates parental references.
   * `await save_state(path: Optional[str] = None, full: bool = True)`
@@ -195,6 +201,20 @@ Owns durable communication requests, approvals, ballots, Agreements, and peer-de
       Enforces endpoint-only revocation.
 * `approval_path(sender, recipient, policy=None) -> List[ApprovalPrincipal]`
       Resolves ordered `agent_team` and Root `agent` principals without selecting an Agent to act for a team.
+
+### `DiscoveryService`
+
+Projects the existing Agent and AgentTeam registries into detached public records rather than owning a separate directory or persisted index.
+
+Capture runs without suspension under the topology lock; filtering, deterministic label ordering, derived depth calculation, and position selection operate only on the captured values.
+
+Agent-facing wrappers are asynchronous without suspension so `Tool` does not dispatch live-object capture to a worker thread, and the service never borrows Agent invocation locks or updates depth caches.
+
+Text ReAct, Native, personal interactions, and formation deliberation advertise the same available discovery tools instead of injecting full global directories.
+
+Counts and range metadata describe one capture, while separate pages may observe different live registries without a version protocol.
+
+See [Agent and AgentTeam Discovery](../Agent_and_AgentTeam_Discovery.md) for the public result models and exact privacy, lifecycle, and pagination contracts.
 
 ### `TeamDecisionProvider`
 

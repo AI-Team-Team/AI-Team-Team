@@ -26,6 +26,7 @@ To understand specific systems in detail, please refer to the following document
 9. **[Core Objects Model](Core_Objects_Model.md)**: A deep-dive architectural data dictionary defining the internal memory mechanics and states of `ATTManager`, `AgentTeam`, and `Agent`.
 10. **[Developer Testing & Mocking Guide](dev/testing.md)**: Guidelines for writing unit tests and mocking sequence responses.
 11. **[Developer API Reference](dev/API_Reference.md)**: Reference listing system internals and execution logic.
+12. **[Agent and AgentTeam Discovery](Agent_and_AgentTeam_Discovery.md)**: Defines on-demand public directory listing, case-insensitive OR keyword search, stable-ID inspection, inclusive entity-position ranges, lifecycle scope, and independent authorization boundaries.
 
 ## 📊 Visual Flowcharts Directory
 

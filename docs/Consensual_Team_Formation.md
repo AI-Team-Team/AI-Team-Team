@@ -73,6 +73,10 @@ Public request, invitation, revision, decision, and draft reads are detached fro
 
 An initiating Agent may ask its invocation-scoped current AgentTeam to shape an initial proposal or a possible next revision. The work is advisory: it runs later as a detached job under the creator AgentTeam's normal serial discussion lock, freezes the participating members, does not consume unrelated inbox work, and never accepts an invitation for another Agent.
 
+Deliberation uses the available [entity-discovery tools](Agent_and_AgentTeam_Discovery.md) instead of automatically receiving a global candidate directory.
+
+Explicit candidate references in the current proposal or discussion remain valid context, but finding an Agent never supplies its membership consent.
+
 The initiating Agent synthesizes a strict complete `TeamFormationDraftCandidate` after the discussion. Failed, incomplete, cancelled, invalid, or membership-changing deliberation produces no publishable proposal revision. A ready draft remains inert until that same Agent explicitly publishes it, and revision publication fails closed when its immutable base revision has become stale.
 
 `ATTConfig.formation_deliberation_policy` defaults to `"optional"`. Setting it to `"required_when_team_scoped"` requires this draft workflow before a team-scoped initial proposal or revision is published; a standalone Root Agent may still formulate a proposal directly.

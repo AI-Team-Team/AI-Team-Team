@@ -28,53 +28,57 @@ class AgentRegistry:
         by_id: Dict[str, Agent],
     ) -> None:
         """Atomically rebinds every public and internal Agent index alias."""
-        self.active_by_name = active_by_name
-        self.by_id = by_id
-        self.manager.agents = active_by_name
-        self.manager._agents_by_id = by_id
+        with self.manager._topology_lock:
+            self.active_by_name = active_by_name
+            self.by_id = by_id
+            self.manager.agents = active_by_name
+            self.manager._agents_by_id = by_id
 
     def register(self, agent: Agent, *, auto_save: bool = True) -> Agent:
         manager = self.manager
-        if not isinstance(agent, Agent):
-            raise TypeError("agent must be an Agent instance.")
-        if agent.lifecycle_state != "active":
-            raise ValueError(
-                "Only a new active Agent can be registered; inactive "
-                "identities require reactivate_agent()."
-            )
-        existing_by_id = self.by_id.get(agent.agent_id)
-        if existing_by_id is not None and existing_by_id is not agent:
-            raise ValueError(f"Agent ID {agent.agent_id!r} is already registered.")
-        existing_by_name = self.active_by_name.get(agent.name)
-        if existing_by_name is not None and existing_by_name is not agent:
-            raise ValueError(f"Agent name {agent.name!r} is already registered.")
-        for known in self.by_id.values():
-            if known is not agent and known.name == agent.name:
-                raise ValueError(f"Agent name {agent.name!r} is already reserved.")
+        # Directory captures and topology commits share this publication lock.
+        # It is reentrant when staged team creation registers several Agents.
+        with manager._topology_lock:
+            if not isinstance(agent, Agent):
+                raise TypeError("agent must be an Agent instance.")
+            if agent.lifecycle_state != "active":
+                raise ValueError(
+                    "Only a new active Agent can be registered; inactive "
+                    "identities require reactivate_agent()."
+                )
+            existing_by_id = self.by_id.get(agent.agent_id)
+            if existing_by_id is not None and existing_by_id is not agent:
+                raise ValueError(f"Agent ID {agent.agent_id!r} is already registered.")
+            existing_by_name = self.active_by_name.get(agent.name)
+            if existing_by_name is not None and existing_by_name is not agent:
+                raise ValueError(f"Agent name {agent.name!r} is already registered.")
+            for known in self.by_id.values():
+                if known is not agent and known.name == agent.name:
+                    raise ValueError(f"Agent name {agent.name!r} is already reserved.")
 
-        agent.lifecycle_state = "active"
-        lib_id = agent.private_doc_library_id or f"PDL-{agent.agent_id}"
-        expected = f"PDL-{agent.agent_id}"
-        if lib_id != expected:
-            raise ValueError(f"Private DocLib ID must be {expected!r} for this agent.")
-        library = manager.libraries.get(lib_id)
-        if library is None:
-            library = manager._new_document_library(
-                lib_id=lib_id,
-                name=f"{agent.name} Private Library",
-                owner_agent_id=agent.agent_id,
-                library_kind="agent_private",
-                lifecycle_state="active",
-                description=(f"Persistent private workspace for agent {agent.name}."),
-                is_public_visible=False,
-            )
-            manager.libraries[lib_id] = library
-        elif library.library_kind != "agent_private" or library.owner_agent_id != agent.agent_id:
-            raise ValueError("Private DocLib ownership is inconsistent.")
-        agent._private_doc_library_id = lib_id
-        agent._manager = manager
-        self.by_id[agent.agent_id] = agent
-        self.active_by_name[agent.name] = agent
+            agent.lifecycle_state = "active"
+            lib_id = agent.private_doc_library_id or f"PDL-{agent.agent_id}"
+            expected = f"PDL-{agent.agent_id}"
+            if lib_id != expected:
+                raise ValueError(f"Private DocLib ID must be {expected!r} for this agent.")
+            library = manager.libraries.get(lib_id)
+            if library is None:
+                library = manager._new_document_library(
+                    lib_id=lib_id,
+                    name=f"{agent.name} Private Library",
+                    owner_agent_id=agent.agent_id,
+                    library_kind="agent_private",
+                    lifecycle_state="active",
+                    description=(f"Persistent private workspace for agent {agent.name}."),
+                    is_public_visible=False,
+                )
+                manager.libraries[lib_id] = library
+            elif library.library_kind != "agent_private" or library.owner_agent_id != agent.agent_id:
+                raise ValueError("Private DocLib ownership is inconsistent.")
+            agent._private_doc_library_id = lib_id
+            agent._manager = manager
+            self.by_id[agent.agent_id] = agent
+            self.active_by_name[agent.name] = agent
         if auto_save:
             manager._auto_save(agents={agent.agent_id}, libraries={lib_id})
             manager._memory.record_event(
@@ -224,14 +228,15 @@ class AgentRegistry:
         if selected in {"retain", "archive"}:
             alias = manager.resolve_model_alias(agent.llm_client)
             old_alias = agent._model_alias
-            agent._model_alias = alias
             state = "retained" if selected == "retain" else "archived"
             old_client = agent.llm_client
-            agent.lifecycle_state = state
-            with library._lock:
-                library.lifecycle_state = state
-            self.active_by_name.pop(agent.name, None)
-            agent.llm_client = None
+            with manager._topology_lock:
+                agent._model_alias = alias
+                agent.lifecycle_state = state
+                with library._lock:
+                    library.lifecycle_state = state
+                self.active_by_name.pop(agent.name, None)
+                agent.llm_client = None
             lifecycle_event = None
             try:
                 lifecycle_event = manager._memory.record_event(
@@ -252,12 +257,13 @@ class AgentRegistry:
                     manager._memory.discard_unpersisted_event(
                         lifecycle_event.event_id
                     )
-                agent.lifecycle_state = "active"
-                with library._lock:
-                    library.lifecycle_state = "active"
-                agent.llm_client = old_client
-                agent._model_alias = old_alias
-                self.active_by_name[agent.name] = agent
+                with manager._topology_lock:
+                    agent.lifecycle_state = "active"
+                    with library._lock:
+                        library.lifecycle_state = "active"
+                    agent.llm_client = old_client
+                    agent._model_alias = old_alias
+                    self.active_by_name[agent.name] = agent
                 raise
             manager._emit_callback(
                 "on_system_event",
@@ -279,18 +285,19 @@ class AgentRegistry:
         moved = False
         committed = False
         try:
-            agent.lifecycle_state = "deleting"
-            with library._lock:
-                library.lifecycle_state = "archived"
-                if os.path.exists(library.root_dir):
-                    os.replace(library.root_dir, trash_path)
-                    moved = True
-            self.active_by_name.pop(agent.name, None)
-            self.by_id.pop(agent_id, None)
-            manager.libraries.pop(lib_id, None)
-            manager._library_files.pop(lib_id, None)
-            manager.library_links.pop(lib_id, None)
-            manager.library_permissions.pop(lib_id, None)
+            with manager._topology_lock:
+                agent.lifecycle_state = "deleting"
+                with library._lock:
+                    library.lifecycle_state = "archived"
+                    if os.path.exists(library.root_dir):
+                        os.replace(library.root_dir, trash_path)
+                        moved = True
+                self.active_by_name.pop(agent.name, None)
+                self.by_id.pop(agent_id, None)
+                manager.libraries.pop(lib_id, None)
+                manager._library_files.pop(lib_id, None)
+                manager.library_links.pop(lib_id, None)
+                manager.library_permissions.pop(lib_id, None)
             manager._memory.remove_agent_derived_state(agent_id)
             lifecycle_event = manager._memory.record_event(
                 "agent_lifecycle_changed",
@@ -307,19 +314,20 @@ class AgentRegistry:
             await manager.flush_state()
             committed = True
         except Exception:
-            self.by_id[agent_id] = agent
-            self.active_by_name[agent.name] = agent
-            manager.libraries[lib_id] = library
-            manager._library_files[lib_id] = old_files
-            if old_links is not None:
-                manager.library_links[lib_id] = old_links
-            if old_permissions is not None:
-                manager.library_permissions[lib_id] = old_permissions
-            if moved and os.path.exists(trash_path):
-                os.replace(trash_path, library.root_dir)
-            with library._lock:
-                library.lifecycle_state = "active"
-            agent.lifecycle_state = "active"
+            with manager._topology_lock:
+                self.by_id[agent_id] = agent
+                self.active_by_name[agent.name] = agent
+                manager.libraries[lib_id] = library
+                manager._library_files[lib_id] = old_files
+                if old_links is not None:
+                    manager.library_links[lib_id] = old_links
+                if old_permissions is not None:
+                    manager.library_permissions[lib_id] = old_permissions
+                if moved and os.path.exists(trash_path):
+                    os.replace(trash_path, library.root_dir)
+                with library._lock:
+                    library.lifecycle_state = "active"
+                agent.lifecycle_state = "active"
             manager._memory.restore(
                 old_memory["memory_events"],
                 old_memory["memory_segments"],
@@ -385,12 +393,13 @@ class AgentRegistry:
         old_state = agent.lifecycle_state
         old_library_state = library.lifecycle_state
         old_alias = agent._model_alias
-        agent.llm_client = client
-        agent._model_alias = model_alias
-        agent.lifecycle_state = "active"
-        with library._lock:
-            library.lifecycle_state = "active"
-        self.active_by_name[agent.name] = agent
+        with manager._topology_lock:
+            agent.llm_client = client
+            agent._model_alias = model_alias
+            agent.lifecycle_state = "active"
+            with library._lock:
+                library.lifecycle_state = "active"
+            self.active_by_name[agent.name] = agent
         lifecycle_event = None
         try:
             lifecycle_event = manager._memory.record_event(
@@ -411,12 +420,13 @@ class AgentRegistry:
                 manager._memory.discard_unpersisted_event(
                     lifecycle_event.event_id
                 )
-            self.active_by_name.pop(agent.name, None)
-            agent.llm_client = None
-            agent._model_alias = old_alias
-            agent.lifecycle_state = old_state
-            with library._lock:
-                library.lifecycle_state = old_library_state
+            with manager._topology_lock:
+                self.active_by_name.pop(agent.name, None)
+                agent.llm_client = None
+                agent._model_alias = old_alias
+                agent.lifecycle_state = old_state
+                with library._lock:
+                    library.lifecycle_state = old_library_state
             raise
         manager._emit_callback(
             "on_system_event",
