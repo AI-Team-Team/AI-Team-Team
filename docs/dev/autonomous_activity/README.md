@@ -6,9 +6,9 @@ Phase 0 implements value contracts, a dependency inventory, deterministic advers
 
 It does not implement the replacement scheduler, change existing runtime behavior, activate schema 12, or claim that later-phase acceptance tests pass.
 
-The governing local blueprint and implementation plan, including the confirmations recorded on 2026-10-07, remain authoritative.
+The governing [blueprint](../../blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md) and [implementation plan](../../blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md), including the confirmed decisions recorded on 2026-10-07, remain authoritative.
 
-This tracked directory preserves their engineering interpretation so the contract freeze is available outside the ignored `local/` directory.
+This directory records their Phase 0 engineering contracts and verification artifacts.
 
 All D01 through D15 decisions remain confirmed, and no institution is reopened by these specifications.
 

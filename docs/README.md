@@ -28,6 +28,15 @@ To understand specific systems in detail, please refer to the following document
 11. **[Developer API Reference](dev/API_Reference.md)**: Reference listing system internals and execution logic.
 12. **[Agent and AgentTeam Discovery](Agent_and_AgentTeam_Discovery.md)**: Defines on-demand public directory listing, case-insensitive OR keyword search, stable-ID inspection, inclusive entity-position ranges, lifecycle scope, and independent authorization boundaries.
 
+### Design Blueprints & Implementation Plans
+
+The [Design Blueprints index](blueprints/README.md) separates target behavior, engineering delivery, and deferred features from the current-runtime guides above.
+
+* **[Autonomous Agent Activity, Messaging, and Background Tasks](blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md)**: The governing design for continuing personal activity, explicit communication, background execution, and recovery.
+* **[Implementation Plan](blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md)**: Confirmed decisions, engineering contracts, implementation phases, and acceptance gates.
+* **[Future Plans](blueprints/Todo_Autonomous_Agent_Activity_Messaging_and_Background_Tasks.md)**: Deferred features outside the initial replacement scope, not an implementation-progress checklist.
+* **[Phase 0 Contract Freeze](dev/autonomous_activity/README.md)**: Implemented value contracts, the replacement inventory, deterministic fixtures, and separately runnable specifications for the unimplemented runtime.
+
 ## 📊 Visual Flowcharts Directory
 
 For visual diagrams sequencing ATT loops, refer to the flowchart index and specific diagrams:

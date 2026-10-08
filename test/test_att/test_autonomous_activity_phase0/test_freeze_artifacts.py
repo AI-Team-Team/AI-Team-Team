@@ -15,7 +15,13 @@ from ai_team_team.database.persistence.constants import STATE_SCHEMA_VERSION
 
 from test.test_att.test_autonomous_activity_phase0._fixtures import ScriptedModelClient
 from test.test_att.test_autonomous_activity_phase0 import _inventory
-from test.test_att.test_autonomous_activity_phase0._inventory import AREAS, ROOT, SELECTORS, collect
+from test.test_att.test_autonomous_activity_phase0._inventory import (
+    AREAS,
+    EXCLUDED,
+    ROOT,
+    SELECTORS,
+    collect,
+)
 from test.test_att.test_autonomous_activity_phase0._fixtures.schema import physical_schema
 from test.test_att.test_autonomous_activity_phase0.spec_schema_activation import REQUIRED_TABLES
 
@@ -65,6 +71,28 @@ class TestFreezeArtifacts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({item["path"] for item in found}, {f".github/{name}" for name in names})
         self.assertTrue(all(item["hits"][0][0] == 1 for item in found))
 
+    def test_inventory_excludes_all_blueprints_without_excluding_current_runtime_docs(self):
+        with tempfile.TemporaryDirectory(prefix="att-phase0-inventory-") as workspace:
+            root = Path(workspace)
+            excluded = {
+                f"docs/blueprints/{directory}/fixture{suffix}"
+                for directory in (".", "design", "plan/nested")
+                for suffix in (".py", ".md", ".yaml", ".yml", ".toml")
+            }
+            included = {
+                "docs/user/API_Reference.md",
+                "docs/dev/testing.md",
+                "docs/flowcharts/Tooling_and_Execution.md",
+                "docs/blueprints_examples/README.md",
+            }
+            for name in excluded | included:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("execute_team_discussion()\n", encoding="utf-8")
+            with patch.object(_inventory, "ROOT", root):
+                found = _inventory.collect("docs")
+        self.assertEqual({item["path"] for item in found}, included)
+
     def test_inventory_matches_the_complete_current_scan(self):
         recorded = json.loads((ARTIFACTS / "round_dependencies.json").read_text(encoding="utf-8"))
         self.assertEqual(
@@ -74,6 +102,7 @@ class TestFreezeArtifacts(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(recorded["selectors"], SELECTORS)
         self.assertEqual(recorded["areas"], list(AREAS))
+        self.assertEqual(recorded["excluded"], list(EXCLUDED))
 
     async def test_effect_manifest_covers_every_builtin_including_optional_memory(self):
         workspace = tempfile.TemporaryDirectory(prefix="att-phase0-effects-")

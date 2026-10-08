@@ -8,7 +8,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 AREAS = ("src", "test", "typecheck", "docs", "README.md", "Roadmap", ".github", "pyproject.toml")
-EXCLUDED = ("test/test_att/test_autonomous_activity_phase0/", "docs/dev/autonomous_activity/")
+EXCLUDED = (
+    "test/test_att/test_autonomous_activity_phase0/",
+    "docs/dev/autonomous_activity/",
+    "docs/blueprints/",
+)
 SELECTORS = {
     "discussion_entry": r"\b\w*execute_team_discussion\w*\b|\bDiscussionCoordinator\b|\bDiscussionAPI\b",
     "discussion_results": r"\bDiscussion(?:Result|RoundResult|Status)\b|\bAgentTurn(?:Result|Status|IncompleteError)\b",
@@ -66,7 +70,7 @@ if __name__ == "__main__":
     parser.add_argument("--metadata", action="store_true")
     arguments = parser.parse_args()
     if arguments.metadata:
-        print(json.dumps({"areas": AREAS, "selectors": SELECTORS}))
+        print(json.dumps({"areas": AREAS, "excluded": EXCLUDED, "selectors": SELECTORS}))
     elif arguments.summary:
         files = collect(arguments.area)
         print(json.dumps({"files": len(files), "lines": sum(len(item["hits"]) for item in files)}))

@@ -12,9 +12,13 @@ The inventory is overinclusive, and a selected callback, transcript word, techni
 
 Parallel collection is inventoried because an all-member gather can form a barrier, while Native tool batches, writer receipt collection, and shutdown cleanup may legitimately retain gather.
 
-The new Phase 0 package and this specification directory are excluded to avoid recursively cataloging the inventory's own quoted old names.
+The Phase 0 test package, this specification directory, and the entire `docs/blueprints/` directory are excluded because they define the replacement rather than document the existing runtime dependencies to remove.
 
-Ignored local design records remain governing records.
+Current-runtime API references, user guides, development guides, and flowcharts remain included.
+
+The snapshot records these exclusion boundaries in its `excluded` metadata alongside the scan areas and selectors.
+
+The public [blueprint](../../blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md) and [implementation plan](../../blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md) remain governing design records rather than descriptions of the current runtime.
 
 The scanner is read-only and prints JSON without changing repository files.
 

@@ -1,5 +1,20 @@
 # AI-Team-Team (ATT)
 
+> [!IMPORTANT]
+> **Major architectural refactor in progress.**
+>
+> ATT is replacing team-wide discussion rounds and all-member response barriers with one continuing personal activity mechanism per Agent.
+>
+> Planned changes include explicit team conversation streams and personal messaging, notification and sleep controls, tracked background execution, and durable activity checkpoints and recovery.
+>
+> Governance, team formation, topology, supervision, model and tool execution, persistence, public APIs, configuration, tests, and documentation will be updated around this model.
+>
+> Agent identity, personal memory, membership consent, and permission boundaries remain core requirements.
+>
+> Phase 0 has frozen contracts and verification fixtures; the replacement runtime and schema activation are not yet implemented, and breaking API and SQLite schema changes are planned.
+>
+> See the [Design Blueprints](docs/blueprints/README.md) for the design, implementation phases, and deferred features.
+
 A generic framework for persistent, hierarchical, and dynamically organized multi-agent collaboration in Python.
 
 ATT models stable Agent identities that can participate in autonomous AgentTeams.
@@ -445,6 +460,12 @@ The Quickstart now covers manager configuration, LLM integration, model and Agen
 The complete and current `ATTConfig` reference has moved to the [Public API Reference](docs/user/API_Reference.md).
 
 The reference includes every top-level option, nested policy configuration, tokenizer mapping, validation constraint, and the model-facing file-read token-counter rules.
+
+## Design Blueprints
+
+The [Design Blueprints](docs/blueprints/README.md) collect the autonomous Agent activity blueprint, implementation plan, and deferred features.
+
+They describe the target architecture rather than the current runtime; Phase 0 freezes contracts and verification fixtures, while replacement-runtime implementation remains planned.
 
 ## 📊 Architecture & Control Flow Diagrams
 
