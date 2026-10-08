@@ -18,6 +18,14 @@ For an individual test package:
 
 The repository CI runs the suite on Python 3.11 through 3.13 across Linux, macOS, and Windows. The quality job also runs Ruff, the public consumer mypy contract, branch coverage with a 70 percent baseline, and a wheel build/install smoke test.
 
+The foundational autonomous-activity replacement has a separate [Phase 0 contract freeze](autonomous_activity/README.md), with deterministic fixtures and an explicitly red `spec_*.py` gate.
+
+Ordinary discovery runs its implemented contract and fixture tests, while `./venv/bin/python -m unittest discover -s test/test_att/test_autonomous_activity_phase0 -t . -p 'spec_*.py'` exposes the unimplemented runtime requirements without skips or expected-failure success.
+
+Run `./venv/bin/mypy typecheck/activity_contract.py` alongside the existing public consumer contract when editing the frozen value records.
+
+Do not interpret the current round-based regression suite passing as acceptance of the replacement runtime, and promote completed specifications into ordinary discovery in their implementing phase.
+
 Run the same quality checks locally with:
 
 ```bash
