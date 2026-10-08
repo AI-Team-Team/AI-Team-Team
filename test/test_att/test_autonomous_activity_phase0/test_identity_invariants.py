@@ -102,7 +102,9 @@ class TestRelationshipIdentitySnapshots(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(Path, "read_bytes", autospec=True, side_effect=reject_link_read):
             snapshot = AgentIdentitySnapshot.capture(self.person, self.manager)
-        self.assertIn(("external-link.txt", ("symlink", str(target))), snapshot.private_entries)
+        self.assertIn(
+            ("external-link.txt", ("symlink", str(link.readlink()))), snapshot.private_entries
+        )
 
     def test_snapshot_failure_representation_does_not_expose_personal_content(self):
         secret = "PRIVATE_AGENT_CONTENT_NEVER_LOGGED"
