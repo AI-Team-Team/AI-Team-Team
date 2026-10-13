@@ -87,12 +87,14 @@ To achieve this, inject a temporary directory sandbox into the `setUp()` method 
         os.chdir(self._test_tmpdir)
         
         # Ensure cleanup runs after tearDown()
-        self.addCleanup(os.chdir, self._test_old_cwd)
         self.addCleanup(shutil.rmtree, self._test_tmpdir, ignore_errors=True)
+        self.addCleanup(os.chdir, self._test_old_cwd)
         
         # Initialize your manager now (workspace_root will default to CWD which is tmpdir)
         # self.manager = ATTManager(...)
 ```
+
+Cleanup callbacks run in reverse registration order, so register directory removal first to restore the working directory before deleting the sandbox.
 
 ## 5. Mocking LLM Responses
 

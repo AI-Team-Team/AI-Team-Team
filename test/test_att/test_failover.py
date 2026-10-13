@@ -20,8 +20,8 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
         self._test_old_cwd = os.getcwd()
         self._test_tmpdir = tempfile.mkdtemp(prefix="att_test_")
         os.chdir(self._test_tmpdir)
-        self.addCleanup(os.chdir, self._test_old_cwd)
         self.addCleanup(shutil.rmtree, self._test_tmpdir, ignore_errors=True)
+        self.addCleanup(os.chdir, self._test_old_cwd)
 
         self.mock_client = MagicMock()
         # Default mock response for standard LLM calls

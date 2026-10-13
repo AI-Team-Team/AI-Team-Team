@@ -21,8 +21,8 @@ class TestATTMigration(unittest.IsolatedAsyncioTestCase):
         self._test_old_cwd = os.getcwd()
         self._test_tmpdir = tempfile.mkdtemp(prefix="att_test_")
         os.chdir(self._test_tmpdir)
-        self.addCleanup(os.chdir, self._test_old_cwd)
         self.addCleanup(shutil.rmtree, self._test_tmpdir, ignore_errors=True)
+        self.addCleanup(os.chdir, self._test_old_cwd)
 
         self.mock_client = PersonalGovernanceClient()
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
