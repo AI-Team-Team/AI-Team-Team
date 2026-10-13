@@ -68,6 +68,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
             Agent("SourceRoot", "Architect", self.client),
             ATTConfig(workspace_root=source_root),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         source.register_llm_client("test", self.client)
         persisted_team = source.create_agent_team(source.root_ai)
@@ -76,8 +77,8 @@ class TestCriticalHardening(CriticalHardeningTestCase):
         await source.close()
         with closing(sqlite3.connect(db_path)) as connection:
             connection.execute(
-                "INSERT INTO team_members (team_id, agent_id) VALUES (?, ?)",
-                (persisted_team.team_id, "missing-agent"),
+                "INSERT INTO team_members (team_id, agent_id, interval_id) VALUES (?, ?, ?)",
+                (persisted_team.team_id, "missing-agent", "missing-interval"),
             )
             connection.commit()
 
@@ -89,7 +90,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
         old_teams = self.manager.teams
         old_libraries = self.manager.libraries
 
-        with self.assertRaisesRegex(StateRestoreError, "missing members"):
+        with self.assertRaisesRegex(StateRestoreError, "dangling concrete foreign key"):
             await self.manager.load_state(db_path)
 
         self.assertIs(self.manager.config, old_config)
@@ -109,6 +110,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
             Agent("DepthRoot", "Architect", self.client),
             ATTConfig(workspace_root=source_root),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         source.register_llm_client("test", self.client)
         parent = source.create_agent_team(source.root_ai)
@@ -116,12 +118,14 @@ class TestCriticalHardening(CriticalHardeningTestCase):
         await source.save_state()
         await source.close()
         with closing(sqlite3.connect(db_path)) as connection:
-            connection.execute("UPDATE teams SET depth = 999")
-            connection.commit()
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(teams)")}
+            self.assertNotIn("depth", columns)
+            self.assertNotIn("migration_count", columns)
 
         restored = ATTManager(
             Agent("DepthRoot", "Architect", self.client),
             ATTConfig(workspace_root=os.path.join(self.tmpdir, "unused")),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("test", self.client)
         await restored.load_state(db_path)

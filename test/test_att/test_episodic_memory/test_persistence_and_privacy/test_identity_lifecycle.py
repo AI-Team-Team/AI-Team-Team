@@ -7,6 +7,8 @@ from ai_team_team import (
     ATTConfig,
     ATTManager,
     Agent,
+    AgentTurnResult,
+    AgentTurnStatus,
     LLMResponse,
     StateRestoreError,
     ToolCall,
@@ -47,15 +49,23 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
     async def test_permanent_agent_delete_removes_derived_memory_but_retains_journal(self):
         doomed = Agent("Doomed", "Researcher", self.client)
         self.manager.register_agent(doomed)
-        self.team.members.append(doomed)
-        await self.team.execute_reasoning_step_detailed(
-            doomed,
-            "Create history before retirement.",
-            "System.",
-            manager=self.manager,
-        )
+        # A standalone personal segment has no restrictive relationship or
+        # activity references. Separate tests cover retained historical owners,
+        # which must be archived rather than permanently deleted.
+        turn_id = "standalone-delete-fixture"
+        token = self.manager._active_agent_turn_id.set(turn_id)
+        try:
+            self.manager._memory.start_turn(doomed, None, turn_id)
+            doomed.append_message({"role": "user", "content": "Create personal history before retirement."})
+            doomed.append_message({"role": "assistant", "content": "Completed personal fixture work."})
+            await self.manager._memory.finalize_turn(doomed, None, AgentTurnResult(
+                agent_id=doomed.agent_id, turn_id=turn_id, status=AgentTurnStatus.COMPLETED,
+                answer="Completed personal fixture work.",
+            ))
+        finally:
+            self.manager._active_agent_turn_id.reset(token)
         await self.manager.flush_memory_indexing()
-        self.team.members.remove(doomed)
+        self.assertTrue(any(card.agent_id == doomed.agent_id for card in self.manager._memory.cards.values()))
         db_path = os.path.join(self.tmpdir, "delete.db")
         self.manager.db_path = db_path
         await self.manager.save_state()

@@ -150,7 +150,7 @@ class TestStatePersistence(StatePersistenceTestCase):
         new_manager = ATTManager(
             root_ai=new_root_ai,
             db_path=self.db_path
-        )
+        , persistence_mode=("durable" if (self.db_path) else "volatile"))
         new_manager.register_llm_client("critic", self.mock_react_client)
         new_manager.register_tools_context({"att_manager": new_manager})
         
@@ -213,7 +213,7 @@ class TestStatePersistence(StatePersistenceTestCase):
         new_manager = ATTManager(
             root_ai=temp_root_ai,
             db_path=self.db_path
-        )
+        , persistence_mode=("durable" if (self.db_path) else "volatile"))
         new_manager.register_llm_client("critic", self.mock_react_client)
         self.assertIs(new_manager.supervisor.manager.root_ai, temp_root_ai)
 

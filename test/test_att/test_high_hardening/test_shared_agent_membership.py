@@ -25,6 +25,7 @@ class TestSharedAgentMembership(unittest.IsolatedAsyncioTestCase):
         self.manager = ATTManager(
             self.root,
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         self.manager.register_llm_client("shared-model", self.client)
         self.shared = Agent(
@@ -76,7 +77,7 @@ class TestSharedAgentMembership(unittest.IsolatedAsyncioTestCase):
             ).fetchone()
             messages = connection.execute(
                 "SELECT id, agent_id, role, content, created_at, tool_calls, tool_call_id, "
-                "name, team_id, discussion_id FROM agent_messages WHERE agent_id = ? "
+                "name, team_id, invocation_id, source_metadata FROM agent_messages WHERE agent_id = ? "
                 "ORDER BY id",
                 (self.shared.agent_id,),
             ).fetchall()
@@ -241,11 +242,12 @@ class TestSharedAgentMembership(unittest.IsolatedAsyncioTestCase):
             membership_columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(team_members)")
             }
-        self.assertEqual(membership_columns, {"team_id", "agent_id"})
+        self.assertEqual(membership_columns, {"team_id", "agent_id", "interval_id"})
 
         restored = ATTManager(
             Agent("TemporaryRoot", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("shared-model", self.client)
         await restored.load_state(db_path)

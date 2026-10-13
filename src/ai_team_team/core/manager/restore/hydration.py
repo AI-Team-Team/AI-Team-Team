@@ -16,6 +16,7 @@ from ...team import AgentTeam
 class RestoreHydrationMixin:
     async def _apply_state_snapshot_unvalidated(self, state: Dict[str, Any]) -> None:
         manager = self.manager
+        manager._records.restore(state.get("records", ()))
         configs = state["configs"]
         config_data = json.loads(configs["att_config"])
         manager.config = ATTConfig(**config_data)
@@ -71,6 +72,7 @@ class RestoreHydrationMixin:
                 agent_id=row["agent_id"],
             )
             agent.lifecycle_state = lifecycle_state
+            agent.presentation_preferences = dict(row.get("presentation_preferences", {}))
             agent._model_alias = alias
             agent._private_doc_library_id = f"PDL-{agent.agent_id}"
             agent._manager = manager
@@ -126,6 +128,8 @@ class RestoreHydrationMixin:
                 team_kind=row["team_kind"],
             )
             team.team_id = row["team_id"]
+            team._parent_agent_id = row.get("parent_agent_id")
+            team._lifecycle_state = row.get("lifecycle_state", "active")
             team.logger = logging.getLogger(f"AgentTeam:{team.team_id}")
             team.team_progress = row["team_progress"]
             team.chapter_num = row["chapter_num"]

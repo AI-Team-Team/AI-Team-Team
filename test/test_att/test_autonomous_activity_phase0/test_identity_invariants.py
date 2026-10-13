@@ -20,7 +20,7 @@ class TestRelationshipIdentitySnapshots(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.workspace.cleanup)
         self.client = ScriptedModelClient()
         self.root = Agent("Root", "Architect", self.client)
-        self.manager = ATTManager(self.root, ATTConfig(workspace_root=self.workspace.name))
+        self.manager = ATTManager(self.root, ATTConfig(workspace_root=self.workspace.name), persistence_mode="volatile")
         self.addAsyncCleanup(self.manager.close)
         self.manager.register_llm_client("fixture", self.client)
         self.person = Agent(

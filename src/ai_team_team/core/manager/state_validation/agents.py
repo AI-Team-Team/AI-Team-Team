@@ -36,6 +36,7 @@ def validate_agents(
             "active",
             "retained",
             "archived",
+            "dead",
         }:
             raise StateRestoreError(
                 f"Agent {row.get('agent_id')!r} has an invalid lifecycle state."

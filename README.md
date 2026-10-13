@@ -11,7 +11,7 @@
 >
 > Agent identity, personal memory, membership consent, and permission boundaries remain core requirements.
 >
-> Phase 0 has frozen contracts and verification fixtures; the replacement runtime and schema activation are not yet implemented, and breaking API and SQLite schema changes are planned.
+> Phase 0 has frozen contracts and verification fixtures, and Phase 1 activates schema 12 with durability and publication foundations; the replacement activity runtime and subsequent breaking API changes remain in progress.
 >
 > See the [Design Blueprints](docs/blueprints/README.md) for the design, implementation phases, and deferred features.
 
@@ -139,6 +139,10 @@ AgentTeam structural state uses a separate lock for proposals, ballots, membersh
 Topology mutations are revalidated under a manager-level lock after any external authorization work and before all parent, child, depth, and registry pointers change atomically.
 
 Persistence uses one exclusive writer manager per SQLite state database and coalesces pending deltas without making disk I/O part of the event-loop critical path.
+
+Durable sessions require an explicit database path; the Host may explicitly choose a volatile session without restart recovery.
+
+The [Phase 1 persistence foundations](docs/dev/autonomous_activity/Phase_1.md) install incompatible schema 12, immutable record deltas, exact commit receipts, recoverable directory publication, and stale-worker fencing while the later runtime replacement remains in progress.
 
 ### Failure Semantics Follow the Type of Decision
 

@@ -20,6 +20,7 @@ from ..callbacks import CallbackDispatcher
 from ..communication_validation import CommunicationStateValidator
 from ..discussions import DiscussionCoordinator
 from ..discovery import DiscoveryService
+from ..durable_records import DurableRecordService
 from ..failover import FailoverService
 from ..formations import FormationService
 from ..governance import GovernanceService
@@ -31,6 +32,7 @@ from ..migration import MigrationService
 from ..memory import MemoryService
 from ..restore import RestoreService
 from ..runtime import RuntimeRegistry
+from ..resources import ResourceGate
 from ..snapshots import SnapshotBuilder
 from ..state import StateCoordinator
 from ..state_validation import StateValidator
@@ -69,8 +71,16 @@ class ATTManager(
         config: Optional[ATTConfig] = None,
         db_path: Optional[str] = None,
         *,
+        persistence_mode: str = "durable",
         _restore_mode: bool = False,
     ) -> None:
+        if persistence_mode not in {"durable", "volatile"}:
+            raise ValueError("persistence_mode must be 'durable' or 'volatile'.")
+        if not _restore_mode and persistence_mode == "durable" and not db_path:
+            raise ValueError("Durable ATTManager requires an explicit db_path; choose persistence_mode='volatile' for in-memory operation.")
+        if persistence_mode == "volatile" and db_path:
+            raise ValueError("Volatile ATTManager cannot own a durable db_path.")
+        self.persistence_mode = persistence_mode
         self.root_ai = root_ai
         self.config = config or ATTConfig()
         self.db_path = db_path
@@ -121,11 +131,15 @@ class ATTManager(
         self._active_formation_operations = 0
         self._formation_operation_tasks: set[asyncio.Task[Any]] = set()
         self._restore_in_progress = False
+        self._publication_tasks: set[asyncio.Task[Any]] = set()
+        self._close_task: Optional[asyncio.Task[Any]] = None
+        self._resources = ResourceGate(self)
         self._starting_invocations = 0
         self._active_invocations = 0
         self._active_agent_invocation_tokens: set[str] = set()
         self._agent_wait_edge_counts: Dict[Tuple[str, str], int] = {}
         self._state_version = 0
+        self._records = DurableRecordService(self)
         self._snapshots = SnapshotBuilder(self)
         self._restore = RestoreService(self)
         self._state_validator = StateValidator(self)

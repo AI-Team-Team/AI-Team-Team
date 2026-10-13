@@ -135,7 +135,7 @@ Use stable IDs for inspection and subsequent operations rather than treating res
 
 There is no required directory version, persisted pagination snapshot, or separate discovery index.
 
-Existing persisted Agent and AgentTeam fields remain authoritative, so discovery works immediately after restore and schema remains `11`.
+Persisted Agent and AgentTeam fields remain authoritative, so discovery works immediately after a validated restore using the current schema `12`.
 
 ## Deferred Extensions
 

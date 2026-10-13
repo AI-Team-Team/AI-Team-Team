@@ -34,6 +34,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         restored = ATTManager(
             restored_root,
             ATTConfig(workspace_root=self.temp_dir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("default", self.client)
         await restored.load_state(db_path)

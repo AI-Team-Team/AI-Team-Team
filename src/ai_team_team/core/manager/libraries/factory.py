@@ -21,7 +21,7 @@ class LibraryFactoryMixin:
     ) -> DocumentLibrary:
         manager = self.manager
         manager._library_files.setdefault(lib_id, {})
-        return manager._build_document_library(
+        library = manager._build_document_library(
             lib_id=lib_id,
             name=name,
             owner_team_id=owner_team_id,
@@ -32,6 +32,8 @@ class LibraryFactoryMixin:
             is_public_visible=is_public_visible,
             storage_dir=storage_dir,
         )
+        manager._resources.bind(library)
+        return library
 
     def _build_document_library(
         self,

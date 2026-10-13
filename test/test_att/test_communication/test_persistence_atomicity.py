@@ -51,6 +51,7 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
                 workspace_root=self.workspace,
             ),
             db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("default", self.client)
         return manager
@@ -100,6 +101,7 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("RestoreRoot", "Root governor", self.client),
             ATTConfig(workspace_root=self.workspace),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("default", self.client)
         await restored.load_state(db_path)
@@ -131,6 +133,7 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
         final = ATTManager(
             Agent("FinalRoot", "Root governor", self.client),
             ATTConfig(workspace_root=self.workspace),
+            persistence_mode="volatile",
         )
         final.register_llm_client("default", self.client)
         await final.load_state(db_path)

@@ -14,7 +14,6 @@ from ai_team_team.database.models import (
     AgentModel,
     CommunicationAgreementModel,
     CommunicationApprovalModel,
-    CommunicationBallotModel,
     CommunicationRequestModel,
     DocLibFileModel,
     DocLibLinkModel,
@@ -38,15 +37,24 @@ from ai_team_team.database.models import (
 )
 from ai_team_team.database.persistence.constants import STATE_SCHEMA_VERSION
 from .governance_reader import read_governance_state
+from .records import read_records, validate_database
 
 
 class StoreReadMixin:
     session_factory: Any
 
-    def read(self) -> Dict[str, Any]:
+    def read(self, *, reconcile: bool = True) -> Dict[str, Any]:
         """Reads all persisted state into detached plain Python structures."""
+        self._preflight_schema(self.db_path)
+        from .reconciliation import reconcile_publication
+        if reconcile:
+            reconcile_publication(self)
         session = self.session_factory()
         try:
+            # Pysqlite's legacy transaction mode does not begin on SELECT.
+            # An explicit read transaction keeps every table at one checkpoint.
+            session.execute(text("BEGIN"))
+            validate_database(session)
             config_map = {
                 row.config_key: row.config_value for row in session.query(ManagerConfigModel).all()
             }
@@ -76,6 +84,8 @@ class StoreReadMixin:
 
             agents = []
             for row in session.query(AgentModel).all():
+                if not isinstance(row.presentation_preferences, dict):
+                    raise StateRestoreError("Agent presentation preferences must be a JSON object.")
                 messages = []
                 message_rows = (
                     session.query(AgentMessageModel)
@@ -84,15 +94,20 @@ class StoreReadMixin:
                     .all()
                 )
                 for msg in message_rows:
+                    if not isinstance(msg.source_metadata, dict) or set(msg.source_metadata) & {"role", "content", "tool_calls", "tool_call_id", "name", "team_id", "invocation_id", "source_chat_message_id", "source_execution_id"}:
+                        raise StateRestoreError("Invalid committed message source metadata.")
                     messages.append(
                         {
+                            **msg.source_metadata,
                             "role": msg.role,
                             "content": msg.content,
                             "tool_calls": msg.tool_calls,
                             "tool_call_id": msg.tool_call_id,
                             "name": msg.name,
                             "team_id": msg.team_id,
-                            "discussion_id": msg.discussion_id,
+                            "invocation_id": msg.invocation_id,
+                            **({"source_chat_message_id": msg.source_chat_message_id} if msg.source_chat_message_id else {}),
+                            **({"source_execution_id": msg.source_execution_id} if msg.source_execution_id else {}),
                         }
                     )
                 agents.append(
@@ -105,6 +120,8 @@ class StoreReadMixin:
                         "model_alias": row.model_alias,
                         "last_context": row.last_context,
                         "lifecycle_state": row.lifecycle_state,
+                        "state_version": row.state_version,
+                        "presentation_preferences": row.presentation_preferences,
                         "messages": messages,
                     }
                 )
@@ -161,14 +178,17 @@ class StoreReadMixin:
                 teams.append(
                     {
                         "team_id": row.team_id,
+                        "parent_agent_id": row.parent_agent_id,
+                        "lifecycle_state": row.lifecycle_state,
+                        "state_version": row.state_version,
                         "team_kind": row.team_kind,
                         "preset_name": row.preset_name,
                         "team_purpose": row.team_purpose,
                         "team_progress": row.team_progress,
-                        "depth": row.depth,
+                        "depth": None,
                         "chapter_num": row.chapter_num,
                         "parent_team_id": row.parent_team_id,
-                        "migration_count": row.migration_count,
+                        "migration_count": 0,
                         "creator_type": ("agent" if row.creator_agent_id else "team"),
                         "creator_id": (row.creator_agent_id or row.creator_team_id),
                         "status_map": row.status_map,
@@ -317,7 +337,9 @@ class StoreReadMixin:
                     "objective": row.objective,
                     "status": row.status,
                     "participant_agent_ids": row.participant_agent_ids,
-                    "source_discussion_id": row.source_discussion_id,
+                    "source_discussion_id": row.checkpoint_context.get("source_discussion_id"),
+                    "source_message_id": row.source_message_id,
+                    "initiator_invocation_id": row.initiator_invocation_id,
                     "candidate": row.candidate,
                     "reason": row.reason,
                     "created_at": row.created_at,
@@ -339,20 +361,6 @@ class StoreReadMixin:
                     "resolved_at": row.resolved_at,
                 }
                 for row in session.query(CommunicationApprovalModel).all()
-            ]
-            communication_ballots = [
-                {
-                    "request_id": row.request_id,
-                    "principal": {
-                        "kind": row.principal_kind,
-                        "principal_id": row.principal_id,
-                    },
-                    "voter_agent_id": row.voter_agent_id,
-                    "approved": bool(row.approved),
-                    "reason": row.reason,
-                    "created_at": row.created_at,
-                }
-                for row in session.query(CommunicationBallotModel).all()
             ]
             communication_agreements = [
                 {
@@ -396,8 +404,11 @@ class StoreReadMixin:
                     "agent_id": row.agent_id,
                     "agent_name_snapshot": row.agent_name_snapshot,
                     "team_id": row.team_id,
-                    "discussion_id": row.discussion_id,
-                    "turn_id": row.turn_id,
+                    "discussion_id": row.checkpoint_context.get("discussion_id"),
+                    "turn_id": row.checkpoint_context.get("turn_id"),
+                    "invocation_id": row.invocation_id,
+                    "source_chat_message_id": row.source_chat_message_id,
+                    "source_execution_id": row.source_execution_id,
                     "role": row.role,
                     "payload": row.payload,
                     "redacted": bool(row.redacted),
@@ -422,9 +433,10 @@ class StoreReadMixin:
                     {
                         "segment_id": row.segment_id,
                         "agent_id": row.agent_id,
-                        "turn_id": row.turn_id,
+                        "turn_id": row.checkpoint_context.get("turn_id"),
+                        "invocation_id": row.invocation_id,
                         "origin_team_id": row.origin_team_id,
-                        "discussion_id": row.discussion_id,
+                        "discussion_id": row.checkpoint_context.get("discussion_id"),
                         "source_event_ids": source_event_ids,
                         "recall_content": row.recall_content,
                         "content_sha256": row.content_sha256,
@@ -448,12 +460,13 @@ class StoreReadMixin:
                     {
                         "memory_id": row.memory_id,
                         "agent_id": row.agent_id,
-                        "turn_id": row.turn_id,
+                        "turn_id": row.checkpoint_context.get("turn_id"),
+                        "invocation_id": row.invocation_id,
                         "title": row.title,
                         "summary": row.summary,
                         "tags": tags,
                         "origin_team_id": row.origin_team_id,
-                        "discussion_id": row.discussion_id,
+                        "discussion_id": row.checkpoint_context.get("discussion_id"),
                         "segment_id": row.segment_id,
                         "status": row.status,
                         "version": row.version,
@@ -473,7 +486,21 @@ class StoreReadMixin:
             ]
 
             governance_rounds, migration_requests = read_governance_state(session)
+            latest_cases = {}
+            for case in governance_rounds:
+                principal = case["principal"]
+                key = case["business_kind"], case["business_id"], principal["kind"], principal["principal_id"]
+                if key not in latest_cases or case["round_number"] > latest_cases[key]["round_number"]:
+                    latest_cases[key] = case
+            communication_ballots = [
+                {"request_id": case["business_id"], "principal": case["principal"],
+                 "voter_agent_id": ballot["voter_agent_id"], "approved": ballot["choice"]["approved"],
+                 "reason": ballot["choice"].get("reason", ""), "created_at": ballot["created_at"]}
+                for case in latest_cases.values() if case["business_kind"] == "communication" and case["principal"]["kind"] == "agent_team" and case["status"] in {"APPROVED", "DENIED"}
+                for ballot in case["ballots"]
+            ]
             return {
+                "records": read_records(session),
                 "governance_rounds": governance_rounds,
                 "migration_requests": migration_requests,
                 "configs": config_map,
@@ -498,6 +525,10 @@ class StoreReadMixin:
                 "memory_cards": memory_cards,
                 "memory_references": memory_references,
             }
+        except StateRestoreError:
+            raise
+        except (ValueError, TypeError, KeyError, AttributeError) as exc:
+            raise StateRestoreError("Invalid checkpoint value or provenance structure.") from exc
         finally:
             session.close()
 

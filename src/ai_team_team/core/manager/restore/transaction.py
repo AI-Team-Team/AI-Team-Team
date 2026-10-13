@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ...agent import Agent
 from ...config import ATTConfig
 from ...exceptions import StateRestoreError
+from .manifest import prepare_manifest, resolve_manifest
 
 
 class RestoreTransactionMixin:
@@ -29,7 +30,7 @@ class RestoreTransactionMixin:
             )
         if any(team.is_running for team in manager.teams.values()):
             raise StateRestoreError("Cannot restore state while a team discussion is active.")
-        if any(agent.lock.locked() for agent in manager._agents_by_id.values()):
+        if any(agent._lock is not None and agent._lock.locked() for agent in manager._agents_by_id.values()):
             raise StateRestoreError("Cannot restore state while an agent invocation is active.")
         if manager._formations.tasks or any(
             lock.locked() for lock in manager._formations._request_locks.values()
@@ -53,7 +54,7 @@ class RestoreTransactionMixin:
         ):
             raise StateRestoreError("Cannot restore state while a personal governance operation is active.")
         try:
-            target_config = manager._validate_state_snapshot(state)
+            target_config = await asyncio.to_thread(manager._validate_state_snapshot, state)
             if target_config.episodic_memory.enabled:
                 manager._memory._require_fts5()
         except StateRestoreError:
@@ -66,7 +67,10 @@ class RestoreTransactionMixin:
             raise StateRestoreError("The managed DocLib root cannot be a symbolic link.")
         os.makedirs(managed_root, exist_ok=True)
         staging_workspace = tempfile.mkdtemp(prefix=".att-restore-", dir=managed_root)
-        staged_state = json.loads(json.dumps(state))
+        staged_state = await asyncio.to_thread(
+            lambda: json.loads(json.dumps({key: value for key, value in state.items() if key != "records"}))
+        )
+        staged_state["records"] = state.get("records", ())
         staged_config_data = json.loads(staged_state["configs"]["att_config"])
         staged_config_data["workspace_root"] = staging_workspace
         staged_state["configs"]["att_config"] = json.dumps(staged_config_data)
@@ -78,6 +82,7 @@ class RestoreTransactionMixin:
                 llm_client=manager.root_ai.llm_client,
             ),
             ATTConfig(workspace_root=staging_workspace),
+            persistence_mode="volatile",
             _restore_mode=True,
         )
         staged.llm_clients = dict(manager.llm_clients)
@@ -85,6 +90,9 @@ class RestoreTransactionMixin:
         staged.global_tools = dict(manager.global_tools)
         published: List[Tuple[str, Optional[str]]] = []
         staged_closed = False
+        publication_gate = False
+        committed = False
+        manifest = None
         try:
             await staged._apply_state_snapshot_unvalidated(staged_state)
             await staged._persistence.close()
@@ -107,12 +115,20 @@ class RestoreTransactionMixin:
             for team in staged.teams.values():
                 _ = team.depth
 
-            published = manager._publish_staged_libraries(
+            if not manager._resources.blocked:
+                manager._resources.begin_publication()
+            publication_gate = True
+            manifest = await prepare_manifest(manager, staged, managed_root, state)
+            published = await asyncio.to_thread(manager._publish_staged_libraries,
                 staged.libraries,
                 managed_root,
             )
             old_state = {
                 "config": manager.config,
+                "state_version": manager._state_version,
+                "receipts": dict(manager._records.receipts),
+                "records": manager._records.snapshot(),
+                "recovery_plan": getattr(manager, "_recovery_plan", None),
                 "root_ai": manager.root_ai,
                 "agents": manager.agents,
                 "agents_by_id": manager._agents_by_id,
@@ -143,11 +159,19 @@ class RestoreTransactionMixin:
                 "governance_rounds": manager._governance.snapshot(),
                 "migration_requests": [item.model_dump(mode="json") for item in manager._migration.requests.values()],
             }
+            # The durable commit decision precedes the synchronous registry
+            # switch. A crash here retains the validated new file generation.
+            manifest = await resolve_manifest(manager, manifest, "published")
+            staged._records._merge((manifest,))
             # Readers must see the entire publication or its completed rollback.
             # Staging and persistence awaits remain outside this synchronous lock.
             with manager._topology_lock:
                 try:
                     manager.config = target_config
+                    manager._state_version = max(manager._state_version, int(state["configs"].get("state_version", "1")))
+                    manager._records.restore(staged._records.snapshot())
+                    manager._records.receipts.clear()
+                    manager._recovery_plan = staged._recovery_plan
                     manager.root_ai = staged.root_ai
                     manager._agent_registry.replace_indexes(
                         staged.agents,
@@ -223,6 +247,10 @@ class RestoreTransactionMixin:
                         if old_state["agents_by_id"].get(staged_agent.agent_id) is not staged_agent:
                             staged_agent._manager = None
                     manager.config = old_state["config"]
+                    manager._state_version = old_state["state_version"]
+                    manager._records.restore(old_state["records"])
+                    manager._records.receipts = old_state["receipts"]
+                    manager._recovery_plan = old_state["recovery_plan"]
                     manager.root_ai = old_state["root_ai"]
                     manager._agent_registry.replace_indexes(
                         old_state["agents"],
@@ -272,23 +300,51 @@ class RestoreTransactionMixin:
                         old_memory["memory_cards"],
                         old_memory["memory_references"],
                     )
-                    manager._rollback_published_libraries(published)
-                    published = []
                     raise
             for old_agent in old_state["agents_by_id"].values():
                 if manager._agents_by_id.get(old_agent.agent_id) is not old_agent:
                     old_agent._manager = None
-            manager._discard_library_backups(published)
+            committed = True
+            source_path = getattr(manager, "_restore_source_path", None)
+            if source_path is not None:
+                manager.db_path = source_path
+                manager.persistence_mode = "durable"
+            await asyncio.to_thread(manager._discard_library_backups, published)
             published = []
-        except StateRestoreError:
-            if published:
-                manager._rollback_published_libraries(published)
-            raise
-        except Exception as exc:
-            if published:
-                manager._rollback_published_libraries(published)
+        except BaseException as exc:
+            if committed:
+                manager._emit_callback("on_system_event", "publication_cleanup_pending", {"publication_id": manifest.values["publication_id"]})
+                return
+            if not committed:
+                journal = getattr(manager, "_publication_journal", None)
+                if journal is not None:
+                    try:
+                        await asyncio.to_thread(journal.mark_rollback)
+                        await asyncio.to_thread(journal.rollback)
+                        if manifest is not None:
+                            await resolve_manifest(manager, manifest, "rolled_back")
+                        await asyncio.to_thread(journal.finish)
+                        journal.release()
+                        manager._publication_journal = None
+                    except BaseException as rollback_error:
+                        manager._resources._closed = True
+                        raise StateRestoreError("Publication rollback failed; managed resources remain fenced.") from rollback_error
+            if isinstance(exc, (StateRestoreError, asyncio.CancelledError)):
+                raise
             raise StateRestoreError(f"State restoration failed before commit: {exc}") from exc
         finally:
+            journal = getattr(manager, "_publication_journal", None)
+            if journal is not None:
+                journal.release()
+            manager._publication_annotations = (), ()
+            if publication_gate:
+                manager._resources.finish_publication(committed=committed,
+                    generation=manifest.values["target_generation"] if committed else None)
+            if committed:
+                manager._emit_callback("on_system_event", "recovery_records_published", {
+                    "publication_id": manifest.values["publication_id"],
+                    "notification_ids": list(manager._recovery_plan.notification_ids),
+                })
             if not staged_closed:
                 await asyncio.shield(staged._persistence.close())
-            shutil.rmtree(staging_workspace, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, staging_workspace, ignore_errors=True)

@@ -56,6 +56,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
                 workspace_root=self.tmpdir,
                 subagent_discussion_rounds=1,
             ),
+            persistence_mode="volatile",
         )
         self.manager.register_llm_client("draft", self.client)
         self.invitees = [
@@ -532,6 +533,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("TemporaryStaleRoot", "Temporary", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("draft", self.client)
         try:
@@ -613,6 +615,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
             root,
             ATTConfig(workspace_root=workspace, subagent_discussion_rounds=1),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("draft-persist", client)
         manager.bootstrap_agent_team(
@@ -696,6 +699,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("TemporaryPersistentRoot", "Temporary", client),
             ATTConfig(workspace_root=workspace),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("draft-persist", client)
         try:
@@ -736,6 +740,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
             root,
             ATTConfig(workspace_root=workspace),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("hanging-draft", client)
         draft = await manager.discuss_team_formation_proposal(
@@ -749,6 +754,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("TemporaryCancelledRoot", "Temporary", replacement),
             ATTConfig(workspace_root=workspace),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("hanging-draft", replacement)
         try:

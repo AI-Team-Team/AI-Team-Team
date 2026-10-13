@@ -47,6 +47,7 @@ def _write_and_hold(db_path, workspace, ready, release):
             Agent("ProcessRoot", "Architect", client),
             ATTConfig(workspace_root=workspace),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("process-model", client)
         team = manager.create_agent_team(manager.root_ai)
@@ -73,6 +74,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 audit_unknown_escalation_mode="queue",
             ),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("stable", self.client)
         parent = manager.create_agent_team(manager.root_ai)
@@ -86,6 +88,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("Root", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("stable", self.client)
         await restored.load_state(db_path)
@@ -103,6 +106,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 audit_unknown_escalation_mode="queue",
                 audit_unknown_soft_threshold=2,
             ),
+            persistence_mode="volatile",
         )
         parent = manager.create_agent_team(manager.root_ai)
         child = manager.create_agent_team(parent)

@@ -33,6 +33,7 @@ team_members = Table(
         ForeignKey("agents.agent_id", ondelete="CASCADE"),
         primary_key=True,
     ),
+    Column("interval_id", String, ForeignKey("membership_intervals.interval_id", ondelete="RESTRICT"), nullable=False, unique=True),
 )
 
 
@@ -43,10 +44,11 @@ class TeamModel(Base):
     preset_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     team_purpose: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     team_progress: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    depth: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     chapter_num: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    parent_team_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("teams.team_id", ondelete="SET NULL"), nullable=True)
-    migration_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    parent_team_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("teams.team_id", ondelete="RESTRICT"), nullable=True)
+    parent_agent_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("agents.agent_id", ondelete="RESTRICT"), nullable=True)
+    lifecycle_state: Mapped[str] = mapped_column(String, default="active")
+    state_version: Mapped[int] = mapped_column(Integer, default=1)
     creator_agent_id: Mapped[Optional[str]] = mapped_column(
         String,
         ForeignKey("agents.agent_id", ondelete="RESTRICT"),
@@ -85,6 +87,8 @@ class TeamModel(Base):
     )
 
     __table_args__ = (
+        CheckConstraint("parent_agent_id IS NULL OR parent_team_id IS NULL"),
+        CheckConstraint("lifecycle_state IN ('active', 'dissolved') AND state_version > 0"),
         CheckConstraint(
             "team_kind = 'ordinary'",
             name="ck_persisted_team_kind",
@@ -326,7 +330,9 @@ class TeamFormationDraftModel(Base):
     objective: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String)
     participant_agent_ids: Mapped[list] = mapped_column(JSON)
-    source_discussion_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    source_message_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chat_messages.message_id", ondelete="RESTRICT"), nullable=True)
+    initiator_invocation_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("activity_invocations.invocation_id", ondelete="RESTRICT"), nullable=True)
+    checkpoint_context: Mapped[dict] = mapped_column(JSON, default=dict)
     candidate: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     reason: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[float] = mapped_column(Float)

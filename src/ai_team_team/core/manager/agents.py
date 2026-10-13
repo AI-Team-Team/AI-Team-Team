@@ -6,6 +6,7 @@ import uuid
 from typing import TYPE_CHECKING, Dict, Optional, Tuple
 
 from ai_team_team.doc_library import DocumentLibrary
+from ai_team_team.database.models import ACTIVITY_TABLES
 
 from ..adapters import HandlerClientAdapter, ManagerDefaultClientAdapter
 from ..agent import Agent
@@ -164,6 +165,15 @@ class AgentRegistry:
         if agent.lock.locked():
             raise ValueError("Agent has an active model invocation.")
         if selected == "delete":
+            history_refs = [
+                row.receipt_key
+                for row in manager._records.snapshot()
+                if any(constraint.referred_table.name == "agents"
+                       and any(row.values[element.parent.name] == agent_id for element in constraint.elements)
+                       for constraint in ACTIVITY_TABLES[row.table_name].foreign_key_constraints)
+            ]
+            if history_refs:
+                raise ValueError("Agent still has durable history references: " + ", ".join(sorted(history_refs)))
             governance_refs = [
                 f"{team.team_id}:{proposal_id}"
                 for team in manager.teams.values()
@@ -230,11 +240,10 @@ class AgentRegistry:
             old_alias = agent._model_alias
             state = "retained" if selected == "retain" else "archived"
             old_client = agent.llm_client
-            with manager._topology_lock:
+            with manager._resources._lock, manager._topology_lock:
                 agent._model_alias = alias
                 agent.lifecycle_state = state
-                with library._lock:
-                    library.lifecycle_state = state
+                library.lifecycle_state = state
                 self.active_by_name.pop(agent.name, None)
                 agent.llm_client = None
             lifecycle_event = None
@@ -257,10 +266,9 @@ class AgentRegistry:
                     manager._memory.discard_unpersisted_event(
                         lifecycle_event.event_id
                     )
-                with manager._topology_lock:
+                with manager._resources._lock, manager._topology_lock:
                     agent.lifecycle_state = "active"
-                    with library._lock:
-                        library.lifecycle_state = "active"
+                    library.lifecycle_state = "active"
                     agent.llm_client = old_client
                     agent._model_alias = old_alias
                     self.active_by_name[agent.name] = agent
@@ -285,13 +293,12 @@ class AgentRegistry:
         moved = False
         committed = False
         try:
-            with manager._topology_lock:
+            with manager._resources._lock, manager._topology_lock:
                 agent.lifecycle_state = "deleting"
-                with library._lock:
-                    library.lifecycle_state = "archived"
-                    if os.path.exists(library.root_dir):
-                        os.replace(library.root_dir, trash_path)
-                        moved = True
+                library.lifecycle_state = "archived"
+                if os.path.exists(library.root_dir):
+                    os.replace(library.root_dir, trash_path)
+                    moved = True
                 self.active_by_name.pop(agent.name, None)
                 self.by_id.pop(agent_id, None)
                 manager.libraries.pop(lib_id, None)
@@ -314,7 +321,7 @@ class AgentRegistry:
             await manager.flush_state()
             committed = True
         except Exception:
-            with manager._topology_lock:
+            with manager._resources._lock, manager._topology_lock:
                 self.by_id[agent_id] = agent
                 self.active_by_name[agent.name] = agent
                 manager.libraries[lib_id] = library
@@ -325,8 +332,7 @@ class AgentRegistry:
                     manager.library_permissions[lib_id] = old_permissions
                 if moved and os.path.exists(trash_path):
                     os.replace(trash_path, library.root_dir)
-                with library._lock:
-                    library.lifecycle_state = "active"
+                library.lifecycle_state = "active"
                 agent.lifecycle_state = "active"
             manager._memory.restore(
                 old_memory["memory_events"],
@@ -393,12 +399,11 @@ class AgentRegistry:
         old_state = agent.lifecycle_state
         old_library_state = library.lifecycle_state
         old_alias = agent._model_alias
-        with manager._topology_lock:
+        with manager._resources._lock, manager._topology_lock:
             agent.llm_client = client
             agent._model_alias = model_alias
             agent.lifecycle_state = "active"
-            with library._lock:
-                library.lifecycle_state = "active"
+            library.lifecycle_state = "active"
             self.active_by_name[agent.name] = agent
         lifecycle_event = None
         try:
@@ -420,13 +425,12 @@ class AgentRegistry:
                 manager._memory.discard_unpersisted_event(
                     lifecycle_event.event_id
                 )
-            with manager._topology_lock:
+            with manager._resources._lock, manager._topology_lock:
                 self.active_by_name.pop(agent.name, None)
                 agent.llm_client = None
                 agent._model_alias = old_alias
                 agent.lifecycle_state = old_state
-                with library._lock:
-                    library.lifecycle_state = old_library_state
+                library.lifecycle_state = old_library_state
             raise
         manager._emit_callback(
             "on_system_event",

@@ -26,7 +26,7 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
         self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Dialogue approved."}')
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
         self.config = ATTConfig(tool_calling_mode="react")
-        self.manager = ATTManager(root_ai=self.root_ai, config=self.config)
+        self.manager = ATTManager(root_ai=self.root_ai, config=self.config, persistence_mode="volatile")
 
     async def test_tool_auditor_approval(self):
         """Verify the Tool Auditor registration and interception hook."""

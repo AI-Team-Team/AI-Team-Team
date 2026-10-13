@@ -97,12 +97,8 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             clean_path = att_manager.normalize_library_path(path)
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        if lib_id not in att_manager.library_permissions:
-            att_manager.library_permissions[lib_id] = {}
-        if clean_path not in att_manager.library_permissions[lib_id]:
-            att_manager.library_permissions[lib_id][clean_path] = {}
-            
-        att_manager.library_permissions[lib_id][clean_path][target_team_id] = permission
+        with att_manager._resources.mutation():
+            att_manager.library_permissions.setdefault(lib_id, {}).setdefault(clean_path, {})[target_team_id] = permission
         att_manager._auto_save(permissions={lib_id})
         return f"Successfully granted '{permission}' permission for path '{clean_path}' in library '{lib_id}' to team '{target_team_id}'."
 
@@ -124,11 +120,12 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             clean_path = att_manager.normalize_library_path(path)
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        if lib_id in att_manager.library_permissions and clean_path in att_manager.library_permissions[lib_id]:
-            if target_team_id in att_manager.library_permissions[lib_id][clean_path]:
-                del att_manager.library_permissions[lib_id][clean_path][target_team_id]
-                att_manager._auto_save(permissions={lib_id})
-                return f"Successfully revoked permissions for path '{clean_path}' in library '{lib_id}' for team '{target_team_id}'."
+        with att_manager._resources.mutation():
+            permissions = att_manager.library_permissions.get(lib_id, {}).get(clean_path, {})
+            removed = permissions.pop(target_team_id, None) is not None
+        if removed:
+            att_manager._auto_save(permissions={lib_id})
+            return f"Successfully revoked permissions for path '{clean_path}' in library '{lib_id}' for team '{target_team_id}'."
         return f"No permissions found for path '{clean_path}' in library '{lib_id}' for team '{target_team_id}'."
 
     async def create_library_link(

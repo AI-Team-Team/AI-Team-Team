@@ -23,7 +23,7 @@ from test.test_att.test_autonomous_activity_phase0._inventory import (
     collect,
 )
 from test.test_att.test_autonomous_activity_phase0._fixtures.schema import physical_schema
-from test.test_att.test_autonomous_activity_phase0.spec_schema_activation import REQUIRED_TABLES
+from test.test_att.test_autonomous_activity_phase1.test_schema_activation import REQUIRED_TABLES
 
 
 ARTIFACTS = ROOT / "docs/dev/autonomous_activity"
@@ -45,6 +45,7 @@ class TestFreezeArtifacts(unittest.IsolatedAsyncioTestCase):
             Agent("Root", "Architect", client),
             ATTConfig(workspace_root=workspace.name),
             db_path=str(database_path),
+            persistence_mode=("durable" if (str(database_path)) else "volatile"),
         )
         self.addAsyncCleanup(manager.close)
         manager.register_llm_client("fixture", client)
@@ -110,6 +111,7 @@ class TestFreezeArtifacts(unittest.IsolatedAsyncioTestCase):
         manager = ATTManager(
             Agent("Root", "Architect", ScriptedModelClient()),
             ATTConfig(workspace_root=workspace.name),
+            persistence_mode="volatile",
         )
         self.addAsyncCleanup(manager.close)
         # Build optional tool schemas without dispatching an indexer or model.

@@ -84,6 +84,7 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
                 },
             ),
             db_path=self.db_path if incremental else None,
+            persistence_mode=("durable" if (self.db_path if incremental else None) else "volatile"),
         )
         self.managers.append(manager)
         self.clients.append(client)
@@ -326,7 +327,7 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
             {original_parent.team_id, current_parent.team_id, team.team_id},
         )
         # Supply the child first to ensure insertion does not depend on ID order.
-        delta["team_dependencies"].sort(key=lambda record: record["team_id"] != team.team_id)
+        delta["team_dependencies"] = tuple(sorted(delta["team_dependencies"], key=lambda record: record["team_id"] != team.team_id))
         await asyncio.wrap_future(manager._persistence.submit(self.db_path, delta))
         state = await self.assert_dependency_complete(manager)
         restored_team = next(record for record in state["teams"] if record["team_id"] == team.team_id)

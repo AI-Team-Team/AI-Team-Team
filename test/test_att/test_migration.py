@@ -26,7 +26,7 @@ class TestATTMigration(unittest.IsolatedAsyncioTestCase):
 
         self.mock_client = PersonalGovernanceClient()
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
-        self.manager = ATTManager(root_ai=self.root_ai)
+        self.manager = ATTManager(root_ai=self.root_ai, persistence_mode="volatile")
         self.manager.register_llm_client("default", self.mock_client)
         self.addAsyncCleanup(self.manager.close)
 

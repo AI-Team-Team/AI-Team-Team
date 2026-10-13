@@ -40,6 +40,7 @@ class PrivateAgentDocLibTestCase(unittest.IsolatedAsyncioTestCase):
         self.manager = ATTManager(
             self.root,
             ATTConfig(workspace_root=self.temp_dir),
+            persistence_mode="volatile",
         )
         self.manager.register_llm_client("default", self.client)
 

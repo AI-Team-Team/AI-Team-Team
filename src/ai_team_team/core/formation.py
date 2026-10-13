@@ -201,6 +201,8 @@ class TeamFormationDraft(BaseModel):
     status: FormationDraftStatus = FormationDraftStatus.PENDING
     participant_agent_ids: List[str] = Field(default_factory=list)
     source_discussion_id: Optional[str] = None
+    source_message_id: Optional[str] = None
+    initiator_invocation_id: Optional[str] = None
     candidate: Optional[TeamFormationDraftCandidate] = None
     reason: str = ""
     created_at: float

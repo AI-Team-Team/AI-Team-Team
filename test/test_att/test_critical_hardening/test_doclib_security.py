@@ -17,6 +17,7 @@ from test.test_att.test_critical_hardening._support import (
     sqlite3,
 )
 import json
+from pathlib import Path
 
 
 class TestCriticalHardening(CriticalHardeningTestCase):
@@ -106,6 +107,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
             Agent("LinkRoot", "Architect", self.client),
             ATTConfig(workspace_root=workspace),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("test", self.client)
         team_a = manager.create_agent_team(manager.root_ai)
@@ -133,6 +135,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
         restored = ATTManager(
             Agent("LinkRoot", "Architect", self.client),
             ATTConfig(workspace_root=os.path.join(self.tmpdir, "unused-links")),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("test", self.client)
         await restored.load_state(db_path)
@@ -193,6 +196,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
             Agent("PublishRoot", "Architect", self.client),
             ATTConfig(workspace_root=source_root),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         source.register_llm_client("test", self.client)
         first = source.create_agent_team(source.root_ai)
@@ -226,8 +230,8 @@ class TestCriticalHardening(CriticalHardeningTestCase):
 
         self.assertIs(self.manager.teams, old_teams)
         self.assertIn("still live", live_team.doc_library.read_file("live.txt"))
-        self.assertIn("first original", first.doc_library.read_file("first.txt"))
-        self.assertIn("second original", second.doc_library.read_file("second.txt"))
+        self.assertIn("first original", (Path(first.doc_library.root_dir) / "first.txt").read_text(encoding="utf-8"))
+        self.assertIn("second original", (Path(second.doc_library.root_dir) / "second.txt").read_text(encoding="utf-8"))
 
     def test_native_symlink_cannot_escape_doclib(self):
         team = self.manager.create_agent_team(self.root)

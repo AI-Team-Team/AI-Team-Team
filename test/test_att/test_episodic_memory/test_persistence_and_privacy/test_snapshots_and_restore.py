@@ -71,6 +71,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
         replacement = ATTManager(
             Agent("Replacement", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         with self.assertRaises(StateRestoreError):
             await replacement.load_state(db_path)
@@ -112,6 +113,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
         restored = ATTManager(
             temporary_root,
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("memory-model", self.client)
         await restored.load_state(db_path)
@@ -156,6 +158,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
         replacement = ATTManager(
             Agent("Replacement", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         replacement.register_llm_client("memory-model", self.client)
         original_root = replacement.root_ai
@@ -296,6 +299,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
                 workspace_root=self.tmpdir,
                 episodic_memory={"enabled": True},
             ),
+            persistence_mode="volatile",
         )
         restored._memory.ensure_enabled()
         self.assertTrue(restored._memory._fts_sync_active)

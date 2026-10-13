@@ -45,6 +45,7 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
                 workspace_root=self.workspace,
             ),
             db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("default", self.client)
         return manager

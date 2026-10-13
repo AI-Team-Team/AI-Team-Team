@@ -263,7 +263,7 @@ config = ATTConfig(
 )
 
 root_agent = Agent(name="Root_AI", role="Architect")
-manager = ATTManager(root_ai=root_agent, config=config)
+manager = ATTManager(root_ai=root_agent, config=config, db_path="att_state.db")
 ```
 
 ## 7. Emergency Wakeup Protocol

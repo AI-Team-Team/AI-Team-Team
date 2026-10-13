@@ -26,6 +26,7 @@ class TopologyIndexTests(unittest.IsolatedAsyncioTestCase):
                 migration_policy="permissive",
                 max_delegation_depth=5,
             ),
+            persistence_mode="volatile",
         )
         self.manager.register_llm_client("default", client)
         self.addAsyncCleanup(self.manager.close)

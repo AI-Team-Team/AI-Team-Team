@@ -128,6 +128,18 @@ class LifecycleService:
         if manager._closed:
             return
         manager._closing = True
+        manager._resources.fence()
+        # Restore owns this gate before its publication task exists. Drain all
+        # accepted local state work before closing its writer or releasing the
+        # database lease; model/provider waits do not hold this gate.
+        async with manager._runtime_gate:
+            pass
+        publication_error = None
+        if manager._publication_tasks:
+            # These accepted finalizers contain only persistence and publication,
+            # never external LLM or executor waits.
+            results = await asyncio.gather(*tuple(manager._publication_tasks), return_exceptions=True)
+            publication_error = next((result for result in results if isinstance(result, BaseException)), None)
         manager._formations.cancel_for_shutdown()
         await manager._memory.close()
         current = asyncio.current_task()
@@ -197,6 +209,8 @@ class LifecycleService:
                     agent._manager = None
         if reset_error is not None:
             raise reset_error
+        if publication_error is not None:
+            raise publication_error
         if finalizer_error is not None:
             raise finalizer_error
         if audit_error is not None:
@@ -206,6 +220,8 @@ class LifecycleService:
     async def agent_invocation(self, agent: Agent, *, allow_runtime: bool = False):
         """Starts a model invocation atomically against restore and retirement."""
         manager = self.manager
+        if manager.db_path:
+            await manager._persistence.prepare_runtime(manager.db_path)
         dependency_edges: Tuple[Tuple[str, str], ...] = ()
         async with manager._runtime_gate:
             if manager._closing:

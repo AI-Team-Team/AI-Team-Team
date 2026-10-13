@@ -74,6 +74,7 @@ class TestOperationalAuditModes(unittest.IsolatedAsyncioTestCase):
         self.manager = ATTManager(
             Agent("Root", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         self.team = self.manager.create_agent_team(self.manager.root_ai)
 

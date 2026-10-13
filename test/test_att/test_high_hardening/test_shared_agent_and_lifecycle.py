@@ -47,6 +47,7 @@ def _write_and_hold(db_path, workspace, ready, release):
             Agent("ProcessRoot", "Architect", client),
             ATTConfig(workspace_root=workspace),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("process-model", client)
         team = manager.create_agent_team(manager.root_ai)
@@ -82,7 +83,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         client = SerialClient()
         root = Agent("Root", "Architect", client)
         shared = Agent("Shared", "Analyst", client)
-        manager = ATTManager(root, ATTConfig(workspace_root=self.tmpdir))
+        manager = ATTManager(root, ATTConfig(workspace_root=self.tmpdir), persistence_mode="volatile")
         manager.register_llm_client("shared-model", client)
         manager.register_agent(shared)
         configs_a = {
@@ -151,6 +152,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("Root", "Architect", client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("shared-model", client)
         await restored.load_state(db_path)
@@ -164,6 +166,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         manager = ATTManager(
             Agent("Root", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         gate = threading.Event()
         started = threading.Event()
@@ -242,6 +245,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 model_token_limits={"default": 10},
                 model_max_output_tokens={"default": 6},
             ),
+            persistence_mode="volatile",
         )
         with self.assertRaisesRegex(
             LLMGenerationError, "max_output_tokens or max_tokens"
@@ -262,6 +266,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         manager = ATTManager(
             Agent("Root", "Architect", client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         team = manager.create_agent_team(manager.root_ai)
         task = asyncio.create_task(

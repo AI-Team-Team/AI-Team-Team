@@ -24,7 +24,7 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
         self.mock_client = MagicMock()
         self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Dialogue approved."}')
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
-        self.manager = ATTManager(root_ai=self.root_ai)
+        self.manager = ATTManager(root_ai=self.root_ai, persistence_mode="volatile")
 
     def test_heterogeneous_registry_mode1(self):
         """Verify Mode 1 (Dependency Injection) client registration and routing."""

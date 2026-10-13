@@ -4,6 +4,8 @@ import tempfile
 import uuid
 import logging
 import threading
+from contextlib import nullcontext
+from functools import wraps
 from pathlib import PurePosixPath
 from typing import Optional, List, Callable, Dict
 from .gated_reader import (
@@ -14,6 +16,24 @@ from .gated_reader import (
 )
 
 logger = logging.getLogger("ATT.DocLib")
+
+
+def managed_operation(function):
+    """Acquire a generation lease before any managed filesystem access."""
+    @wraps(function)
+    def guarded(self, *args, **kwargs):
+        gate = self._resource_gate
+        with gate.operation(self) if gate else nullcontext():
+            if gate:
+                paths = [args[0] if args else kwargs.get("path", "/")]
+                if function.__name__ == "move_file":
+                    paths = [args[0] if args else kwargs["source_path"],
+                             args[1] if len(args) > 1 else kwargs["target_path"]]
+                elif function.__name__ == "replace_all_files":
+                    paths = ["/"]
+                gate.authorize(self, function.__name__, paths)
+            return function(self, *args, **kwargs)
+    return guarded
 
 
 class DocumentLibrary:
@@ -62,6 +82,8 @@ class DocumentLibrary:
         self._on_change = on_change
         self._suppress_notifications = False
         self._lock = threading.RLock()
+        self._resource_gate = None
+        self._resource_generation = 0
         
         # Locate the files under a managed directory
         if storage_dir is not None:
@@ -83,19 +105,11 @@ class DocumentLibrary:
         self.root_dir = os.path.abspath(target_root)
         os.makedirs(self.root_dir, exist_ok=True)
 
+    @managed_operation
     def write_file(self, path: str, content: str) -> None:
         """Writes content to a file path within the library. Creates directories if necessary."""
-        with self._lock:
-            self._ensure_writable()
-            normalized_path = self._normalize_path(path, allow_root=False)
-            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-            fd = self._open_file_descriptor(
-                normalized_path, flags, create_parents=True
-            )
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-            logger.info(f"Written file '{path}' in library '{self.lib_id}'.")
-            self._notify_change(normalized_path, content)
+        self.write_file_atomic(path, content, overwrite=True)
+        logger.info(f"Written file '{path}' in library '{self.lib_id}'.")
 
     def _write_staged_file(self, path: str, content: str) -> str:
         """Writes validated staging content without runtime logs or callbacks."""
@@ -127,6 +141,7 @@ class DocumentLibrary:
             character_count=character_count,
         ).content
 
+    @managed_operation
     def read_file_slice(
         self,
         path: str,
@@ -161,6 +176,7 @@ class DocumentLibrary:
                     expected_file_version=expected_file_version,
                 )
 
+    @managed_operation
     def _assert_file_version(self, path: str, expected_file_version: str) -> None:
         """Verifies that a physical file path still names the expected version."""
 
@@ -175,9 +191,11 @@ class DocumentLibrary:
             finally:
                 os.close(fd)
 
+    @managed_operation
     def delete_file(self, path: str) -> str:
         """Deletes a file or directory path within the library."""
-        with self._lock:
+        gate = self._resource_gate
+        with self._lock, gate.commit(self, "delete_file", (path,)) if gate else nullcontext():
             self._ensure_writable()
             normalized_path = self._normalize_path(path, allow_root=False)
             safe_path = self._resolve_path(normalized_path, allow_root=False)
@@ -204,6 +222,7 @@ class DocumentLibrary:
             except Exception as e:
                 return f"Error deleting '{path}' in library '{self.lib_id}': {e}"
 
+    @managed_operation
     def list_contents(self, path: str = "/") -> List[str]:
         """Lists files and directories under a path within the library."""
         with self._lock:
@@ -240,18 +259,19 @@ class DocumentLibrary:
                 logger.error(f"Error listing contents of '{path}' in library '{self.lib_id}': {e}")
             return sorted(contents)
 
+    @managed_operation
     def replace_all_files(self, files: Dict[str, str]) -> None:
         """Stages all content and atomically publishes the completed directory."""
         with self._lock:
             self._ensure_writable()
-            self._replace_all_files_unlocked(files)
+            self._replace_all_files_unlocked(files, guarded=True)
 
     def _restore_all_files(self, files: Dict[str, str]) -> None:
         """Restores staged files without weakening runtime archive policy."""
         with self._lock:
             self._replace_all_files_unlocked(files)
 
-    def _replace_all_files_unlocked(self, files: Dict[str, str]) -> None:
+    def _replace_all_files_unlocked(self, files: Dict[str, str], *, guarded: bool = False) -> None:
         """Implements replacement while the library lock is held."""
         parent = os.path.dirname(self.root_dir)
         os.makedirs(parent, exist_ok=True)
@@ -273,15 +293,19 @@ class DocumentLibrary:
             staged._suppress_notifications = True
             for path, content in files.items():
                 staged.write_file(path, content)
-            if os.path.lexists(self.root_dir):
-                if os.path.islink(self.root_dir):
-                    raise PermissionError(
-                        "Access denied: A DocLib root cannot be a symlink."
-                    )
-                os.replace(self.root_dir, backup)
-                moved_old = True
-            os.replace(staging, self.root_dir)
-            staging = ""
+            gate = self._resource_gate if guarded else None
+            with gate.commit(self, "replace_all_files", ("/",)) if gate else nullcontext():
+                if guarded:
+                    self._ensure_writable()
+                if os.path.lexists(self.root_dir):
+                    if os.path.islink(self.root_dir):
+                        raise PermissionError(
+                            "Access denied: A DocLib root cannot be a symlink."
+                        )
+                    os.replace(self.root_dir, backup)
+                    moved_old = True
+                os.replace(staging, self.root_dir)
+                staging = ""
             if moved_old:
                 shutil.rmtree(backup, ignore_errors=True)
         except Exception:
@@ -400,11 +424,13 @@ class DocumentLibrary:
         self._reject_native_symlinks(clean_path)
         return os.open(target, flags, 0o600)
 
+    @managed_operation
     def path_exists(self, path: str) -> bool:
         with self._lock:
             safe_path = self._resolve_path(path, allow_root=False)
             return os.path.exists(safe_path)
 
+    @managed_operation
     def is_file(self, path: str) -> bool:
         with self._lock:
             safe_path = self._resolve_path(path, allow_root=False)
@@ -421,6 +447,7 @@ class DocumentLibrary:
         if self.lifecycle_state == "archived":
             raise PermissionError("Archived document libraries are read-only.")
 
+    @managed_operation
     def read_text(self, path: str) -> str:
         """Reads complete text for trusted manager-side copy operations."""
         with self._lock:
@@ -431,6 +458,7 @@ class DocumentLibrary:
             with os.fdopen(fd, "r", encoding="utf-8", errors="strict") as stream:
                 return stream.read()
 
+    @managed_operation
     def move_file(
         self, source_path: str, target_path: str, overwrite: bool = False
     ) -> None:
@@ -452,12 +480,22 @@ class DocumentLibrary:
                     raise IsADirectoryError(target_path)
                 if not overwrite:
                     raise FileExistsError(target_path)
-            self._ensure_parent_directories(target)
             content = self.read_text(source)
-            os.replace(source_abs, target_abs)
-            self._notify_change(source, None)
-            self._notify_change(target, content)
+            gate = self._resource_gate
+            with gate.commit(self, "move_file", (source_path, target_path)) if gate else nullcontext():
+                self._ensure_writable()
+                self._ensure_parent_directories(target)
+                source_abs = self._resolve_path(source, allow_root=False)
+                target_abs = self._resolve_path(target, allow_root=False)
+                if os.path.lexists(target_abs) and not overwrite:
+                    raise FileExistsError(target_path)
+                if os.path.isdir(target_abs):
+                    raise IsADirectoryError(target_path)
+                os.replace(source_abs, target_abs)
+                self._notify_change(source, None)
+                self._notify_change(target, content)
 
+    @managed_operation
     def write_file_atomic(
         self, path: str, content: str, overwrite: bool = False
     ) -> None:
@@ -465,22 +503,26 @@ class DocumentLibrary:
         with self._lock:
             self._ensure_writable()
             normalized = self._normalize_path(path, allow_root=False)
-            self._ensure_parent_directories(normalized)
-            target = self._resolve_path(normalized, allow_root=False)
-            if os.path.lexists(target) and not overwrite:
-                raise FileExistsError(path)
-            if os.path.isdir(target):
-                raise IsADirectoryError(path)
-            parent = os.path.dirname(target)
-            fd, staging = tempfile.mkstemp(prefix=".att-copy-", dir=parent)
+            fd, staging = tempfile.mkstemp(prefix=".att-copy-", dir=os.path.dirname(self.root_dir))
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as stream:
                     stream.write(content)
-                os.replace(staging, target)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                gate = self._resource_gate
+                with gate.commit(self, "write_file_atomic", (path,)) if gate else nullcontext():
+                    self._ensure_writable()
+                    self._ensure_parent_directories(normalized)
+                    target = self._resolve_path(normalized, allow_root=False)
+                    if os.path.lexists(target) and not overwrite:
+                        raise FileExistsError(path)
+                    if os.path.isdir(target):
+                        raise IsADirectoryError(path)
+                    os.replace(staging, target)
+                    self._notify_change(normalized, content)
             finally:
                 if os.path.exists(staging):
                     os.remove(staging)
-            self._notify_change(normalized, content)
 
     def _ensure_parent_directories(self, clean_path: str) -> None:
         if not self._supports_secure_dir_fd():

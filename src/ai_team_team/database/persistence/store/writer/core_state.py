@@ -3,10 +3,11 @@
 import json
 from typing import Any, Dict, Iterable, List, Optional
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from ai_team_team.database.models import (
     AgentMessageModel,
+    ACTIVITY_TABLES,
     AgentModel,
     ManagerConfigModel,
     TeamInboxModel,
@@ -22,11 +23,18 @@ class CoreStateWriteMixin:
         if configs is None:
             return
         for key, value in configs.items():
+            if key == "publication_generation":
+                previous = session.get(ManagerConfigModel, key)
+                if previous is not None and int(previous.config_value) > int(value):
+                    continue
             session.merge(ManagerConfigModel(config_key=key, config_value=value))
 
     @staticmethod
     def _write_agents(session: Any, agents: Iterable[Dict[str, Any]]) -> None:
         for agent in agents:
+            previous = session.get(AgentModel, agent["agent_id"])
+            if previous is not None and previous.state_version > agent.get("state_version", 1):
+                continue
             session.merge(
                 AgentModel(
                     agent_id=agent["agent_id"],
@@ -37,6 +45,8 @@ class CoreStateWriteMixin:
                     model_alias=agent["model_alias"],
                     last_context=agent["last_context"],
                     lifecycle_state=agent["lifecycle_state"],
+                    state_version=agent.get("state_version", 1),
+                    presentation_preferences=agent.get("presentation_preferences", {}),
                 )
             )
             session.query(AgentMessageModel).filter_by(agent_id=agent["agent_id"]).delete(
@@ -52,7 +62,11 @@ class CoreStateWriteMixin:
                         tool_call_id=message.get("tool_call_id"),
                         name=message.get("name"),
                         team_id=message.get("team_id"),
-                        discussion_id=message.get("discussion_id"),
+                        invocation_id=message.get("invocation_id"),
+                        source_chat_message_id=message.get("source_chat_message_id"),
+                        source_execution_id=message.get("source_execution_id"),
+                        source_metadata={key: value for key, value in message.items()
+                                         if key not in {"role", "content", "tool_calls", "tool_call_id", "name", "team_id", "invocation_id", "source_chat_message_id", "source_execution_id"}},
                         created_at=agent["message_timestamp"] + index * 0.001,
                     )
                 )
@@ -88,7 +102,7 @@ class CoreStateWriteMixin:
         ]
 
     @staticmethod
-    def _write_teams(session: Any, teams: Iterable[Dict[str, Any]]) -> None:
+    def _write_teams(session: Any, teams: Iterable[Dict[str, Any]], records=()) -> None:
         # Team creators have immediate self-FKs, unlike the deferred parent pointers.
         pending = {team["team_id"]: team for team in teams}
         teams = []
@@ -103,7 +117,12 @@ class CoreStateWriteMixin:
             for team in sorted(ready, key=lambda record: record["team_id"]):
                 teams.append(team)
                 del pending[team["team_id"]]
+        accepted = []
         for team in teams:
+            previous = session.get(TeamModel, team["team_id"])
+            if previous is not None and previous.state_version > team.get("state_version", 1):
+                continue
+            accepted.append(team)
             session.merge(
                 TeamModel(
                     team_id=team["team_id"],
@@ -111,10 +130,11 @@ class CoreStateWriteMixin:
                     preset_name=team["preset_name"],
                     team_purpose=team["team_purpose"],
                     team_progress=team["team_progress"],
-                    depth=team["depth"],
                     chapter_num=team["chapter_num"],
                     parent_team_id=None,
-                    migration_count=team["migration_count"],
+                    state_version=team.get("state_version", 1),
+                    parent_agent_id=team.get("parent_agent_id"),
+                    lifecycle_state=team.get("lifecycle_state", "active"),
                     creator_agent_id=(
                         team["creator_id"] if team["creator_type"] == "agent" else None
                     ),
@@ -125,6 +145,7 @@ class CoreStateWriteMixin:
                     system_instructions=team["system_instructions"],
                 )
             )
+        teams = accepted
         session.flush()
         for team in teams:
             session.query(TeamModel).filter_by(team_id=team["team_id"]).update(
@@ -135,8 +156,17 @@ class CoreStateWriteMixin:
         for team in teams:
             session.execute(delete(team_members).where(team_members.c.team_id == team["team_id"]))
             for member_id in team["members"]:
+                interval_id = next((record.values["interval_id"] for record in records
+                    if record.table_name == "membership_intervals" and record.values["team_id"] == team["team_id"]
+                    and record.values["agent_id"] == member_id and record.values["leave_event_id"] is None), None)
+                if interval_id is None:
+                    intervals = ACTIVITY_TABLES["membership_intervals"]
+                    interval_id = session.execute(select(intervals.c.interval_id).where(
+                        intervals.c.team_id == team["team_id"], intervals.c.agent_id == member_id, intervals.c.leave_event_id.is_(None))).scalar_one_or_none()
+                if interval_id is None:
+                    raise ValueError("Current membership requires an exact open historical interval.")
                 session.execute(
-                    team_members.insert().values(team_id=team["team_id"], agent_id=member_id)
+                    team_members.insert().values(team_id=team["team_id"], agent_id=member_id, interval_id=interval_id)
                 )
 
     @staticmethod

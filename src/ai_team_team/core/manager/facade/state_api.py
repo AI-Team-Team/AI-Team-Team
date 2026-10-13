@@ -9,6 +9,7 @@ from ...agent import Agent
 from ...config import ATTConfig
 from ...exceptions import StateRestoreError
 from ..state import StateCoordinator
+from ai_team_team.database.persistence.receipts import settle_commit
 
 if TYPE_CHECKING:
     from .manager import ATTManager
@@ -16,14 +17,15 @@ if TYPE_CHECKING:
 
 class StateAPI:
     async def __aenter__(self) -> "ATTManager":
+        self._callbacks.ensure_worker()
         return self
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         await self.close()
 
     @staticmethod
-    def _new_dirty_state(full: bool = False) -> Dict[str, Any]:
-        return StateCoordinator._new_dirty_state(full)
+    def _new_dirty_state(full: bool = False, *, provisional: bool = False) -> Dict[str, Any]:
+        return StateCoordinator._new_dirty_state(full, provisional=provisional)
 
     @staticmethod
     def _merge_dirty_state(target: Dict[str, Any], source: Dict[str, Any]) -> None:
@@ -58,7 +60,11 @@ class StateAPI:
 
     async def close(self) -> None:
         """Closes runtime work, callbacks, and persistence resources."""
-        await self._lifecycle.close()
+        if self._closed:
+            return
+        if self._close_task is None:
+            self._close_task = asyncio.create_task(self._lifecycle.close())
+        await settle_commit(self._close_task)
 
     async def load_state(self, path: str) -> None:
         """Restores a versioned state snapshot without blocking the event loop."""
@@ -76,16 +82,30 @@ class StateAPI:
             if not os.path.exists(path):
                 raise FileNotFoundError(f"State database file '{path}' not found.")
             self._restore_in_progress = True
+            self._restore_source_path = path
             try:
+                self._resources.begin_publication()
                 await self._memory.suspend_for_restore()
+                # Reject corrupt references and missing host bindings before
+                # crash reconciliation is allowed to rename any directories.
+                state = await self._persistence.read(path, reconcile=False)
+                await asyncio.to_thread(self._validate_state_snapshot, state)
                 state = await self._persistence.read(path)
-                await self._apply_state_snapshot(state)
+                publication = asyncio.create_task(self._apply_state_snapshot(state))
+                self._publication_tasks.add(publication)
+                try:
+                    await settle_commit(publication)
+                finally:
+                    self._publication_tasks.discard(publication)
                 self.db_path = path
                 self.broker.resume_pending_requests()
                 self._governance.resume()
                 self._migration.resume()
                 self._auto_save(governance_rounds={item.round_id for item in self._governance.rounds.values() if item.status == "EXPIRED"})
             finally:
+                self._restore_source_path = None
+                if self._resources.blocked:
+                    self._resources.finish_publication(committed=False)
                 self._restore_in_progress = False
                 if self._memory._restore_suspended:
                     self._memory.resume_after_restore()

@@ -1,4 +1,4 @@
-"""Intentionally red until Phase 1 installs the incompatible physical schema."""
+"""The implemented incompatible schema belongs to ordinary Phase 1 discovery."""
 
 import asyncio
 import tempfile
@@ -62,7 +62,7 @@ REQUIRED_TABLES = {
 }
 
 
-class SpecSchemaActivation(unittest.IsolatedAsyncioTestCase):
+class TestSchemaActivation(unittest.IsolatedAsyncioTestCase):
     async def test_physical_schema_matches_the_frozen_target(self):
         self.assertEqual(
             STATE_SCHEMA_VERSION,
@@ -77,6 +77,7 @@ class SpecSchemaActivation(unittest.IsolatedAsyncioTestCase):
             Agent("Root", "Architect", client),
             ATTConfig(workspace_root=workspace.name),
             db_path=str(database_path),
+            persistence_mode=("durable" if (str(database_path)) else "volatile"),
         )
         self.addAsyncCleanup(manager.close)
         manager.register_llm_client("fixture", client)

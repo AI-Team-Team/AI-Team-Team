@@ -36,6 +36,7 @@ class RuntimeSpecFixture:
             self.root,
             ATTConfig(workspace_root=self.workspace.name, tool_calling_mode="native"),
             db_path=str(Path(self.workspace.name) / "state.sqlite"),
+            persistence_mode=("durable" if (str(Path(self.workspace.name) / "state.sqlite")) else "volatile"),
         )
         self.addAsyncCleanup(self.manager.close)
         self.manager.register_llm_client("fixture", self.client)

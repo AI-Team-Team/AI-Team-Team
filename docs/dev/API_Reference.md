@@ -59,10 +59,16 @@ Formation consent is revision-scoped. `revise_team_formation()` commits immutabl
 
 Synchronous and asynchronous callbacks share one ordered background dispatcher; callback failures are logged and never alter core transaction outcomes.
 
+Event-loop and worker-thread emissions share the same acceptance order, and `flush_callbacks()` drains observations accepted before the flush, including pending thread emissions.
+
+Observers do not inherit Agent or AgentTeam invocation context; actor and source information must come from the supplied metadata.
+
+Per-callback observation tasks isolate self-cancellation from the ordered dispatcher, while shutdown cancels dispatch without awaiting an uncooperative observer indefinitely.
+
 * **Constructor**:
 
   ```python
-  manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path: Optional[str] = None)
+  manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path: Optional[str] = None, *, persistence_mode: str = "durable")
   ```
 
 * **Methods**:
@@ -311,7 +317,7 @@ Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/
 
 ## Database Schema & ORM Models
 
-SQLAlchemy Declarative Models mapping schema 11 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
+SQLAlchemy models and relational activity tables mapping schema 12 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
 * **`AgentModel`, `AgentMessageModel`, and `AgentInboxModel`**: Use immutable `agent_id` primary/foreign keys and persist lifecycle profiles, bounded Working Context, and identity-addressed notifications.

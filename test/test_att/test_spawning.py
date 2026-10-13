@@ -24,7 +24,7 @@ class TestATTSpawning(unittest.IsolatedAsyncioTestCase):
         self.mock_client = MagicMock()
         self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Dialogue approved."}')
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
-        self.manager = ATTManager(root_ai=self.root_ai)
+        self.manager = ATTManager(root_ai=self.root_ai, persistence_mode="volatile")
 
     def test_agent_team_size_validation(self):
         """Verify that an Agent Team (AT) must contain at least 3 members."""
@@ -87,7 +87,7 @@ class TestATTSpawning(unittest.IsolatedAsyncioTestCase):
     async def test_arbitrary_depth_limit(self):
         """Verify that configuring a larger depth limit works and triggers rejection only at that limit."""
         config = ATTConfig(max_delegation_depth=4)
-        manager = ATTManager(root_ai=self.root_ai, config=config)
+        manager = ATTManager(root_ai=self.root_ai, config=config, persistence_mode="volatile")
         # Register tools context on manager to bind dispatch_subagent
         manager.register_tools_context({"att_manager": manager})
         

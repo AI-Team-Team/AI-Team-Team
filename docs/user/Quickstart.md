@@ -51,7 +51,9 @@ root_agent = Agent(name="Root_AI", role="Architect")
 manager = ATTManager(root_ai=root_agent, config=config, db_path="att_state.db")
 ```
 
-Supplying `db_path` enables asynchronous incremental persistence and automatic saving of accepted state changes.
+Durable persistence is the default and requires an explicit `db_path`, with asynchronous incremental saving of accepted state changes.
+
+For an intentionally non-recoverable session, use `ATTManager(root_ai=root_agent, config=config, persistence_mode="volatile")` without a database path.
 
 Register the runtime model bindings described below before loading persisted state, because callables and external connections are intentionally not serialized.
 

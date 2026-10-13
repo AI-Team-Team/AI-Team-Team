@@ -40,6 +40,7 @@ class TestOptionalMode(unittest.IsolatedAsyncioTestCase):
         manager = ATTManager(
             Agent("Root", "Architect", client),
             ATTConfig(workspace_root=self.workspace),
+            persistence_mode="volatile",
         )
         manager.register_llm_client("model", client)
         team = manager.create_agent_team(manager.root_ai, member_count=3)
@@ -78,6 +79,7 @@ class TestOptionalMode(unittest.IsolatedAsyncioTestCase):
                     },
                 ),
                 db_path=db_path,
+                persistence_mode=("durable" if (db_path) else "volatile"),
             )
             manager.register_llm_client("model", client)
             team = manager.create_agent_team(manager.root_ai, member_count=3)
@@ -108,6 +110,7 @@ class TestOptionalMode(unittest.IsolatedAsyncioTestCase):
             manager = ATTManager(
                 Agent("Root", "Architect", client),
                 ATTConfig(workspace_root=workspace),
+                persistence_mode="volatile",
             )
             manager.register_llm_client("model", client)
             team = manager.create_agent_team(manager.root_ai, member_count=3)
@@ -161,6 +164,7 @@ class TestOptionalMode(unittest.IsolatedAsyncioTestCase):
                 workspace_root=self.workspace,
                 episodic_memory={"enabled": True},
             ),
+            persistence_mode="volatile",
         )
         manager.register_llm_client("model", client)
         team = manager.create_agent_team(manager.root_ai, member_count=3)

@@ -356,7 +356,7 @@ class MemoryIndexingMixin:
             raise StateRestoreError(
                 "Cannot restore state while an AgentTeam discussion is active."
             )
-        if any(agent.lock.locked() for agent in manager._agents_by_id.values()):
+        if any(agent._lock is not None and agent._lock.locked() for agent in manager._agents_by_id.values()):
             raise StateRestoreError(
                 "Cannot restore state while an Agent invocation is active."
             )

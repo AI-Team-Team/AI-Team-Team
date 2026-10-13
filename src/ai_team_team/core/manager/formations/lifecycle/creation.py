@@ -147,7 +147,7 @@ class FormationCreationMixin:
         old_inboxes = self._copy_inboxes(notified_agents)
         stale_drafts = {}
         team = None
-        dirty = manager._new_dirty_state()
+        dirty = manager._new_dirty_state(provisional=True)
         if extra_dirty is not None:
             manager._merge_dirty_state(dirty, extra_dirty)
         batch_token = manager._persistence_batch.set(dirty)

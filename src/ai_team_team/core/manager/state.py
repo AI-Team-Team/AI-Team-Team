@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from ai_team_team.database.persistence import PersistenceCoordinator
+from ai_team_team.database.persistence.receipts import settle_commit
 
 from ..exceptions import ATTException, StatePersistenceError
 
@@ -24,9 +25,10 @@ class StateCoordinator:
         )
 
     @staticmethod
-    def _new_dirty_state(full: bool = False) -> Dict[str, Any]:
+    def _new_dirty_state(full: bool = False, *, provisional: bool = False) -> Dict[str, Any]:
         return {
             "full": full,
+            "_provisional": provisional,
             "configs": full,
             "agents": set(),
             "teams": set(),
@@ -184,8 +186,6 @@ class StateCoordinator:
         deleted_memory_references: Optional[set[str]] = None,
     ) -> None:
         """Records an immutable incremental state delta for the single writer."""
-        if not self.manager.db_path:
-            return
         dirty = self.manager._new_dirty_state(full=full)
         dirty["configs"] = configs or full
         dirty["agents"].update(agents or set())
@@ -222,31 +222,48 @@ class StateCoordinator:
 
         if not self.manager._dirty_state_has_changes(dirty):
             return
-        with self.manager._snapshot_lock:
-            self.manager._state_version += 1
         batch = self.manager._persistence_batch.get()
+        if self.manager.db_path:
+            with self.manager._snapshot_lock:
+                self.manager._state_version += 1
+        elif batch is None or not batch.get("_provisional", False):
+            self._capture_volatile_relationships(dirty["teams"], full=dirty["full"])
         if batch is not None:
             self.manager._merge_dirty_state(batch, dirty)
             return
-        self.manager._submit_dirty_state(dirty)
+        if self.manager.db_path:
+            self.manager._submit_dirty_state(dirty)
+
+    def _capture_volatile_relationships(self, team_ids: set[str], *, full: bool = False) -> None:
+        """Keep relationship history without making it depend on disk writes.
+
+        Accepted mutations are captured even inside ordinary save suppression,
+        so a leave followed by a rejoin cannot collapse into an unchanged pair.
+        Provisional transactions defer capture until their authoritative commit;
+        temporary audit teams never enter ordinary relationship history.
+        """
+        manager = self.manager
+        with manager._snapshot_lock:
+            identifiers = set(manager.teams) if full else team_ids
+            identifiers = {identifier for identifier in identifiers
+                           if identifier in manager.teams and manager.teams[identifier].team_kind == "ordinary"}
+            if identifiers:
+                manager._state_version += 1
+                manager._records.capture_memberships(identifiers)
 
     async def _commit_dirty_state(self, dirty: Dict[str, Any]) -> None:
         """Commits one authoritative domain delta and propagates write errors."""
-        if not self.manager.db_path or not self.manager._dirty_state_has_changes(dirty):
+        if not self.manager._dirty_state_has_changes(dirty):
+            return
+        if not self.manager.db_path:
+            self._capture_volatile_relationships(dirty["teams"], full=dirty["full"])
             return
         with self.manager._snapshot_lock:
             self.manager._state_version += 1
             snapshot = self.manager._capture_state_snapshot(dirty)
             future = self.manager._persistence.submit(self.manager.db_path, snapshot)
-        wrapped = asyncio.wrap_future(future)
         try:
-            await asyncio.shield(wrapped)
-        except asyncio.CancelledError:
-            # Once an authoritative domain commit is accepted, keep its
-            # transaction lock until the exact delta finishes. Cancellation
-            # is delivered to the caller only after durability is known.
-            await asyncio.shield(wrapped)
-            raise
+            await settle_commit(asyncio.wrap_future(future))
         except ATTException:
             raise
         except Exception as exc:
@@ -257,7 +274,9 @@ class StateCoordinator:
     def _submit_dirty_state(self, dirty: Dict[str, Any]) -> None:
         with self.manager._snapshot_lock:
             try:
+                self.manager._state_version += 1
                 snapshot = self.manager._capture_state_snapshot(dirty)
+                snapshot["_operations"] = ()
             except Exception as exc:
                 snapshot = {"_capture_error": exc}
             self.manager._persistence.submit(self.manager.db_path, snapshot)
@@ -275,9 +294,10 @@ class StateCoordinator:
             dirty["configs"] = True
         async with self.manager._runtime_gate:
             with self.manager._snapshot_lock:
+                self.manager._state_version += 1
                 snapshot = self.manager._capture_state_snapshot(dirty)
                 future = self.manager._persistence.submit(target_path, snapshot)
-        await asyncio.shield(asyncio.wrap_future(future))
+        await settle_commit(asyncio.wrap_future(future))
 
     async def flush_state(self) -> None:
         """Waits until every queued state delta has committed."""

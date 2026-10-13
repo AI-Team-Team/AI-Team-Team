@@ -1,18 +1,18 @@
-# Autonomous Activity: Phase 0 Contract Freeze
+# Autonomous Activity: Contract Freeze and Durability Foundations
 
 ## Status
 
 Phase 0 implements value contracts, a dependency inventory, deterministic adversarial fixtures, and an explicitly red runtime specification suite.
 
-It does not implement the replacement scheduler, change existing runtime behavior, activate schema 12, or claim that later-phase acceptance tests pass.
+Phase 1 adds the [durability foundations](Phase_1.md), activates schema 12, and makes durable versus volatile operation explicit without implementing the replacement scheduler or claiming later-phase acceptance.
 
 The governing [blueprint](../../blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md) and [implementation plan](../../blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md), including the confirmed decisions recorded on 2026-10-07, remain authoritative.
 
-This directory records their Phase 0 engineering contracts and verification artifacts.
+This directory records their engineering contracts and phase-specific verification artifacts.
 
 All D01 through D15 decisions remain confirmed, and no institution is reopened by these specifications.
 
-The target schema is frozen as `12`, while the running implementation continues using schema `11` until Phase 1 implements its incompatible replacement.
+The running persistence schema is now `12`; schema 11 and earlier are rejected without migration.
 
 ## Deliverables
 
@@ -23,6 +23,7 @@ The target schema is frozen as `12`, while the running implementation continues 
 - [Built-in effect declarations](tool_effects.json): the reviewed target registration contracts, not permissions already installed in `Tool`.
 - [Contract models](../../../src/ai_team_team/core/activity/contracts/__init__.py): strict immutable values and a host-facing Protocol without an execution engine.
 - [Fixtures and specifications](../../../test/test_att/test_autonomous_activity_phase0): real Manager identity checks and controlled model, clock, executor, commit, and publication boundaries.
+- [Phase 1 implementation](Phase_1.md): immutable durable records, exact receipts, recoverable publication, mutation leases, and the scope of the initial recovery plan.
 
 ## Green and Red Checks
 
@@ -40,15 +41,15 @@ Run the intentionally failing replacement specifications separately:
 ./venv/bin/python -m unittest discover -s test/test_att/test_autonomous_activity_phase0 -t . -p 'spec_*.py'
 ```
 
-The six red specifications target the real `ATTManager`, assert missing prerequisites explicitly, and contain the subsequent behavioral assertions that later phases must satisfy.
+Five remaining red specifications target the real `ATTManager`, assert missing prerequisites explicitly, and contain the subsequent behavioral assertions that later phases must satisfy.
 
 Runtime cleanup also rejects scripted-client requests whose exceptions were swallowed, and coalescing checks the preserved scope and complete request count.
 
 The background specification validates a structured durable handle and its later owner-facing completion notice rather than accepting the old handle as evidence of a new notification.
 
-The schema specification reads a real committed database, requires every frozen new or replacement table, rejects retired tables and provenance columns, and checks foreign-key integrity after the target version is implemented.
+The completed schema specification is now in ordinary [Phase 1 discovery](../../../test/test_att/test_autonomous_activity_phase1/test_schema_activation.py), requiring every frozen new or replacement table, rejecting retired tables and provenance columns, and checking foreign-key integrity.
 
-They cover default continuation without automatic publication, shared-person admission coalescing, idle-mail activation without inferred read state, next-frame notification during a tool wait, one-execution Native detachment, and activation of the physical schema target.
+The remaining red specifications cover default continuation without automatic publication, shared-person admission coalescing, idle-mail activation without inferred read state, next-frame notification during a tool wait, and one-execution Native detachment.
 
 They do not call old discussion APIs, use a fake replacement runtime, skip missing features, or convert missing implementation into `expectedFailure` success.
 
@@ -82,6 +83,6 @@ Its string and byte evidence is hashed so an assertion's failure representation 
 
 These fixtures prove control and observation behavior, not the safety of a production executor or the atomicity of a future restore algorithm.
 
-Actual publication rollback, schema corruption, worker fencing, and process-crash tests remain required in Phase 1 and subsequent gates.
+Actual publication rollback, schema corruption, worker fencing, and process-crash tests now run in the [Phase 1 package](../../../test/test_att/test_autonomous_activity_phase1), with later phases extending the same boundaries.
 
 No fixture waits two real minutes or creates storage in the repository root.

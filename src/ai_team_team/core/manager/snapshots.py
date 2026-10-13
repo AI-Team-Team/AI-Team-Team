@@ -4,6 +4,7 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from ai_team_team.database.persistence import STATE_SCHEMA_VERSION
+from ai_team_team.database.persistence.records import freeze
 
 from ..agent import Agent
 from ..exceptions import StatePersistenceError
@@ -81,11 +82,13 @@ class SnapshotBuilder:
             for item in governance_rounds
             for agent_id in item["voter_agent_ids"]
         }
+        governance_agents.update(dirty.get("record_dependency_agents", ()))
         governance_teams = {
             item["principal"]["principal_id"]
             for item in governance_rounds
             if item["principal"]["kind"] == "agent_team"
         }
+        governance_teams.update(dirty.get("record_dependency_teams", ()))
         for item in migration_requests:
             governance_teams.update(
                 identifier
@@ -122,6 +125,17 @@ class SnapshotBuilder:
                 if request.initiated_by_agent_id is not None:
                     governance_agents.add(request.initiated_by_agent_id)
         governance_teams.update(dirty["inboxes"])
+        # A file-only first delta still needs its library's concrete owner.
+        # These are insert-only prerequisites, never authoritative Agent edits.
+        for lib_id in dirty["libraries"] | set(dirty["file_changes"]):
+            library = manager.libraries.get(lib_id)
+            if library is None:
+                continue
+            if library.owner_agent_id is not None:
+                governance_agents.add(library.owner_agent_id)
+            if library.owner_team_id is not None:
+                governance_teams.add(library.owner_team_id)
+        governance_agents.add(manager.root_ai.agent_id)
         memory_agent_ids, memory_team_ids = collect_memory_identity_dependencies(
             manager,
             memory_records,
@@ -129,9 +143,11 @@ class SnapshotBuilder:
             extra_teams=governance_teams,
         )
         configs = None
-        if full or dirty["configs"] or dependency_request_ids or migration_requests:
+        if full or dirty["configs"] or dependency_request_ids or migration_requests or dirty["libraries"] or dirty["file_changes"]:
             configs = {
                 "schema_version": STATE_SCHEMA_VERSION,
+                "persistence_mode": "durable",
+                "publication_generation": manager._resources.generation,
                 "att_config": manager.config.to_dict(),
                 "root_ai_id": manager.root_ai.agent_id,
                 "model_configs": {
@@ -229,12 +245,14 @@ class SnapshotBuilder:
             ]
             serialized_agent = {
                 "agent_id": agent.agent_id,
+                "state_version": max(1, manager._state_version),
                 "name": agent.name,
                 "role": agent.role,
                 "role_description": getattr(agent, "role_description", ""),
                 "system_instructions": getattr(agent, "system_instructions", ""),
                 "model_alias": model_alias,
                 "lifecycle_state": agent.lifecycle_state,
+                "presentation_preferences": getattr(agent, "presentation_preferences", {}),
                 "last_context": (dict(agent.last_context) if agent.last_context else None),
                 "messages": tuple(dict(message) for message in working_context),
                 "message_timestamp": now,
@@ -273,6 +291,9 @@ class SnapshotBuilder:
                 creator_id = team.creator.team_id
             serialized_teams[team_id] = {
                 "team_id": team.team_id,
+                "state_version": max(1, manager._state_version),
+                "parent_agent_id": getattr(team, "_parent_agent_id", None),
+                "lifecycle_state": getattr(team, "_lifecycle_state", "active"),
                 "team_kind": team.team_kind,
                 "preset_name": team.preset_name,
                 "team_purpose": team.team_purpose,
@@ -296,6 +317,7 @@ class SnapshotBuilder:
         team_dependencies = [
             serialized_teams[team_id] for team_id in sorted(team_dependency_ids)
         ]
+        relationship_records = manager._records.capture_memberships(team_ids | team_dependency_ids)
 
         inbox_ids = (
             set(manager.teams) if full else set(dirty["inboxes"])
@@ -507,7 +529,8 @@ class SnapshotBuilder:
             if draft_id in manager._formations.drafts
         ]
 
-        return {
+        snapshot = {
+            "records": manager._records.snapshot() if full else relationship_records,
             "state_version": manager._state_version,
             "full": full,
             "episodic_memory_enabled": manager.config.episodic_memory.enabled,
@@ -547,3 +570,6 @@ class SnapshotBuilder:
                 dirty["deleted_memory_references"]
             ),
         }
+        # Nested containers become immutable values; string/file bodies remain
+        # lightweight references, and JSON encoding stays on the writer worker.
+        return {key: value if key == "records" else freeze(value) for key, value in snapshot.items()}

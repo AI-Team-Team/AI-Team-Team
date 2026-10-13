@@ -37,6 +37,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
             self.root,
             ATTConfig(workspace_root=self.tmpdir),
             db_path=self.db_path,
+            persistence_mode=("durable" if (self.db_path) else "volatile"),
         )
         self.manager.register_llm_client("echo", self.client)
 
@@ -68,6 +69,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("Temporary", "Temporary", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("echo", self.client)
         try:
@@ -122,6 +124,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("Temporary", "Temporary", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("echo", self.client)
         try:
@@ -170,6 +173,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("Temporary", "Temporary", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("echo", self.client)
         try:
@@ -241,6 +245,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("TemporaryMinimumRoot", "Temporary", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("echo", self.client)
         try:
@@ -322,6 +327,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         target = ATTManager(
             target_root,
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         target.register_llm_client("echo", self.client)
         try:
@@ -364,6 +370,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         target = ATTManager(
             Agent("TargetRoot", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         target.register_llm_client("echo", self.client)
         try:
@@ -430,6 +437,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         target = ATTManager(
             Agent("TargetRoot", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         target.register_llm_client("echo", self.client)
         try:
@@ -462,6 +470,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         target = ATTManager(
             Agent("TargetRoot", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         target.register_llm_client("echo", self.client)
         baseline_root = target.root_ai
@@ -499,10 +508,11 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         target = ATTManager(
             Agent("TargetRoot", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         target.register_llm_client("echo", self.client)
         try:
-            with self.assertRaisesRegex(StateRestoreError, "team formation record"):
+            with self.assertRaisesRegex(StateRestoreError, "team formation record|checkpoint constraint evidence in team_formation_requests"):
                 await target.load_state(self.db_path)
             self.assertFalse(target._formations.requests)
         finally:
@@ -579,6 +589,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         target = ATTManager(
             Agent("TargetRoot", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         target.register_llm_client("echo", self.client)
         try:
@@ -672,6 +683,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("Temporary", "Temporary", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("echo", self.client)
         try:
@@ -730,6 +742,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         restored = ATTManager(
             Agent("Temporary", "Temporary", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("echo", self.client)
         try:
@@ -783,6 +796,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         target = ATTManager(
             target_root,
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         target.register_llm_client("echo", self.client)
         target._formations._notify_agent(

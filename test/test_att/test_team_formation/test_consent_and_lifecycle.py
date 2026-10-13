@@ -36,6 +36,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         self.manager = ATTManager(
             self.root,
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         self.manager.register_llm_client("echo", self.client)
         self.invitees = [

@@ -1,8 +1,11 @@
 """Incremental governance records with append-only ballot enforcement."""
 
 from ai_team_team.core.exceptions import StatePersistenceError
+from ai_team_team.database.persistence.governance_schema import choice_schema
 from ai_team_team.database.models import (
     GovernanceBallotModel,
+    CommunicationApprovalModel,
+    GovernanceElectorateModel,
     GovernanceRoundModel,
     MigrationRequestModel,
 )
@@ -10,7 +13,7 @@ from ai_team_team.database.models import (
 
 class GovernanceWriteMixin:
     @staticmethod
-    def _write_governance(session, rounds, migrations):
+    def _write_governance(session, rounds, migrations, state_version=1):
         for item in migrations:
             session.merge(
                 MigrationRequestModel(
@@ -18,6 +21,12 @@ class GovernanceWriteMixin:
                     team_id=item["team_id"],
                     target_parent_id=item["target_parent_id"],
                     original_parent_id=item["original_parent_id"],
+                    target_parent_agent_id=item.get("target_parent_agent_id"),
+                    original_parent_agent_id=item.get("original_parent_agent_id"),
+                    acceptance_id=item.get("acceptance_id"),
+                    detachment_kind=item.get("detachment_kind"),
+                    path_evidence=item.get("path_evidence", {}),
+                    state_version=max(1, state_version),
                     data=dict(item),
                 )
             )
@@ -41,8 +50,21 @@ class GovernanceWriteMixin:
                     if principal["kind"] == "agent"
                     else None,
                     data=data,
+                    electorate_revision=item["round_number"],
+                    choice_schema=choice_schema(item["choice_kind"], item["candidates"]),
+                    state_version=max(1, state_version),
                 )
             )
+            session.flush()
+            if item["business_kind"] == "communication":
+                approval = session.get(CommunicationApprovalModel, (item["business_id"], principal["kind"], principal["principal_id"]))
+                if approval is not None:
+                    previous_case = session.get(GovernanceRoundModel, approval.case_id) if approval.case_id else None
+                    if previous_case is None or previous_case.electorate_revision <= item["round_number"]:
+                        approval.case_id = item["round_id"]
+            for position, voter in enumerate(item["voter_agent_ids"]):
+                if session.get(GovernanceElectorateModel, (item["round_id"], voter)) is None:
+                    session.add(GovernanceElectorateModel(case_id=item["round_id"], voter_agent_id=voter, position=position, eligibility={"frozen": True}, created_version=max(1, state_version)))
             session.flush()
             for ballot in item["ballots"]:
                 existing = (

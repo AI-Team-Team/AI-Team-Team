@@ -32,6 +32,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                 communication=ParentApprovalCommunicationConfig(),
             ),
             os.path.join(self.workspace.name, "state.sqlite"),
+            persistence_mode=("durable" if (os.path.join(self.workspace.name, "state.sqlite")) else "volatile"),
         )
         self.manager.register_llm_client("default", self.client)
         self.addAsyncCleanup(self.manager.close)
@@ -134,7 +135,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
             request_id, item = await self.pending()
             with closing(sqlite3.connect(self.manager.db_path)) as database:
                 self.assertEqual(
-                    database.execute("SELECT COUNT(*) FROM governance_rounds").fetchone()[0], 1
+                    database.execute("SELECT COUNT(*) FROM governance_cases").fetchone()[0], 1
                 )
                 self.assertEqual(database.execute("PRAGMA foreign_key_check").fetchall(), [])
         await self.manager.flush_state()
@@ -169,12 +170,12 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         await self.manager.save_state()
         with closing(sqlite3.connect(self.manager.db_path)) as database:
             original = database.execute(
-                "SELECT data FROM governance_rounds WHERE round_id=?", (item.round_id,)
+                "SELECT data FROM governance_cases WHERE case_id=?", (item.round_id,)
             ).fetchone()[0]
             damaged = json.loads(original)
             damaged["round_id"] = "conflicting-round-id"
             database.execute(
-                "UPDATE governance_rounds SET data=? WHERE round_id=?",
+                "UPDATE governance_cases SET data=? WHERE case_id=?",
                 (json.dumps(damaged), item.round_id),
             )
             database.commit()
@@ -182,20 +183,21 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
             await self.manager._persistence.read(self.manager.db_path)
         with closing(sqlite3.connect(self.manager.db_path)) as database:
             database.execute(
-                "UPDATE governance_rounds SET data=? WHERE round_id=?", (original, item.round_id)
+                "UPDATE governance_cases SET data=? WHERE case_id=?", (original, item.round_id)
             )
             database.execute(
-                "INSERT INTO governance_ballots VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO governance_ballots VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     "orphan-ballot",
                     "missing-round",
                     self.manager.root_ai.agent_id,
                     json.dumps({"approved": True, "reason": ""}),
                     item.created_at,
+                    1,
                 ),
             )
             database.commit()
-        with self.assertRaisesRegex(StateRestoreError, "no originating round"):
+        with self.assertRaisesRegex(StateRestoreError, "dangling concrete foreign key"):
             await self.manager._persistence.read(self.manager.db_path)
         with closing(sqlite3.connect(self.manager.db_path)) as database:
             database.execute("DELETE FROM governance_ballots WHERE ballot_id=?", ("orphan-ballot",))

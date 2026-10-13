@@ -2,12 +2,15 @@
 
 import json
 from typing import Any, Dict
+from ..records import thaw
 
 
 class StoreMaterializationMixin:
     @staticmethod
     def _materialize(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         """Performs expensive deep JSON copying on the persistence worker."""
+        snapshot = {key: value if key in {"records", "_operations", "_capture_error"} else thaw(value)
+                    for key, value in snapshot.items()}
         result = dict(snapshot)
         configs = snapshot.get("configs")
         if configs is not None:

@@ -70,6 +70,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
         self.manager = ATTManager(
             Agent("Root", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir, tool_calling_mode="react"),
+            persistence_mode="volatile",
         )
         self.team = self.manager.create_agent_team(self.manager.root_ai)
         self.agent = self.team.members[0]

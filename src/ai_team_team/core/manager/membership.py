@@ -65,8 +65,9 @@ class MembershipService:
                     if any(member.name == new_agent.name for member in team.members):
                         proposal["status"] = "rejected"
                         continue
-                    team.members.append(new_agent)
                     manager.register_agent(new_agent, auto_save=False)
+                    with manager._resources.mutation():
+                        team.members.append(new_agent)
                     changed_agents.add(new_agent.agent_id)
                     membership_changed = True
                     manager.logger.info(
@@ -85,7 +86,8 @@ class MembershipService:
                     if target_agent is None:
                         proposal["status"] = "rejected"
                         continue
-                    team.members.remove(target_agent)
+                    with manager._resources.mutation():
+                        team.members.remove(target_agent)
                     membership_changed = True
                     manager.logger.info(
                         "Deferred execution removed member %s from team %s.",

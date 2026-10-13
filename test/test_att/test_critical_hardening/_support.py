@@ -45,6 +45,7 @@ class CriticalHardeningTestCase(unittest.IsolatedAsyncioTestCase):
                 workspace_root=self.tmpdir,
                 migration_policy="permissive",
             ),
+            persistence_mode="volatile",
         )
         self.manager.register_llm_client("test", self.client)
 

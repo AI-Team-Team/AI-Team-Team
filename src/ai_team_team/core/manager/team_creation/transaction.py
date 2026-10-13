@@ -232,6 +232,8 @@ class TeamCreationTransactionMixin:
                 try:
                     published = manager._publish_new_staged_libraries(stage["libraries"], managed_root)
                     manager.libraries.update(stage["libraries"])
+                    for library in stage["libraries"].values():
+                        manager._resources.bind(library)
                     manager._library_files.update(stage["library_files"])
                     for agent in stage["new_agents"]:
                         manager.register_agent(agent, auto_save=False)

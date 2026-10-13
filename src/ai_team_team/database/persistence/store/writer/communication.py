@@ -5,7 +5,6 @@ from typing import Any, Dict, Iterable
 from ai_team_team.database.models import (
     CommunicationAgreementModel,
     CommunicationApprovalModel,
-    CommunicationBallotModel,
     CommunicationRequestModel,
     PeerMessageModel,
 )
@@ -43,9 +42,6 @@ class CommunicationWriteMixin:
     ) -> None:
         request_ids = {approval["request_id"] for approval in approvals}
         for request_id in request_ids:
-            session.query(CommunicationBallotModel).filter_by(request_id=request_id).delete(
-                synchronize_session=False
-            )
             session.query(CommunicationApprovalModel).filter_by(request_id=request_id).delete(
                 synchronize_session=False
             )
@@ -64,21 +60,6 @@ class CommunicationWriteMixin:
                 )
             )
         session.flush()
-        for ballot in ballots:
-            if ballot["request_id"] not in request_ids:
-                continue
-            principal = ballot["principal"]
-            session.add(
-                CommunicationBallotModel(
-                    request_id=ballot["request_id"],
-                    principal_kind=principal["kind"],
-                    principal_id=principal["principal_id"],
-                    voter_agent_id=ballot["voter_agent_id"],
-                    approved=int(ballot["approved"]),
-                    reason=ballot.get("reason", ""),
-                    created_at=ballot["created_at"],
-                )
-            )
 
     @staticmethod
     def _write_communication_agreements(session: Any, agreements: Iterable[Dict[str, Any]]) -> None:

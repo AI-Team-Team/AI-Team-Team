@@ -85,7 +85,7 @@ def _validate_private_library(
         for agent_row in payload.agents
         if agent_row.get("agent_id") == owner_agent_id
     )
-    if row.get("lifecycle_state") != owner_state:
+    if (owner_state == "dead" and row.get("lifecycle_state") not in {"retained", "archived"}) or (owner_state != "dead" and row.get("lifecycle_state") != owner_state):
         raise StateRestoreError(f"Private DocLib {lib_id!r} lifecycle does not match its owner.")
     return owner_agent_id
 

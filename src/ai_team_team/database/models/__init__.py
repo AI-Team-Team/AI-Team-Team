@@ -5,12 +5,11 @@ from .base import Base
 from .communication import (
     CommunicationAgreementModel,
     CommunicationApprovalModel,
-    CommunicationBallotModel,
     CommunicationRequestModel,
     PeerMessageModel,
 )
 from .config import ManagerConfigModel
-from .governance import GovernanceBallotModel, GovernanceRoundModel, MigrationRequestModel
+from .governance import GovernanceBallotModel, GovernanceElectorateModel, GovernanceRoundModel, MigrationRequestModel
 from .libraries import (
     DocLibFileModel,
     DocLibLinkModel,
@@ -36,6 +35,8 @@ from .teams import (
     TeamProposalModel,
     team_members,
 )
+from .activity import ACTIVITY_TABLES
+from .receipts import commit_receipts
 
 __all__ = [
     "AgentInboxModel",
@@ -46,7 +47,6 @@ __all__ = [
     "Base",
     "CommunicationAgreementModel",
     "CommunicationApprovalModel",
-    "CommunicationBallotModel",
     "CommunicationRequestModel",
     "DocLibFileModel",
     "DocLibLinkModel",
@@ -54,6 +54,9 @@ __all__ = [
     "LibraryPermissionModel",
     "ManagerConfigModel",
     "GovernanceRoundModel",
+    "GovernanceElectorateModel",
+    "ACTIVITY_TABLES",
+    "commit_receipts",
     "GovernanceBallotModel",
     "MigrationRequestModel",
     "MemoryCardSourceEventModel",

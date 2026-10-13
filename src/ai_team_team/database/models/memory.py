@@ -16,8 +16,10 @@ class SystemMemoryEventModel(Base):
     agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     agent_name_snapshot: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     team_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    discussion_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    turn_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    invocation_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    source_chat_message_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chat_messages.message_id", ondelete="RESTRICT"), nullable=True)
+    source_execution_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("executions.execution_id", ondelete="RESTRICT"), nullable=True)
+    checkpoint_context: Mapped[dict] = mapped_column(JSON, default=dict)
     role: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
     redacted: Mapped[int] = mapped_column(Integer, default=0)
@@ -28,11 +30,11 @@ class AgentMemorySegmentModel(Base):
     __tablename__ = "agent_memory_segments"
     segment_id: Mapped[str] = mapped_column(String, primary_key=True)
     agent_id: Mapped[str] = mapped_column(
-        String, ForeignKey("agents.agent_id", ondelete="CASCADE")
+        String, ForeignKey("agents.agent_id", ondelete="RESTRICT")
     )
-    turn_id: Mapped[str] = mapped_column(String, unique=True)
+    invocation_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("activity_invocations.invocation_id", ondelete="RESTRICT"), nullable=True, unique=True)
     origin_team_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    discussion_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    checkpoint_context: Mapped[dict] = mapped_column(JSON, default=dict)
     recall_content: Mapped[str] = mapped_column(String)
     content_sha256: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String)
@@ -53,13 +55,13 @@ class AgentMemoryCardModel(Base):
     __tablename__ = "agent_memory_cards"
     memory_id: Mapped[str] = mapped_column(String, primary_key=True)
     agent_id: Mapped[str] = mapped_column(
-        String, ForeignKey("agents.agent_id", ondelete="CASCADE")
+        String, ForeignKey("agents.agent_id", ondelete="RESTRICT")
     )
-    turn_id: Mapped[str] = mapped_column(String, unique=True)
+    invocation_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("activity_invocations.invocation_id", ondelete="RESTRICT"), nullable=True, unique=True)
     title: Mapped[str] = mapped_column(String)
     summary: Mapped[str] = mapped_column(String)
     origin_team_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    discussion_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    checkpoint_context: Mapped[dict] = mapped_column(JSON, default=dict)
     segment_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("agent_memory_segments.segment_id", ondelete="CASCADE"),

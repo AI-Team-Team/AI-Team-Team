@@ -29,6 +29,7 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
                 enable_memory_compression=False,
                 communication=ParentApprovalCommunicationConfig(),
             ),
+            persistence_mode="volatile",
         )
         self.manager.register_llm_client("default", self.client)
         self.addAsyncCleanup(self.manager.close)

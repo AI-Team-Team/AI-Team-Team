@@ -29,7 +29,7 @@ class TestMigrationPolicies(unittest.IsolatedAsyncioTestCase):
             migration_policy="ancestor_approval",
             workspace_root=self.workspace,
         )
-        self.manager = ATTManager(self.root, self.config)
+        self.manager = ATTManager(self.root, self.config, persistence_mode="volatile")
         self.manager.register_llm_client("default", self.client)
 
     async def asyncTearDown(self):

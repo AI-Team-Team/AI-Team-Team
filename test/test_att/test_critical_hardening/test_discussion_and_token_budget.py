@@ -124,6 +124,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
                 model_token_limits={"default": 10},
                 model_max_output_tokens={"default": 6},
             ),
+            persistence_mode="volatile",
         )
         first = asyncio.create_task(
             generate_with_retry(
@@ -181,6 +182,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
                         model_token_limits={"default": 10},
                         model_max_output_tokens={"default": 2},
                     ),
+                    persistence_mode="volatile",
                 )
                 manager.count_tokens = (
                     lambda text, model_alias=None: len(str(text).split())
@@ -236,6 +238,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
                 model_token_limits={"default": 20},
                 model_max_output_tokens={"default": 5},
             ),
+            persistence_mode="volatile",
         )
         task = asyncio.create_task(
             generate_with_retry(
@@ -275,6 +278,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
                 model_token_limits={"bounded": 20},
                 model_max_output_tokens={"bounded": 4},
             ),
+            persistence_mode="volatile",
         )
         manager.register_llm_client("bounded", client)
         await generate_with_retry(

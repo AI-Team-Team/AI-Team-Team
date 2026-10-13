@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, Float, ForeignKey, ForeignKeyConstraint, Integer, JSON, String
+from sqlalchemy import CheckConstraint, Float, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -60,38 +60,12 @@ class CommunicationApprovalModel(Base):
     reason: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[float] = mapped_column(Float)
     resolved_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    case_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("governance_cases.case_id", ondelete="RESTRICT"), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
             "principal_kind IN ('agent_team', 'agent')",
             name="ck_communication_approval_principal_kind",
-        ),
-    )
-
-
-class CommunicationBallotModel(Base):
-    __tablename__ = "communication_ballots"
-    request_id: Mapped[str] = mapped_column(String, primary_key=True)
-    principal_kind: Mapped[str] = mapped_column(String, primary_key=True)
-    principal_id: Mapped[str] = mapped_column(String, primary_key=True)
-    voter_agent_id: Mapped[str] = mapped_column(
-        String,
-        ForeignKey("agents.agent_id", ondelete="RESTRICT"),
-        primary_key=True,
-    )
-    approved: Mapped[int] = mapped_column(Integer)
-    reason: Mapped[str] = mapped_column(String, default="")
-    created_at: Mapped[float] = mapped_column(Float)
-
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["request_id", "principal_kind", "principal_id"],
-            [
-                "communication_approvals.request_id",
-                "communication_approvals.principal_kind",
-                "communication_approvals.principal_id",
-            ],
-            ondelete="CASCADE",
         ),
     )
 

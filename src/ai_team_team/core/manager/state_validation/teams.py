@@ -56,7 +56,12 @@ def validate_teams(
         if parent_id is not None and parent_id not in team_id_set:
             raise StateRestoreError(f"Team {team_id!r} references missing parent {parent_id!r}.")
         parent_map[team_id] = parent_id
-        _validate_team_creator(row, active_agent_ids, team_id_set)
+        parent_agent_id = row.get("parent_agent_id")
+        if parent_agent_id is not None and (parent_agent_id not in active_agent_ids or parent_id is not None):
+            raise StateRestoreError("A current Agent parent must be active and exclusive.")
+        if parent_id is not None and any(parent["team_id"] == parent_id and parent.get("lifecycle_state", "active") != "active" for parent in payload.teams):
+            raise StateRestoreError("A current AgentTeam parent cannot be dissolved.")
+        _validate_team_creator(row, agent_id_set, team_id_set)
         for proposal in row.get("proposals", []):
             _validate_proposal(proposal, team_id, agent_id_set)
 

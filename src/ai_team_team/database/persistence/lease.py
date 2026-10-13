@@ -58,3 +58,9 @@ class WriterLease:
                 msvcrt_api.locking(self._file.fileno(), msvcrt_api.LK_UNLCK, 1)
         finally:
             self._file.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()

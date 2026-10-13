@@ -10,7 +10,7 @@ async with ATTManager(root_ai, config, db_path="att.db") as manager:
     await manager.save_state()          # Full snapshot and commit.
     await manager.flush_state()         # Wait for queued deltas.
 
-restored = ATTManager(rebound_root, config)
+restored = ATTManager(rebound_root, config, db_path="att.db")
 restored.register_generator_handler(runtime_handler)
 await restored.load_state("att.db")
 await restored.close()
@@ -21,6 +21,12 @@ await restored.close()
 - Persistence errors are always re-raised by `save_state()`, `flush_state()`, or `close()`.
 - `close()` flushes, disposes the reused SQLAlchemy engines, and shuts down the persistence worker.
 - The asynchronous context manager calls `close()` on exit.
+
+Durable mode is the default and requires an explicit database path.
+
+The Host can explicitly select `persistence_mode="volatile"` without `db_path` for a session that has no restart-recovery promise; permission and ownership rules are unchanged.
+
+The [Phase 1 engineering profile](dev/autonomous_activity/Phase_1.md) describes schema 12 records, exact commit receipts, recoverable publication, and resource-generation leases.
 
 ## Incremental single-writer design
 
@@ -64,10 +70,10 @@ The database stores:
 - schema version, `ATTConfig`, model metadata, presets, and token usage;
 - all active and inactive agents by immutable UUID, lifecycle state, private-library ownership, bounded Working Context, and persistent identity-addressed inbox messages;
 - append-only System Memory Journal events with identity snapshots and source provenance, plus optional Agent-owned segments, Memory Cards, normalized tags, retained references, and FTS5 search data;
-- ordinary teams with role-neutral `team_id ↔ agent_id` membership rows, lineage, migration counters, AgentTeam inboxes, and proposals;
+- ordinary teams with role-neutral `team_id ↔ agent_id` membership rows linked to historical intervals, explicit parent references, AgentTeam inboxes, and proposals;
 - consensual formation request projections, normalized content and revision fingerprints, immutable revision snapshots, append-only exact-revision invitation decisions, detached collaborative drafts, creation choices, late-join state, and resulting team references;
 - communication requests, ordered approvals, member ballots, directional Agreements, and peer-delivery records;
-- identified governance rounds with frozen electorates, immutable explicit personal-email ballots, and asynchronous migration requests;
+- identified governance cases with frozen electorates, immutable explicit personal-email ballots, and asynchronous migration requests;
 - document-library metadata, ACLs, managed cross-library links, paths, and file contents.
 
 An incremental membership change rewrites the affected team's `team_members` rows without rewriting an already persisted Agent record, Working Context, Journal, Memory Catalog, model binding, lifecycle state, or Private DocLib.
@@ -91,7 +97,7 @@ It reads persisted model aliases before constructing agents.
 Hosts must register direct clients or a generator handler before loading:
 
 ```python
-manager = ATTManager(runtime_root)
+manager = ATTManager(runtime_root, db_path="att.db")
 manager.register_llm_client("analysis", analysis_client)
 manager.register_generator_handler(handler)
 await manager.load_state("att.db")
@@ -114,7 +120,13 @@ Restoration is transactional.
 
 It builds agents and files in a detached manager and a same-filesystem staging directory, recomputes derived team depth, then swaps the DocLib directories and live registries.
 
-Any validation, staging, or publication error leaves the original manager and original DocLib trees unchanged.
+Before publication completes, any validation, staging, or publication error restores the original manager and original DocLib trees, or leaves resources fenced if rollback itself cannot safely complete.
+
+A durable journal and publication manifest coordinate directory swaps with SQLite decisions after a process interruption; SQLite and filesystem renames are not one OS-atomic operation.
+
+Managed access is gated during provisional publication, and old DocLib objects cannot mutate a newly published generation.
+
+Cleanup or callback failure after a committed registry switch does not undo the new state.
 
 Runtime tools and callbacks already registered on the host remain runtime-owned.
 
@@ -130,6 +142,6 @@ The optional [Selective Episodic Memory](Selective_Episodic_Memory.md) catalog c
 
 ## Schema policy
 
-- The current persistence schema version is `11`.
-- Compatibility with schema `10` and earlier SQLite layouts is intentionally unsupported.
+- The current persistence schema version is `12`.
+- Compatibility with schema `11` and earlier SQLite layouts is intentionally unsupported.
 - Create a new database when upgrading.

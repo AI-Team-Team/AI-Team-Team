@@ -41,6 +41,7 @@ class DiscoveryFixture:
         self.manager = ATTManager(
             self.root,
             ATTConfig(workspace_root=self.workspace.name, enable_memory_compression=False),
+            persistence_mode="volatile",
         )
         self.manager.register_llm_client("default", self.client)
         self.addAsyncCleanup(self.manager.close)

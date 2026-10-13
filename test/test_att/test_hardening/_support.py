@@ -39,6 +39,7 @@ class ATTHardeningTestCase(unittest.IsolatedAsyncioTestCase):
                 enable_membership_voting=True,
                 workspace_root=self.tmpdir,
             ),
+            persistence_mode="volatile",
         )
 
     async def asyncTearDown(self) -> None:

@@ -47,6 +47,7 @@ class TestPeerInvocationScope(unittest.IsolatedAsyncioTestCase):
                 enable_memory_compression=False,
                 llm_max_retries=0,
             ),
+            persistence_mode="volatile",
         )
         manager.register_llm_client("root", root_client)
         self.managers.append(manager)

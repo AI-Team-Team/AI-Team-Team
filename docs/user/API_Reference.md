@@ -190,8 +190,14 @@ The master controller managing the overall agent team topology, tool registratio
 ```python
 from ai_team_team import ATTManager
 
-manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path: Optional[str] = None)
+manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path: Optional[str] = None, *, persistence_mode: str = "durable")
 ```
+
+Durable mode requires an explicit `db_path` and claims exclusive writer ownership before registering managed resources.
+
+The Host may explicitly choose `persistence_mode="volatile"` without `db_path`; this keeps the same authority checks but does not promise restart recovery.
+
+Loading a SQLite checkpoint adopts durable mode after successful publication.
 
 ### Methods
 
@@ -202,7 +208,7 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 * **`get_private_library_id(agent_id: str) -> str`**
   Returns the canonical `PDL-<agent_id>` ID.
 * **`await retire_agent(agent_id: str, policy: Optional[str] = None, confirm_delete: bool = False)`**
-  Deactivates an unused AI under `retain`, `archive`, or confirmed `delete`. Root, team members, team creators, agents with an active model call, and identities referenced by durable governance/audit records cannot be permanently deleted.
+  Deactivates an unused AI under `retain`, `archive`, or confirmed `delete`. Root, team members, team creators, agents with an active model call, and identities referenced by membership, activity, or governance/audit history cannot be permanently deleted, including in volatile sessions.
 * **`await reactivate_agent(agent_id: str, model_alias: str) -> Agent`**
   Restores a retained or archived AI with an explicit stable runtime model binding and its original private library.
 * **`register_tool_auditor(tool_name: str, auditor_func: Callable[..., Tuple[bool, str]])`**
@@ -289,7 +295,7 @@ manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path
 * **`await close()`**
   Rejects new work, cancels outstanding external LLM waits and emergency tasks, flushes all accepted persistence changes without a timeout, and releases the exclusive database writer lease. `ATTManager` also supports `async with`.
 * **`await flush_callbacks()`**
-  Waits for all observational callbacks queued so far.
+  Waits for observational callbacks accepted so far, including worker-thread events awaiting transfer to the dispatcher.
 * **`acknowledge_unknown_alert(team_id: str, fingerprint: str) -> bool`**
   Explicitly acknowledges and removes one durable UNKNOWN alert.
 * **`clear_unknown_alerts(team_id: str, fingerprints: Optional[set[str]] = None) -> int`**
@@ -304,6 +310,16 @@ See [Agent and AgentTeam Discovery](../Agent_and_AgentTeam_Discovery.md) for exa
 ### Callbacks
 
 Callbacks may be synchronous or asynchronous. ATT dispatches them in order on a background channel; slow callbacks do not block discussions, and callback exceptions are logged without changing core outcomes.
+
+Thread emissions wake the owning event loop and preserve the same acceptance order as event-loop emissions.
+
+Constructing the manager in that loop or entering `async with manager` establishes the callback loop; events emitted before a loop is available remain deferred until it is bound or flushed.
+
+Callbacks receive explicit event metadata and do not inherit Agent or AgentTeam invocation authority.
+
+Each observation runs in its own task, so callback self-cancellation is logged without cancelling the dispatcher or preventing the next observation from running.
+
+Closing the manager cancels observation dispatch without waiting indefinitely for a callback that suppresses cancellation; shutdown does not promise to deliver the remaining queued observations.
 
 * **`on_status_change: Optional[Callable[[str, str], None]]`**
   Invoked when an agent changes state (e.g. `"Thinking..."`, `"Executing Tool..."`, `"Idle"`).

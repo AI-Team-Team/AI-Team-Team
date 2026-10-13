@@ -56,6 +56,7 @@ class EpisodicMemoryTestCase(unittest.IsolatedAsyncioTestCase):
                     "index_retry_backoff_factor": 0.0,
                 },
             ),
+            persistence_mode="volatile",
         )
         self.manager.register_llm_client("memory-model", self.client)
         self.team = self.manager.create_agent_team(

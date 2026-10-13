@@ -1,3 +1,3 @@
 """Persistence schema constants."""
 
-STATE_SCHEMA_VERSION = "11"
+STATE_SCHEMA_VERSION = "12"

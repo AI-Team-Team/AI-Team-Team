@@ -102,6 +102,11 @@ def _append_agent_message(
         manager._active_discussion_id.get() if manager else None
     )
     enriched["discussion_id"] = discussion_id
+    chain = manager._agent_invocation_chain.get() if manager else ()
+    # The transitional call-chain token is not durable admission evidence.
+    invocation_id = chain[-1][1] if chain else None
+    if manager and ("activity_invocations", (invocation_id,)) in manager._records.index:
+        enriched["invocation_id"] = invocation_id
     agent.append_message(enriched, capture_content=capture_content)
 
 

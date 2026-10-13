@@ -64,6 +64,7 @@ class StatePersistenceTestCase(unittest.IsolatedAsyncioTestCase):
         self.manager = ATTManager(
             root_ai=self.root_ai,
             db_path=self.db_path,
+            persistence_mode=("durable" if (self.db_path) else "volatile"),
         )
         self.manager.register_llm_client("critic", self.mock_react_client)
         self.manager.register_tools_context({"att_manager": self.manager})

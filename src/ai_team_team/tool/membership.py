@@ -64,8 +64,9 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
             )
             if any(member.name == new_agent.name for member in child.members):
                 raise ToolBusinessError(f"Member {new_agent.name!r} already exists.")
-            child.members.append(new_agent)
             att_manager.register_agent(new_agent, auto_save=False)
+            with att_manager._resources.mutation():
+                child.members.append(new_agent)
         att_manager._auto_save(
             agents={new_agent.agent_id},
             teams={child.team_id},
@@ -110,7 +111,8 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                     f"Member {agent_name!r} was not found in AgentTeam {team_id!r}."
                 )
 
-            child.members.remove(target_agent)
+            with att_manager._resources.mutation():
+                child.members.remove(target_agent)
         att_manager._auto_save(teams={child.team_id})
         return f"Successfully removed member '{agent_name}' from team '{team_id}'."
 
@@ -319,10 +321,11 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                                 )
                                 new_agent = None
                             else:
-                                actual_team.members.append(new_agent)
                                 att_manager.register_agent(
                                     new_agent, auto_save=False
                                 )
+                                with att_manager._resources.mutation():
+                                    actual_team.members.append(new_agent)
                                 membership_changed = True
                                 result = (
                                     f"Proposal '{proposal_id}' approved "
@@ -354,7 +357,8 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                                 f"Member '{prop['target']}' not found."
                             )
                         else:
-                            actual_team.members.remove(target_agent)
+                            with att_manager._resources.mutation():
+                                actual_team.members.remove(target_agent)
                             membership_changed = True
                             result = (
                                 f"Proposal '{proposal_id}' approved "

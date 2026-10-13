@@ -15,6 +15,10 @@ class RestorePublicationMixin:
         managed_root: str,
     ) -> List[Tuple[str, Optional[str]]]:
         manager = self.manager
+        journal = getattr(manager, "_publication_journal", None)
+        if journal is not None:
+            journal.publish(libraries)
+            return [(entry["final"], entry["backup"] if entry["existed"] else None) for entry in journal.entries]
         published: List[Tuple[str, Optional[str]]] = []
         try:
             staged_ids = set(libraries)
@@ -74,6 +78,10 @@ class RestorePublicationMixin:
 
     def _rollback_published_libraries(self, published: List[Tuple[str, Optional[str]]]) -> None:
         manager = self.manager
+        journal = getattr(manager, "_publication_journal", None)
+        if journal is not None:
+            journal.rollback()
+            return
         for final_root, backup in reversed(published):
             if os.path.exists(final_root):
                 shutil.rmtree(final_root, ignore_errors=True)
@@ -82,6 +90,12 @@ class RestorePublicationMixin:
 
     def _discard_library_backups(self, published: List[Tuple[str, Optional[str]]]) -> None:
         manager = self.manager
+        journal = getattr(manager, "_publication_journal", None)
+        if journal is not None:
+            journal.finish()
+            journal.release()
+            manager._publication_journal = None
+            return
         for _, backup in published:
             if backup:
                 shutil.rmtree(backup, ignore_errors=True)

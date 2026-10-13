@@ -57,6 +57,7 @@ class TestATTHardening(ATTHardeningTestCase):
             self.root,
             ATTConfig(workspace_root=self.tmpdir),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("test", self.client)
         team = manager.create_agent_team(self.root)
@@ -87,6 +88,7 @@ class TestATTHardening(ATTHardeningTestCase):
             self.root,
             ATTConfig(workspace_root=self.tmpdir),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("test", self.client)
         original_write = DatabaseStore.write
@@ -117,6 +119,7 @@ class TestATTHardening(ATTHardeningTestCase):
             self.root,
             ATTConfig(workspace_root=self.tmpdir),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("test", self.client)
         team = manager.create_agent_team(self.root)
@@ -129,6 +132,7 @@ class TestATTHardening(ATTHardeningTestCase):
         restored = ATTManager(
             Agent("Root", "Architect", llm_client=self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("test", self.client)
         await restored.load_state(db_path)
@@ -143,6 +147,7 @@ class TestATTHardening(ATTHardeningTestCase):
             Agent("Root", "Architect", llm_client=self.client),
             ATTConfig(workspace_root=self.tmpdir),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         rebinder.register_llm_client("test", self.client)
         await rebinder.load_state(db_path)
@@ -153,6 +158,7 @@ class TestATTHardening(ATTHardeningTestCase):
         missing = ATTManager(
             Agent("Root", "Architect", llm_client=self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         with self.assertRaisesRegex(StateRestoreError, "named"):
             await missing.load_state(db_path)
@@ -166,6 +172,7 @@ class TestATTHardening(ATTHardeningTestCase):
                 workspace_root=self.tmpdir,
             ),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("test", self.client)
         team = manager.create_agent_team(self.root)
@@ -190,6 +197,7 @@ class TestATTHardening(ATTHardeningTestCase):
         restored = ATTManager(
             Agent("Root", "Architect", llm_client=self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         restored.register_llm_client("test", self.client)
         await restored.load_state(db_path)
@@ -206,6 +214,7 @@ class TestATTHardening(ATTHardeningTestCase):
             Agent("ScopedRoot", "Architect", llm_client=self.client),
             ATTConfig(workspace_root=self.tmpdir),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         scoped.register_llm_client("test", self.client)
         async with scoped:

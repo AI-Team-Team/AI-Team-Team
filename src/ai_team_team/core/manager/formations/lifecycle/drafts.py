@@ -683,7 +683,7 @@ class FormationDraftMixin:
         ]
         old_inboxes = self._copy_inboxes(affected_agents)
         old_draft = draft.model_copy(deep=True)
-        dirty = self.manager._new_dirty_state()
+        dirty = self.manager._new_dirty_state(provisional=True)
         batch_token = self.manager._persistence_batch.set(dirty)
         request = None
         try:

@@ -29,6 +29,9 @@ class SystemMemoryEvent(BaseModel):
     agent_id: Optional[str] = None
     agent_name_snapshot: Optional[str] = None
     team_id: Optional[str] = None
+    invocation_id: Optional[str] = None
+    source_chat_message_id: Optional[str] = None
+    source_execution_id: Optional[str] = None
     discussion_id: Optional[str] = None
     turn_id: Optional[str] = None
     role: Optional[str] = None
@@ -49,6 +52,7 @@ class AgentMemorySegment(BaseModel):
     segment_id: str = Field(min_length=1)
     agent_id: str = Field(min_length=1)
     turn_id: str = Field(min_length=1)
+    invocation_id: Optional[str] = None
     origin_team_id: Optional[str] = None
     discussion_id: Optional[str] = None
     source_event_ids: List[str] = Field(min_length=1)
@@ -73,6 +77,7 @@ class AgentMemoryCard(BaseModel):
     memory_id: str = Field(min_length=1)
     agent_id: str = Field(min_length=1)
     turn_id: str = Field(min_length=1)
+    invocation_id: Optional[str] = None
     title: str = Field(min_length=1, max_length=120)
     summary: str = Field(min_length=1, max_length=1000)
     tags: List[str] = Field(min_length=1)

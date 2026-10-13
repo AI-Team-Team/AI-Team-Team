@@ -28,7 +28,7 @@ class TestEmergencyWakeup(unittest.IsolatedAsyncioTestCase):
             enable_emergency_wakeup=True,
             emergency_discussion_rounds=1
         )
-        self.manager = ATTManager(root_ai=self.root_ai, config=self.config)
+        self.manager = ATTManager(root_ai=self.root_ai, config=self.config, persistence_mode="volatile")
         self.manager.register_tools_context({"att_manager": self.manager})
 
     def tearDown(self):

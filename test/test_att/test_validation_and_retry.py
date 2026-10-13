@@ -31,7 +31,7 @@ class TestValidationAndRetry(unittest.IsolatedAsyncioTestCase):
         self.config = ATTConfig(
             tool_calling_mode="react", max_tool_argument_retries=2
         )
-        self.manager = ATTManager(root_ai=self.root_ai, config=self.config)
+        self.manager = ATTManager(root_ai=self.root_ai, config=self.config, persistence_mode="volatile")
 
     async def test_create_agent_team_invalid_model(self):
         """Verify that create_agent_team raises a ValueError when passed an unregistered model."""

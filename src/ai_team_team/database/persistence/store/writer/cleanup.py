@@ -6,13 +6,13 @@ from sqlalchemy import delete, text
 
 from ai_team_team.database.models import (
     AgentMessageModel,
+    ACTIVITY_TABLES,
     AgentInboxModel,
     AgentMemoryCardModel,
     AgentMemorySegmentModel,
     AgentModel,
     CommunicationAgreementModel,
     CommunicationApprovalModel,
-    CommunicationBallotModel,
     CommunicationRequestModel,
     DocLibFileModel,
     DocLibLinkModel,
@@ -21,6 +21,7 @@ from ai_team_team.database.models import (
     ManagerConfigModel,
     GovernanceBallotModel,
     GovernanceRoundModel,
+    GovernanceElectorateModel,
     MigrationRequestModel,
     MemoryCardSourceEventModel,
     MemoryCardTagModel,
@@ -43,6 +44,7 @@ class CleanupWriteMixin:
     def _clear_all(session: Any) -> None:
         for model in (
             GovernanceBallotModel,
+            GovernanceElectorateModel,
             GovernanceRoundModel,
             MigrationRequestModel,
             RetainedMemoryReferenceModel,
@@ -60,7 +62,6 @@ class CleanupWriteMixin:
             TeamFormationDraftModel,
             TeamFormationRequestModel,
             PeerMessageModel,
-            CommunicationBallotModel,
             CommunicationAgreementModel,
             CommunicationApprovalModel,
             CommunicationRequestModel,
@@ -73,7 +74,7 @@ class CleanupWriteMixin:
         session.query(LibraryModel).delete(synchronize_session=False)
         session.query(TeamModel).delete(synchronize_session=False)
         session.query(AgentModel).delete(synchronize_session=False)
-        session.query(ManagerConfigModel).delete(synchronize_session=False)
+        session.query(ManagerConfigModel).filter(ManagerConfigModel.config_key.notin_(("checkpoint_id", "publication_generation"))).delete(synchronize_session=False)
 
     @staticmethod
     def _write_deletions(session: Any, snapshot: Dict[str, Any]) -> None:
@@ -117,6 +118,9 @@ class CleanupWriteMixin:
                     {"agent_id": agent_id},
                 )
             session.execute(delete(team_members).where(team_members.c.agent_id == agent_id))
+            # Explicitly remove derived personal catalogs before deleting an
+            # unreferenced identity; restrictive activity/history FKs remain.
+            session.query(AgentMemorySegmentModel).filter_by(agent_id=agent_id).delete(synchronize_session=False)
             session.query(AgentMessageModel).filter_by(agent_id=agent_id).delete(
                 synchronize_session=False
             )

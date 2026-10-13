@@ -45,6 +45,12 @@ def parse_state_validation_payload(
     """Decode the persisted JSON configuration and required entity collections."""
     try:
         configs = state["configs"]
+        for key in ("state_version", "publication_generation"):
+            value = json.loads(configs.get(key, "1"))
+            if type(value) is not int or value < 1:
+                raise ValueError(f"{key} must be a positive strict integer.")
+        if json.loads(configs.get("persistence_mode", '"durable"')) != "durable":
+            raise ValueError("A SQLite checkpoint must declare durable persistence.")
         return StateValidationPayload(
             config=ATTConfig(**json.loads(configs["att_config"])),
             model_configs=json.loads(configs.get("model_configs", "{}")),

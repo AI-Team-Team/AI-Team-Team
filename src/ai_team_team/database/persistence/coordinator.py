@@ -2,12 +2,17 @@
 
 import asyncio
 import threading
+import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Optional, cast
 
+from ai_team_team.core.exceptions import StateRestoreError
+
 from .lease import WriterLease
 from .store import DatabaseStore
+from .records import merge_records
+from .receipts import CommitReceipt, settle_commit
 
 
 class PersistenceCoordinator:
@@ -25,6 +30,7 @@ class PersistenceCoordinator:
         self._error: Optional[BaseException] = None
         self._lock = threading.RLock()
         self._closed = False
+        self._prepared_paths = set()
         if db_path:
             try:
                 self.claim(db_path)
@@ -39,9 +45,36 @@ class PersistenceCoordinator:
             if self._closed:
                 raise RuntimeError("Persistence coordinator is closed.")
             if resolved not in self._leases:
-                self._leases[resolved] = WriterLease(resolved)
+                lease = WriterLease(resolved)
+                try:
+                    DatabaseStore._preflight_schema(resolved)
+                except BaseException:
+                    lease.close()
+                    raise
+                self._leases[resolved] = lease
+
+    async def prepare_runtime(self, db_path):
+        """Reconcile crash-left publication before any external mutation is admitted."""
+        self.claim(db_path)
+        await self.flush()
+        # Reconciliation can rename directories and commit rollback evidence.
+        # Cancellation must not outlive its caller's admission protection.
+        await settle_commit(asyncio.get_running_loop().run_in_executor(self._executor, self._prepare, db_path))
+
+    def _prepare(self, db_path):
+        resolved = str(Path(db_path).resolve())
+        if resolved not in self._prepared_paths:
+            from .store.reconciliation import reconcile_publication
+            reconcile_publication(self._store(resolved))
+            self._prepared_paths.add(resolved)
 
     def submit(self, db_path: str, snapshot: Dict[str, Any]) -> Future[Any]:
+        snapshot = dict(snapshot)
+        if "_operations" not in snapshot and "_capture_error" not in snapshot:
+            snapshot["_operations"] = (CommitReceipt(
+                uuid.uuid4().hex, max(1, snapshot.get("state_version", 1)), "durable",
+                tuple(record.receipt_key for record in snapshot.get("records", ())),
+            ),)
         with self._lock:
             if self._closed:
                 raise RuntimeError("Persistence coordinator is closed.")
@@ -61,11 +94,27 @@ class PersistenceCoordinator:
                 self._pending_snapshot = self._merge_snapshots(self._pending_snapshot, snapshot)
             return cast(Future[Any], self._pending_completion)
 
-    async def read(self, db_path: str) -> Dict[str, Any]:
+    async def read(self, db_path: str, *, reconcile: bool = True) -> Dict[str, Any]:
         self.claim(db_path)
         await self.flush()
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._executor, self._read, db_path)
+        future = loop.run_in_executor(self._executor, self._read, db_path, reconcile)
+        if reconcile:
+            # Keep restore's resource gate held until this mutating worker has
+            # finished, even after repeated cancellation of the observer.
+            return await settle_commit(future)
+        return await future
+
+    async def receipt(self, db_path: str, operation_id: str, *, wait_pending: bool = True):
+        """Look up an accepted operation after its caller lost the response."""
+        self.claim(db_path)
+        if wait_pending:
+            await self.flush()
+        def read():
+            from .store.records import read_receipt
+            with self._store(db_path).session_factory() as session:
+                return read_receipt(session, operation_id)
+        return await asyncio.get_running_loop().run_in_executor(self._executor, read)
 
     async def search_memory_card_ids(
         self, db_path: str, agent_id: str, query: str, limit: int
@@ -117,9 +166,11 @@ class PersistenceCoordinator:
         loop = asyncio.get_running_loop()
 
         def close_all() -> None:
+            # Already accepted reads/preparation may still create or use a
+            # store. Finish those workers before disposing every engine.
+            self._executor.shutdown(wait=True)
             for store in self._stores.values():
                 store.close()
-            self._executor.shutdown(wait=True)
             for lease in self._leases.values():
                 lease.close()
 
@@ -136,14 +187,20 @@ class PersistenceCoordinator:
                 self._stores[resolved] = store
             return store
 
-    def _write(self, db_path: str, snapshot: Dict[str, Any]) -> None:
+    def _write(self, db_path: str, snapshot: Dict[str, Any]):
         capture_error = snapshot.get("_capture_error")
         if capture_error is not None:
             raise capture_error
-        self._store(db_path).write(snapshot)
+        if not snapshot.get("_publication_operation"):
+            self._prepare(db_path)
+        return self._store(db_path).write(snapshot)
 
-    def _read(self, db_path: str) -> Dict[str, Any]:
-        return self._store(db_path).read()
+    def _read(self, db_path: str, reconcile: bool = True) -> Dict[str, Any]:
+        # A reader must never initialize or repair an empty source checkpoint.
+        # Writable initialization remains exclusively on the write path.
+        if DatabaseStore._preflight_schema(str(Path(db_path).resolve())):
+            raise StateRestoreError("An empty database is not a restorable ATT checkpoint; it was not modified.")
+        return self._store(db_path).read(reconcile=reconcile)
 
     def _search_memory_card_ids(
         self, db_path: str, agent_id: str, query: str, limit: int
@@ -166,7 +223,7 @@ class PersistenceCoordinator:
             completion = self._active_completion
             if exception is None:
                 if completion is not None and not completion.done():
-                    completion.set_result(None)
+                    completion.set_result(task.result())
             else:
                 if self._error is None:
                     self._error = exception
@@ -186,16 +243,27 @@ class PersistenceCoordinator:
 
     @staticmethod
     def _merge_snapshots(earlier: Dict[str, Any], later: Dict[str, Any]) -> Dict[str, Any]:
-        """Coalesces immutable deltas without losing later entity values."""
+        """Coalesce immutable deltas in state-version order, not arrival order."""
+        if earlier.get("_publication_operation") or later.get("_publication_operation"):
+            raise RuntimeError("A publication decision cannot coalesce with another authority operation.")
         if later.get("_capture_error") is not None:
             return later
         if earlier.get("_capture_error") is not None:
             return earlier
+        if earlier.get("state_version", 1) > later.get("state_version", 1):
+            earlier, later = later, earlier
         if later.get("full"):
-            return later
+            merged = dict(later)
+            merged["records"] = merge_records(earlier.get("records", ()), later.get("records", ()))
+            merged["_operations"] = tuple(earlier.get("_operations", ())) + tuple(later.get("_operations", ()))
+            for key in ("deleted_agents", "deleted_teams", "deleted_libraries", "deleted_memory_references"):
+                merged[key] = tuple(set(earlier.get(key, ())) | set(later.get(key, ())))
+            return merged
         merged = dict(earlier)
         merged["full"] = bool(earlier.get("full"))
-        merged["state_version"] = later.get("state_version", earlier.get("state_version"))
+        merged["state_version"] = max(later.get("state_version", 1), earlier.get("state_version", 1))
+        merged["records"] = merge_records(earlier.get("records", ()), later.get("records", ()))
+        merged["_operations"] = tuple(earlier.get("_operations", ())) + tuple(later.get("_operations", ()))
         merged["episodic_memory_enabled"] = later.get(
             "episodic_memory_enabled",
             earlier.get("episodic_memory_enabled", False),
@@ -221,7 +289,11 @@ class PersistenceCoordinator:
             ("memory_references", "reference_id"),
         ):
             records = {record[identity]: record for record in earlier.get(key, [])}
-            records.update({record[identity]: record for record in later.get(key, [])})
+            for record in later.get(key, []):
+                previous = records.get(record[identity])
+                previous_version = previous.get("state_version", earlier.get("state_version", 1)) if previous else 0
+                if previous is None or record.get("state_version", later.get("state_version", 1)) >= previous_version:
+                    records[record[identity]] = record
             merged[key] = list(records.values())
 
         for dependency_key, authoritative_key, identity in (

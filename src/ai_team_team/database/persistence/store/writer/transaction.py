@@ -3,6 +3,7 @@
 from typing import Any, Callable, Dict
 
 from sqlalchemy import text
+from ..records import validate_database, write_records, write_receipts
 
 from .cleanup import CleanupWriteMixin
 from .communication import CommunicationWriteMixin
@@ -25,11 +26,17 @@ class StoreWriteMixin(
     session_factory: Any
     _materialize: Callable[[Dict[str, Any]], Dict[str, Any]]
 
-    def write(self, snapshot: Dict[str, Any]) -> None:
+    def write(self, snapshot: Dict[str, Any]):
         """Writes a full snapshot or an incremental immutable delta."""
+        self._preflight_schema(self.db_path)
         snapshot = self._materialize(snapshot)
         session = self.session_factory()
         try:
+            session.execute(text("BEGIN IMMEDIATE"))
+            session.execute(text("PRAGMA defer_foreign_keys = ON"))
+            if snapshot.get("_publication_rollback"):
+                from ..publication_rollback import discard_provisional_records
+                discard_provisional_records(session, snapshot["_publication_rollback"])
             if snapshot["full"]:
                 session.execute(text("PRAGMA defer_foreign_keys = ON"))
                 self._clear_all(session)
@@ -37,6 +44,7 @@ class StoreWriteMixin(
             self._write_deletions(session, snapshot)
 
             self._write_configs(session, snapshot.get("configs"))
+            session.execute(text("INSERT INTO manager_config(config_key, config_value) VALUES('state_version', :version) ON CONFLICT(config_key) DO UPDATE SET config_value = MAX(CAST(config_value AS INTEGER), CAST(:version AS INTEGER))"), {"version": str(max(1, snapshot.get("state_version", 1)))})
             self._write_agent_dependencies(session, snapshot.get("agent_dependencies", []))
             self._write_agents(session, snapshot.get("agents", []))
             session.flush()
@@ -60,7 +68,7 @@ class StoreWriteMixin(
             team_dependencies = self._missing_team_dependencies(
                 session, snapshot.get("team_dependencies", [])
             )
-            self._write_teams(session, team_dependencies + snapshot.get("teams", []))
+            self._write_teams(session, team_dependencies + snapshot.get("teams", []), snapshot.get("records", ()))
             session.flush()
             self._write_formation_requests(
                 session, snapshot.get("formation_requests", [])
@@ -94,14 +102,19 @@ class StoreWriteMixin(
                 session, snapshot.get("communication_agreements", [])
             )
             self._write_peer_messages(session, snapshot.get("peer_messages", []))
-            self._write_governance(session, snapshot.get("governance_rounds", []), snapshot.get("migration_requests", []))
+            self._write_governance(session, snapshot.get("governance_rounds", []), snapshot.get("migration_requests", []), snapshot.get("state_version", 1))
             self._write_library_dependencies(session, snapshot.get("library_dependencies", []))
             self._write_libraries(session, snapshot.get("libraries", []))
             session.flush()
             self._write_permissions(session, snapshot.get("permissions", {}))
             self._write_file_changes(session, snapshot.get("file_changes", {}))
             self._write_links(session, snapshot.get("links"))
+            session.flush()
+            write_records(session, snapshot.get("records", ()))
+            validate_database(session)
+            receipts = write_receipts(session, snapshot.get("_operations", ()))
             session.commit()
+            return receipts
         except Exception:
             session.rollback()
             raise

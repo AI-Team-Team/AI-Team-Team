@@ -47,6 +47,7 @@ def _write_and_hold(db_path, workspace, ready, release):
             Agent("ProcessRoot", "Architect", client),
             ATTConfig(workspace_root=workspace),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("process-model", client)
         team = manager.create_agent_team(manager.root_ai)
@@ -81,6 +82,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 Agent("Other", "Architect", self.client),
                 ATTConfig(workspace_root=self.tmpdir),
                 db_path=db_path,
+                persistence_mode=("durable" if (db_path) else "volatile"),
             )
 
         process.terminate()
@@ -91,6 +93,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             Agent("ProcessRoot", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
             db_path=db_path,
+            persistence_mode=("durable" if (db_path) else "volatile"),
         )
         restored.register_llm_client("process-model", self.client)
         await restored.load_state(db_path)
@@ -242,6 +245,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                         )
                     ),
                     db_path=db_path,
+                    persistence_mode=("durable" if (db_path) else "volatile"),
                 )
                 source.register_llm_client("stable", self.client)
                 parent = source.create_agent_team(source.root_ai)
@@ -266,6 +270,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                             self.tmpdir, f"live-{name}"
                         )
                     ),
+                    persistence_mode="volatile",
                 )
                 live.register_llm_client("stable", self.client)
                 live_team = live.create_agent_team(live.root_ai)

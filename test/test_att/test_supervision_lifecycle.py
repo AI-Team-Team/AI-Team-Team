@@ -61,6 +61,7 @@ class TestSupervisoryTeamLifecycle(unittest.IsolatedAsyncioTestCase):
         self.manager = ATTManager(
             self.root,
             ATTConfig(workspace_root=self.workspace.name),
+            persistence_mode="volatile",
         )
         self.client.manager = self.manager
         self.manager.register_llm_client("default", self.client)
@@ -183,6 +184,7 @@ class TestSupervisoryTeamLifecycle(unittest.IsolatedAsyncioTestCase):
             new_root,
             ATTConfig(workspace_root=self.workspace.name),
             db_path=database_path,
+            persistence_mode=("durable" if (database_path) else "volatile"),
         )
         restored.register_llm_client("default", self.client)
         try:
@@ -255,6 +257,7 @@ class TestSupervisoryTeamLifecycle(unittest.IsolatedAsyncioTestCase):
             Agent("Restore Root", "Architect", llm_client=self.client),
             ATTConfig(workspace_root=self.workspace.name),
             db_path=database_path,
+            persistence_mode=("durable" if (database_path) else "volatile"),
         )
         restored.register_llm_client("default", self.client)
         try:

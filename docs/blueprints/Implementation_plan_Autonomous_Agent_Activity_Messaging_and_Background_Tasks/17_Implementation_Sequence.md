@@ -24,7 +24,7 @@ All 34 implemented Phase 0 checks and the complete 445-test regression suite pas
 
 The separately invoked six-test red gate has five explicit missing-runtime assertions and one schema-target assertion, without skips, expected failures, import errors, or old discussion API calls.
 
-Schema 12 is reserved rather than activated, and no replacement scheduler or later-phase implementation is included.
+At Phase 0 completion, schema 12 was reserved rather than activated, and no replacement scheduler or later-phase implementation was included.
 
 ## Phase 1: Durable primitives and publication safety
 
@@ -35,6 +35,16 @@ Schema 12 is reserved rather than activated, and no replacement scheduler or lat
 - Make unsupported schema preflight and writer ownership tests pass before any feature can dispatch work.
 
 Gate: transaction cancellation, dependency-only updates, dirty merging, corrupt-state rejection, and publication fault tests preserve the original manager and files.
+
+Status: completed on 2026-10-12, with implementation boundaries and verification recorded in the [Phase 1 durability foundations](../../dev/autonomous_activity/Phase_1.md).
+
+Schema 12 is active, all 98 Phase 1 tests and the complete 544-test regression suite pass, and branch coverage is 81 percent, including fourth-review fixes verified on 2026-10-13.
+
+Ruff, both consumer typechecks, distribution builds, and installed-wheel foundation checks pass locally on macOS with Python 3.13, with the remaining supported CI matrix still requiring CI verification.
+
+The five remaining separately invoked runtime specifications fail explicitly at missing later-phase contracts rather than being skipped or counted as completed features.
+
+This gate completes durable primitives and recoverable publication foundations, not the personal scheduler, public chat or execution services, institutional round removal, or the full Phase 6 recovery activation matrix.
 
 ## Phase 2: Personal activity runtime and model boundaries
 

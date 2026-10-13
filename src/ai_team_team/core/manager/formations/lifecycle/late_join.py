@@ -250,7 +250,8 @@ class FormationLateJoinMixin:
                         raise ValueError(
                             "The invited Agent is already a member of this AgentTeam."
                         )
-                    team.members.append(invitee)
+                    with self.manager._resources.mutation():
+                        team.members.append(invitee)
                     now = time.time()
                     invitation.joined_at = now
                     invitation.late_join_pending = False
@@ -271,7 +272,8 @@ class FormationLateJoinMixin:
                         )
                     )
                 except Exception:
-                    team.members = old_members
+                    with self.manager._resources.mutation():
+                        team.members = old_members
                     raise
         except asyncio.CancelledError:
             if not commit_started:

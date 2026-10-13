@@ -25,7 +25,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Approved"}')
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
         self.config = ATTConfig(llm_max_retries=2, llm_retry_backoff_factor=0.01, tool_calling_mode="react") # fast retry for test
-        self.manager = ATTManager(root_ai=self.root_ai, config=self.config)
+        self.manager = ATTManager(root_ai=self.root_ai, config=self.config, persistence_mode="volatile")
 
     async def test_lexical_argument_parsing_with_commas(self):
         """Verify that tool arguments containing commas inside quotes are parsed correctly."""
@@ -96,7 +96,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         agent = Agent(name="FlakyAgent", role="Test", llm_client=flaky)
         self.root_ai.llm_client = flaky
         config = ATTConfig(llm_max_retries=3, llm_retry_backoff_factor=0.01, tool_calling_mode="react")
-        manager = ATTManager(root_ai=self.root_ai, config=config)
+        manager = ATTManager(root_ai=self.root_ai, config=config, persistence_mode="volatile")
         team = manager.create_agent_team(creator=self.root_ai, member_count=3)
         manager.register_agent(agent)
         
@@ -117,7 +117,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         agent = Agent(name="DeadAgent", role="Test", llm_client=dead)
         self.root_ai.llm_client = dead
         config = ATTConfig(llm_max_retries=2, llm_retry_backoff_factor=0.001)
-        manager = ATTManager(root_ai=self.root_ai, config=config)
+        manager = ATTManager(root_ai=self.root_ai, config=config, persistence_mode="volatile")
         team = manager.create_agent_team(creator=self.root_ai, member_count=3)
         manager.register_agent(agent)
         team.members[0] = agent

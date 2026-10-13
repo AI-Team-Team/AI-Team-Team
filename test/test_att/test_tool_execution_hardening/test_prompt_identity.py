@@ -37,6 +37,7 @@ class TestPromptIdentityConsistency(unittest.IsolatedAsyncioTestCase):
         self.manager = ATTManager(
             Agent("Root", "Architect", self.client),
             ATTConfig(workspace_root=self.tmpdir),
+            persistence_mode="volatile",
         )
         self.manager.register_llm_client("capture", self.client)
         self.mission = "INDIVIDUAL_MISSION: Preserve evidence provenance."

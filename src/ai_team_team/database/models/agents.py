@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from sqlalchemy import Float, ForeignKey, Integer, JSON, String
+from sqlalchemy import CheckConstraint, Float, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -16,6 +16,9 @@ class AgentModel(Base):
     model_alias: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     last_context: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     lifecycle_state: Mapped[str] = mapped_column(String, default="active")
+    state_version: Mapped[int] = mapped_column(Integer, default=1)
+    presentation_preferences: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (CheckConstraint("lifecycle_state IN ('active', 'retained', 'archived', 'dead') AND state_version > 0"),)
 
     messages: Mapped[List["AgentMessageModel"]] = relationship(
         back_populates="agent", cascade="all, delete-orphan", order_by="AgentMessageModel.created_at"
@@ -32,7 +35,10 @@ class AgentMessageModel(Base):
     tool_call_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     team_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    discussion_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    invocation_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("activity_invocations.invocation_id", ondelete="RESTRICT"), nullable=True)
+    source_chat_message_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chat_messages.message_id", ondelete="RESTRICT"), nullable=True)
+    source_execution_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("executions.execution_id", ondelete="RESTRICT"), nullable=True)
+    source_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
 
     agent: Mapped["AgentModel"] = relationship(back_populates="messages")
 

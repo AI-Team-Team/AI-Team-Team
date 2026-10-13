@@ -50,6 +50,7 @@ class ModelFileReadingTests(unittest.IsolatedAsyncioTestCase):
         self.manager = ATTManager(
             Agent("Root", "Architect", PlainClient()),
             ATTConfig(workspace_root=self.temporary.name),
+            persistence_mode="volatile",
         )
         self.team = self.manager.create_agent_team(self.manager.root_ai)
         self.agent = self.team.members[0]

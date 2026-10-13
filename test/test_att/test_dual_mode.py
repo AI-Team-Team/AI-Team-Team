@@ -68,7 +68,7 @@ class TestDualModeToolCalling(unittest.IsolatedAsyncioTestCase):
         # 4. manager.register_tool shortcut
         mock_client = MagicMock()
         mock_agent = Agent(name="TestAgent", role="Tester", llm_client=mock_client)
-        manager = ATTManager(root_ai=mock_agent)
+        manager = ATTManager(root_ai=mock_agent, persistence_mode="volatile")
         manager.register_tool(my_test_tool)
         self.assertIn("my_test_tool", manager.global_tools)
         self.assertEqual(manager.global_tools["my_test_tool"].description, "Retrieve the value of x.")
@@ -138,7 +138,7 @@ class TestDualModeToolCalling(unittest.IsolatedAsyncioTestCase):
         mock_client.supports_native_tool_calling = lambda: True
         
         root_ai = Agent(name="Root", role="Architect", llm_client=mock_client)
-        manager = ATTManager(root_ai=root_ai, config=config)
+        manager = ATTManager(root_ai=root_ai, config=config, persistence_mode="volatile")
         
         # Register tools
         tool_a_runs = 0
@@ -198,7 +198,7 @@ class TestDualModeToolCalling(unittest.IsolatedAsyncioTestCase):
         
         config = ATTConfig(tool_calling_mode="auto")
         root_ai = Agent(name="Root", role="Architect", llm_client=mock_native_client)
-        manager = ATTManager(root_ai=root_ai, config=config)
+        manager = ATTManager(root_ai=root_ai, config=config, persistence_mode="volatile")
         team = manager.create_agent_team(creator=root_ai, member_count=3)
         manager.register_agent(agent_native)
         manager.register_agent(agent_text)
