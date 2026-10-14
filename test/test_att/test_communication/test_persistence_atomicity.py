@@ -1,17 +1,10 @@
-import asyncio
-import json
 import os
-import shutil
-import tempfile
-import unittest
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from ai_team_team import (
-    ATTConfig,
-    ATTManager,
     Agent,
-    LineageApprovalCommunicationConfig,
     ParentApprovalCommunicationConfig,
     PermissiveCommunicationConfig,
     StateRestoreError,
@@ -21,45 +14,13 @@ from ai_team_team.core.decision import DecisionOutcome
 from ai_team_team.core.manager.communication_validation.successors import (
     validate_successors_and_ballots,
 )
+from ai_team_team.database.persistence.coordinator import PersistenceCoordinator
 
 
-from test.governance_client import PersonalGovernanceClient
+from test.test_att.test_communication._support import CommunicationTestCase
 
 
-class GovernanceClient(PersonalGovernanceClient):
-    pass
-
-
-class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.old_cwd = os.getcwd()
-        self.workspace = tempfile.mkdtemp(prefix="att-communication-")
-        os.chdir(self.workspace)
-        self.client = GovernanceClient()
-        self.root = Agent("Root", "Root governor", self.client)
-
-    async def asyncTearDown(self):
-        os.chdir(self.old_cwd)
-        shutil.rmtree(self.workspace, ignore_errors=True)
-
-    def manager(self, communication=None, db_path=None):
-        manager = ATTManager(
-            self.root,
-            ATTConfig(
-                communication=communication
-                or PermissiveCommunicationConfig(),
-                workspace_root=self.workspace,
-            ),
-            db_path,
-            persistence_mode=("durable" if (db_path) else "volatile"),
-        )
-        manager.register_llm_client("default", self.client)
-        return manager
-
-    async def wait_for_status(self, request, expected, timeout=1.0):
-        async with asyncio.timeout(timeout):
-            while request.status.value != expected:
-                await asyncio.sleep(0.01)
+class TestAutonomousCommunication(CommunicationTestCase):
 
     async def test_missing_nested_successor_is_reported_as_corrupt_state(self):
         first = SimpleNamespace(
@@ -84,6 +45,20 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_current_schema_restores_pending_request_and_delivery(self):
+        await self._assert_pending_request_and_delivery_round_trip()
+
+    async def test_pending_request_and_delivery_survive_slow_writes(self):
+        original_write = PersistenceCoordinator._write
+
+        def slow_write(coordinator, db_path, snapshot):
+            # Runs on the real persistence worker, not the discussion event loop.
+            time.sleep(0.1)
+            return original_write(coordinator, db_path, snapshot)
+
+        with patch.object(PersistenceCoordinator, "_write", slow_write):
+            await self._assert_pending_request_and_delivery_round_trip()
+
+    async def _assert_pending_request_and_delivery_round_trip(self):
         db_path = os.path.join(self.workspace, "communication.db")
         source = self.manager(
             ParentApprovalCommunicationConfig(), db_path=db_path
@@ -98,12 +73,9 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
         await source.save_state()
         await source.close()
 
-        restored = ATTManager(
-            Agent("RestoreRoot", "Root governor", self.client),
-            ATTConfig(workspace_root=self.workspace),
-            persistence_mode="volatile",
+        restored = self.manager(
+            root_ai=Agent("RestoreRoot", "Root governor", self.client),
         )
-        restored.register_llm_client("default", self.client)
         await restored.load_state(db_path)
         request = restored.broker.communication_requests[result.request_id]
         self.assertEqual(request.status.value, "PENDING")
@@ -130,12 +102,9 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
         await restored.save_state()
         await restored.close()
 
-        final = ATTManager(
-            Agent("FinalRoot", "Root governor", self.client),
-            ATTConfig(workspace_root=self.workspace),
-            persistence_mode="volatile",
+        final = self.manager(
+            root_ai=Agent("FinalRoot", "Root governor", self.client),
         )
-        final.register_llm_client("default", self.client)
         await final.load_state(db_path)
         self.assertTrue(final.broker.agreements)
         message = final.broker.peer_messages[delivered.message_id]
@@ -147,6 +116,7 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
             )
         )
         await final.close()
+
     async def test_authoritative_write_failures_roll_back_runtime_state(self):
         governed = self.manager(ParentApprovalCommunicationConfig())
         parent_a = governed.create_agent_team(self.root, member_count=3)

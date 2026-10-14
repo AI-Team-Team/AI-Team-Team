@@ -1,59 +1,12 @@
-import asyncio
-import json
-import os
-import shutil
-import tempfile
-import unittest
-from unittest.mock import AsyncMock, patch
-
 from ai_team_team import (
-    ATTConfig,
-    ATTManager,
-    Agent,
     LineageApprovalCommunicationConfig,
     ParentApprovalCommunicationConfig,
-    PermissiveCommunicationConfig,
 )
-from ai_team_team.core.decision import DecisionOutcome
+
+from test.test_att.test_communication._support import CommunicationTestCase
 
 
-from test.governance_client import PersonalGovernanceClient
-
-
-class GovernanceClient(PersonalGovernanceClient):
-    pass
-
-
-class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.old_cwd = os.getcwd()
-        self.workspace = tempfile.mkdtemp(prefix="att-communication-")
-        os.chdir(self.workspace)
-        self.client = GovernanceClient()
-        self.root = Agent("Root", "Root governor", self.client)
-
-    async def asyncTearDown(self):
-        os.chdir(self.old_cwd)
-        shutil.rmtree(self.workspace, ignore_errors=True)
-
-    def manager(self, communication=None, db_path=None):
-        manager = ATTManager(
-            self.root,
-            ATTConfig(
-                communication=communication
-                or PermissiveCommunicationConfig(),
-                workspace_root=self.workspace,
-            ),
-            db_path,
-            persistence_mode=("durable" if (db_path) else "volatile"),
-        )
-        manager.register_llm_client("default", self.client)
-        return manager
-
-    async def wait_for_status(self, request, expected, timeout=1.0):
-        async with asyncio.timeout(timeout):
-            while request.status.value != expected:
-                await asyncio.sleep(0.01)
+class TestAutonomousCommunication(CommunicationTestCase):
 
     async def test_permissive_delivery_needs_no_agreement(self):
         manager = self.manager()
@@ -121,6 +74,8 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
     async def test_non_literal_boolean_keeps_agent_approval_pending(self):
         self.client.approved = "true"
         manager = self.manager(ParentApprovalCommunicationConfig())
+        events = []
+        manager.on_system_event = lambda name, payload: events.append((name, payload))
         first = manager.create_agent_team(self.root, member_count=3)
         second = manager.create_agent_team(self.root, member_count=3)
 
@@ -128,7 +83,19 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
             first, second, first.members[0].agent_id, "strict decision"
         )
         request = manager.broker.communication_requests[result.request_id]
-        await asyncio.sleep(0.05)
+        await self.wait_for_governance_idle(request)
+        await manager.flush_callbacks()
+
+        self.assertTrue(
+            any(
+                name == "tool_execution_failed"
+                and payload.get("tool_name") == "submit_governance_choice"
+                and payload.get("agent_id") == self.root.agent_id
+                and payload.get("status") == "invalid_arguments"
+                for name, payload in events
+            ),
+            "The Agent must attempt a choice and receive strict argument validation.",
+        )
 
         self.assertEqual(request.status.value, "PENDING")
         self.assertEqual(
@@ -136,6 +103,11 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
             "PENDING",
         )
         self.assertEqual(len(manager.broker.agreements), 0)
+        voting_round = manager._governance.latest(
+            "communication", request.request_id, request.approval_principals[0]
+        )
+        self.assertIsNotNone(voting_round)
+        self.assertEqual(voting_round.ballots, [])
         await manager.close()
     async def test_top_level_parent_approval_is_root_agent(self):
         manager = self.manager(ParentApprovalCommunicationConfig())
@@ -155,7 +127,7 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
             self.root.agent_id,
         )
 
-        await asyncio.sleep(0.05)
+        await self.wait_for_status(request, "APPROVED")
         self.assertEqual(request.status.value, "APPROVED")
         agreement = next(iter(manager.broker.agreements.values()))
         self.assertEqual(agreement.direction.value, "bidirectional")

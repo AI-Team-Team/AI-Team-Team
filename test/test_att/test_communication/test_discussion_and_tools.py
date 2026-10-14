@@ -1,59 +1,13 @@
-import asyncio
 import json
-import os
-import shutil
-import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from ai_team_team import (
-    ATTConfig,
-    ATTManager,
-    Agent,
-    LineageApprovalCommunicationConfig,
-    ParentApprovalCommunicationConfig,
-    PermissiveCommunicationConfig,
-)
-from ai_team_team.core.decision import DecisionOutcome
+from ai_team_team import ParentApprovalCommunicationConfig
+
+from test.test_att.test_communication._support import CommunicationTestCase
 
 
-from test.governance_client import PersonalGovernanceClient
-
-
-class GovernanceClient(PersonalGovernanceClient):
-    pass
-
-
-class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.old_cwd = os.getcwd()
-        self.workspace = tempfile.mkdtemp(prefix="att-communication-")
-        os.chdir(self.workspace)
-        self.client = GovernanceClient()
-        self.root = Agent("Root", "Root governor", self.client)
-
-    async def asyncTearDown(self):
-        os.chdir(self.old_cwd)
-        shutil.rmtree(self.workspace, ignore_errors=True)
-
-    def manager(self, communication=None, db_path=None):
-        manager = ATTManager(
-            self.root,
-            ATTConfig(
-                communication=communication
-                or PermissiveCommunicationConfig(),
-                workspace_root=self.workspace,
-            ),
-            db_path,
-            persistence_mode=("durable" if (db_path) else "volatile"),
-        )
-        manager.register_llm_client("default", self.client)
-        return manager
-
-    async def wait_for_status(self, request, expected, timeout=1.0):
-        async with asyncio.timeout(timeout):
-            while request.status.value != expected:
-                await asyncio.sleep(0.01)
+class TestAutonomousCommunication(CommunicationTestCase):
 
     async def test_wake_delivery_runs_governance_discussions(self):
         manager = self.manager(
@@ -159,6 +113,9 @@ class TestAutonomousCommunication(unittest.IsolatedAsyncioTestCase):
             manager._active_tool_agent.reset(agent_token)
             manager._active_team.reset(team_token)
         self.assertEqual(inside["status"], "PENDING_APPROVAL")
+        await self.wait_for_governance_idle(
+            manager.broker.communication_requests[inside["request_id"]]
+        )
         await manager.close()
 
 

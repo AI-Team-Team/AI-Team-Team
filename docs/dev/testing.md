@@ -125,17 +125,24 @@ To test these protected blocks without triggering actual DB hits or risking dead
             self.manager._auto_save(teams={team.team_id})
 ```
 
-With AT-A's first discussion paused and competing discussions started on both teams, verify that AT-B runs while AT-A's next discussion waits:
+Wrap the real per-team session lock in the test fixture so `second_a_attempted` is set immediately before the competing task awaits acquisition, with no intervening suspension.
+
+With AT-A's first discussion paused and competing discussions started on both teams, wait for the actual lock attempt and verify that AT-B runs while AT-A's next discussion waits:
 
 ```python
-await asyncio.wait_for(b_started.wait(), timeout=1)
-await asyncio.sleep(0)
-self.assertFalse(second_a_started.is_set())
+await asyncio.wait_for(second_a_attempted.wait(), timeout=10)
+await asyncio.wait_for(b_started.wait(), timeout=10)
+self.assertFalse(second_a_started.is_set(), execution_order)
 
 release_first_a.set()
-await asyncio.wait_for(second_a_started.wait(), timeout=1)
-await asyncio.gather(first, emergency, other_team)
+await asyncio.wait_for(asyncio.gather(first, emergency, other_team), timeout=10)
 ```
+
+Record the first discussion's actual lock release and assert the order `A1-start → B-start → A1-released → A2-start`, rather than treating an LLM Mock returning as the end of the full session.
+
+Release blocking events and cancel and await unfinished tasks in `finally`, and verify that deliberately bypassing the session lock makes the test fail.
+
+`asyncio.sleep(0)` yields an execution opportunity but does not establish that a particular task has reached the protected boundary.
 
 ## 7. Persistence & I/O
 
@@ -378,6 +385,18 @@ Communication changes must cover:
 - Strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes.
 - Full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation.
 - Idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations.
+
+Use bounded, condition-based waits for detached personal voting and authoritative commits rather than short sleeps or a one-second completion budget.
+
+A discussion returning does not mean its subsequent personal ballots have finished, and a staged terminal status is not ready until the communication transaction completes.
+
+Timeout diagnostics should show request and approval states, vote counts, and worker locations without exposing rationale, message bodies, or tool arguments.
+
+Observe background tasks when they are registered and retain their completion outcomes so removed or replaced live entries cannot hide failures in negative-path tests.
+
+Only report an observer timeout when its deadline actually expires, and propagate worker exceptions without relabeling them.
+
+Register asynchronous cleanup as soon as a fixture owns a Manager so failures and cancellations still close every writer before the working directory is restored and its workspace is removed.
 
 ### Agent and AgentTeam Discovery
 
