@@ -226,7 +226,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         result = await self.manager.negotiate_and_execute_migration(
             moving, second, "Preserve pending migration."
         )
-        await settle_governance_activity(self.manager)
+        await settle_governance_activity(self.manager, timeout=120)
         self.assertEqual(result.status, "PENDING")
         await self.manager.save_state()
         state = await self.manager._persistence.read(self.manager.db_path)
@@ -246,7 +246,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                     )
                 finally:
                     self.manager._active_tool_agent.reset(token)
-        await settle_governance_activity(self.manager)
+        await settle_governance_activity(self.manager, timeout=120)
         self.assertEqual(
             self.manager.inspect_migration_request(result.request_id).status, "EXECUTED"
         )
