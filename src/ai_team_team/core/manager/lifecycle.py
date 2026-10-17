@@ -1,12 +1,14 @@
 """ATTManager shutdown and invocation lifecycle coordination."""
 
 import asyncio
+import contextvars
 import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Iterable, Optional, Tuple
 
 from ..agent import Agent
 from ..exceptions import AgentInvocationDependencyError
+from ai_team_team.database.persistence.receipts import settle_commit
 
 if TYPE_CHECKING:
     from .facade import ATTManager
@@ -26,6 +28,10 @@ class LifecycleService:
             for entry in manager._agent_invocation_chain.get()
             if entry[1] in manager._active_agent_invocation_tokens
         )
+
+    def live_invocation_chain(self) -> Tuple[Tuple[str, str], ...]:
+        """Read a task-local chain synchronously on the runtime event loop."""
+        return self._live_invocation_chain_locked()
 
     @staticmethod
     def _path_exists(
@@ -100,6 +106,9 @@ class LifecycleService:
         manager = self.manager
         reserved_edges: Tuple[Tuple[str, str], ...] = ()
         async with manager._runtime_gate:
+            manager._resources.check_authority()
+            if manager._closing or manager._restore_in_progress:
+                raise RuntimeError("Synchronous runtime admission is closed.")
             dependency_chain = self._live_invocation_chain_locked()
             targets = tuple(dict.fromkeys(target_agent_ids))
             if dependency_chain and targets:
@@ -119,8 +128,16 @@ class LifecycleService:
             yield
         finally:
             if reserved_edges:
-                async with manager._runtime_gate:
-                    self._release_wait_edges_locked(reserved_edges)
+                release = asyncio.create_task(
+                    self._release_synchronous_dependencies(reserved_edges),
+                    context=contextvars.Context(),
+                    name="att-dependency-release",
+                )
+                await settle_commit(release)
+
+    async def _release_synchronous_dependencies(self, edges) -> None:
+        async with self.manager._runtime_gate:
+            self._release_wait_edges_locked(edges)
 
     async def close(self) -> None:
         """Cancels external waits, commits accepted state, and releases resources."""
@@ -128,6 +145,7 @@ class LifecycleService:
         if manager._closed:
             return
         manager._closing = True
+        manager._activity.closing = True
         manager._resources.fence()
         # Restore owns this gate before its publication task exists. Drain all
         # accepted local state work before closing its writer or releasing the
@@ -140,6 +158,13 @@ class LifecycleService:
             # never external LLM or executor waits.
             results = await asyncio.gather(*tuple(manager._publication_tasks), return_exceptions=True)
             publication_error = next((result for result in results if isinstance(result, BaseException)), None)
+        # A restore finalizer reconstructs local activity indexes. Never sample
+        # or close a mixture of the old indexes and newly published records.
+        activity_error = None
+        try:
+            await manager._activity.close()
+        except BaseException as error:
+            activity_error = error
         manager._formations.cancel_for_shutdown()
         await manager._memory.close()
         current = asyncio.current_task()
@@ -215,6 +240,8 @@ class LifecycleService:
             raise finalizer_error
         if audit_error is not None:
             raise audit_error
+        if activity_error is not None:
+            raise activity_error
 
     @asynccontextmanager
     async def agent_invocation(self, agent: Agent, *, allow_runtime: bool = False):
@@ -224,8 +251,9 @@ class LifecycleService:
             await manager._persistence.prepare_runtime(manager.db_path)
         dependency_edges: Tuple[Tuple[str, str], ...] = ()
         async with manager._runtime_gate:
-            if manager._closing:
-                raise RuntimeError("ATTManager is closing and rejects new agent invocations.")
+            manager._resources.check_authority()
+            if manager._closing or manager._restore_in_progress:
+                raise RuntimeError("ATTManager is closing or restoring and rejects new agent invocations.")
             registered = manager._agents_by_id.get(agent.agent_id) is agent
             if (not registered and not allow_runtime) or (agent.lifecycle_state != "active"):
                 raise RuntimeError("Agent is not an active identity in this manager.")
@@ -248,6 +276,9 @@ class LifecycleService:
             await invocation.__aenter__()
             invocation_entered = True
             async with manager._runtime_gate:
+                manager._resources.check_authority()
+                if manager._closing or manager._restore_in_progress:
+                    raise RuntimeError("Agent invocation admission closed while waiting for its guard.")
                 manager._starting_invocations -= 1
                 starting_counted = False
                 manager._active_invocations += 1

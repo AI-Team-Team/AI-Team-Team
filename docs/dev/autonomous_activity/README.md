@@ -6,6 +6,8 @@ Phase 0 implements value contracts, a dependency inventory, deterministic advers
 
 Phase 1 adds the [durability foundations](Phase_1.md), activates schema 12, and makes durable versus volatile operation explicit without implementing the replacement scheduler or claiming later-phase acceptance.
 
+Phase 2 adds the [continuing-person runtime and model boundaries](Phase_2.md), promoting the four frozen personal specifications into ordinary discovery while leaving the background-detachment specification explicitly red.
+
 The governing [blueprint](../../blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md) and [implementation plan](../../blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md), including the confirmed decisions recorded on 2026-10-07, remain authoritative.
 
 This directory records their engineering contracts and phase-specific verification artifacts.
@@ -24,6 +26,7 @@ The running persistence schema is now `12`; schema 11 and earlier are rejected w
 - [Contract models](../../../src/ai_team_team/core/activity/contracts/__init__.py): strict immutable values and a host-facing Protocol without an execution engine.
 - [Fixtures and specifications](../../../test/test_att/test_autonomous_activity_phase0): real Manager identity checks and controlled model, clock, executor, commit, and publication boundaries.
 - [Phase 1 implementation](Phase_1.md): immutable durable records, exact receipts, recoverable publication, mutation leases, and the scope of the initial recovery plan.
+- [Phase 2 implementation](Phase_2.md): one personal admission, fair continuation, explicit controls, notification frames, exact personal checkpoints, and bounded ordinary/audit/maintenance requests.
 
 ## Green and Red Checks
 
@@ -41,7 +44,9 @@ Run the intentionally failing replacement specifications separately:
 ./venv/bin/python -m unittest discover -s test/test_att/test_autonomous_activity_phase0 -t . -p 'spec_*.py'
 ```
 
-Five remaining red specifications target the real `ATTManager`, assert missing prerequisites explicitly, and contain the subsequent behavioral assertions that later phases must satisfy.
+The separately invoked specifications target the real `ATTManager` and contain behavioral assertions rather than a fake replacement engine.
+
+Four now pass and run in ordinary personal-runtime discovery; the remaining background specification explicitly fails when threshold detachment does not produce its required Native handle.
 
 Runtime cleanup also rejects scripted-client requests whose exceptions were swallowed, and coalescing checks the preserved scope and complete request count.
 
@@ -49,7 +54,9 @@ The background specification validates a structured durable handle and its later
 
 The completed schema specification is now in ordinary [Phase 1 discovery](../../../test/test_att/test_autonomous_activity_phase1/test_schema_activation.py), requiring every frozen new or replacement table, rejecting retired tables and provenance columns, and checking foreign-key integrity.
 
-The remaining red specifications cover default continuation without automatic publication, shared-person admission coalescing, idle-mail activation without inferred read state, next-frame notification during a tool wait, and one-execution Native detachment.
+The promoted personal specifications cover default continuation without automatic publication, shared-person admission coalescing, idle-mail activation without inferred read state, and next-frame notification during a tool wait.
+
+One-execution Native detachment remains Phase 4 work.
 
 They do not call old discussion APIs, use a fake replacement runtime, skip missing features, or convert missing implementation into `expectedFailure` success.
 

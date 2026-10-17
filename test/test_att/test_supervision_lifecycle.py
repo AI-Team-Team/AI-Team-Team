@@ -453,14 +453,14 @@ class TestSupervisoryTeamLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_evidence_commit_failure_dissolves_temporary_team(self) -> None:
-        original_commit = self.manager._commit_dirty_state
+        original_commit = self.manager._records.commit
 
-        async def fail_evidence(dirty):
-            if dirty["memory_events"] and not dirty["deleted_teams"]:
+        async def fail_evidence(records, **kwargs):
+            if any(row.table_name == "audit_evidence" for row in records):
                 raise StatePersistenceError("injected evidence failure")
-            await original_commit(dirty)
+            return await original_commit(records, **kwargs)
 
-        with patch.object(self.manager, "_commit_dirty_state", side_effect=fail_evidence):
+        with patch.object(self.manager._records, "commit", side_effect=fail_evidence):
             with self.assertRaisesRegex(StatePersistenceError, "evidence failure"):
                 await self.manager.supervisor.audit_team_dialog(self.team, "failed input")
         self.assertFalse(

@@ -16,6 +16,7 @@ class PersonalInboxService:
         self._read_lock = asyncio.Lock()
 
     def notify(self, agent_id: str, message_type: str, payload: Dict[str, Any]) -> str:
+        self.manager._resources.check_authority()
         agent = self.manager._agents_by_id.get(agent_id)
         if agent is None:
             raise ValueError(f"Cannot notify missing Agent {agent_id!r}.")
@@ -41,6 +42,7 @@ class PersonalInboxService:
 
     async def mark_read(self, agent_id: str, message_ids: Optional[Iterable[str]] = None) -> int:
         async with self._read_lock:
+            self.manager._resources.check_authority()
             if self.manager._closing or self.manager._restore_in_progress:
                 raise RuntimeError("ATTManager cannot change email receipts during shutdown or restore.")
             return await self._mark_read(agent_id, message_ids)

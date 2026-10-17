@@ -28,6 +28,23 @@ _RETRYABLE_PROVIDER_ERROR_NAMES = {
 }
 
 
+async def _invoke_sync_provider(function, **kwargs):
+    """Retain local ownership until an uncancellable synchronous call ends."""
+    worker = asyncio.create_task(asyncio.to_thread(function, **kwargs))
+    cancelled = False
+    while not worker.done():
+        try:
+            await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            cancelled = True
+    result = worker.result()
+    if cancelled:
+        if inspect.iscoroutine(result):
+            result.close()
+        raise asyncio.CancelledError
+    return result
+
+
 def _is_retryable_llm_error(error: BaseException) -> bool:
     """Classifies transient failures by type or explicit provider metadata."""
     if isinstance(
@@ -209,6 +226,18 @@ async def generate_with_retry(
         if tools is not None and _accepts_keyword(generate_callable, "tools")
         else None
     )
+
+    if manager is not None:
+        audit_id = manager.supervisor.request_profile.get()
+        team = manager._active_team.get()
+        chain = manager._agent_invocation_chain.get()
+        if audit_id is not None and team is not None and team.team_kind == "supervisory":
+            agent = manager._agents_by_id.get(chain[-1][0]) if chain else None
+            if agent is None or agent not in team.members or agent.llm_client is not llm_client:
+                raise PermissionError("An audit provider request has no exact registered participant.")
+            response = await manager._activity.models.audit(audit_id, agent, prompt, system_instruction,
+                tools=transmitted_tools, temperature=temperature, require_json=require_json)
+            return response if return_response_obj else response.text or ""
 
     if manager:
         resolved_alias = (

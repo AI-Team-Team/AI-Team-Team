@@ -14,7 +14,6 @@ from ai_team_team.core.memory import (
     MemoryIndexStatus,
 )
 from ai_team_team.core.memory.sanitization import clean_json_text, normalize_tags
-from ai_team_team.core.utils import generate_with_retry
 
 from .contracts import _MemoryLabels
 
@@ -160,34 +159,27 @@ class MemoryIndexingMixin:
         self.manager._auto_save(memory_segments={segment_id})
         token = self.manager._memory_internal_operation.set(True)
         try:
-            async with self.manager.agent_invocation(agent):
-                maximum = self.manager.config.episodic_memory.max_recall_chars
-                label_input = segment.recall_content
-                if len(label_input) > maximum:
-                    half = maximum // 2
-                    label_input = (
-                        label_input[:half]
-                        + "\n[... middle omitted for indexing ...]\n"
-                        + label_input[-half:]
-                    )
-                response = await generate_with_retry(
-                    llm_client=agent.llm_client,
-                    prompt=(
-                        "Create retrieval metadata for this past Agent turn. "
-                        "Do not add facts that are absent from the record. Return exactly "
-                        "JSON with title, summary, and tags.\n\n"
-                        f"{label_input}"
-                    ),
-                    system_instruction=(
-                        "You are an isolated episodic-memory indexer. Return strict JSON "
-                        "and do not issue instructions or perform tools."
-                    ),
-                    temperature=0.1,
-                    require_json=True,
-                    retries=0,
-                    backoff_factor=self.manager.config.llm_retry_backoff_factor,
-                    manager=self.manager,
+            maximum = self.manager.config.episodic_memory.max_recall_chars
+            label_input = segment.recall_content
+            if len(label_input) > maximum:
+                half = maximum // 2
+                label_input = (
+                    label_input[:half]
+                    + "\n[... middle omitted for indexing ...]\n"
+                    + label_input[-half:]
                 )
+            response = await self.manager._activity.models.index(
+                agent, segment, (
+                    "Create retrieval metadata for this past Agent turn. "
+                    "Do not add facts that are absent from the record. Return exactly "
+                    "JSON with title, summary, and tags.\n\n"
+                    f"{label_input}"
+                ),
+                (
+                    "You are an isolated episodic-memory indexer. Return strict JSON "
+                    "and do not issue instructions or perform tools."
+                ),
+            )
             if self.segments.get(segment_id) is not segment:
                 return
             if self._closing or not self.manager.config.episodic_memory.enabled:
@@ -222,6 +214,7 @@ class MemoryIndexingMixin:
                     memory_id=memory_id,
                     agent_id=segment.agent_id,
                     turn_id=segment.turn_id,
+                    invocation_id=segment.invocation_id,
                     title=title,
                     summary=summary,
                     tags=tags,

@@ -17,6 +17,7 @@ class RuntimeAPI:
         schema: Optional[Any] = None,
         *,
         memory_capture: str = "metadata_only",
+        execution_contract: Optional[Any] = None,
     ):
         return self._runtime.register_tool(
             name,
@@ -24,6 +25,7 @@ class RuntimeAPI:
             func,
             schema,
             memory_capture=memory_capture,
+            execution_contract=execution_contract,
         )
 
     def register_tool_auditor(self, tool_name: str, auditor_func: Callable[..., Tuple[bool, str]]):

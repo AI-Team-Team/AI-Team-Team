@@ -1,12 +1,10 @@
 """Personal email and explicit governance choices for continuing Agents."""
 
-import uuid
 from typing import Any, Optional
 
 from ...agent import Agent
-from ...exceptions import AgentTurnIncompleteError, LLMGenerationError, TokenLimitExceededError
 from ...governance import GovernanceSubmissionResult
-from ...response import AgentTurnResult, AgentTurnStatus
+from ...response import AgentTurnResult
 from ...team import AgentTeam
 
 
@@ -34,73 +32,10 @@ class GovernanceAPI:
     async def execute_agent_interaction(
         self, agent: Agent, prompt: str, *, team: Optional[AgentTeam] = None
     ) -> AgentTurnResult:
-        """Runs an ordinary serialized personal turn, never a standalone ballot prompt."""
+        """Observe an answer from the common personal runtime without ending activity."""
+        from ...activity.contracts import AgentTeamScope, PersonalScope
         if team is not None:
             if self.teams.get(team.team_id) is not team or agent not in team.members:
                 raise PermissionError("The interaction's AgentTeam must contain this Agent.")
-            return await team.execute_reasoning_step_detailed(
-                agent,
-                prompt,
-                team.system_instructions,
-                max_steps=self.config.react_max_steps,
-                manager=self,
-            )
-        from ...strategies import NativeReasoningStrategy, TextReactReasoningStrategy
-
-        async with self.agent_invocation(agent):
-            turn_id = f"TURN-{uuid.uuid4().hex}"
-            turn_token = self._active_agent_turn_id.set(turn_id)
-            team_token = self._active_team.set(None)
-            discussion_token = self._active_discussion_id.set(None)
-            round_token = self._active_round_number.set(None)
-            self._memory.start_turn(agent, None, turn_id)
-            try:
-                mode = self.config.tool_calling_mode
-                native = (
-                    mode == "native"
-                    or mode == "auto"
-                    and self.probe_native_tool_capability(agent.llm_client, agent=agent)
-                )
-                strategy = NativeReasoningStrategy() if native else TextReactReasoningStrategy()
-                try:
-                    if agent.llm_client is None:
-                        raise LLMGenerationError("Agent has no configured model client.")
-                    result = await strategy.execute(
-                        team=None,
-                        agent=agent,
-                        prompt=prompt,
-                        system_instruction="",
-                        max_steps=self.config.react_max_steps,
-                        manager=self,
-                    )
-                except (LLMGenerationError, TokenLimitExceededError) as exc:
-                    result = AgentTurnResult(
-                        agent_id=agent.agent_id,
-                        turn_id=turn_id,
-                        status=AgentTurnStatus.INCOMPLETE,
-                        error_kind="token_limit_exhausted"
-                        if isinstance(exc, TokenLimitExceededError)
-                        else "llm_generation_failed",
-                        reason=str(exc),
-                    )
-                    if self.config.turn_failure_policy.llm == "abort":
-                        raise AgentTurnIncompleteError(result) from exc
-                else:
-                    if (
-                        result.status is AgentTurnStatus.INCOMPLETE
-                        and self.config.turn_failure_policy.tool == "abort"
-                    ):
-                        raise AgentTurnIncompleteError(result)
-                await self._memory.finalize_turn(agent, None, result)
-                return result
-            except AgentTurnIncompleteError as exc:
-                await self._memory.finalize_turn(agent, None, exc.result)
-                raise
-            except BaseException as exc:
-                self._memory.cancel_turn(agent, None, turn_id, type(exc).__name__)
-                raise
-            finally:
-                self._active_round_number.reset(round_token)
-                self._active_discussion_id.reset(discussion_token)
-                self._active_team.reset(team_token)
-                self._active_agent_turn_id.reset(turn_token)
+        return await self._activity.interact(agent, prompt,
+            scope=AgentTeamScope(team_id=team.team_id) if team is not None else PersonalScope())

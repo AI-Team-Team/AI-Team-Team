@@ -27,7 +27,7 @@ class ChatMessagePage(ContractRecord):
 
 
 class ActivityRuntimeAPI(Protocol):
-    """A Protocol declares a contract; ATTManager does not implement it in Phase 0."""
+    """Host contract; personal methods are implemented before the later chat service."""
 
     def register_runtime_clock(self, clock: RuntimeClock) -> None: ...
 

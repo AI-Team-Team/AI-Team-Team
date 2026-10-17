@@ -4,7 +4,7 @@ import copy
 import json
 import tempfile
 
-from ai_team_team import ATTConfig, ATTManager, Agent, LLMResponse
+from ai_team_team import ATTConfig, ATTManager, Agent, LLMResponse, ToolCall
 
 
 class CaptureClient:
@@ -27,6 +27,9 @@ class CaptureClient:
             return self.response(prompt, require_json=require_json, **kwargs)
         if require_json:
             return json.dumps({"is_healthy": True, "reason": "Synthetic audit."})
+        if "Activity continues by default." in (system_instruction or ""):
+            return (LLMResponse(tool_calls=[ToolCall("choose-idle", "set_activity_intent", {"intent": {"kind": "idle"}})])
+                    if kwargs.get("tools") else LLMResponse(text="Action: set_activity_intent(intent={'kind': 'idle'})"))
         return LLMResponse(text="Final Answer: Completed the ordinary interaction.")
 
 

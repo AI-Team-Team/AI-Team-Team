@@ -105,6 +105,10 @@ def _append_agent_message(
     chain = manager._agent_invocation_chain.get() if manager else ()
     # The transitional call-chain token is not durable admission evidence.
     invocation_id = chain[-1][1] if chain else None
+    activity = getattr(manager, "_activity", None) if manager else None
+    active = activity.current.get() if activity is not None else None
+    if active is not None:
+        invocation_id = active.invocation_id
     if manager and ("activity_invocations", (invocation_id,)) in manager._records.index:
         enriched["invocation_id"] = invocation_id
     agent.append_message(enriched, capture_content=capture_content)
@@ -463,6 +467,10 @@ def _record_tool_result(
         "error_kind": result.error_kind or result.status.value,
         "attempts": result.attempts,
     }
+    activity = getattr(manager, "_activity", None)
+    session = activity.current.get() if activity is not None else None
+    if session is not None:
+        payload["invocation_id"] = session.invocation_id
     manager.logger.info(
         "Tool invocation failed: agent=%s team=%s tool=%s status=%s attempts=%s",
         agent.agent_id,

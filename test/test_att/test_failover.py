@@ -176,9 +176,10 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
                 "high": 5000,
             },
             failover_policy="parent",
-            parent_failover_timeout_seconds=1,
+            parent_failover_timeout_seconds=10,
         )
         manager = ATTManager(root_ai=self.root_ai, config=config, persistence_mode="volatile")
+        manager.register_llm_client("default", self.mock_client)
         low_client = MagicMock()
         low_client.generate = AsyncMock(return_value="Final Answer: low")
         low_client.supports_output_token_limit.return_value = (

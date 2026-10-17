@@ -10,7 +10,7 @@ from ai_team_team import (
     ToolArgumentError,
     ToolBusinessError,
 )
-from test.governance_client import PersonalGovernanceClient
+from test.governance_client import PersonalGovernanceClient, settle_governance_activity
 
 
 class PersonalGovernanceTests(unittest.IsolatedAsyncioTestCase):
@@ -32,10 +32,7 @@ class PersonalGovernanceTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.manager.close)
 
     async def settle(self):
-        async with asyncio.timeout(5):
-            while self.manager._emergency_tasks:
-                await asyncio.gather(*tuple(self.manager._emergency_tasks))
-                await asyncio.sleep(0)
+        await settle_governance_activity(self.manager)
 
     async def request(self):
         first = self.manager.create_agent_team(self.root)

@@ -13,7 +13,7 @@ from ai_team_team import (
     ToolCall,
 )
 from ai_team_team.core.decision import DecisionOutcome
-from test.governance_client import PersonalGovernanceClient
+from test.governance_client import PersonalGovernanceClient, settle_governance_activity
 
 
 class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
@@ -35,10 +35,7 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.manager.close)
 
     async def settle(self):
-        async with asyncio.timeout(5):
-            while self.manager._emergency_tasks:
-                await asyncio.gather(*tuple(self.manager._emergency_tasks))
-                await asyncio.sleep(0)
+        await settle_governance_activity(self.manager)
 
     async def request(self, parent=None):
         sender = self.manager.create_agent_team(parent or self.root)
@@ -113,15 +110,16 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
                 sender, recipient, sender.members[0].agent_id, "A cancellable explicit choice."
             )
             await asyncio.wait_for(committed.wait(), timeout=3)
-            notification = next(
-                task
-                for key, task in self.manager._governance.tasks.items()
-                if key.startswith("mail:")
-            )
+            notification = next(task for task in self.manager._activity.workers
+                                if task.get_name() == f"att-person-{self.root.agent_id}")
             notification.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await notification
-        await self.settle()
+        # The deliberately cancelled invocation is factual history, not a new
+        # failure of the already accepted ballot or permission to replay it.
+        async with asyncio.timeout(10):
+            while self.manager._emergency_tasks:
+                await asyncio.gather(*tuple(self.manager._emergency_tasks))
         self.assertEqual(
             self.manager.broker.communication_requests[result.request_id].status.value, "APPROVED"
         )
@@ -161,7 +159,7 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
                 ]
             )
 
-        async def execute(tool_name, *, call_id, **kwargs):
+        async def execute(tool_name, *args, call_id, **kwargs):
             if call_id == "pending":
                 tasks.append(asyncio.current_task())
                 entered.set()
@@ -180,6 +178,8 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(stopped.is_set())
             self.assertTrue(all(task.done() for task in tasks))
             self.assertFalse(self.root.lock.locked())
+            with self.assertRaises(StatePersistenceError):
+                await self.manager.close()
         finally:
             for task in tasks:
                 task.cancel()

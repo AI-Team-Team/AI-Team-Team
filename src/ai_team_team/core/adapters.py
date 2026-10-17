@@ -80,7 +80,9 @@ class HandlerClientAdapter:
             ):
                 kwargs["max_output_tokens"] = max_output_tokens
 
-        res = self.handler(**kwargs)
+        from .utils import _invoke_sync_provider
+        res = (self.handler(**kwargs) if inspect.iscoroutinefunction(self.handler)
+               else await _invoke_sync_provider(self.handler, **kwargs))
         if inspect.isawaitable(res):
             res = await res
         
@@ -222,7 +224,9 @@ class ManagerDefaultClientAdapter:
             )
             if output_parameter and max_output_tokens is not None:
                 kwargs[output_parameter] = max_output_tokens
-            result = generate(**kwargs)
+            from .utils import _invoke_sync_provider
+            result = (generate(**kwargs) if inspect.iscoroutinefunction(generate)
+                      else await _invoke_sync_provider(generate, **kwargs))
             if inspect.isawaitable(result):
                 result = await result
             return result

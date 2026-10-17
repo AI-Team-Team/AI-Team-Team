@@ -1,6 +1,7 @@
 """Audit-scoped supervisory AgentTeam orchestration."""
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
@@ -25,6 +26,23 @@ class SupervisionService:
         self.logger = logging.getLogger("ATTManager.Supervision")
         self.active_tasks: set[asyncio.Task[Any]] = set()
         self.finalizers: set[asyncio.Task[Any]] = set()
+        self.request_profile = contextvars.ContextVar(f"att_audit_profile_{id(manager)}", default=None)
+
+    async def _capture_request_profile(self, audit_id, subject, team):
+        from .activity.values import capture
+        manager = self.manager
+        now = manager._activity.clock.wall_time()
+        records = [capture(manager, "audit_runs", audit_id=audit_id, subject_team_id=subject.team_id,
+            temporary_team_id=team.team_id, template={"preset": "supervisor_audit", "quota_policy": "shared_model_ledger"},
+            electorate=[agent.agent_id for agent in team.members], runtime_generation=manager._resources.generation,
+            status="running", created_at=now, deadline=now + manager.config.activity.llm.sequence_timeout_seconds,
+            token_budget=sum(manager.config.model_token_limits.values()))]
+        for position, agent in enumerate(team.members):
+            records.append(capture(manager, "audit_participants", audit_id=audit_id,
+                scoped_agent_id=agent.agent_id, position=position,
+                model_alias=manager.resolve_model_alias(agent.llm_client),
+                identity_snapshot={"agent_id": agent.agent_id, "name": agent.name, "role": agent.role}))
+        await manager._records.commit(records, allow_closing=True)
 
     def is_supervisory_agent(self, agent_id: str) -> bool:
         """Exclude audit-scoped identities from ordinary team recruitment."""
@@ -189,7 +207,20 @@ class SupervisionService:
             )
             dirty = manager._new_dirty_state()
             dirty["memory_events"].add(event.event_id)
-            await manager._commit_dirty_state(dirty)
+            from .activity.values import capture
+            if ("audit_runs", (audit_id,)) not in manager._records.index:
+                # Cancellation can occur before the initial flush completes;
+                # retain the exact ephemeral identities without dispatching work.
+                await self._capture_request_profile(audit_id, target_team, supervisory_team)
+            run = manager._records.index[("audit_runs", (audit_id,))]
+            await manager._records.commit((capture(manager, "audit_runs", audit_id=audit_id,
+                status="interrupted" if cancelled else "completed" if result.status is not AuditStatus.UNKNOWN else "unknown"),
+                capture(manager, "audit_evidence", audit_id=audit_id,
+                    evidence_references={"journal_event_id": event.event_id, "source_sha256": hashlib.sha256(source_transcript.encode("utf-8")).hexdigest()},
+                    findings=result.model_dump(mode="json"), result=result.status.value.lower(),
+                    identity_snapshots=[dict(manager._records.index[("audit_participants", (audit_id, owner))].values["identity_snapshot"])
+                                        for owner in run.values["electorate"]],
+                    created_at=manager._activity.clock.wall_time())), dirty=dirty, allow_closing=True)
             evidence_committed = True
             await manager._team_creation.dissolve_supervisory_team(supervisory_team)
         except BaseException:
@@ -220,6 +251,7 @@ class SupervisionService:
         if audit_task is not None:
             self.active_tasks.add(audit_task)
         batch_token = manager._persistence_batch.set(None)
+        profile_token = self.request_profile.set(audit_id)
         supervisory_team: Optional[AgentTeam] = None
         debate_transcript = ""
         result: Optional[AuditResult] = None
@@ -228,6 +260,7 @@ class SupervisionService:
             supervisory_team = manager._team_creation.create_supervisory_team()
             try:
                 await manager.flush_state()
+                await self._capture_request_profile(audit_id, team, supervisory_team)
                 working_transcript = await self._compress_transcript(
                     supervisory_team, dialog_transcript
                 )
@@ -315,6 +348,7 @@ class SupervisionService:
                 raise asyncio.CancelledError()
             return result
         finally:
+            self.request_profile.reset(profile_token)
             manager._persistence_batch.reset(batch_token)
             if audit_task is not None:
                 self.active_tasks.discard(audit_task)

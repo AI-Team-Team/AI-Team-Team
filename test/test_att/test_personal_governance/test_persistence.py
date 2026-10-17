@@ -16,7 +16,7 @@ from ai_team_team import (
     ParentApprovalCommunicationConfig,
     StateRestoreError,
 )
-from test.governance_client import PersonalGovernanceClient
+from test.governance_client import PersonalGovernanceClient, settle_governance_activity
 
 
 class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
@@ -44,10 +44,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         result = await manager.broker.request_peer_communication(
             first, second, first.members[0].agent_id, "Persistent public rationale."
         )
-        async with asyncio.timeout(10):
-            while manager._emergency_tasks:
-                await asyncio.gather(*tuple(manager._emergency_tasks))
-                await asyncio.sleep(0)
+        await settle_governance_activity(manager)
         return result.request_id, next(iter(manager._governance.rounds.values()))
 
     async def test_unread_and_read_pending_choices_restore_independently(self):
@@ -152,10 +149,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
             )
         finally:
             self.manager._active_tool_agent.reset(token)
-        async with asyncio.timeout(5):
-            while self.manager._emergency_tasks:
-                await asyncio.gather(*tuple(self.manager._emergency_tasks))
-                await asyncio.sleep(0)
+        await settle_governance_activity(self.manager)
         await self.manager.save_state()
         state = await self.manager._persistence.read(self.manager.db_path)
         self.manager._validate_state_snapshot(state)
@@ -218,6 +212,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         task.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await task
+        await settle_governance_activity(self.manager)
         await self.manager._apply_state_snapshot(state)
         item = next(iter(self.manager._governance.rounds.values()))
         self.assertEqual(item.status, "EXPIRED")
@@ -231,10 +226,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         result = await self.manager.negotiate_and_execute_migration(
             moving, second, "Preserve pending migration."
         )
-        async with asyncio.timeout(5):
-            while self.manager._emergency_tasks:
-                await asyncio.gather(*tuple(self.manager._emergency_tasks))
-                await asyncio.sleep(0)
+        await settle_governance_activity(self.manager)
         self.assertEqual(result.status, "PENDING")
         await self.manager.save_state()
         state = await self.manager._persistence.read(self.manager.db_path)
@@ -254,10 +246,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                     )
                 finally:
                     self.manager._active_tool_agent.reset(token)
-        async with asyncio.timeout(5):
-            while self.manager._emergency_tasks:
-                await asyncio.gather(*tuple(self.manager._emergency_tasks))
-                await asyncio.sleep(0)
+        await settle_governance_activity(self.manager)
         self.assertEqual(
             self.manager.inspect_migration_request(result.request_id).status, "EXECUTED"
         )

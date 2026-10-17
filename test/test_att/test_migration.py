@@ -11,7 +11,7 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from ai_team_team import ATTManager, Agent, ATTConfig
-from test.governance_client import PersonalGovernanceClient
+from test.governance_client import PersonalGovernanceClient, settle_governance_activity
 import asyncio
 import json
 
@@ -53,9 +53,9 @@ class TestATTMigration(unittest.IsolatedAsyncioTestCase):
         res = await c1.tools["request_migration"](t2.team_id, "Need to align with P2 objectives")
         handle = json.loads(res)
         self.assertEqual(handle["status"], "PENDING")
-        async with asyncio.timeout(10):
-            while self.manager.inspect_migration_request(handle["request_id"]).status == "PENDING":
-                await asyncio.sleep(0.01)
+        # Observe completed model/tool receipts and authority finalizers, not
+        # a guessed number of yields or a single-call governance assumption.
+        await settle_governance_activity(self.manager, timeout=120)
         await self.manager.flush_callbacks()
         
         self.assertEqual(self.manager.inspect_migration_request(handle["request_id"]).status, "EXECUTED")

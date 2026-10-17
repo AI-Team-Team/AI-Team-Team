@@ -40,6 +40,10 @@ def derive_recovery(staged, checkpoint_id, publication_id):
             invocation_id, execution_id = row.values["invocation_id"], row.values["execution_id"]
             last_confirmed = {"execution_id": execution_id, "status": row.values["status"],
                               "state_version": row.version}
+        elif row.table_name == "agent_activities" and row.values["intent"] == "continuing":
+            key = f"activity:{row.values['admission_id'] or row.values['agent_id']}"
+            invocation_id, execution_id = None, None
+            last_confirmed = {"intent": "continuing", "context_version": row.values["context_version"]}
         else:
             continue
         owner = row.values["agent_id"]

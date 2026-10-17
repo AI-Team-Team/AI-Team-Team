@@ -1,10 +1,10 @@
 """Agent reference and runtime-binding validation for restored state."""
 
-import json
 import uuid
 from typing import Any, Dict, Set, Tuple
 
 from ...exceptions import StateRestoreError
+from ..activity.persisted_context import decode_last_context
 from .payload import StateValidationPayload
 
 
@@ -90,12 +90,6 @@ def validate_agents(
     ):
         raise StateRestoreError("No runtime binding is available for the default model alias.")
     for row in payload.agents:
-        if row.get("last_context"):
-            try:
-                json.loads(row["last_context"])
-            except Exception as exc:
-                raise StateRestoreError(
-                    f"Agent {row['name']!r} has invalid last_context JSON."
-                ) from exc
+        decode_last_context(row.get("last_context"), row["agent_id"])
 
     return agent_id_set, active_agent_ids, root_id

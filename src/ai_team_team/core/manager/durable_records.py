@@ -34,7 +34,7 @@ class DurableRecordService:
         with self._index_lock:
             self.restore(merge_records(self.snapshot(), records))
 
-    def capture_memberships(self, team_ids):
+    def capture_memberships(self, team_ids, *, publish=True):
         """Capture relationship facts without editing any Agent-owned field.
 
         Local volatile mutations and durable checkpoints share this producer;
@@ -42,9 +42,9 @@ class DurableRecordService:
         The later chat phase supplies the shared live publication ordering API.
         """
         with self._index_lock:
-            return self._capture_memberships(team_ids)
+            return self._capture_memberships(team_ids, publish=publish)
 
-    def _capture_memberships(self, team_ids):
+    def _capture_memberships(self, team_ids, *, publish=True):
         captured = []
         for team_id in sorted(team_ids):
             team = self.manager.teams[team_id]
@@ -75,17 +75,20 @@ class DurableRecordService:
                 if previous:
                     stream["state_version"] = previous.version + 1
                 captured.append(DomainRecord.capture("chat_streams", stream))
-        self.restore(merge_records(self.snapshot(), captured))
+        merged = merge_records(self.snapshot(), captured)
+        if publish:
+            self.restore(merged)
+        candidate = {row.identity: row for row in merged}
         # A projection may have been recorded in memory before any database
         # export. Its first partial checkpoint still needs the concrete stream,
         # interval, and join-event targets, not only newly changed facts.
-        prerequisites = tuple(row for row in self.index.values()
+        prerequisites = tuple(row for row in candidate.values()
             if (row.table_name == "chat_streams" and row.values["team_id"] in team_ids)
             or (row.table_name == "membership_intervals" and row.values["team_id"] in team_ids
                 and row.values["leave_event_id"] is None))
-        return dependency_closure(merge_records(prerequisites, captured), self.index)
+        return dependency_closure(merge_records(prerequisites, captured), candidate)
 
-    async def commit(self, records, *, operation_id=None, notifications=()):
+    async def commit(self, records, *, operation_id=None, notifications=(), dirty=None, allow_closing=False, agent_contexts=None):
         """Commit a domain delta without flushing unrelated queued changes.
 
         Notification dispatch contains IDs and transition metadata only. A
@@ -93,6 +96,9 @@ class DurableRecordService:
         after a successful accepted operation.
         """
         manager = self.manager
+        manager._resources.check_authority()
+        if agent_contexts and (dirty is None or not set(agent_contexts).issubset(dirty["agents"])):
+            raise ValueError("Checkpoint context overrides require an authoritative Agent delta.")
         records = tuple(DomainRecord.capture(record.table_name, record.values) for record in records)
         if operation_id is None:
             operation_id = uuid.uuid4().hex
@@ -103,9 +109,15 @@ class DurableRecordService:
         if any(identifier not in notice_ids for identifier in notifications):
             raise ValueError("Post-commit dispatch must reference a notification in the accepted operation.")
         async with manager._runtime_gate:
-            if manager._closing or manager._restore_in_progress:
+            manager._resources.check_authority()
+            restoring_elsewhere = (
+                manager._restore_in_progress
+                and asyncio.current_task() is not manager._restore_finalizer
+            )
+            if manager._closed or (manager._closing and not allow_closing) or restoring_elsewhere:
                 raise RuntimeError("Runtime admission is closed.")
             async with self.lock:
+                manager._resources.check_authority()
                 digest = await asyncio.to_thread(record_digest, records)
                 if operation_id in self.receipts:
                     previous, _previous_records = self.receipts[operation_id]
@@ -119,11 +131,15 @@ class DurableRecordService:
                             raise ValueError("An operation ID cannot be reused for different records.")
                         self.receipts[operation_id] = previous, records
                         return previous
-                if manager._closing:
+                if manager._closing and not allow_closing:
                     raise RuntimeError("Runtime admission closed before acceptance.")
                 captured = dependency_closure(records, self.index)
                 merge_records(self.snapshot(), records)
+                checkpoint_dirty = dirty
                 dirty = manager._new_dirty_state()
+                if checkpoint_dirty is not None:
+                    manager._merge_dirty_state(dirty, checkpoint_dirty)
+                    dirty["_relationships_supplied"] = checkpoint_dirty.get("_relationships_supplied", False)
                 dirty["configs"] = True
                 agents, teams = set(), set()
                 for record in captured:
@@ -151,8 +167,10 @@ class DurableRecordService:
                 dirty["record_dependency_teams"] = teams
                 if not manager.db_path:
                     from ai_team_team.database.persistence.store.detached_validation import validate_detached_records
+                    scoped_auditors = {member.agent_id for team in manager.teams.values()
+                                       if team.team_kind == "supervisory" for member in team.members}
                     state = {
-                        "agents": [{"agent_id": agent.agent_id, "name": agent.name, "lifecycle_state": agent.lifecycle_state} for agent in manager._agents_by_id.values()],
+                        "agents": [{"agent_id": agent.agent_id, "name": agent.name, "lifecycle_state": agent.lifecycle_state} for agent in manager._agents_by_id.values() if agent.agent_id not in scoped_auditors],
                         "teams": [{"team_id": team.team_id, "team_kind": "ordinary", "lifecycle_state": "active", "creator_type": "agent" if hasattr(team.creator, "agent_id") else "team", "creator_id": getattr(team.creator, "agent_id", getattr(team.creator, "team_id", None)), "members": tuple(member.agent_id for member in team.members)} for team in manager.teams.values() if team.team_kind == "ordinary"],
                         "agent_inboxes": {agent.agent_id: list(agent.agent_inbox) for agent in manager._agents_by_id.values()},
                         **manager._memory.snapshot(),
@@ -160,8 +178,11 @@ class DurableRecordService:
                         "records": merge_records(self.snapshot(), captured),
                     }
                     await asyncio.to_thread(validate_detached_records, state, partial=True)
-                    if manager._closing:
+                    if manager._closing and not allow_closing:
                         raise RuntimeError("Runtime admission closed before acceptance.")
+                # Resource authorization precedes the snapshot lock, matching
+                # managed file commits that publish their snapshot delta.
+                manager._resources.check_authority()
                 with manager._snapshot_lock:
                     manager._state_version += 1
                     version = manager._state_version
@@ -170,6 +191,14 @@ class DurableRecordService:
                         tuple(record.receipt_key for record in captured), digest)
                     if manager.db_path:
                         snapshot = manager._capture_state_snapshot(dirty)
+                        if agent_contexts:
+                            # Capture the candidate only in its accepted value
+                            # snapshot, never on a live person before receipt.
+                            snapshot["agents"] = [
+                                {**row, "last_context": agent_contexts[row["agent_id"]]}
+                                if row["agent_id"] in agent_contexts else row
+                                for row in snapshot["agents"]
+                            ]
                         snapshot["records"] = merge_records(snapshot.get("records", ()), captured)
                         snapshot["_operations"] = (receipt,)
                         future = asyncio.wrap_future(manager._persistence.submit(manager.db_path, snapshot))

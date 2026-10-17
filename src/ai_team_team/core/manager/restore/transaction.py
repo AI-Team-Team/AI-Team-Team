@@ -19,6 +19,8 @@ class RestoreTransactionMixin:
         manager = self.manager
         from ..facade import ATTManager
 
+        manager._activity.assert_restore_ready()
+
         if (
             manager._starting_invocations
             or manager._active_invocations

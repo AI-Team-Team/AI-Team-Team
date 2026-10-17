@@ -1,7 +1,7 @@
 import asyncio
 
 from ai_team_team import ParentApprovalCommunicationConfig
-from test.governance_client import governance_action
+from test.governance_client import governance_action, settle_governance_activity
 from test.test_att.test_state_persistence._support import (
     ATTConfig,
     ATTManager,
@@ -96,6 +96,8 @@ class TestStatePersistence(StatePersistenceTestCase):
         original_generate = self.mock_react_client.generate
 
         async def governance_generate(prompt, **kwargs):
+            if "Activity continues by default." in (kwargs.get("system_instruction") or ""):
+                return governance_action(prompt) or "Action: set_activity_intent(intent={'kind': 'idle'})"
             return governance_action(prompt) or await original_generate(prompt, **kwargs)
 
         self.mock_react_client.generate = governance_generate
@@ -104,10 +106,7 @@ class TestStatePersistence(StatePersistenceTestCase):
             team_parent, team_child, team_parent.members[0].agent_id, "Persist a governed channel"
         )
         await self.manager.execute_team_discussion(team_parent, "Consider the channel.", rounds=1, skip_audit=True)
-        async with asyncio.timeout(5):
-            while self.manager._emergency_tasks:
-                await asyncio.gather(*tuple(self.manager._emergency_tasks))
-                await asyncio.sleep(0)
+        await settle_governance_activity(self.manager, timeout=30)
         self.assertEqual(self.manager.broker.communication_requests[result.request_id].status.value, "APPROVED")
         agreement = next(iter(self.manager.broker.agreements.values()))
         self.mock_react_client.generate = original_generate

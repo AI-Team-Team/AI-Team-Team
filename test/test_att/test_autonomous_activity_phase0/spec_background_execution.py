@@ -48,7 +48,10 @@ class SpecBackgroundExecution(RuntimeSpecFixture, unittest.IsolatedAsyncioTestCa
         admitted = await activate(self.person.agent_id)
         await asyncio.wait_for(executor.started.wait(), timeout=5)
         self.clock.advance(120)
-        await handle_frame.wait_entered()
+        try:
+            await handle_frame.wait_entered()
+        except TimeoutError:
+            self.fail("Missing autonomous execution contract: threshold detachment did not release the foreground wait and produce its Native BACKGROUND observation.")
         observations = [
             item for item in self.client.requests[-1].prompt if item.get("tool_call_id") == "slow-A"
         ]

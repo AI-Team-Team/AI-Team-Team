@@ -253,7 +253,11 @@ class StateCoordinator:
 
     async def _commit_dirty_state(self, dirty: Dict[str, Any]) -> None:
         """Commits one authoritative domain delta and propagates write errors."""
+        self.manager._resources.check_authority()
         if not self.manager._dirty_state_has_changes(dirty):
+            return
+        if dirty["agent_inboxes"] and hasattr(self.manager, "_activity"):
+            await self.manager._activity.commit_inbox_delta(dirty)
             return
         if not self.manager.db_path:
             self._capture_volatile_relationships(dirty["teams"], full=dirty["full"])
@@ -283,21 +287,32 @@ class StateCoordinator:
 
     async def save_state(self, path: Optional[str] = None, full: bool = True) -> None:
         """Persists state asynchronously and waits for the write to commit."""
-        if self.manager._closing:
-            raise RuntimeError("ATTManager is closing and cannot accept saves.")
+        self._check_save_admission()
         target_path = path or self.manager.db_path
         if not target_path:
             return
+        await self.manager._activity.sample_countdowns()
         await self.manager.flush_state()
         dirty = self.manager._new_dirty_state(full=full)
         if not full:
             dirty["configs"] = True
         async with self.manager._runtime_gate:
+            # Preparatory awaits can outlive the admission checks above. A
+            # restore retains ownership until its local recovery also ends,
+            # including intervals in which it does not hold the runtime gate.
+            self._check_save_admission()
             with self.manager._snapshot_lock:
                 self.manager._state_version += 1
                 snapshot = self.manager._capture_state_snapshot(dirty)
                 future = self.manager._persistence.submit(target_path, snapshot)
         await settle_commit(asyncio.wrap_future(future))
+
+    def _check_save_admission(self) -> None:
+        self.manager._resources.check_authority()
+        if self.manager._closing:
+            raise RuntimeError("ATTManager is closing and cannot accept saves.")
+        if self.manager._restore_in_progress:
+            raise RuntimeError("ATTManager is restoring state and cannot accept saves.")
 
     async def flush_state(self) -> None:
         """Waits until every queued state delta has committed."""

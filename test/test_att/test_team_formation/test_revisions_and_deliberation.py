@@ -27,6 +27,8 @@ class DraftClient:
             return json.dumps(self.candidate)
         if require_json:
             return '{"is_healthy":true,"reason":"Synthetic audit."}'
+        if "Activity continues by default." in (kwargs.get("system_instruction") or ""):
+            return "Action: set_activity_intent(intent={'kind': 'idle'})"
         return "Final Answer: Advisory formation design."
 
     def supports_native_tool_calling(self):

@@ -13,6 +13,7 @@ from ai_team_team import (
     ToolResultStatus,
 )
 from ai_team_team.core.tool_runtime import ToolExecutor
+from test.governance_client import settle_governance_activity
 
 from ._fixture import DiscoveryFixture
 
@@ -34,6 +35,7 @@ class DiscoveryContextTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase):
             personal = await self.manager.execute_agent_interaction(
                 self.root, "Consider your work."
             )
+            await settle_governance_activity(self.manager)
             self.assertEqual(result.status.value, "completed")
             self.assertEqual(personal.status.value, "completed")
             for call in self.client.calls[start:]:
@@ -77,13 +79,18 @@ class DiscoveryContextTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase):
                     return LLMResponse(
                         text="Action: search_entities(keywords=['DATABASE'], entity_type='agent')"
                     )
-                return LLMResponse(text="Final Answer: I found a possible collaborator.")
+                if turn_calls == 2:
+                    return LLMResponse(text="Final Answer: I found a possible collaborator.")
+                if mode == "native":
+                    return LLMResponse(tool_calls=[ToolCall("idle", "set_activity_intent", {"intent": {"kind": "idle"}})])
+                return LLMResponse(text="Action: set_activity_intent(intent={'kind': 'idle'})")
 
             self.client.response = response
             start = len(self.client.calls)
             result = await self.manager.execute_agent_interaction(self.root, "Find a collaborator.")
+            await settle_governance_activity(self.manager)
             self.assertEqual(result.status.value, "completed")
-            self.assertEqual(turn_calls, 2)
+            self.assertEqual(turn_calls, 3)
             self.assertIn(outsider.agent_id, str(self.client.calls[start + 1]["prompt"]))
             self.assertIn(outsider.agent_id, str(self.root.message_history))
         self.assertEqual(len(self.manager.teams), 0)
@@ -200,10 +207,7 @@ class DiscoveryContextTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase):
             request = await self.manager.broker.request_peer_communication(
                 first, second, first.members[0].agent_id, "Consider this public channel."
             )
-            async with asyncio.timeout(5):
-                while self.manager._emergency_tasks:
-                    await asyncio.gather(*tuple(self.manager._emergency_tasks))
-                    await asyncio.sleep(0)
+            await settle_governance_activity(self.manager)
             calls = self.client.calls[start:]
             self.assertTrue(calls)
             rendered = json.dumps(calls)

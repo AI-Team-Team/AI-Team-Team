@@ -43,6 +43,7 @@ class Tool:
         examples: Optional[List[Dict[str, Any]]] = None,
         retry_safe: bool = False,
         memory_capture: str = "metadata_only",
+        execution_contract: Optional[Any] = None,
     ):
         # Resolve positional arguments vs keyword arguments
         if callable(name):
@@ -100,6 +101,11 @@ class Tool:
         self.examples = list(examples or [])
         self.retry_safe = retry_safe
         self.memory_capture = memory_capture
+        from ..core.activity.contracts.execution import ToolExecutionContract
+        self.execution_contract = (
+            ToolExecutionContract(effects=("undeclared",), background_allowed=False, required_scope="either")
+            if execution_contract is None else ToolExecutionContract.model_validate(execution_contract)
+        )
         self._signature = inspect.signature(func)
         try:
             self._type_hints = typing.get_type_hints(func, include_extras=True)

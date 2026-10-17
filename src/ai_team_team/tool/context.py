@@ -5,6 +5,8 @@ from typing import Any, Tuple
 
 def _resolve_actual_team(caller_node: Any, att_manager: Any) -> Any:
     from ..core import Agent, AgentTeam
+    if att_manager is not None:
+        att_manager._resources.check_authority()
     if att_manager is not None and hasattr(att_manager, "_active_team"):
         active_team = att_manager._active_team.get()
         if active_team is not None:
@@ -18,6 +20,8 @@ def _resolve_actual_team(caller_node: Any, att_manager: Any) -> Any:
 def _resolve_actual_agent(caller_node: Any, att_manager: Any) -> Any:
     from ..core import Agent
 
+    if att_manager is not None:
+        att_manager._resources.check_authority()
     if att_manager is not None and hasattr(att_manager, "_active_tool_agent"):
         active_agent = att_manager._active_tool_agent.get()
         if active_agent is not None:
@@ -31,6 +35,7 @@ def _resolve_communication_context(att_manager: Any) -> Tuple[Any, Any]:
     """Resolves a fail-closed invocation-scoped AgentTeam and actor Agent."""
     if att_manager is None:
         raise RuntimeError("ATTManager is not available.")
+    att_manager._resources.check_authority()
     team = att_manager._active_team.get()
     agent = att_manager._active_tool_agent.get()
     if team is None or agent is None:

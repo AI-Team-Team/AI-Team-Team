@@ -51,6 +51,16 @@ Represents a dynamic team of at least 3 agents ($N \ge 3$) executing discussions
 
 ### `ATTManager`
 
+The new personal runtime is composed through `ActivityAPI` and `PersonalActivityService` under `core/manager/activity/`.
+
+`activate_agent()`, `inspect_agent_activity()`, `wait_for_activity_checkpoint()`, and `deliver_agent_mail()` expose committed admission and observation rather than a transcript-producing discussion.
+
+The [Phase 2 engineering profile](autonomous_activity/Phase_2.md) specifies safe batches, immutable request profiles, local ownership, recovery, and lock ordering.
+
+`ToolExecutor.execute(before_attempt=...)` accepts a trusted runtime hook for durable evidence after validation and auditing but before each actual executor attempt.
+
+It is not a model-facing policy override or a new tool argument.
+
 Master orchestrator managing the overall ATT topology, dynamic presets, tool registrations, and callback events.
 
 `create_agent_team()` returns an immediate AgentTeam only for all-new membership. Existing Agent inputs return a persistent `TeamFormationRequest`; accepted identities are revalidated before the staged commit, and membership stores only the team/Agent relationship. `bootstrap_agent_team()` is the explicit audited host-only provisioned-topology bypass and is not registered as a tool.

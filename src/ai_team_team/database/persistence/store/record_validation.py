@@ -33,11 +33,20 @@ def validate_records(session, *, current_memberships=None, partial_memberships=F
                     invalid = session.execute(text(f'SELECT 1 FROM "{name}" WHERE NOT ({check.sqltext}) LIMIT 1')).first()
                     require(invalid is None, f"{name}.{column.name} check violation")
 
+    for row in rows["activity_admissions"]:
+        if row["scope_kind"] == "agent_team":
+            require(any(interval["team_id"] == row["scope_team_id"] and interval["agent_id"] == row["agent_id"]
+                        for interval in rows["membership_intervals"]), "admission scope has no membership evidence")
     for row in rows["activity_invocations"]:
         admission = get("activity_admissions", row["admission_id"])
         require(row["agent_id"] == admission["agent_id"], "invocation owner mismatch")
         require(row["runtime_generation"] == admission["runtime_generation"], "invocation generation mismatch")
-        require((row["scope_kind"], row["scope_team_id"]) == (admission["scope_kind"], admission["scope_team_id"]), "invocation scope mismatch")
+        if row["scope_kind"] == "agent_team":
+            require(any(interval["team_id"] == row["scope_team_id"] and interval["agent_id"] == row["agent_id"]
+                        for interval in rows["membership_intervals"]), "invocation scope has no membership evidence")
+        # Admissions retain the initially requested scope; a later bounded
+        # invocation can capture a deliberately changed scope without rewriting
+        # historical authority. Live authority is checked by the admitting service.
         require(row["started_at"] >= admission["accepted_at"] and (row["boundary_at"] is None or row["boundary_at"] >= row["started_at"]), "invocation boundary precedes admission")
     for row in rows["agent_activities"]:
         if row["admission_id"] is not None:
@@ -49,7 +58,9 @@ def validate_records(session, *, current_memberships=None, partial_memberships=F
         require(row["context_version"] >= invocation["context_version"], "frame context precedes invocation")
         require(type(row["summary_references"]) is list, "frame summaries require a reference list")
     for row in rows["model_requests"]:
-        require(row["agent_id"] == get("notification_frames", row["frame_id"])["agent_id"], "model request owner mismatch")
+        frame = get("notification_frames", row["frame_id"])
+        require(row["agent_id"] == frame["agent_id"], "model request owner mismatch")
+        require(row["input_version"] == frame["context_version"], "model request context version mismatch")
     for name in ("model_requests", "audit_model_requests", "memory_index_requests"):
         for row in rows[name]:
             require(row["dispatched_at"] is None or (row["dispatch_state"] in {"sent", "unknown_sent"} and row["dispatched_at"] >= row["created_at"]), "request dispatch timestamp mismatch")

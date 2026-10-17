@@ -9,7 +9,7 @@ from ai_team_team import ATTConfig, ATTManager, Agent
 from ai_team_team.core.decision import DecisionOutcome
 
 
-from test.governance_client import PersonalGovernanceClient
+from test.governance_client import PersonalGovernanceClient, settle_governance_activity
 import asyncio
 
 
@@ -81,9 +81,10 @@ class TestMigrationPolicies(unittest.IsolatedAsyncioTestCase):
         )
 
     async def finish(self, request_id):
-        async with asyncio.timeout(10):
-            while self.manager.inspect_migration_request(request_id).status == "PENDING":
-                await asyncio.sleep(0.01)
+        # Observe the real personal workers and authority finalizers. A long
+        # lineage includes many separately committed requests and ballots;
+        # this is a test-observer budget, not a production governance deadline.
+        await settle_governance_activity(self.manager, timeout=120)
         self.assertEqual(self.manager.inspect_migration_request(request_id).status, "EXECUTED")
 
 

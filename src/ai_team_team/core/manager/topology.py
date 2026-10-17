@@ -43,18 +43,9 @@ class TopologyService:
             target._parent_team = self.manager.teams[parent_id]
             return target._parent_team
 
-        if isinstance(target.creator, AgentTeam):
-            target._parent_team = target.creator
-            self.parent_map[target.team_id] = target.creator.team_id
-            return target.creator
-
-        if isinstance(target.creator, Agent):
-            parent = self.get_agent_team(target.creator)
-            if parent:
-                target._parent_team = parent
-                self.parent_map[target.team_id] = parent.team_id
-                return parent
-
+        # Creation and migration publish the actual parent relationship. A
+        # missing team parent is an intentional boundary, not permission to
+        # infer ancestry from the creator's current invocation or memberships.
         return None
 
     def get_agent_team(self, agent: Agent) -> Optional[AgentTeam]:

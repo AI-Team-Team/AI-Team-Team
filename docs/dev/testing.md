@@ -18,9 +18,23 @@ For an individual test package:
 
 The repository CI runs the suite on Python 3.11 through 3.13 across Linux, macOS, and Windows. The quality job also runs Ruff, the public consumer mypy contract, branch coverage with a 70 percent baseline, and a wheel build/install smoke test.
 
-The foundational autonomous-activity replacement has a [Phase 0 contract freeze](autonomous_activity/README.md) and [Phase 1 durability gate](autonomous_activity/Phase_1.md), with deterministic fixtures and a separately invoked `spec_*.py` gate for the remaining unimplemented runtime.
+The autonomous-activity replacement has a [Phase 0 contract freeze](autonomous_activity/README.md), [Phase 1 durability gate](autonomous_activity/Phase_1.md), and [Phase 2 personal-runtime gate](autonomous_activity/Phase_2.md), with deterministic fixtures and a separately invoked `spec_*.py` gate for remaining unimplemented services.
 
-Ordinary discovery now includes the implemented schema-activation specification and Phase 1 publication tests, while `./venv/bin/python -m unittest discover -s test/test_att/test_autonomous_activity_phase0 -t . -p 'spec_*.py'` exposes the five remaining runtime requirements without skips or expected-failure success.
+Ordinary discovery includes schema activation, publication safety, and the four implemented personal specifications in `test/test_att/test_agent_activity/`.
+
+`./venv/bin/python -m unittest discover -s test/test_att/test_autonomous_activity_phase0 -t . -p 'spec_*.py'` still exposes the unimplemented background-detachment requirement explicitly, without skips or expected-failure success.
+
+Use `./venv/bin/python -m unittest discover -s test/test_att/test_agent_activity -t test` to verify coalescing, continuing activity, batch scope, mail presentation, request/claim settlement, finite timers, late fencing, and scoped audit/index profiles.
+
+Tests needing a finite personal interaction must script the Agent's explicit idle control rather than treat a final answer as a runtime stop.
+
+Wait for real worker registration, commit receipts, and lock-attempt barriers instead of assuming a fixed count of event-loop yields establishes synchronization.
+
+Personal-runtime regressions include corrupt activity-context restore preflight, Native sibling cancellation, instruction cancellation on both sides of source acceptance, and delayed or duplicate notification dispatch after confirmed presentation.
+
+Additional transaction regressions queue an explicit save before restore admission, complete same-tool Native faults concurrently, revoke identity and team publication while topology is contended, and retire a mail recipient while ingress waits for the activity lock.
+
+These tests distinguish rejected preparation from a successful receipt followed by observer cancellation, and verify that no unaccepted inbox row, cooldown deadline, identity, or private directory remains.
 
 Run `./venv/bin/mypy typecheck/activity_contract.py` alongside the existing public consumer contract when editing the frozen value records.
 
@@ -434,3 +448,15 @@ Cover:
 - Verify multi-principal `PROCESSING` consistency, exact sibling-order rollback after failed migration commits, and rejection of non-finite governance timestamps without changing the live manager.
 
 The `test/test_att/test_personal_governance/` package contains focused integration cases.
+
+### Personal Activity Lifecycle Boundaries
+
+The `test/test_att/test_agent_activity/` package includes real-client and SQLite regression cases for restore finalization, synchronous interaction dependencies, answer observation, and revocable foreground execution authority.
+
+Cover post-publication cancellation and commit failure, admission attempts during reconstruction, and close while recovery still owns accepted local work.
+
+Exercise self-dependencies, longer identity cycles, parallel nested observers, one-slot acyclic progress, and cancellation without waiting for a downstream provider.
+
+Verify that technical model/tool budgets and scope checkpoints do not produce empty completed answers, while an explicit idle or sleep choice remains observable.
+
+Test both asynchronous and synchronous cancellation-resistant tools, inherited child contexts, rejected new managed writes after a later admission, and successful settlement of a file operation accepted before cancellation.

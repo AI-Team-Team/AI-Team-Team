@@ -38,8 +38,9 @@ class AgentRegistry:
     def register(self, agent: Agent, *, auto_save: bool = True) -> Agent:
         manager = self.manager
         # Directory captures and topology commits share this publication lock.
+        # Authority is rechecked at the commit boundary, not before waiting.
         # It is reentrant when staged team creation registers several Agents.
-        with manager._topology_lock:
+        with manager._resources.topology_mutation():
             if not isinstance(agent, Agent):
                 raise TypeError("agent must be an Agent instance.")
             if agent.lifecycle_state != "active":
@@ -98,6 +99,7 @@ class AgentRegistry:
 
     def require_private_context(self) -> Tuple[Agent, DocumentLibrary]:
         manager = self.manager
+        manager._resources.check_authority()
         agent = manager._active_tool_agent.get()
         if agent is None:
             raise PermissionError("Private DocLib access requires an active agent invocation.")
@@ -141,6 +143,7 @@ class AgentRegistry:
         confirm_delete: bool = False,
     ) -> None:
         manager = self.manager
+        manager._resources.check_authority()
         selected = policy or manager.config.agent_private_data_policy
         if selected not in {"retain", "archive", "delete"}:
             raise ValueError("policy must be retain, archive, or delete.")
@@ -155,6 +158,7 @@ class AgentRegistry:
             raise ValueError("Permanent deletion requires confirm_delete=True.")
         if selected == "delete":
             await manager.flush_state()
+            manager._resources.check_authority()
 
         memberships = [team.team_id for team in manager.teams.values() if agent in team.members]
         if memberships:
@@ -370,6 +374,7 @@ class AgentRegistry:
 
     async def reactivate_locked(self, agent_id: str, model_alias: str) -> Agent:
         manager = self.manager
+        manager._resources.check_authority()
         agent = self.by_id.get(agent_id)
         if agent is None:
             raise KeyError(f"Unknown agent ID {agent_id!r}.")

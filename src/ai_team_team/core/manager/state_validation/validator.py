@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from ...config import ATTConfig
 from ...exceptions import StateRestoreError
+from .activity import validate_activity_contexts
 from .agents import validate_agents
 from .libraries import validate_libraries
 from .memory import validate_memory_state
@@ -57,6 +58,7 @@ class SnapshotValidationMixin:
             {row["team_id"]: row.get("inbox", []) for row in payload.teams},
         )
         validate_detached_records(state)
+        validate_activity_contexts(payload, state.get("records", ()))
         index = {record.identity: record for record in state.get("records", ())}
         for agent in payload.agents:
             for message in agent.get("messages", ()):

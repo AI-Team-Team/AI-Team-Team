@@ -16,7 +16,7 @@ await restored.load_state("att.db")
 await restored.close()
 ```
 
-- `save_state(path=None, full=True)` writes a complete snapshot by default.
+- `save_state(path=None, full=True)` writes a complete snapshot by default and rejects saves throughout state restoration or shutdown, including saves already waiting for runtime admission.
 - `flush_state()` waits for every accepted write.
 - Persistence errors are always re-raised by `save_state()`, `flush_state()`, or `close()`.
 - `close()` flushes, disposes the reused SQLAlchemy engines, and shuts down the persistence worker.
@@ -27,6 +27,16 @@ Durable mode is the default and requires an explicit database path.
 The Host can explicitly select `persistence_mode="volatile"` without `db_path` for a session that has no restart-recovery promise; permission and ownership rules are unchanged.
 
 The [Phase 1 engineering profile](dev/autonomous_activity/Phase_1.md) describes schema 12 records, exact commit receipts, recoverable publication, and resource-generation leases.
+
+The [Phase 2 personal runtime](dev/autonomous_activity/Phase_2.md) atomically checkpoints the sanitized personal window, Journal dependencies, notification claims, and activity progress.
+
+Open Native exchanges are excluded from saved model windows while their issued execution evidence remains retained.
+
+Model requests and quota claims commit before dispatch; sent requests with unknown usage remain conservatively charged after cancellation or recovery.
+
+Explicit saves sample finite sleep and downtime-excluded cooldown remainders, while restore anchors their remaining durations at restoration start.
+
+Restore does not replay an external tool, reconnect to it, or poll it for a fabricated result.
 
 ## Incremental single-writer design
 

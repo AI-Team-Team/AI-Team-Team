@@ -2,8 +2,25 @@
 
 import json
 import re
+import asyncio
 
 from ai_team_team import LLMResponse, ToolCall
+
+
+async def settle_governance_activity(manager, timeout=15):
+    """Observe scripted idle and committed domain work, not obsolete mail Tasks."""
+    async with asyncio.timeout(timeout):
+        while True:
+            activity = manager._activity
+            tasks = tuple(manager._emergency_tasks | activity.workers | activity.dispatch_tasks)
+            if tasks:
+                await asyncio.gather(*(asyncio.shield(task) for task in tasks))
+            elif activity.ready.empty():
+                for session in activity.sessions.values():
+                    if session.failure is not None:
+                        raise session.failure
+                return
+            await asyncio.sleep(0)
 
 
 def governance_action(prompt, *, approved=True, model_alias=None, native=False):
@@ -70,6 +87,9 @@ class PersonalGovernanceClient:
             )
             if action is not None:
                 return action
+        if "Activity continues by default." in (system_instruction or ""):
+            return (LLMResponse(tool_calls=[ToolCall("choose-idle", "set_activity_intent", {"intent": {"kind": "idle"}})])
+                    if self.native else "Action: set_activity_intent(intent={'kind': 'idle'})")
         return (
             LLMResponse(text="Discussion complete.") if self.native else "Final Answer: discussed"
         )

@@ -2,6 +2,7 @@ import os
 import sqlite3
 from copy import deepcopy
 from contextlib import closing
+from unittest.mock import patch
 
 from ai_team_team import (
     ATTConfig,
@@ -49,9 +50,8 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
     async def test_permanent_agent_delete_removes_derived_memory_but_retains_journal(self):
         doomed = Agent("Doomed", "Researcher", self.client)
         self.manager.register_agent(doomed)
-        # A standalone personal segment has no restrictive relationship or
-        # activity references. Separate tests cover retained historical owners,
-        # which must be archived rather than permanently deleted.
+        # This pure catalog fixture has no actual provider request. A separate
+        # test verifies that retained request/quota evidence prevents deletion.
         turn_id = "standalone-delete-fixture"
         token = self.manager._active_agent_turn_id.set(turn_id)
         try:
@@ -64,7 +64,11 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
             ))
         finally:
             self.manager._active_agent_turn_id.reset(token)
-        await self.manager.flush_memory_indexing()
+        async def derived_labels(agent, segment, prompt, system_instruction):
+            import json
+            return json.dumps(self.client.labels)
+        with patch.object(self.manager._activity.models, "index", derived_labels):
+            await self.manager.flush_memory_indexing()
         self.assertTrue(any(card.agent_id == doomed.agent_id for card in self.manager._memory.cards.values()))
         db_path = os.path.join(self.tmpdir, "delete.db")
         self.manager.db_path = db_path
@@ -104,6 +108,23 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
                 0,
             )
         self.assertTrue(self.manager.list_agent_history(doomed.agent_id))
+
+    async def test_actual_index_request_evidence_prevents_physical_agent_deletion(self):
+        owner = self.manager.register_agent(Agent("RetainedIndexerOwner", "Researcher", self.client))
+        turn_id = "retained-index-request-fixture"
+        self.manager._memory.start_turn(owner, None, turn_id)
+        await self.manager._memory.finalize_turn(owner, None, AgentTurnResult(
+            agent_id=owner.agent_id, turn_id=turn_id, status=AgentTurnStatus.COMPLETED, answer="Done."))
+        await self.manager.flush_memory_indexing()
+        requests = [row for row in self.manager._records.snapshot() if row.table_name == "memory_index_requests"
+                    and row.values["beneficiary_agent_id"] == owner.agent_id]
+        self.assertEqual(len(requests), 1)
+        with self.assertRaisesRegex(ValueError, "durable history references"):
+            await self.manager.retire_agent(owner.agent_id, "delete", confirm_delete=True)
+        await self.manager.retire_agent(owner.agent_id, "archive")
+        self.assertEqual(owner.lifecycle_state, "archived")
+        self.assertEqual([row for row in self.manager._records.snapshot() if row.table_name == "memory_index_requests"
+                          and row.values["beneficiary_agent_id"] == owner.agent_id], requests)
 
     def _agent_memory_snapshot(self, agent_id):
         snapshot = self.manager._memory.snapshot()

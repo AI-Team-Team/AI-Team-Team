@@ -32,22 +32,21 @@ class TestCommunicationWaits(CommunicationTestCase):
         manager = self.manager(ParentApprovalCommunicationConfig())
         failure = RuntimeError("sensitive-worker-error-marker")
 
-        async def failed_notification(round_id, agent_id):
+        async def failed_notification(session, agent):
             raise failure
 
-        with patch.object(manager._governance, "notify_agent", failed_notification):
+        with patch.object(manager._activity, "run_invocation", failed_notification):
             with self.assertLogs(manager.logger, level="ERROR"):
                 _, request = await self._create_request(manager=manager)
                 approval_task = manager.broker._approval_tasks.history[0][1]
                 await self._await_task_cleanup(approval_task)
-                key, notification = next(
-                    (key, task)
-                    for key, task in manager._governance.tasks.history
-                    if key.startswith("mail:")
-                )
+                async with asyncio.timeout(10):
+                    while not manager._activity.workers.history:
+                        await asyncio.sleep(0)
+                notification = manager._activity.workers.history[0]
                 await self._await_task_cleanup(notification)
 
-        self.assertNotIn(key, manager._governance.tasks)
+        self.assertNotIn(notification, manager._activity.workers)
         self.assertEqual(self.client.calls, [])
         with self.assertRaises(RuntimeError) as caught:
             await self.wait_for_governance_idle(request)

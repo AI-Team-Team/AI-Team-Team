@@ -2,7 +2,7 @@ import os
 from collections.abc import Mapping
 from typing import Annotated, Any, Callable, ClassVar, Dict, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 
 class _StrictCommunicationConfig(BaseModel):
@@ -163,6 +163,54 @@ class ValidatedDict(dict):
         return self
 
 
+class ModelRequestPolicy(BaseModel):
+    """Bounded provider attempts, independent of tool replay and activity intent."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, validate_assignment=True, validate_default=True)
+    max_retries: Annotated[int, Field(ge=0)] = 3
+    backoff_base_seconds: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 1.0
+    backoff_cap_seconds: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 30.0
+    request_timeout_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 120.0
+    sequence_timeout_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 600.0
+    recovery_delay_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 60.0
+    model_timeouts: Dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("model_timeouts", mode="after")
+    @classmethod
+    def validate_timeouts(cls, values: Dict[str, float]) -> ValidatedDict:
+        def validate(key: str, value: Any) -> None:
+            import math
+            if not isinstance(key, str) or not key.strip() or isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ValueError("Model timeouts require nonblank aliases and finite positive durations.")
+        return ValidatedDict(values, validate)
+
+
+class PersonalActivityConfig(BaseModel):
+    """Technical fairness limits never imply voluntary idle or completion."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, validate_assignment=True, validate_default=True)
+    model_requests_per_invocation: Annotated[int, Field(ge=1)] = 5
+    tool_batches_per_invocation: Annotated[int, Field(ge=1)] = 5
+    max_concurrent_activities: Annotated[int, Field(ge=1)] = 8
+    max_concurrent_model_requests: Annotated[int, Field(ge=1)] = 8
+    notification_frame_limit: Annotated[int, Field(ge=1)] = 20
+    minimum_sleep_minutes: Annotated[int, Field(ge=1)] = 5
+    maximum_sleep_minutes: Annotated[int, Field(ge=1)] = 2880
+    tool_cooldown_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 600.0
+    cooldown_downtime: Literal["include", "exclude"] = "include"
+    llm: ModelRequestPolicy = Field(default_factory=ModelRequestPolicy)
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_sleep_bounds(cls, values):
+        if isinstance(values, Mapping):
+            minimum = values.get("minimum_sleep_minutes", 5)
+            maximum = values.get("maximum_sleep_minutes", 2880)
+            if type(minimum) is int and type(maximum) is int and minimum > maximum:
+                raise ValueError("The minimum sleep duration cannot exceed the maximum.")
+        return values
+
+
 class ATTConfig(BaseModel):
     """Strict, assignment-validated runtime configuration for ATT."""
 
@@ -238,6 +286,7 @@ class ATTConfig(BaseModel):
     episodic_memory: EpisodicMemoryConfig = Field(
         default_factory=EpisodicMemoryConfig
     )
+    activity: PersonalActivityConfig = Field(default_factory=PersonalActivityConfig)
 
     _MAPPING_VALIDATORS: ClassVar[Dict[str, str]] = {
         "model_registry": "_validate_string_mapping",

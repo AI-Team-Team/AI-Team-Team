@@ -15,6 +15,7 @@ from ...config import ATTConfig
 from ...team import AgentTeam
 from ...token_budget import TokenBudgetLedger
 from ..agents import AgentRegistry
+from ..activity import PersonalActivityService
 from ..alerts import AlertService
 from ..callbacks import CallbackDispatcher
 from ..communication_validation import CommunicationStateValidator
@@ -40,6 +41,7 @@ from ..supervision import SupervisionService
 from ..team_creation import TeamCreationService
 from ..topology import TopologyService
 from .agents_api import AgentAPI
+from .activity_api import ActivityAPI
 from .discussions_api import DiscussionAPI
 from .discovery_api import DiscoveryAPI
 from .formations_api import FormationAPI
@@ -62,6 +64,7 @@ class ATTManager(
     FormationAPI,
     GovernanceAPI,
     DiscoveryAPI,
+    ActivityAPI,
 ):
     """Master controller managing the overall ATT topology."""
 
@@ -131,6 +134,7 @@ class ATTManager(
         self._active_formation_operations = 0
         self._formation_operation_tasks: set[asyncio.Task[Any]] = set()
         self._restore_in_progress = False
+        self._restore_finalizer: Optional[asyncio.Task[Any]] = None
         self._publication_tasks: set[asyncio.Task[Any]] = set()
         self._close_task: Optional[asyncio.Task[Any]] = None
         self._resources = ResourceGate(self)
@@ -184,6 +188,7 @@ class ATTManager(
         self._closing = False
         self._closed = False
         self._callbacks = CallbackDispatcher(self)
+        self._activity = PersonalActivityService(self)
 
         self.tool_auditors: Dict[str, Callable[..., Tuple[bool, str]]] = {}
 

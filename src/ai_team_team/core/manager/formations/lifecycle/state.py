@@ -272,6 +272,7 @@ class FormationStateMixin:
                 agent.agent_inbox = [dict(message) for message in copies[agent.agent_id]]
 
     def _require_active_agent(self, actor: Agent) -> None:
+        self.manager._resources.check_authority()
         if (
             self.manager._agents_by_id.get(actor.agent_id) is not actor
             or self.manager.agents.get(actor.name) is not actor

@@ -16,7 +16,6 @@ from test.test_att.test_autonomous_activity_phase0._runtime_spec import (
 class SpecPersonalActivity(RuntimeSpecFixture, unittest.IsolatedAsyncioTestCase):
     async def test_a_plain_answer_continues_activity_without_publication(self):
         activate = self.require_method("activate_agent")
-        list_messages = self.require_method("list_team_messages")
         second_request = AsyncBarrier()
         self.client.steps.extend(
             [
@@ -29,7 +28,9 @@ class SpecPersonalActivity(RuntimeSpecFixture, unittest.IsolatedAsyncioTestCase)
         )
         await second_request.wait_entered()
         self.assertEqual(self.client.maximum_in_flight, 1)
-        self.assertEqual(list_messages(self.first.team_id, actor=self.person).total_count, 0)
+        # Publication is a source fact; the public historical-query API belongs
+        # to Phase 3 and must not be faked merely to make this gate green.
+        self.assertFalse(any(row.table_name == "chat_messages" for row in self.manager._records.snapshot()))
         second_request.release()
         self.assertEqual((await self.wait_idle(admitted.admission_id)).intent, "idle")
 

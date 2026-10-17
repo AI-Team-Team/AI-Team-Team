@@ -4,6 +4,16 @@ This document outlines both the internal execution strategies of the framework a
 
 ## 1. Architectural Overview
 
+The [Phase 2 personal runtime](dev/autonomous_activity/Phase_2.md) uses the shared parsers, strict `Tool` validation, auditor, typed executor, and privacy helpers in continuing invocations.
+
+Its ordinary tool failures remain observations, and technical budgets yield fairly without ending the person's activity.
+
+Native batches keep one captured scope and apply explicit idle, sleep, or scope controls only after every required observation is complete.
+
+The numbered strategy and member-turn descriptions below remain transitional institutional producers until Phase 5, not a fallback mode for `activate_agent()`.
+
+Foreground execution evidence now commits before each real attempt, including opted-in retries; undeclared custom tools still cannot detach into background work.
+
 To make reasoning execution vendor-independent and model-agnostic, the ATT framework decouples the reasoning loop from individual LLM clients. It implements a Strategy Pattern to govern how agent turns are executed.
 
 ```plaintext

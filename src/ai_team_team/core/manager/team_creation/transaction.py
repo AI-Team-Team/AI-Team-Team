@@ -162,6 +162,7 @@ class TeamCreationTransactionMixin:
     ) -> AgentTeam:
         """Stages off-registry objects and atomically publishes one AgentTeam."""
         manager = self.manager
+        manager._resources.check_authority()
         if manager._restore_in_progress:
             raise RuntimeError("ATTManager is restoring state and rejects new teams.")
         if (existing_members or existing_member_ids) and not authorized_existing:
@@ -226,7 +227,7 @@ class TeamCreationTransactionMixin:
                 staging_root=staging_root,
                 team_kind=team_kind,
             )
-            with manager._topology_lock:
+            with manager._resources.topology_mutation():
                 manager._validate_team_creation_commit(stage)
                 snapshot = manager._team_creation_snapshot()
                 try:

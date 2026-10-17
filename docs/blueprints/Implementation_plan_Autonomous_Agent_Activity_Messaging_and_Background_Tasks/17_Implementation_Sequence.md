@@ -56,6 +56,18 @@ This gate completes durable primitives and recoverable publication foundations, 
 
 Gate: shared Agents never overlap, notifications enter the next valid request, silence stays non-failure, and continuing checkpoints restore committed personal context.
 
+Status: completed on 2026-10-17, with the confirmed scope in `local/3A/Phase_2_Scope_and_Implementation.md` and implementation boundaries in the [Phase 2 personal-runtime profile](../../dev/autonomous_activity/Phase_2.md).
+
+All 62 personal-runtime tests and all 620 full-suite tests pass, and a separate full-suite coverage run reports 82 percent aggregate branch coverage.
+
+Ruff, both consumer typechecks, isolated distribution builds, and installed-wheel durable personal-activity and restore checks pass locally on macOS with Python 3.13.
+
+The four frozen personal specifications are now part of ordinary discovery, while the separately invoked background-detachment specification remains explicitly red for Phase 4.
+
+Schema remains 12, advanced episodic memory remains optional, and this gate does not claim Phase 3 messaging, Phase 4 background execution, Phase 5 institutional round removal, or the complete Phase 6 recovery matrix.
+
+The supported operating-system and Python CI matrix still requires CI verification.
+
 ## Phase 3: Team and direct communication
 
 - Implement explicit team publication, membership intervals, historical visibility, independent read state, and bounded summaries.

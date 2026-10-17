@@ -7,7 +7,9 @@ from contextlib import closing
 from unittest.mock import patch
 
 from ai_team_team import Agent
+from ai_team_team.core.manager.activity.values import ModelUnavailable
 from ai_team_team.tool.membership import build_membership_tools
+from test.governance_client import settle_governance_activity
 from test.test_att.test_autonomous_activity_phase0._fixtures import AgentIdentitySnapshot
 
 from ._support import hydrate_team_stream_id, invocation_graph, make_manager
@@ -19,6 +21,14 @@ def current_intervals(manager, team):
 
 
 class VolatileMembershipTests(unittest.IsolatedAsyncioTestCase):
+    async def settle_resource_blocked_mail(self, manager):
+        # These foundation tests exercise relationship facts without dispatching
+        # model work. Addressed mail remains accepted and observably blocked.
+        try:
+            await settle_governance_activity(manager)
+        except ModelUnavailable:
+            pass
+
     def create_team(self, manager, creator=None, *, size=4):
         return manager.bootstrap_agent_team(creator or manager.root_ai, member_configs={
             f"Member-{index}": {"model": "fixture"} for index in range(size)
@@ -119,6 +129,7 @@ class VolatileMembershipTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_consensual_creation_and_late_join_record_current_intervals(self):
         manager, _, client = make_manager(self, volatile=True)
+        manager.config.model_token_limits["fixture"] = 0
         invitees = [manager.register_agent(Agent(f"Invitee-{index}", "Researcher", client)) for index in range(4)]
         request = manager.create_agent_team(manager.root_ai, existing_members=invitees, late_join_policy="open")
         for person in invitees[:3]:
@@ -129,6 +140,7 @@ class VolatileMembershipTests(unittest.IsolatedAsyncioTestCase):
         joined = await manager.respond_team_invitation(request.request_id, proposal_revision=request.proposal_revision, actor=invitees[3], attitude="accepted")
         self.assertEqual(joined.status, "JOINED")
         self.assertEqual({row.values["agent_id"] for row in current_intervals(manager, team)}, {person.agent_id for person in invitees})
+        await self.settle_resource_blocked_mail(manager)
         await manager._records.commit(invocation_graph(manager.root_ai.agent_id))
         self.assertEqual(client.requests, [])
 
@@ -185,10 +197,12 @@ class VolatileMembershipTests(unittest.IsolatedAsyncioTestCase):
         for independent_commit in (False, True):
             with self.subTest(independent_commit=independent_commit):
                 manager, _, client = make_manager(self, volatile=True)
+                manager.config.model_token_limits["fixture"] = 0
                 invitees = [manager.register_agent(Agent(f"Founder-{index}", "Researcher", client)) for index in range(3)]
                 request = manager.create_agent_team(manager.root_ai, existing_members=invitees)
                 for person in invitees:
                     await manager.respond_team_invitation(request.request_id, proposal_revision=1, actor=person, attitude="accepted")
+                await self.settle_resource_blocked_mail(manager)
                 before = manager._records.snapshot()
                 graph = invocation_graph(manager.root_ai.agent_id)
                 async def fail_commit(dirty):
@@ -202,7 +216,10 @@ class VolatileMembershipTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaisesRegex(OSError, "provisional formation"):
                         await manager.create_team_from_formation(request.request_id, proposal_revision=1, actor=manager.root_ai)
                 self.assertEqual(manager.teams, {})
-                self.assertEqual(manager._records.snapshot(), graph if independent_commit else before)
+                expected = {row.identity: row for row in before}
+                if independent_commit:
+                    expected.update({row.identity: row for row in graph})
+                self.assertEqual({row.identity: row for row in manager._records.snapshot()}, expected)
                 self.assertEqual(manager.get_team_formation(request.request_id).status.value, "ready_for_confirmation")
                 await manager._records.commit(graph, operation_id="independent-operation")
                 self.assertEqual(client.requests, [])

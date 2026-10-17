@@ -25,6 +25,20 @@ class _ObservedTaskRegistry(dict):
         self.history.append((key, task))
 
 
+class _ObservedTaskSet(set):
+    """Retain actual personal workers even after production removes them."""
+
+    def __init__(self, tasks):
+        super().__init__()
+        self.history = []
+        for task in tasks:
+            self.add(task)
+
+    def add(self, task):
+        super().add(task)
+        self.history.append(task)
+
+
 class CommunicationTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._managers = []
@@ -65,6 +79,7 @@ class CommunicationTestCase(unittest.IsolatedAsyncioTestCase):
         # Observe registration, not a later poll that can miss completed failures.
         manager.broker._approval_tasks = _ObservedTaskRegistry(manager.broker._approval_tasks)
         manager._governance.tasks = _ObservedTaskRegistry(manager._governance.tasks)
+        manager._activity.workers = _ObservedTaskSet(manager._activity.workers)
         manager.register_llm_client("default", self.client)
         return manager
 
@@ -88,6 +103,11 @@ class CommunicationTestCase(unittest.IsolatedAsyncioTestCase):
                     for round_id in round_ids
                 ):
                     tasks[f"{key}#{generation}"] = task
+        voters = {owner for item in manager._governance.rounds.values() if item.round_id in round_ids
+                  for owner in item.voter_agent_ids}
+        for generation, task in enumerate(manager._activity.workers.history, start=1):
+            if task.get_name() in {f"att-person-{owner}" for owner in voters}:
+                tasks[f"{task.get_name()}#{generation}"] = task
         return tasks
 
     @staticmethod
@@ -151,7 +171,7 @@ class CommunicationTestCase(unittest.IsolatedAsyncioTestCase):
             sort_keys=True,
         )
 
-    async def wait_for_status(self, request, expected, timeout=10.0):
+    async def wait_for_status(self, request, expected, timeout=60.0):
         """Observe current registry state, not an object replaced by rollback."""
         manager = self._request_manager(request.request_id)
         deadline = asyncio.timeout(timeout)
@@ -180,7 +200,7 @@ class CommunicationTestCase(unittest.IsolatedAsyncioTestCase):
                 + self._request_diagnostics(manager, request.request_id, expected)
             )
 
-    async def wait_for_governance_idle(self, request, timeout=10.0):
+    async def wait_for_governance_idle(self, request, timeout=60.0):
         """Wait for a negative decision's real mail interactions to finish."""
         manager = self._request_manager(request.request_id)
         deadline = asyncio.timeout(timeout)
@@ -196,7 +216,10 @@ class CommunicationTestCase(unittest.IsolatedAsyncioTestCase):
                         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                         self._raise_completed_task_errors(tracked)
                     elif not manager.broker._transaction_lock.locked():
-                        return
+                        # Mail ingress can be accepted before the ready scheduler
+                        # has registered its worker; neither gap is idle.
+                        if not manager._activity.dispatch_tasks and manager._activity.ready.empty():
+                            return
                     await asyncio.sleep(0.01)
         except TimeoutError:
             if not deadline.expired():

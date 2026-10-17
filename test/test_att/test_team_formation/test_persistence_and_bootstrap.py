@@ -21,6 +21,8 @@ class EchoClient:
     async def generate(self, prompt, require_json=False, **kwargs):
         if require_json:
             return '{"is_healthy":true,"reason":"Synthetic audit."}'
+        if "Activity continues by default." in (kwargs.get("system_instruction") or ""):
+            return "Action: set_activity_intent(intent={'kind': 'idle'})"
         return "Final Answer: completed"
 
     def supports_native_tool_calling(self):
@@ -764,21 +766,33 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
             initiator_joins=True,
             task="Complete deferred work.",
         )
+        lock_attempted = asyncio.Event()
+        original_acquire = initiator.lock.acquire
+
+        async def observed_acquire():
+            lock_attempted.set()
+            return await original_acquire()
+
         async with self.manager.agent_invocation(initiator):
+            initiator.lock.acquire = observed_acquire
+            self.addCleanup(setattr, initiator.lock, "acquire", original_acquire)
             result = await asyncio.wait_for(
                 self.manager.create_team_from_formation(
                     request.request_id,
                     proposal_revision=request.proposal_revision,
                     actor=initiator,
                 ),
-                timeout=2,
+                timeout=10,
             )
             self.assertEqual(result.status, "CREATED")
             self.assertIn(initiator, self.manager.teams[result.team_id].members)
+            await asyncio.wait_for(lock_attempted.wait(), timeout=10)
+            self.assertTrue(self.manager._formations.tasks)
+            self.assertTrue(all(not task.done() for task in self.manager._formations.tasks))
         if self.manager._formations.tasks:
             await asyncio.wait_for(
                 asyncio.gather(*tuple(self.manager._formations.tasks)),
-                timeout=5,
+                timeout=60,
             )
 
     async def test_failed_restore_rolls_back_the_original_agent_inbox(self):

@@ -239,9 +239,12 @@ class SnapshotBuilder:
                     unresolved_agents.append(agent.name)
                     continue
                 dependency_error = dependency_error or "The active Agent has no model alias."
+            activity = getattr(manager, "_activity", None)
+            active_person = activity.sessions.get(agent_id) if activity is not None else None
+            window = activity.window_for_snapshot(agent) if active_person is not None else agent.messages
             working_context = [
                 sanitize_working_context_message(message)
-                for message in agent.messages
+                for message in window
             ]
             serialized_agent = {
                 "agent_id": agent.agent_id,
@@ -317,7 +320,8 @@ class SnapshotBuilder:
         team_dependencies = [
             serialized_teams[team_id] for team_id in sorted(team_dependency_ids)
         ]
-        relationship_records = manager._records.capture_memberships(team_ids | team_dependency_ids)
+        relationship_records = (() if dirty.get("_relationships_supplied") else
+                                manager._records.capture_memberships(team_ids | team_dependency_ids))
 
         inbox_ids = (
             set(manager.teams) if full else set(dirty["inboxes"])

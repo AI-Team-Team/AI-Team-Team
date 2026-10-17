@@ -1,6 +1,7 @@
 """Public ATTManager delegation methods for StateAPI."""
 
 import asyncio
+import contextvars
 import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Dict, Optional
@@ -68,9 +69,13 @@ class StateAPI:
 
     async def load_state(self, path: str) -> None:
         """Restores a versioned state snapshot without blocking the event loop."""
+        restoration_start = self._activity.clock.monotonic()
         async with self._runtime_gate:
             if self._closing:
                 raise RuntimeError("ATTManager is closing and cannot restore state.")
+            if self._restore_in_progress:
+                raise StateRestoreError("Another state restoration is already in progress.")
+            self._activity.assert_restore_ready()
             if self._active_formation_operations:
                 raise StateRestoreError(
                     "Cannot restore state while a team formation operation is active."
@@ -91,24 +96,49 @@ class StateAPI:
                 state = await self._persistence.read(path, reconcile=False)
                 await asyncio.to_thread(self._validate_state_snapshot, state)
                 state = await self._persistence.read(path)
-                publication = asyncio.create_task(self._apply_state_snapshot(state))
+                # The accepted finalizer owns publication AND local recovery.
+                # Its observer never holds the gate needed by recovery commits.
+                publication = asyncio.create_task(
+                    self._complete_state_restore(state, path, restoration_start),
+                    context=contextvars.Context(),
+                    name="att-restore-finalizer",
+                )
+                self._restore_finalizer = publication
                 self._publication_tasks.add(publication)
-                try:
-                    await settle_commit(publication)
-                finally:
-                    self._publication_tasks.discard(publication)
+                publication.add_done_callback(self._publication_tasks.discard)
+            except BaseException:
+                self._finish_restore_protection()
+                raise
+        await settle_commit(publication)
+
+    def _finish_restore_protection(self) -> None:
+        self._restore_source_path = None
+        if self._resources.blocked:
+            self._resources.finish_publication(committed=False)
+        self._restore_in_progress = False
+        self._restore_finalizer = None
+        if self._memory._restore_suspended and not self._activity.recovery_required:
+            self._memory.resume_after_restore()
+
+    async def _complete_state_restore(self, state, path, restoration_start) -> None:
+        """Settle accepted local work before exposing the restored generation."""
+        recovered = False
+        try:
+            async with self._runtime_gate:
+                await self._apply_state_snapshot(state)
                 self.db_path = path
-                self.broker.resume_pending_requests()
-                self._governance.resume()
-                self._migration.resume()
-                self._auto_save(governance_rounds={item.round_id for item in self._governance.rounds.values() if item.status == "EXPIRED"})
-            finally:
-                self._restore_source_path = None
-                if self._resources.blocked:
-                    self._resources.finish_publication(committed=False)
-                self._restore_in_progress = False
-                if self._memory._restore_suspended:
-                    self._memory.resume_after_restore()
+            async with self._activity.lock:
+                await self._activity.after_restore(restoration_start=restoration_start)
+            recovered = True
+        finally:
+            self._finish_restore_protection()
+        if recovered and not self._closing:
+            # These are synchronous queue handoffs, never external execution.
+            self._activity.resume_after_restore()
+            self.broker.resume_pending_requests()
+            self._governance.resume()
+            self._migration.resume()
+            self._auto_save(governance_rounds={item.round_id for item in self._governance.rounds.values() if item.status == "EXPIRED"})
 
     @asynccontextmanager
     async def agent_invocation(self, agent: Agent, *, allow_runtime: bool = False):

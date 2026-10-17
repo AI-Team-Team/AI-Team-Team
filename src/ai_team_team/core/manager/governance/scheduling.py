@@ -32,9 +32,11 @@ class GovernanceSchedulingMixin:
     def schedule_notifications(self, item):
         for agent_id in item.voter_agent_ids:
             if self.is_outstanding(agent_id, item.round_id):
-                self.track(
-                    f"mail:{item.round_id}:{agent_id}", self.notify_agent(item.round_id, agent_id)
-                )
+                for mail in self.manager._inbox.list(agent_id, unread_only=False):
+                    if mail.message_type == "governance_choice_request" and mail.payload.get("round_id") == item.round_id:
+                        notice_id = f"NOTICE-{mail.message_id}"
+                        if ("agent_notifications", (notice_id,)) in self.manager._records.index:
+                            self.manager._activity.schedule_notice(notice_id)
 
     async def notify_agent(self, round_id, agent_id):
         item = self.rounds.get(round_id)
@@ -54,16 +56,9 @@ class GovernanceSchedulingMixin:
         )
         if message is None:
             return
-        team = (
-            self.manager.teams.get(item.principal.principal_id)
-            if item.principal.kind == "agent_team"
-            else None
-        )
-        await self.manager.execute_agent_interaction(
-            actor,
-            f"You received a governance voting email `{message.message_id}` for round `{round_id}`. You may use open_agent_mail to inspect it and, independently, submit_governance_choice to express a choice. You may also leave it unanswered. Receiving, reading, or acknowledging the email does not cast a vote.",
-            team=team,
-        )
+        notice_id = f"NOTICE-{message.message_id}"
+        if ("agent_notifications", (notice_id,)) in self.manager._records.index:
+            self.manager._activity.schedule_notice(notice_id)
 
     def schedule_resolution(self, item):
         self.track(f"resolve:{item.round_id}", self.resolve(item.round_id))

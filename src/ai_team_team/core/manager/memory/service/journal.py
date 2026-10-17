@@ -24,6 +24,7 @@ class MemoryJournalMixin:
         *,
         agent: Optional["Agent"] = None,
         team: Optional["AgentTeam"] = None,
+        invocation_id: Optional[str] = None,
         discussion_id: Optional[str] = None,
         turn_id: Optional[str] = None,
         role: Optional[str] = None,
@@ -34,6 +35,9 @@ class MemoryJournalMixin:
     ) -> SystemMemoryEvent:
         """Appends one immutable event and records an append-only persistence delta."""
         manager = self.manager
+        activity = getattr(manager, "_activity", None)
+        executing = activity.current.get() if activity is not None else None
+        active = executing if inherit_context else None
         with self._lock:
             self._sequence += 1
             event = SystemMemoryEvent(
@@ -43,6 +47,7 @@ class MemoryJournalMixin:
                 agent_id=agent.agent_id if agent else None,
                 agent_name_snapshot=agent.name if agent else None,
                 team_id=team.team_id if team else None,
+                invocation_id=invocation_id or (active.invocation_id if active is not None else None),
                 discussion_id=(
                     discussion_id
                     if discussion_id is not None
@@ -57,7 +62,7 @@ class MemoryJournalMixin:
                     if turn_id is not None
                     else (
                         manager._active_agent_turn_id.get()
-                        if inherit_context
+                        if inherit_context and active is None
                         else None
                     )
                 ),
@@ -71,7 +76,9 @@ class MemoryJournalMixin:
                 self._event_ids_by_turn.setdefault(event.turn_id, []).append(
                     event.event_id
                 )
-        if persist:
+        if persist and executing is not None and agent is not None and agent.agent_id == executing.agent_id:
+            executing.pending_event_ids.add(event.event_id)
+        elif persist:
             manager._auto_save(memory_events={event.event_id})
         return event
 
@@ -200,3 +207,26 @@ class MemoryJournalMixin:
             payload={"reason": reason},
             redacted=True,
         )
+
+    async def finalize_activity_invocation(self, agent, team, invocation_id):
+        """Stage optional derived memory; scheduling follows its exact checkpoint."""
+        self._recalled_by_turn.pop(invocation_id, None)
+        if not self.manager.config.episodic_memory.enabled:
+            return None
+        with self._lock:
+            previous = next((item for item in self.segments.values() if item.invocation_id == invocation_id), None)
+            if previous is not None:
+                return previous.segment_id
+            events = sorted((event for event in self.events.values()
+                             if event.agent_id == agent.agent_id and event.invocation_id == invocation_id),
+                            key=lambda event: event.sequence)
+            if not events:
+                return None
+            content = render_recall_content(events)
+            now = time.time()
+            segment = AgentMemorySegment(segment_id=f"SEG-{uuid.uuid4().hex}", agent_id=agent.agent_id,
+                turn_id=invocation_id, invocation_id=invocation_id, origin_team_id=team.team_id if team else None,
+                source_event_ids=[event.event_id for event in events], recall_content=content,
+                content_sha256=content_digest(content), created_at=now, updated_at=now)
+            self.segments[segment.segment_id] = segment
+            return segment.segment_id

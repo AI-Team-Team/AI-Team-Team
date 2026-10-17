@@ -16,12 +16,15 @@ from ai_team_team import (
 from ai_team_team.core.tool_runtime import ToolExecutor
 from ai_team_team.core.exceptions import ToolPermissionError
 from ai_team_team.tool import get_default_tools
+from test.governance_client import settle_governance_activity
 
 
 class EchoClient:
     async def generate(self, prompt, require_json=False, **kwargs):
         if require_json:
             return json.dumps({"is_healthy": True, "reason": "Synthetic audit."})
+        if "Activity continues by default." in (kwargs.get("system_instruction") or ""):
+            return "Action: set_activity_intent(intent={'kind': 'idle'})"
         return "Final Answer: completed"
 
     def supports_native_tool_calling(self):
@@ -29,6 +32,16 @@ class EchoClient:
 
 
 class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
+    def observe_lock_attempt(self, lock):
+        entered = asyncio.Event()
+        original = lock.acquire
+        async def observed():
+            entered.set()
+            return await original()
+        lock.acquire = observed
+        self.addCleanup(setattr, lock, "acquire", original)
+        return entered
+
     async def asyncSetUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="att-formation-")
         self.client = EchoClient()
@@ -470,7 +483,9 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
             actor=self.root,
         )
         team = self.manager.teams[created.team_id]
+        await settle_governance_activity(self.manager)
         await team.state_lock.acquire()
+        entered = self.observe_lock_attempt(team.state_lock)
         late_join = asyncio.create_task(
             self.manager.respond_team_invitation(
                 request.request_id,
@@ -480,16 +495,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
             )
         )
         try:
-            for _ in range(100):
-                invitation = self.manager.get_team_formation_invitation(
-                    request.request_id,
-                    late_invitee.agent_id,
-                )
-                if invitation.attitude is InvitationAttitude.ACCEPTED:
-                    break
-                await asyncio.sleep(0)
-            else:
-                self.fail("The late-join operation did not reach the team lock.")
+            await asyncio.wait_for(entered.wait(), 10)
             await self.manager.retire_agent(late_invitee.agent_id, policy="retain")
         finally:
             team.state_lock.release()
@@ -520,7 +526,9 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
             actor=self.root,
         )
         team = self.manager.teams[created.team_id]
+        await settle_governance_activity(self.manager)
         await team.state_lock.acquire()
+        entered = self.observe_lock_attempt(team.state_lock)
         late_join = asyncio.create_task(
             self.manager.respond_team_invitation(
                 request.request_id,
@@ -530,16 +538,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
             )
         )
         try:
-            for _ in range(100):
-                invitation = self.manager.get_team_formation_invitation(
-                    request.request_id,
-                    late_invitee.agent_id,
-                )
-                if invitation.attitude is InvitationAttitude.ACCEPTED:
-                    break
-                await asyncio.sleep(0)
-            else:
-                self.fail("The late-join operation did not reach the team lock.")
+            await asyncio.wait_for(entered.wait(), 10)
             self.assertIn(late_join, self.manager._formation_operation_tasks)
             late_join.cancel()
             with self.assertRaises(asyncio.CancelledError):

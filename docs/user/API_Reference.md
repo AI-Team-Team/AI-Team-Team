@@ -74,6 +74,29 @@ config = ATTConfig(
 | `formation_deliberation_policy` | `Literal` | `"optional"` | Uses `"optional"` proposal drafting or requires detached creator-AgentTeam deliberation with `"required_when_team_scoped"`. |
 | `file_read` | `FileReadConfig` | `FileReadConfig()` | Controls decoded content-token limits and missing-counter behavior for model-facing team and private file reads. |
 | `episodic_memory` | `EpisodicMemoryConfig` | `EpisodicMemoryConfig()` | Configures the optional Agent-owned episodic-memory catalog, which is disabled by default. |
+| `activity` | `PersonalActivityConfig` | `PersonalActivityConfig()` | Continuing-person scheduling, notification frames, finite sleep, cooldown accounting, and bounded model requests. |
+
+### `PersonalActivityConfig` and `ModelRequestPolicy`
+
+These strict nested models validate both construction and runtime assignment, including individual `llm.model_timeouts` entries.
+
+`activity.model_requests_per_invocation=5` bounds request sequences in one fair invocation, and `tool_batches_per_invocation=5` bounds complete batches before a technical yield.
+
+Neither setting makes an Agent idle or completes a business task.
+
+The defaults admit eight personal invocations and eight provider requests concurrently, with at most twenty newly presented references in each notification frame.
+
+Finite sleep uses `minimum_sleep_minutes=5` and `maximum_sleep_minutes=2880`, with validated ordered bounds.
+
+Eligible execution faults use `tool_cooldown_seconds=600.0` and `cooldown_downtime="include"`; `"exclude"` preserves the remaining duration while ATT is offline.
+
+`activity.llm` defaults to `max_retries=3`, `backoff_base_seconds=1.0`, `backoff_cap_seconds=30.0`, `request_timeout_seconds=120.0`, `sequence_timeout_seconds=600.0`, and `recovery_delay_seconds=60.0`.
+
+`activity.llm.model_timeouts` can override the positive finite single-request timeout for a stable model alias.
+
+Provider earliest-retry instructions can exceed the jitter cap but cannot force a request beyond the remaining whole-sequence budget.
+
+The older `llm_max_retries`, round limits, argument-correction limits, and `turn_failure_policy` still describe transitional institutional discussion APIs, not a second mode of the personal runtime.
 
 ### Communication Configuration
 
@@ -201,7 +224,19 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
 
 ### Methods
 
-* **`register_tool(name: str, description: str, func: Callable[..., Any], schema: Optional[Any] = None, *, memory_capture: str = "metadata_only")`**
+* **`await activate_agent(agent_id: str, *, scope: OperationScope | None = None) -> ActivityAdmission`**
+  Admits a continuing person in personal scope by default, or coalesces with that person's existing activity without changing its scope.
+* **`inspect_agent_activity(agent_id: str) -> ActivityView`**
+  Returns personal intent, runtime availability, and the current admission and scope without activating the person.
+* **`await wait_for_activity_checkpoint(admission_id: str, *, intent=None) -> ActivityCheckpoint`**
+  Observes a committed boundary, optionally waiting for `"continuing"`, `"idle"`, or `"sleep"`; cancelling the observer does not cancel the person.
+* **`await deliver_agent_mail(agent_id: str, *, message_type: str, payload: Mapping[str, Any]) -> SourceDeliveryReceipt`**
+  Commits addressed personal mail and notification references before scheduling eligible activity; presentation is not reading or consent.
+* **`await clear_agent_model_unavailability(agent_id: str) -> None`**
+  Host-only acknowledgement after resource remediation, without resetting quota, switching the model, or bypassing live-request and provider waiting boundaries.
+* **`register_runtime_clock(clock: RuntimeClock) -> None`**
+  Binds a Host clock before activity, requests, or timers are admitted; ordinary applications use the built-in clock.
+* **`register_tool(name: str, description: str, func: Callable[..., Any], schema: Optional[Any] = None, *, memory_capture: str = "metadata_only", execution_contract: ToolExecutionContract | None = None)`**
   Registers a custom utility tool globally and requires explicit `memory_capture="content"` before its observation body may enter episodic recall content.
 * **`register_agent(agent: Agent) -> Agent`**
   Registers one stable identity and creates its unique private DocLib. Direct mutation of `manager.agents` is unsupported.
@@ -277,7 +312,7 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
 * **`inspect_migration_request(request_id: str) -> MigrationRequest`**
   Returns a detached copy of a durable migration request for trusted-host inspection.
 * **`await save_state(path: Optional[str] = None, full: bool = True)`**
-  Queues and waits for a versioned snapshot commit.
+  Queues and waits for a versioned snapshot commit, rejecting new or already-waiting saves while state restoration or shutdown owns the runtime.
 * **`await load_state(path: str)`**
   Transactionally restores a fully validated staged registry after runtime clients or a generator handler have been rebound. Missing or corrupt references raise `StateRestoreError` without changing the live manager or its DocLib files.
 * **`await flush_state()`**
@@ -486,6 +521,14 @@ class LLMClientProto(Protocol):
 ```
 
 ## 🛠️ Built-in ReAct Tools Reference
+
+### Personal Activity Controls
+
+The continuing-person runtime adds `set_activity_intent(intent)` for explicit idle or finite sleep, and `set_operation_scope(scope)` for a validated scope transition after the complete batch.
+
+These tools accept no Agent override, and ordinary text, silence, or a tool failure does not implicitly choose idle.
+
+See the [Phase 2 runtime contract](../dev/autonomous_activity/Phase_2.md) for checkpoint, quota, sleep, and incomplete-replacement boundaries.
 
 These tools are automatically registered and bound to all agent teams by default. ReAct agents can invoke them using standard positional/keyword call syntax:
 

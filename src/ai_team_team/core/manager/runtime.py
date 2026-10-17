@@ -45,10 +45,11 @@ class RuntimeRegistry:
         schema: Optional[Any] = None,
         *,
         memory_capture: str = "metadata_only",
+        execution_contract: Optional[Any] = None,
     ):
         """Registers a custom utility tool to all teams."""
         manager = self.manager
-        tool = Tool(name, description, func, schema, memory_capture=memory_capture)
+        tool = Tool(name, description, func, schema, memory_capture=memory_capture, execution_contract=execution_contract)
         manager.global_tools[tool.name] = tool
         # Bind to existing teams
         for team in manager.teams.values():
@@ -400,6 +401,8 @@ class RuntimeRegistry:
                 for name, tool in get_default_tools(manager.tools_context, agent).items()
                 if name in personal_names
             }
+            tools.update({name: tool for name, tool in manager.global_tools.items()
+                          if tool.execution_contract.required_scope != "agent_team"})
             if not manager.config.episodic_memory.enabled:
                 for name in {"search_memories", "recall_memory", "keep_memory_in_context", "forget_memory"}:
                     tools.pop(name, None)
@@ -470,7 +473,7 @@ class RuntimeRegistry:
             manager.logger.info(
                 "Native tool capability probe failed for Agent %s: %s",
                 payload["agent_id"],
-                exc,
+                type(exc).__name__,
             )
             manager._emit_callback("on_system_event", "tool_capability_probe_failed", payload)
             return False

@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from ai_team_team import ATTConfig, ATTManager, Agent, LLMResponse
 from ai_team_team.core.exceptions import StatePersistenceError
@@ -186,13 +187,23 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
         await manager.close()
 
         restored, restored_client = self.make_manager(incremental=False)
-        await restored.load_state(checkpoint)
-        self.assertEqual(set(restored._memory.segments), expected_segments)
-        self.assertTrue(
-            all(segment.status.value == "pending" for segment in restored._memory.segments.values())
-        )
-        restored_client.release_index.set()
-        await asyncio.wait_for(restored.flush_memory_indexing(), 10)
+        original_index = restored._memory._index_segment
+        pending_at_dispatch = set()
+
+        async def index(segment_id):
+            # Observe the actual queue boundary, not an assumed event-loop turn
+            # between the restore finalizer and its caller receiving a receipt.
+            self.assertEqual(restored._memory.segments[segment_id].status.value, "pending")
+            pending_at_dispatch.add(segment_id)
+            await original_index(segment_id)
+
+        with patch.object(restored._memory, "_index_segment", index):
+            await restored.load_state(checkpoint)
+            self.assertEqual(set(restored._memory.segments), expected_segments)
+            await asyncio.wait_for(restored_client.index_started.wait(), 10)
+            restored_client.release_index.set()
+            await asyncio.wait_for(restored.flush_memory_indexing(), 10)
+        self.assertEqual(pending_at_dispatch, expected_segments)
         await restored.flush_state()
         state = await restored._persistence.read(checkpoint)
         restored._validate_state_snapshot(state)

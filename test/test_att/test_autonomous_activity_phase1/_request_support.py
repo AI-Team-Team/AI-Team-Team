@@ -20,12 +20,12 @@ def request_profiles(owner):
 async def install_request_sources(manager):
     owner = manager.root_ai.agent_id
     await manager._records.commit((*invocation_graph(owner), *audit_records(owner)))
-    events = [manager._memory.record_event(kind, agent=manager.root_ai, turn_id="index-turn",
+    events = [manager._memory.record_event(kind, agent=manager.root_ai, invocation_id="invocation",
                                           payload=payload, persist=False, inherit_context=False)
               for kind, payload in (
-                  ("agent_turn_started", {}),
+                  ("activity_invocation_started", {}),
                   ("message", {"content": "Fixture conclusion"}),
-                  ("agent_turn_finished", {"status": "completed"}),
+                  ("activity_invocation_finished", {"intent": "idle"}),
               )]
     content = render_recall_content(events)
     manager._memory.segments["index-segment"] = AgentMemorySegment(

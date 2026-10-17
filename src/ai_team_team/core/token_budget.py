@@ -48,7 +48,7 @@ class TokenBudgetLedger:
                 reserved += claim["prompt_budget"] + claim["output_budget"]
         return usage, reserved
 
-    async def reserve_request(self, request_record, prompt_tokens: int, output_tokens: int):
+    async def reserve_request(self, request_record, prompt_tokens: int, output_tokens: int, *, related_records=()):
         """Commit a concrete common-service request and its quota claim before send.
 
         The trusted service chooses ordinary, audit, or maintenance provenance;
@@ -87,7 +87,7 @@ class TokenBudgetLedger:
                 "settlement": "reserved", "actual_usage": None, "settled_at": None, "state_version": 1,
             })
             try:
-                await self._manager._records.commit((request_record, claim))
+                await self._manager._records.commit((request_record, claim, *related_records))
             finally:
                 with self._lock:
                     if reservation.reservation_id in self._reservations:
@@ -95,7 +95,7 @@ class TokenBudgetLedger:
             return reservation.reservation_id
 
     async def settle_claim(self, claim_id: str, *, settlement: str, actual_usage: Optional[int] = None,
-                           outcome: Optional[str] = None):
+                           outcome: Optional[str] = None, allow_closing: bool = False):
         """Settle once; unknown-sent is conservative evidence, not a refund."""
         from ai_team_team.database.persistence.records import DomainRecord, thaw
         if settlement not in {"confirmed_unsent", "known_usage", "unknown_sent"}:
@@ -131,8 +131,10 @@ class TokenBudgetLedger:
                 request_values.update(dispatch_state="sent" if settlement == "known_usage" else settlement,
                                       outcome=outcome or ("completed" if settlement == "known_usage" else "cancelled" if settlement == "confirmed_unsent" else "uncertain"),
                                       state_version=request.version + 1)
+                if settlement == "confirmed_unsent":
+                    request_values["dispatched_at"] = None
                 captured.append(DomainRecord.capture(table, request_values))
-            await self._manager._records.commit(captured)
+            await self._manager._records.commit(captured, allow_closing=allow_closing)
 
     def reserve(
         self,

@@ -9,7 +9,7 @@ from ai_team_team import (
     ApprovalPrincipal,
     ParentApprovalCommunicationConfig,
 )
-from test.governance_client import PersonalGovernanceClient
+from test.governance_client import PersonalGovernanceClient, settle_governance_activity
 
 
 class GovernanceRoundTests(unittest.IsolatedAsyncioTestCase):
@@ -31,10 +31,7 @@ class GovernanceRoundTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.manager.close)
 
     async def settle(self):
-        async with asyncio.timeout(10):
-            while self.manager._emergency_tasks:
-                await asyncio.gather(*tuple(self.manager._emergency_tasks))
-                await asyncio.sleep(0)
+        await settle_governance_activity(self.manager)
 
     async def setup_round(self):
         parent = self.manager.create_agent_team(self.root)
@@ -166,5 +163,6 @@ class GovernanceRoundTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Second team's activity.", str(shared.message_history))
         self.assertEqual(
             {message.get("team_id") for message in shared.message_history},
-            {first.team_id, second.team_id},
+            {first.team_id},
         )
+        self.assertEqual(self.manager.inspect_agent_activity(shared.agent_id).scope.team_id, first.team_id)

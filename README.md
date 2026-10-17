@@ -11,7 +11,7 @@
 >
 > Agent identity, personal memory, membership consent, and permission boundaries remain core requirements.
 >
-> Phase 0 has frozen contracts and verification fixtures, and Phase 1 activates schema 12 with durability and publication foundations; the replacement activity runtime and subsequent breaking API changes remain in progress.
+> Phase 0 freezes contracts, Phase 1 activates schema 12 durability foundations, and Phase 2 adds continuing personal activity and bounded model requests; messaging, background execution, institutional round removal, and the remaining breaking changes are still in progress.
 >
 > See the [Design Blueprints](docs/blueprints/README.md) for the design, implementation phases, and deferred features.
 
@@ -143,6 +143,8 @@ Persistence uses one exclusive writer manager per SQLite state database and coal
 Durable sessions require an explicit database path; the Host may explicitly choose a volatile session without restart recovery.
 
 The [Phase 1 persistence foundations](docs/dev/autonomous_activity/Phase_1.md) install incompatible schema 12, immutable record deltas, exact commit receipts, recoverable directory publication, and stale-worker fencing while the later runtime replacement remains in progress.
+
+The [Phase 2 personal runtime](docs/dev/autonomous_activity/Phase_2.md) adds per-person admission, continuing activity, explicit idle or finite sleep, captured scopes, durable notification frames, and bounded model requests with persistent quota claims.
 
 ### Failure Semantics Follow the Type of Decision
 
@@ -322,7 +324,10 @@ flowchart TB
         Teams --> TeamDocLib
     end
 
-    subgraph Runtime["Discussion and Agent Execution"]
+    subgraph Runtime["Personal Activity and Transitional Institutional Execution"]
+        PersonalActivity["One Continuing Activity per Agent<br/>deduplicated admission and fair invocations"]
+        PersonalBoundary["Durable Frames and Checkpoints<br/>explicit idle, finite sleep, and scope changes"]
+        RequestEvidence["Bounded Model Requests<br/>durable claims, retry boundaries, and late-result fencing"]
         DiscussionLock["Per-AgentTeam Discussion Lock<br/>normal, emergency, and governance sessions"]
         Rounds["Multi-Round Discussion<br/>frozen membership per round"]
         Turns["Concurrent Member Turns"]
@@ -340,6 +345,14 @@ flowchart TB
         AgentLock --> WaitGraph
         WaitGraph --> DelegationAdmission
         AgentLock --> Strategy
+        AgentInbox --> PersonalActivity
+        PersonalActivity --> AgentLock
+        AgentLock --> PersonalBoundary
+        PersonalBoundary --> RequestEvidence
+        PersonalBoundary --> Tools
+        Tools -->|complete batch| PersonalBoundary
+        RequestEvidence --> Model
+        PersonalBoundary -->|continuing yield| PersonalActivity
         Strategy --> Model
         Strategy --> Tools
         Model --> RoundResults
@@ -469,7 +482,7 @@ The reference includes every top-level option, nested policy configuration, toke
 
 The [Design Blueprints](docs/blueprints/README.md) collect the autonomous Agent activity blueprint, implementation plan, and deferred features.
 
-They describe the target architecture rather than the current runtime; Phase 0 freezes contracts and verification fixtures, while replacement-runtime implementation remains planned.
+They describe the target architecture and implementation boundaries; Phases 0–2 supply the contract, durability, and personal-runtime foundations, while the remaining phases are still in progress.
 
 ## 📊 Architecture & Control Flow Diagrams
 
