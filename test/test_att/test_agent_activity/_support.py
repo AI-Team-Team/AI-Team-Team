@@ -57,8 +57,8 @@ class ActivityTestCase(unittest.IsolatedAsyncioTestCase):
     def records(self, table):
         return [row for row in self.manager._records.snapshot() if row.table_name == table]
 
-    async def settle(self):
-        async with asyncio.timeout(15):
+    async def settle(self, *, timeout=15):
+        async with asyncio.timeout(timeout):
             while (
                 self.manager._activity.workers
                 or self.manager._activity.dispatch_tasks

@@ -1,6 +1,9 @@
 """Synchronous observers reserve identity edges and yield bounded worker capacity."""
 
 import asyncio
+import json
+from contextlib import asynccontextmanager
+from pathlib import Path
 from unittest.mock import patch
 
 from ai_team_team import Agent, LLMResponse, ToolCall
@@ -14,7 +17,86 @@ from test.test_att.test_autonomous_activity_phase0._fixtures import (
 from ._support import ActivityTestCase, call, idle
 
 
+DEPENDENCY_CHAIN_TIMEOUT_SECONDS = 60
+
+
 class InteractionDependencyTests(ActivityTestCase):
+    @staticmethod
+    def _task_state(task):
+        if task is None:
+            return None
+        frames = task.get_stack(limit=1)
+        location = None
+        if frames:
+            frame = frames[0]
+            location = f"{Path(frame.f_code.co_filename).name}:{frame.f_lineno}:{frame.f_code.co_name}"
+        return {
+            "done": task.done(),
+            "cancelled": task.cancelled(),
+            "cancelling": task.cancelling(),
+            "location": location,
+        }
+
+    def _dependency_state(self):
+        activity = self.manager._activity
+        return {
+            "workers": len(activity.workers),
+            "ready": activity.ready.qsize(),
+            "dispatch_tasks": len(activity.dispatch_tasks),
+            "tool_tasks": len(activity.tool_tasks),
+            "provider_tasks": len(activity.models.tasks),
+            "admitted_model_requests": activity.models.admitted_requests,
+            "scheduler": self._task_state(activity.scheduler),
+            "locks": {
+                "runtime": self.manager._runtime_gate.locked(),
+                "activity": activity.lock.locked(),
+                "records": self.manager._records.lock.locked(),
+            },
+            "wait_edges": [
+                {"source_agent_id": source, "target_agent_id": target, "count": count}
+                for (source, target), count in sorted(self.manager._agent_wait_edge_counts.items())
+            ],
+            "suspended_workers": [
+                {
+                    "agent_id": resume.session.agent_id,
+                    "waits": resume.waits,
+                    "queued": resume.queued,
+                    "resume_done": resume.future.done(),
+                    "worker": self._task_state(resume.worker),
+                }
+                for resume in sorted(
+                    activity.suspended_workers.values(), key=lambda item: item.session.agent_id
+                )
+            ],
+            "sessions": {
+                agent_id: {
+                    "active": session.active,
+                    "running": session.running,
+                    "queued": session.queued,
+                    "intent": session.intent,
+                    "availability": session.availability,
+                    "model_calls": len(self.manager._agents_by_id[agent_id].llm_client.requests),
+                    "worker": self._task_state(getattr(session, "worker", None)),
+                }
+                for agent_id, session in sorted(activity.sessions.items())
+            },
+        }
+
+    @asynccontextmanager
+    async def _dependency_watchdog(self, *, timeout=DEPENDENCY_CHAIN_TIMEOUT_SECONDS):
+        deadline = asyncio.timeout(timeout)
+        try:
+            async with deadline:
+                yield
+        except TimeoutError:
+            if not deadline.expired():
+                raise
+            # Capture IDs, counts, and source locations, never prompts or tool payloads.
+            self.fail(
+                f"The dependency workload did not settle within {timeout:g} seconds. "
+                f"Runtime state: {json.dumps(self._dependency_state(), sort_keys=True)}"
+            )
+
     async def test_self_interaction_is_rejected_before_accepting_an_instruction(self):
         rejected = []
 
@@ -108,17 +190,91 @@ class InteractionDependencyTests(ActivityTestCase):
                     ModelStep(idle()),
                 )
             )
-        result = await asyncio.wait_for(
-            self.manager.execute_agent_interaction(self.root, "Begin the dependency chain"), 15
-        )
-        self.assertEqual(result.answer, "Answer from person 0")
-        await self.settle()
+        # One cross-platform watchdog covers the serialized chain and its final idle commits.
+        async with self._dependency_watchdog():
+            result = await self.manager.execute_agent_interaction(
+                self.root, "Begin the dependency chain"
+            )
+            self.assertEqual(result.answer, "Answer from person 0")
+            await self.settle(timeout=DEPENDENCY_CHAIN_TIMEOUT_SECONDS)
         self.assertEqual(len(rejected), 1)
         self.assertEqual(len(self.root.agent_inbox), 1)
         self.assertTrue(all(len(agent.agent_inbox) == 1 for agent in people))
         self.assertFalse(self.manager._agent_wait_edge_counts)
         self.assertFalse(self.manager._activity.suspended_workers)
         self.assertTrue(all(not client.unexpected_requests for client in clients))
+
+    async def test_dependency_watchdog_reports_metadata_without_private_content(self):
+        private_content = "Private diagnostic sentinel must never appear in the failure report."
+        self.manager.config.activity.max_concurrent_activities = 1
+        barrier = AsyncBarrier()
+        client = ScriptedModelClient(
+            ModelStep(LLMResponse(text=private_content), barrier), ModelStep(idle())
+        )
+        other = Agent("PrivateSource", "Researcher", client)
+        self.manager.register_llm_client("private-source", client)
+        self.manager.register_agent(other)
+
+        async def ask_private_source() -> str:
+            result = await self.manager.execute_agent_interaction(other, private_content)
+            return result.answer
+
+        self.manager.register_tool("ask_private_source", func=ask_private_source)
+        self.steps(call("ask_private_source"), LLMResponse(text="Complete"), idle())
+        observer = asyncio.create_task(
+            self.manager.execute_agent_interaction(self.root, private_content)
+        )
+        try:
+            await asyncio.wait_for(barrier.entered.wait(), DEPENDENCY_CHAIN_TIMEOUT_SECONDS)
+            with self.assertRaises(self.failureException) as raised:
+                async with self._dependency_watchdog(timeout=0):
+                    await asyncio.shield(observer)
+            message = str(raised.exception)
+            self.assertIn("did not settle within 0 seconds", message)
+            self.assertNotIn(private_content, message)
+            state = json.loads(message.split("Runtime state: ", 1)[1])
+            self.assertEqual(state["provider_tasks"], 1)
+            self.assertEqual(state["admitted_model_requests"], 1)
+            self.assertEqual(
+                state["wait_edges"],
+                [{"source_agent_id": self.root.agent_id, "target_agent_id": other.agent_id, "count": 1}],
+            )
+            self.assertEqual(len(state["suspended_workers"]), 1)
+            self.assertEqual(state["suspended_workers"][0]["agent_id"], self.root.agent_id)
+            self.assertEqual(state["suspended_workers"][0]["waits"], 1)
+            session = state["sessions"][self.root.agent_id]
+            self.assertTrue(session["running"])
+            self.assertEqual(session["model_calls"], 1)
+            self.assertIsNotNone(session["worker"]["location"])
+            self.assertFalse(observer.done())
+        finally:
+            barrier.release()
+            await asyncio.wait_for(observer, DEPENDENCY_CHAIN_TIMEOUT_SECONDS)
+            await self.settle(timeout=DEPENDENCY_CHAIN_TIMEOUT_SECONDS)
+
+    async def test_dependency_watchdog_preserves_operation_timeouts(self):
+        failure = TimeoutError("The observed operation itself timed out.")
+        with self.assertRaises(TimeoutError) as raised:
+            async with self._dependency_watchdog():
+                raise failure
+        self.assertIs(raised.exception, failure)
+
+    async def test_dependency_watchdog_preserves_cancellation(self):
+        barrier = AsyncBarrier()
+
+        async def observed():
+            async with self._dependency_watchdog():
+                await barrier.pause()
+
+        task = asyncio.create_task(observed())
+        try:
+            await barrier.wait_entered()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def test_parallel_interaction_observers_share_one_suspended_worker(self):
         self.manager.config.activity.max_concurrent_activities = 1

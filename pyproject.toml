@@ -98,13 +98,22 @@ warn_unused_ignores = true
 [tool.coverage.run]
 branch = true
 source = ["ai_team_team"]
+relative_files = true
 
 
 [tool.coverage.report]
 exclude_also = [
-    "if TYPE_CHECKING:",
-    '\.\.\.',
+    '^\s*if TYPE_CHECKING\s*:',
+    '^\s*\.\.\.\s*(?:#.*)?$',
 ]
 fail_under = 70
 show_missing = true
 skip_covered = true
+skip_empty = true
+precision = 2
+
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "ATT Coverage Report"
+skip_covered = false

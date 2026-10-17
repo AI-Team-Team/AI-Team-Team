@@ -16,7 +16,13 @@ For an individual test package:
 ./venv/bin/python -m unittest discover -s test/test_att/test_state_persistence
 ```
 
-The repository CI runs the suite on Python 3.11 through 3.13 across Linux, macOS, and Windows. The quality job also runs Ruff, the public consumer mypy contract, branch coverage with a 70 percent baseline, and a wheel build/install smoke test.
+The repository CI runs the suite on Python 3.11 through 3.13 across Linux, macOS, and Windows.
+
+The Ubuntu/Python 3.13 matrix entry measures branch coverage with a 70 percent minimum and uploads HTML/XML reports with a 14-day retention period.
+
+Reports are generated after successful or failed test execution, but not after a failed Coverage installation or a cancelled job.
+
+The quality job runs Ruff and both public mypy contracts, while a separate wheel-smoke job builds, installs, and imports the package.
 
 The autonomous-activity replacement has a [Phase 0 contract freeze](autonomous_activity/README.md), [Phase 1 durability gate](autonomous_activity/Phase_1.md), and [Phase 2 personal-runtime gate](autonomous_activity/Phase_2.md), with deterministic fixtures and a separately invoked `spec_*.py` gate for remaining unimplemented services.
 
@@ -29,6 +35,10 @@ Use `./venv/bin/python -m unittest discover -s test/test_att/test_agent_activity
 Tests needing a finite personal interaction must script the Agent's explicit idle control rather than treat a final answer as a runtime stop.
 
 Wait for real worker registration, commit receipts, and lock-attempt barriers instead of assuming a fixed count of event-loop yields establishes synchronization.
+
+The five-Agent dependency-chain regression uses one 60-second end-to-end watchdog, including final idle settlement, to accommodate slower CI runners without changing runtime safety limits.
+
+Watchdog failures report dependency edges, worker locations, queue sizes, model-call counts, and lock states without including prompts, responses, or tool payloads.
 
 Personal-runtime regressions include corrupt activity-context restore preflight, Native sibling cancellation, instruction cancellation on both sides of source acceptance, and delayed or duplicate notification dispatch after confirmed presentation.
 
@@ -44,8 +54,10 @@ Run the same quality checks locally with:
 
 ```bash
 ./venv/bin/ruff check src test typecheck
-./venv/bin/mypy typecheck/consumer_contract.py
+./venv/bin/mypy typecheck/consumer_contract.py typecheck/activity_contract.py
 ./venv/bin/coverage run -m unittest discover -s test
+./venv/bin/coverage html --fail-under=0
+./venv/bin/coverage xml --fail-under=0
 ./venv/bin/coverage report
 ./venv/bin/python -m build
 ```
