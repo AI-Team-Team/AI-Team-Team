@@ -59,6 +59,13 @@ class RestoreTransactionMixin:
             target_config = await asyncio.to_thread(manager._validate_state_snapshot, state)
             if target_config.episodic_memory.enabled:
                 manager._memory._require_fts5()
+            destination = getattr(manager, "_restore_source_path", None) or manager.db_path
+            if destination:
+                # Recovery events extend the checkpoint's Journal. Never reset
+                # their allocator behind facts already committed to this target.
+                await manager._persistence.validate_restore_journal(
+                    destination, state.get("memory_events", ())
+                )
         except StateRestoreError:
             raise
         except Exception as exc:

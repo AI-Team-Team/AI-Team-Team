@@ -116,6 +116,20 @@ class PersistenceCoordinator:
                 return read_receipt(session, operation_id)
         return await asyncio.get_running_loop().run_in_executor(self._executor, read)
 
+    async def validate_restore_journal(self, db_path: str, events) -> None:
+        """Read after accepted writes without poisoning the writer on rejection."""
+        self.claim(db_path)
+        await self.flush()
+        await asyncio.get_running_loop().run_in_executor(
+            self._executor, self._validate_restore_journal, db_path, tuple(events)
+        )
+
+    def _validate_restore_journal(self, db_path: str, events) -> None:
+        resolved = str(Path(db_path).resolve())
+        if DatabaseStore._preflight_schema(resolved):
+            return  # An absent or empty target has no committed Journal.
+        self._store(resolved).validate_restore_journal(events)
+
     async def search_memory_card_ids(
         self, db_path: str, agent_id: str, query: str, limit: int
     ) -> list[str]:

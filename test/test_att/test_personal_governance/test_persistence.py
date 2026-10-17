@@ -17,6 +17,7 @@ from ai_team_team import (
     StateRestoreError,
 )
 from test.governance_client import PersonalGovernanceClient, settle_governance_activity
+from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier
 
 
 class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
@@ -199,25 +200,68 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_interrupted_failover_restores_expired_mail_without_replaying_choices(self):
         principal = ApprovalPrincipal(kind="agent", principal_id=self.manager.root_ai.agent_id)
-        task = asyncio.create_task(
-            self.manager.broker.decision_provider.decide_agent_model(
-                principal, "Bounded public choice.", ["spare"]
+        barrier = AsyncBarrier()
+        original_generate = self.client.generate
+        checkpoint = os.path.join(self.workspace.name, "interrupted-failover.sqlite")
+
+        async def held_generate(**kwargs):
+            await barrier.pause()
+            return await original_generate(**kwargs)
+
+        def freeze_checkpoint():
+            with closing(sqlite3.connect(self.manager.db_path)) as source:
+                with closing(sqlite3.connect(checkpoint)) as target:
+                    source.backup(target)
+
+        with patch.object(self.client, "generate", held_generate):
+            task = asyncio.create_task(
+                self.manager.broker.decision_provider.decide_agent_model(
+                    principal, "Bounded public choice.", ["spare"]
+                )
             )
+            try:
+                # Freeze a real in-flight checkpoint, not a detached snapshot
+                # that will be written back over the original process's tail.
+                await asyncio.wait_for(barrier.entered.wait(), timeout=120)
+                await self.manager.save_state()
+                await asyncio.to_thread(freeze_checkpoint)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+            finally:
+                barrier.release()
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        await settle_governance_activity(self.manager, timeout=120)
+        with closing(sqlite3.connect(checkpoint)) as database:
+            checkpoint_sequence = database.execute(
+                "SELECT MAX(sequence) FROM system_memory_events"
+            ).fetchone()[0]
+        self.assertGreater(self.manager._memory._sequence, checkpoint_sequence)
+        await self.manager.close()
+
+        client = PersonalGovernanceClient(respond=False)
+        self.manager = ATTManager(
+            Agent("RecoveryHost", "Root", client),
+            ATTConfig(workspace_root=self.workspace.name),
+            db_path=checkpoint,
         )
-        async with asyncio.timeout(5):
-            while not self.manager._governance.rounds or self.manager._emergency_tasks:
-                await asyncio.sleep(0.01)
-        await self.manager.save_state()
-        state = await self.manager._persistence.read(self.manager.db_path)
-        task.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await task
-        await settle_governance_activity(self.manager)
-        await self.manager._apply_state_snapshot(state)
+        self.manager.register_llm_client("default", client)
+        self.addAsyncCleanup(self.manager.close)
+        await self.manager.load_state(checkpoint)
+        await settle_governance_activity(self.manager, timeout=120)
         item = next(iter(self.manager._governance.rounds.values()))
         self.assertEqual(item.status, "EXPIRED")
         self.assertFalse(item.ballots)
         self.assertEqual(len(self.manager.root_ai.agent_inbox), 1)
+        await self.manager.save_state()
+        with closing(sqlite3.connect(checkpoint)) as database:
+            sequences = database.execute(
+                "SELECT sequence FROM system_memory_events ORDER BY sequence"
+            ).fetchall()
+            self.assertEqual(len(sequences), len(set(sequences)))
+            self.assertEqual(database.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     async def test_pending_migration_restores_all_personal_ballots_and_progress(self):
         first = self.manager.create_agent_team(self.manager.root_ai)

@@ -13,6 +13,8 @@ from ai_team_team.database.models import (
     SystemMemoryEventModel,
 )
 
+from ..journal import event_matches, event_values
+
 
 class MemoryWriteMixin:
     @staticmethod
@@ -37,42 +39,11 @@ class MemoryWriteMixin:
                 )
         for event in events:
             existing = session.get(SystemMemoryEventModel, event["event_id"])
-            values = {
-                "event_id": event["event_id"],
-                "sequence": event["sequence"],
-                "event_type": event["event_type"],
-                "agent_id": event.get("agent_id"),
-                "agent_name_snapshot": event.get("agent_name_snapshot"),
-                "team_id": event.get("team_id"),
-                "invocation_id": event.get("invocation_id"),
-                "source_chat_message_id": event.get("source_chat_message_id"),
-                "source_execution_id": event.get("source_execution_id"),
-                "checkpoint_context": {key: event.get(key) for key in ("discussion_id", "turn_id")},
-                "role": event.get("role"),
-                "payload": event.get("payload", {}),
-                "redacted": int(event.get("redacted", False)),
-                "created_at": event["created_at"],
-            }
+            values = event_values(event)
             if existing is None:
                 session.add(SystemMemoryEventModel(**values))
                 continue
-            current = {
-                "event_id": existing.event_id,
-                "sequence": existing.sequence,
-                "event_type": existing.event_type,
-                "agent_id": existing.agent_id,
-                "agent_name_snapshot": existing.agent_name_snapshot,
-                "team_id": existing.team_id,
-                "invocation_id": existing.invocation_id,
-                "source_chat_message_id": existing.source_chat_message_id,
-                "source_execution_id": existing.source_execution_id,
-                "checkpoint_context": existing.checkpoint_context,
-                "role": existing.role,
-                "payload": existing.payload,
-                "redacted": existing.redacted,
-                "created_at": existing.created_at,
-            }
-            if current != values:
+            if not event_matches(existing, values):
                 raise ValueError(
                     f"Immutable journal event {event['event_id']!r} was modified."
                 )

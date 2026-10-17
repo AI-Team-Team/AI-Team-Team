@@ -162,6 +162,10 @@ Release blocking events and cancel and await unfinished tasks in `finally`, and 
 
 Persistence tests must await `save_state`, `load_state`, `flush_state`, and `close`.
 
+To test crash recovery, pause the relevant provider or executor at an explicit barrier, freeze a SQLite backup, and restore that fixed checkpoint through a fresh Manager after releasing and closing the original runtime.
+
+Do not read an in-flight detached snapshot, let its original Journal advance, and apply the old snapshot back to the same database; that is a stale-restore rejection case, not an isolated crash checkpoint.
+
 - Use `asyncTearDown` or `async with ATTManager(...)` so writer threads and SQLite engines are released.
 - Direct mock clients used by persisted agents must be registered with `manager.register_llm_client(alias, client)` before the first auto-save.
 - Close the writer manager before constructing another manager for the same database; tests that intentionally verify contention should assert `DatabaseOwnershipError`.

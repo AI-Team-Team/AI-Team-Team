@@ -128,6 +128,12 @@ Restoration is transactional.
 - Pending failover rounds become `EXPIRED` because their original resource invocation did not survive the process interruption; the retained email and choice history are not deleted.
 - `load_state()` fails closed while foreground formation, governance submission, migration commit, or detached formation/governance work is active, so restored registries cannot race ongoing authoritative operations.
 
+Before staging or publication, restore drains accepted writes and verifies that its candidate Journal contains every event already committed to the destination database with its original sequence and contents.
+
+Restore validation and immutable-event writes use the same JSON comparison, distinguishing booleans from numbers at every nesting level while ignoring object key order.
+
+A stale or divergent detached snapshot raises `StateRestoreError` without changing the live runtime, DocLib files, or writer health; restore an independent checkpoint database instead of writing an older snapshot back over a newer Journal.
+
 It builds agents and files in a detached manager and a same-filesystem staging directory, recomputes derived team depth, then swaps the DocLib directories and live registries.
 
 Before publication completes, any validation, staging, or publication error restores the original manager and original DocLib trees, or leaves resources fenced if rollback itself cannot safely complete.

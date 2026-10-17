@@ -43,6 +43,14 @@ from .records import read_records, validate_database
 class StoreReadMixin:
     session_factory: Any
 
+    def validate_restore_journal(self, events) -> None:
+        """Compare a restore candidate with one consistent committed Journal."""
+        from .journal import validate_restore_journal
+
+        with self.session_factory() as session:
+            session.execute(text("BEGIN"))
+            validate_restore_journal(session, events)
+
     def read(self, *, reconcile: bool = True) -> Dict[str, Any]:
         """Reads all persisted state into detached plain Python structures."""
         self._preflight_schema(self.db_path)
