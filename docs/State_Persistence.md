@@ -73,6 +73,32 @@ The implementation uses `ContextVar`, so concurrent team discussions do not shar
 
 The outermost scope submits one merged delta.
 
+### Validation and acceptance boundaries
+
+Full SQL validation remains the reference path for restore, untrusted checkpoints, and incremental-validator equivalence tests.
+
+Routine commits reuse accepted, copy-on-write table projections and refresh physical checks from actual writer mutations rather than relying only on snapshot dirty flags.
+
+Cross-row authority rules are shared by both paths and conservatively recheck related collections, including reverse references, current membership intervals, notification presentation, and source ownership.
+
+Volatile commits bulk-check changed record groups without repeatedly replaying every historical row into the validation database.
+
+Database validation falls back to the full reference after connection or database-version changes, out-of-band store mutations, unknown SQL effects, full snapshots, or unmodelled triggers.
+
+Governance dependencies use mapped table names, and derived FTS exemptions recognize only complete known writer statements; a table-name mention in a literal, comment, or CTE never proves a write safe to ignore.
+
+Replacing an active writer's database file is rejected rather than reusing its old connection and validation baseline.
+
+A candidate validation cache becomes reusable only after the real commit succeeds; failed or cancelled preparation cannot publish it, and failed writes invalidate reuse.
+
+The writer may stage SQL changes inside its uncommitted transaction, but validation and exact-receipt checks must finish before the database commit.
+
+Only a successful commit permits runtime publication, cache promotion, and dependent notification dispatch.
+
+These are two execution paths with the same authority requirements, not configurable strict and permissive persistence modes.
+
+This optimization does not change schema version, production request deadlines, cancellation settlement, Agent identity, personal memory, or persistence error propagation.
+
 ## Persisted and runtime-only state
 
 The database stores:

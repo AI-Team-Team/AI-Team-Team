@@ -53,6 +53,8 @@ class DatabaseStore(
             expire_on_commit=False,
             bind=self.engine,
         )
+        from .validation.database import DatabaseValidationCache
+        self._validation = DatabaseValidationCache(self.engine, self.db_path)
 
     def _initialize_schema(self):
         with self.engine.connect() as connection:
@@ -144,4 +146,5 @@ class DatabaseStore(
                 temporary.cleanup()
 
     def close(self) -> None:
+        self._validation.finish()
         self.engine.dispose()

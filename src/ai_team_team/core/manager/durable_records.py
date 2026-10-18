@@ -9,6 +9,7 @@ from ai_team_team.database.models import ACTIVITY_TABLES
 from ai_team_team.database.persistence.records import dependency_closure, merge_records, record_digest
 from ai_team_team.database.persistence.records import DomainRecord, thaw
 from ai_team_team.database.persistence.receipts import CommitReceipt, settle_commit
+from ai_team_team.database.persistence.store.validation.detached import DetachedValidationCache
 
 
 class DurableRecordService:
@@ -20,10 +21,12 @@ class DurableRecordService:
         self.index = {}
         self.lock = asyncio.Lock()
         self.receipts = {}
+        self._validation = DetachedValidationCache()
 
     def restore(self, records):
         with self._index_lock:
             self.index = {record.identity: record for record in records}
+            self._validation.invalidate()
 
     def snapshot(self):
         with self._index_lock:
@@ -32,7 +35,7 @@ class DurableRecordService:
     def _merge(self, records):
         """Do not lose another worker's update between COW read and replace."""
         with self._index_lock:
-            self.restore(merge_records(self.snapshot(), records))
+            self.index = {record.identity: record for record in merge_records(self.snapshot(), records)}
 
     def capture_memberships(self, team_ids, *, publish=True):
         """Capture relationship facts without editing any Agent-owned field.
@@ -165,8 +168,8 @@ class DurableRecordService:
                             dirty["governance_rounds"].update(values)
                 dirty["record_dependency_agents"] = agents
                 dirty["record_dependency_teams"] = teams
+                validation_candidate = None
                 if not manager.db_path:
-                    from ai_team_team.database.persistence.store.detached_validation import validate_detached_records
                     scoped_auditors = {member.agent_id for team in manager.teams.values()
                                        if team.team_kind == "supervisory" for member in team.members}
                     state = {
@@ -177,7 +180,7 @@ class DurableRecordService:
                         "governance_rounds": manager._governance.snapshot(),
                         "records": merge_records(self.snapshot(), captured),
                     }
-                    await asyncio.to_thread(validate_detached_records, state, partial=True)
+                    validation_candidate = await asyncio.to_thread(self._validation.prepare, state)
                     if manager._closing and not allow_closing:
                         raise RuntimeError("Runtime admission closed before acceptance.")
                 # Resource authorization precedes the snapshot lock, matching
@@ -212,6 +215,8 @@ class DurableRecordService:
                 finally:
                     if future.done() and not future.cancelled() and future.exception() is None and receipt in future.result():
                         self._merge(records)
+                        if validation_candidate is not None:
+                            self._validation.accept(validation_candidate)
                         self.receipts[operation_id] = receipt, records
                         for notification_id in notifications:
                             manager._emit_callback("on_system_event", "notification_committed", {"notification_id": notification_id, "operation_id": operation_id})

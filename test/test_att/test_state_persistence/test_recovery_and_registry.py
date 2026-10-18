@@ -106,7 +106,7 @@ class TestStatePersistence(StatePersistenceTestCase):
             team_parent, team_child, team_parent.members[0].agent_id, "Persist a governed channel"
         )
         await self.manager.execute_team_discussion(team_parent, "Consider the channel.", rounds=1, skip_audit=True)
-        await settle_governance_activity(self.manager, timeout=30)
+        await settle_governance_activity(self.manager)
         self.assertEqual(self.manager.broker.communication_requests[result.request_id].status.value, "APPROVED")
         agreement = next(iter(self.manager.broker.agreements.values()))
         self.mock_react_client.generate = original_generate

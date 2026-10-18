@@ -3,7 +3,7 @@
 from typing import Any, Callable, Dict
 
 from sqlalchemy import text
-from ..records import validate_database, write_records, write_receipts
+from ..records import read_receipt, write_records, write_receipts
 
 from .cleanup import CleanupWriteMixin
 from .communication import CommunicationWriteMixin
@@ -28,12 +28,14 @@ class StoreWriteMixin(
 
     def write(self, snapshot: Dict[str, Any]):
         """Writes a full snapshot or an incremental immutable delta."""
+        self._validation.check_file_identity()
         self._preflight_schema(self.db_path)
         snapshot = self._materialize(snapshot)
         session = self.session_factory()
         try:
             session.execute(text("BEGIN IMMEDIATE"))
             session.execute(text("PRAGMA defer_foreign_keys = ON"))
+            self._validation.begin(session, full=bool(snapshot["full"]))
             if snapshot.get("_publication_rollback"):
                 from ..publication_rollback import discard_provisional_records
                 discard_provisional_records(session, snapshot["_publication_rollback"])
@@ -111,11 +113,20 @@ class StoreWriteMixin(
             self._write_links(session, snapshot.get("links"))
             session.flush()
             write_records(session, snapshot.get("records", ()))
-            validate_database(session)
+            candidate = self._validation.prepare(session)
             receipts = write_receipts(session, snapshot.get("_operations", ()))
+            for receipt in receipts:
+                if read_receipt(session, receipt.operation_id) != receipt:
+                    raise RuntimeError("The stored receipt does not match the accepted operation.")
+            if self._validation.has_triggers:
+                # A trigger on receipt insertion may affect earlier domain
+                # facts. Validate those effects before the real commit too.
+                candidate = self._validation.prepare(session)
             session.commit()
+            self._validation.finish(candidate)
             return receipts
-        except Exception:
+        except BaseException:
+            self._validation.finish()
             session.rollback()
             raise
         finally:

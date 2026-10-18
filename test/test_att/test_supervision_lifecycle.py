@@ -9,6 +9,7 @@ from contextlib import closing
 from unittest.mock import patch
 
 from ai_team_team import ATTConfig, ATTManager, Agent, AuditStatus, StatePersistenceError
+from test.async_waits import wait_for_runtime
 
 
 class _AuditClient:
@@ -113,7 +114,7 @@ class TestSupervisoryTeamLifecycle(unittest.IsolatedAsyncioTestCase):
             self.manager.supervisor.audit_team_dialog(other, "beta input")
         )
         try:
-            await asyncio.wait_for(self.client.entered.wait(), timeout=5)
+            await wait_for_runtime(self.manager, self.client.entered.wait(), label="Parallel audit entry")
             live = [
                 team for team in self.manager.teams.values()
                 if team.team_kind == "supervisory"
@@ -136,7 +137,7 @@ class TestSupervisoryTeamLifecycle(unittest.IsolatedAsyncioTestCase):
                     self.manager._resolve_existing_team_members([team.members[0]], None)
         finally:
             self.client.release.set()
-        results = await asyncio.wait_for(asyncio.gather(first, second), timeout=5)
+        results = await wait_for_runtime(self.manager, asyncio.gather(first, second), label="Parallel audit completion")
         self.assertTrue(all(result.status is AuditStatus.HEALTHY for result in results))
         self.assertFalse(
             any(team.team_kind == "supervisory" for team in self.manager.teams.values())
@@ -156,7 +157,7 @@ class TestSupervisoryTeamLifecycle(unittest.IsolatedAsyncioTestCase):
             )
         )
         try:
-            await asyncio.wait_for(self.client.entered.wait(), timeout=5)
+            await wait_for_runtime(self.manager, self.client.entered.wait(), label="Parallel discussion audit entry")
             live = [team for team in self.manager.teams.values() if team.team_kind == "supervisory"]
             self.assertEqual(len(live), 2)
             for marker in ("BUSINESS_ALPHA_MARKER", "BUSINESS_BETA_MARKER"):
@@ -167,7 +168,7 @@ class TestSupervisoryTeamLifecycle(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(matching), 1)
         finally:
             self.client.release.set()
-        results = await asyncio.wait_for(asyncio.gather(first, second), timeout=5)
+        results = await wait_for_runtime(self.manager, asyncio.gather(first, second), label="Parallel discussion audit completion")
         self.assertTrue(all(result.audit.status is AuditStatus.HEALTHY for result in results))
 
     async def test_audit_evidence_survives_database_restore_without_live_auditors(self) -> None:

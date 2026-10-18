@@ -14,6 +14,7 @@ from ai_team_team import (
 )
 from ai_team_team.core.decision import DecisionOutcome
 from test.governance_client import PersonalGovernanceClient, settle_governance_activity
+from test.async_waits import runtime_watchdog, wait_for_runtime
 
 
 class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
@@ -109,7 +110,7 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
             result = await self.manager.broker.request_peer_communication(
                 sender, recipient, sender.members[0].agent_id, "A cancellable explicit choice."
             )
-            await asyncio.wait_for(committed.wait(), timeout=3)
+            await wait_for_runtime(self.manager, committed.wait(), label="Accepted governance ballot")
             notification = next(task for task in self.manager._activity.workers
                                 if task.get_name() == f"att-person-{self.root.agent_id}")
             notification.cancel()
@@ -117,7 +118,7 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
                 await notification
         # The deliberately cancelled invocation is factual history, not a new
         # failure of the already accepted ballot or permission to replay it.
-        async with asyncio.timeout(10):
+        async with runtime_watchdog(self.manager, label="Cancelled governance finalizers"):
             while self.manager._emergency_tasks:
                 await asyncio.gather(*tuple(self.manager._emergency_tasks))
         self.assertEqual(

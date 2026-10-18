@@ -40,6 +40,20 @@ The five-Agent dependency-chain regression uses one 60-second end-to-end watchdo
 
 Watchdog failures report dependency edges, worker locations, queue sizes, model-call counts, and lock states without including prompts, responses, or tool payloads.
 
+Shared personal-runtime, governance, and parallel-audit observers use `test/async_waits.py` with a bounded 60-second default; explicitly larger scenario budgets remain explicit.
+
+The watchdog emits state versions, accepted-operation counts, queue progress, task locations, and lock states before cancellation, so slow accepted-commit cleanup cannot erase the diagnostic snapshot.
+
+Domain `TimeoutError` exceptions and external cancellation retain their original meaning; an observer deadline is not a production model, governance, or persistence-flush deadline.
+
+`test/test_att/test_incremental_validation/` compares full SQL validation with incremental candidates and covers reverse dependencies, collection constraints, external database mutations, reconnects, unknown triggers, commit failure, late preparation, and cache publication order.
+
+Governance dependency tests touch each mapped input table independently, while SQL-tracking regressions reject misleading FTS literals, comments, CTEs, definitions, and lookalike names and verify transaction rollback without an accepted receipt.
+
+Performance regressions assert bounded SQL work and reuse of unrelated projections rather than relying only on machine-specific elapsed-time limits.
+
+Use the [performance measurement guide](Performance_Measurement.md) for reproducible timing, SQL counting boundaries, reference-validation comparisons, and CI timeout diagnosis.
+
 Personal-runtime regressions include corrupt activity-context restore preflight, Native sibling cancellation, instruction cancellation on both sides of source acceptance, and delayed or duplicate notification dispatch after confirmed presentation.
 
 Additional transaction regressions queue an explicit save before restore admission, complete same-tool Native faults concurrently, revoke identity and team publication while topology is contended, and retire a mail recipient while ingress waits for the activity lock.

@@ -5,11 +5,12 @@ import re
 import asyncio
 
 from ai_team_team import LLMResponse, ToolCall
+from test.async_waits import DEFAULT_RUNTIME_TIMEOUT, runtime_watchdog
 
 
-async def settle_governance_activity(manager, timeout=15):
+async def settle_governance_activity(manager, timeout=DEFAULT_RUNTIME_TIMEOUT):
     """Observe scripted idle and committed domain work, not obsolete mail Tasks."""
-    async with asyncio.timeout(timeout):
+    async with runtime_watchdog(manager, timeout=timeout, label="Governance activity settlement"):
         while True:
             activity = manager._activity
             tasks = tuple(manager._emergency_tasks | activity.workers | activity.dispatch_tasks)

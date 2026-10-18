@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from ai_team_team import ATTConfig, ATTManager, Agent, LLMResponse, ToolCall
+from test.async_waits import DEFAULT_RUNTIME_TIMEOUT, runtime_watchdog, wait_for_runtime
 from test.test_att.test_autonomous_activity_phase0._fixtures import (
     LogicalClock,
     ModelStep,
@@ -46,9 +47,10 @@ class ActivityTestCase(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(manager.close)
         return manager
 
-    async def wait(self, admission, intent="idle"):
-        return await asyncio.wait_for(
-            self.manager.wait_for_activity_checkpoint(admission.admission_id, intent=intent), 10
+    async def wait(self, admission, intent="idle", *, timeout=DEFAULT_RUNTIME_TIMEOUT):
+        return await wait_for_runtime(
+            self.manager, self.manager.wait_for_activity_checkpoint(admission.admission_id, intent=intent),
+            timeout=timeout, label="Personal activity checkpoint"
         )
 
     def steps(self, *responses):
@@ -57,8 +59,8 @@ class ActivityTestCase(unittest.IsolatedAsyncioTestCase):
     def records(self, table):
         return [row for row in self.manager._records.snapshot() if row.table_name == table]
 
-    async def settle(self, *, timeout=15):
-        async with asyncio.timeout(timeout):
+    async def settle(self, *, timeout=DEFAULT_RUNTIME_TIMEOUT):
+        async with runtime_watchdog(self.manager, timeout=timeout, label="Personal activity settlement"):
             while (
                 self.manager._activity.workers
                 or self.manager._activity.dispatch_tasks

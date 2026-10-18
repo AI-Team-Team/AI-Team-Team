@@ -15,9 +15,11 @@ _INTEGER_FLAGS = {
 }
 
 
-def validate_scalars(session):
+def validate_scalars(session, *, tables=None, combine_checks=False):
     """Reject SQLite coercions and corruption even when CHECK was disabled."""
     for name, table in Base.metadata.tables.items():
+        if tables is not None and name not in tables:
+            continue
         columns = [column for column in table.columns if isinstance(column.type, (Integer, Float))]
         if columns:
             for row in session.execute(select(*columns)).mappings():
@@ -29,12 +31,18 @@ def validate_scalars(session):
                              else type(value) in (int, float) and math.isfinite(value))
                     if not valid or ((name, column.name) in _INTEGER_FLAGS and value not in (0, 1)):
                         raise StateRestoreError(f"Invalid numeric checkpoint evidence in {name}.{column.name}.")
-        if name in ACTIVITY_TABLES:
+        if name in ACTIVITY_TABLES and not combine_checks:
             # Cross-row record validation already checks these declarations.
             continue
         checks = [check for check in table.constraints if isinstance(check, CheckConstraint)]
         checks.extend(check for column in table.columns for check in column.constraints
                       if isinstance(check, CheckConstraint))
+        if combine_checks:
+            if checks:
+                predicate = " OR ".join(f"NOT ({check.sqltext})" for check in checks)
+                if session.execute(text(f'SELECT 1 FROM "{name}" WHERE {predicate} LIMIT 1')).first() is not None:
+                    raise StateRestoreError(f"Invalid checkpoint constraint evidence in {name}.")
+            continue
         for check in checks:
             invalid = session.execute(text(f'SELECT 1 FROM "{name}" WHERE NOT ({check.sqltext}) LIMIT 1')).first()
             if invalid is not None:
