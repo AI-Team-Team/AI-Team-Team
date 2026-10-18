@@ -132,6 +132,24 @@ Read evidence, unread overrides, deletion, and restoration remain recipient-owne
 
 Dissolution closes live intervals and removes live team discovery while retaining team rows and eligible archives as historical evidence.
 
+### Pending Phase 3 constraint alignment
+
+The following clarifications are required implementation work rather than a claim that the current schema 12 constraint and relationship validator already implement them.
+
+The current `window_seconds <= 600` check must be removed so the database retains basic positive-duration validation without turning the ten-minute default into a fixed maximum.
+
+Withdrawal records must retain the finite positive window actually applied and validate elapsed time against the referenced latest successfully committed edit or original send, without substituting later configuration values.
+
+Historical accepted friendship requests may reference an earlier relationship generation and must retain their accepted outcome without authorizing the current relationship.
+
+Reject future request generations and mismatched endpoint references as corruption, while atomically checking the current generation, request eligibility, and applicable restrictions when accepting a new request.
+
+Current direct-message admission uses the current relationship projection rather than historical request status alone.
+
+The implementation must deliver any DDL correction together with the appropriate schema-version update, reader and validator changes, and regression tests, without migrating incompatible databases.
+
+This documentation clarification does not change the running schema version or declare those corrections implemented.
+
 ## Execution, Availability, and Control
 
 | New table | Keys, fields, and constraints |

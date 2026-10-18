@@ -6,6 +6,8 @@
 
 Use a canonical pair identity with independently owned block and refusal controls, bilateral friendship state, relationship-generation evidence, and directional stranger accounting.
 
+A relationship generation identifies a contact period for that pair, not an Agent identity or memory version.
+
 Keep friendship requests and their responses separately attributable rather than treat any direct message as consent.
 
 Root is an ordinary Agent endpoint for these records.
@@ -41,3 +43,17 @@ An explicitly new message with identical text is still a distinct message rather
 The confirmed D06 contract is three messages per sender per relationship period, metadata-only friendship requests initially, and an explicit recipient-owned operation to lift refusal.
 
 Crossed requests remain requests until an explicit acceptance is recorded rather than infer friendship from two expressions of interest.
+
+An accepted request remains an accepted historical fact after the relationship advances to a later generation, including after friendship removal or the final unblock.
+
+Do not rewrite that accepted request as stale or reject an otherwise valid checkpoint solely because its captured generation is older than the current relationship generation.
+
+An old-generation request cannot be applied again to establish current friendship; becoming friends again requires a new request captured in the current generation and explicit acceptance.
+
+Accepting a new request must atomically revalidate its pending state, addressed recipient, endpoint pair, current generation, and applicable current restrictions in the same pair transaction that establishes friendship.
+
+Concurrent friendship removal or blocking must not allow an acceptance based on an obsolete generation or restriction check to take effect afterward.
+
+Current direct-message permission follows the current friendship, both block decisions, applicable refusal, and directional allowance, not the existence of an accepted historical request.
+
+Relationship-generation changes preserve the same Agents' identities, memories, and previously authorized chat history.

@@ -112,9 +112,19 @@ Display the applicable version, such as `Current V2`, and make eligible earlier 
 
 Message withdrawal is distinct from editing and is permitted within a configurable window whose default is ten minutes.
 
+Ten minutes is the default, not a maximum imposed by the persistence schema.
+
+The Host may configure another finite positive duration, including a longer window, without an additional fixed ten-minute database limit.
+
 Measure that window from the latest successfully committed edit, or from the original committed send if the message has never been edited.
 
 A new committed edit renews the window, while an attempted or failed edit does not change the deadline.
+
+Each committed withdrawal records the actual window applied to that operation and references the exact latest committed revision.
+
+At commit, validate that elapsed time from that revision's successful edit or original send is nonnegative and does not exceed the recorded window.
+
+Historical validation uses that recorded window rather than substituting a later configuration value.
 
 A withdrawn message becomes an author-attributed marker such as `**<author> withdrew a message**` in the current chat source projection.
 
