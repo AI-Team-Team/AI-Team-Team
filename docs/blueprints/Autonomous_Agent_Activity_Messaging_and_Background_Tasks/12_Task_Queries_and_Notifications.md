@@ -38,6 +38,10 @@ The default query scope is the same person's tasks across all memberships rather
 
 The personal view must not become unrestricted discovery of other people's private executions or outputs.
 
+By default, the owner may continue reading a task result lawfully acquired and committed before its source permissions were revoked, with this behavior configurable by the Host.
+
+The [retained-result access rules](15_Authority_and_Privacy.md#retained-task-results) distinguish that personal result from a new access to the source resource.
+
 The recommended history behavior is that acknowledging a task does not automatically delete its record or remove it from later queries.
 
 This recommendation does not establish an unlimited retention policy or decide which acknowledged tasks remain in the always-visible summary.

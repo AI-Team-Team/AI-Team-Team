@@ -150,3 +150,25 @@ A later serialized write may therefore overwrite content derived from the same o
 Serialization, atomic publication, live ACL validation, and stale-worker fencing still apply even though semantic overwrite detection is deferred.
 
 Git-backed Team DocLib collaboration is future work recorded in [Future Plans](../Todo_Autonomous_Agent_Activity_Messaging_and_Background_Tasks.md#git-backed-team-doclib-collaboration).
+
+## 10.9 Retained-result access after source revocation
+
+The confirmed default permits the owner to read a protected task result lawfully acquired and committed before a later revocation of access to its source resources.
+
+Retained-result access still requires the actual authorized owner and the applicable lifecycle checks, and never grants another Agent or AgentTeam access.
+
+Provide a strict Host-controlled boolean setting, enabled by default, for continued reading of these retained results after source revocation.
+
+When disabled, result retrieval must establish current authorization for the protected source references under the execution's original scope and fail closed when that authorization cannot be established.
+
+The task cannot borrow its owner's later team scope, and checking authorization must not automatically reread the source, refresh the result, replay execution, or reconnect an external handle.
+
+Retain the protected source provenance needed for this check across save and restore, and apply the configured access policy to result bodies and content-derived search snippets or previews rather than provide an alternate content-disclosure path.
+
+The policy controls retained-content access rather than deleting factual execution records, resetting the Agent's existing memory, or changing task ownership on a membership transition.
+
+New source reads and writes always require live resource authorization regardless of the retained-result setting.
+
+Existing transient private reads and memory-recall cleanup remain unchanged, and the setting cannot authorize automatic persistence of otherwise excluded content.
+
+The exact configuration field name and physical provenance layout remain engineering details rather than additional policy choices.

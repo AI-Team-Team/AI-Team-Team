@@ -24,6 +24,7 @@
 - Personal background tasks are not reset or transferred by team membership changes.
 - Background-task execution, health, and attention are separate state dimensions.
 - Background-task summaries remain visible, with personal list, search, and inspection across memberships and prompt notification of completion, failure, and suspected stalls.
+- Owners may continue reading task results lawfully acquired and committed before source-permission revocation by default, with a Host-configurable restrictive setting and no renewed access to the source resource.
 - Supervisory Teams assess health rather than business progress or work acceptance.
 - State restoration and unfinished-activity recovery require separate, operation-specific contracts.
 - Recovery labels affected executions and notifies the same owner without automatically inspecting, reconnecting, or replaying external operations.

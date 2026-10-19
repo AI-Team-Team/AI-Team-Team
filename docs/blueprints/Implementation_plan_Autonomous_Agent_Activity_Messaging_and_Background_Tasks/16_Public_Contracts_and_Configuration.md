@@ -58,6 +58,7 @@ Every supplied value and runtime assignment must use the same strict validation,
 | Parent failover timeout | Retain the explicit positive 120-second default for the bounded resource attempt. |
 | Automatic background threshold | Add the confirmed positive configurable 120-second default. |
 | Background permission | Require an explicit whitelist declaration for built-in and externally registered tools. |
+| Retained task-result access | Add a strict Host-controlled boolean enabled by default, allowing the owner to read results lawfully acquired and committed before source-permission revocation; disabling it requires current source authorization without deleting execution history, granting renewed source access, or overriding transient-content rules. |
 | Resource coordination | Serialize conflicting resources across owners while allowing independent resources to proceed, without new optimistic write-version or overwrite-confirmation checks. |
 | Execution retry configuration | Retain explicit typed retry policy, retry count, retry safety, and backoff independently of detachment. |
 | Message presentation and withdrawal | Use the first non-code level-one Markdown heading, reject titles over the configurable 200-character limit, show 500 body characters by default, and require the author to remain a current AT member for AT edits or withdrawal; each committed edit creates unread reminders and renews the default ten-minute withdrawal window without restoring personal deletion. |
