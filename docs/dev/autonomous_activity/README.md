@@ -8,18 +8,21 @@ Phase 1 adds the [durability foundations](Phase_1.md), activates schema 12, and 
 
 Phase 2 adds the [continuing-person runtime and model boundaries](Phase_2.md), promoting the four frozen personal specifications into ordinary discovery while leaving the background-detachment specification explicitly red.
 
+Phase 3 adds [team conversations and personal direct chat](Phase_3.md), including authorized frozen history, explicit read controls, friendship, atomic admission, and schema 13.
+
 The governing [blueprint](../../blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md) and [implementation plan](../../blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md), including the confirmed decisions recorded on 2026-10-07, remain authoritative.
 
 This directory records their engineering contracts and phase-specific verification artifacts.
 
 All D01 through D15 decisions remain confirmed, and no institution is reopened by these specifications.
 
-The running persistence schema is now `12`; schema 11 and earlier are rejected without migration.
+The running persistence schema is now `13`; schema 12 and earlier are rejected without migration.
 
 ## Deliverables
 
 - [Engineering contracts](Contracts.md): scope, intent, presentation, effects, admission, and cancellation boundaries.
 - [Schema 12](Schema_12.md): relational groups, reference constraints, ordering, and publication protocol.
+- [Schema 13](Schema_13.md): chat command receipts, personal preferences, explicit reply references, and authoritative conversation projections.
 - [Replacement inventory](Replacement_Inventory.md): ownership and disposition of round-dependent code and documentation.
 - [Machine-readable line inventory](round_dependencies.json): every selected source occurrence, including exports, tests, callbacks, diagrams, and examples.
 - [Built-in effect declarations](tool_effects.json): the reviewed target registration contracts, not permissions already installed in `Tool`.
@@ -27,6 +30,7 @@ The running persistence schema is now `12`; schema 11 and earlier are rejected w
 - [Fixtures and specifications](../../../test/test_att/test_autonomous_activity_phase0): real Manager identity checks and controlled model, clock, executor, commit, and publication boundaries.
 - [Phase 1 implementation](Phase_1.md): immutable durable records, exact receipts, recoverable publication, mutation leases, and the scope of the initial recovery plan.
 - [Phase 2 implementation](Phase_2.md): one personal admission, fair continuation, explicit controls, notification frames, exact personal checkpoints, and bounded ordinary/audit/maintenance requests.
+- [Phase 3 implementation](Phase_3.md): deliberate publications, historical membership visibility, direct relationships, read and withdrawal evidence, and isolated personal reminders.
 
 ## Green and Red Checks
 

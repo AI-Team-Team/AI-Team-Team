@@ -27,6 +27,8 @@ These scenarios are suggested future technical verification cases, not universal
 - Rejoining retains earlier eligible history and new membership-period messages while excluding messages from the person's absence.
 - Concurrent membership changes and message publications produce unambiguous history intervals without changing Agent-owned identity or memory.
 - Stranger messaging respects the three-message allowance, friendship removes that cap, and removing friendship restores the allowance under the finalized directional rules.
+- Direct sends and edits share the sender's current-period stranger allowance, including edits to messages originally sent in an older period or during friendship, and both honor current blocks and recipient refusal.
+- A failed or pre-commit-cancelled direct edit leaves allowance, revisions, reminders, and the withdrawal deadline unchanged, an idempotent retry charges at most once, and restricted delivery does not prevent reading previously authorized history.
 - Rejection prevents receipt under its restriction, and either person's block prevents direct-message sends in both directions.
 - Blocking breaks friendship and informs the other person without bypassing the block through a forged private message.
 - Clearing only one remaining block does not permit sending, and clearing both returns the pair to stranger contact with a fresh allowance rather than reinstating friendship.

@@ -52,7 +52,7 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
             from ..core import ManagerDefaultClientAdapter
             client = ManagerDefaultClientAdapter(att_manager)
             
-        async with child.state_lock:
+        async with att_manager._messaging.membership_transaction(child) as change:
             new_agent = Agent(
                 name=att_manager.unique_agent_name(
                     f"Dynamic_{role_name}", child
@@ -64,14 +64,8 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
             )
             if any(member.name == new_agent.name for member in child.members):
                 raise ToolBusinessError(f"Member {new_agent.name!r} already exists.")
-            att_manager.register_agent(new_agent, auto_save=False)
-            with att_manager._resources.mutation():
-                child.members.append(new_agent)
-        att_manager._auto_save(
-            agents={new_agent.agent_id},
-            teams={child.team_id},
-            libraries={new_agent.private_doc_library_id},
-        )
+            change.register_agent(new_agent)
+            change.members.append(new_agent)
         return f"Successfully added new member '{new_agent.name}' (Role: {role_name}) to team '{team_id}'."
 
     async def remove_team_member(team_id: str, agent_name: str) -> str:
@@ -94,7 +88,7 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                 f"AgentTeam {actual_team.team_id!r} is not the parent of child {team_id!r}."
             )
             
-        async with child.state_lock:
+        async with att_manager._messaging.membership_transaction(child) as change:
             min_size = att_manager.config.min_subagent_team_size
             if len(child.members) <= min_size:
                 raise ToolBusinessError(
@@ -111,9 +105,7 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                     f"Member {agent_name!r} was not found in AgentTeam {team_id!r}."
                 )
 
-            with att_manager._resources.mutation():
-                child.members.remove(target_agent)
-        att_manager._auto_save(teams={child.team_id})
+            change.members.remove(target_agent)
         return f"Successfully removed member '{agent_name}' from team '{team_id}'."
 
     async def initiate_membership_vote(
@@ -201,11 +193,13 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
         new_agent = None
         membership_changed = False
 
-        async with actual_team.state_lock:
-            if proposal_id not in actual_team.proposals:
+        async with att_manager._messaging.membership_transaction(actual_team) as change:
+            if actual_agent not in actual_team.members:
+                raise ToolPermissionError("Only a current active team member can vote.")
+            if proposal_id not in change.proposals:
                 raise ToolBusinessError(f"Proposal {proposal_id!r} was not found.")
                 
-            prop = actual_team.proposals[proposal_id]
+            prop = change.proposals[proposal_id]
             if prop.get("status") != "active":
                 raise ToolBusinessError(
                     f"Proposal {proposal_id!r} is already closed with status {prop.get('status')!r}."
@@ -321,11 +315,8 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                                 )
                                 new_agent = None
                             else:
-                                att_manager.register_agent(
-                                    new_agent, auto_save=False
-                                )
-                                with att_manager._resources.mutation():
-                                    actual_team.members.append(new_agent)
+                                change.register_agent(new_agent)
+                                change.members.append(new_agent)
                                 membership_changed = True
                                 result = (
                                     f"Proposal '{proposal_id}' approved "
@@ -357,8 +348,7 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                                 f"Member '{prop['target']}' not found."
                             )
                         else:
-                            with att_manager._resources.mutation():
-                                actual_team.members.remove(target_agent)
+                            change.members.remove(target_agent)
                             membership_changed = True
                             result = (
                                 f"Proposal '{proposal_id}' approved "
@@ -366,21 +356,6 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                                 f"Removed member '{target_agent.name}' from the team!"
                             )
 
-        changed_agents = {new_agent.agent_id} if new_agent is not None else set()
-        att_manager._auto_save(
-            agents=changed_agents,
-            teams=(
-                {actual_team.team_id}
-                if membership_changed
-                else set()
-            ),
-            proposals={actual_team.team_id},
-            libraries=(
-                {new_agent.private_doc_library_id}
-                if new_agent is not None
-                else set()
-            ),
-        )
         return result
 
     async def retract_membership_vote(proposal_id: str) -> str:

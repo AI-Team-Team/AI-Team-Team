@@ -34,6 +34,8 @@ class TestFreezeArtifacts(unittest.IsolatedAsyncioTestCase):
         document = (ARTIFACTS / "Schema_12.md").read_text(encoding="utf-8")
         new_groups = document.split("## Personal Admission and Model Evidence\n", 1)[1]
         documented = set(re.findall(r"^\| `([^`]+)` \|", new_groups, flags=re.MULTILINE))
+        extension = (ARTIFACTS / "Schema_13.md").read_text(encoding="utf-8")
+        documented.update(re.findall(r"^\| `([^`]+)` \|", extension, flags=re.MULTILINE))
         self.assertEqual(REQUIRED_TABLES, documented)
 
     async def test_schema_fixture_reads_committed_physical_metadata_without_llm_calls(self):

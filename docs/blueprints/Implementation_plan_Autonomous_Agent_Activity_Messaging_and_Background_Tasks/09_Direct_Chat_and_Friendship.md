@@ -16,15 +16,25 @@ Requests and messages targeting inactive, deleted, or audit-scoped identities mu
 
 ## 9.2 Admission transaction
 
+Use the same pair admission transaction for new direct messages and author edits that deliver a new revision to the recipient.
+
 1. Resolve the sender from the current personal invocation and validate both identity references.
 2. Lock the pair's relationship admission and capture its current generation.
-3. Reject delivery if either block is set or the recipient's applicable refusal restriction remains active.
-4. Resolve an existing idempotency record before charging stranger allowance again.
-5. If the pair is not friends, enforce the confirmed three-message allowance using the selected directional accounting rule.
-6. Commit the source message, allowance update, and recipient notification in one transaction.
+3. Return any matching accepted idempotency receipt without admitting another delivery or charging allowance again.
+4. Reject a new delivery if either block is set or the recipient's applicable refusal restriction remains active.
+5. If the pair is not friends, require and consume one unit of the sender's three-delivery allowance in the current relationship generation for either a new message or a successful edit.
+6. Commit the source message or append-only edit revision, allowance update, recipient notification, and idempotency receipt in one transaction.
 7. Return acceptance only after that transaction succeeds, then admit the same recipient's personal activity as allowed by sleep and do-not-disturb.
 
-Failed transactions do not consume allowance, and repeated submission of the same admitted operation does not create another message.
+Failed transactions do not consume allowance, and repeated submission of the same admitted operation does not create another message, edit revision, notification, or allowance charge.
+
+An edit to an older-generation message or a message sent during friendship uses the current relationship generation and current friendship state rather than the original sending permission.
+
+Rejecting an edit, failing its transaction, or cancelling it before acceptance commits leaves the original revision, allowance, reminders, and latest-successful-edit withdrawal deadline unchanged.
+
+Cancellation after acceptance commits must preserve the accepted revision and its single charge; retrying that operation returns its recorded receipt rather than refunding or charging again.
+
+Neither block, refusal, nor exhausted delivery allowance prevents reading history that the person was already authorized to retain.
 
 An explicitly new message with identical text is still a distinct message rather than body-based deduplication.
 
@@ -40,7 +50,7 @@ An explicitly new message with identical text is still a distinct message rather
 - Decisions about older requests cannot restore friendship across a relationship-generation change.
 - Messages and previously legitimate personal memories are not erased by a relationship change.
 
-The confirmed D06 contract is three messages per sender per relationship period, metadata-only friendship requests initially, and an explicit recipient-owned operation to lift refusal.
+The confirmed D06 contract is three stranger deliveries per sender per relationship period shared by new messages and successful edits, metadata-only friendship requests initially, and an explicit recipient-owned operation to lift refusal.
 
 Crossed requests remain requests until an explicit acceptance is recorded rather than infer friendship from two expressions of interest.
 

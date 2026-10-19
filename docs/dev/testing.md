@@ -490,3 +490,35 @@ Exercise self-dependencies, longer identity cycles, parallel nested observers, o
 Verify that technical model/tool budgets and scope checkpoints do not produce empty completed answers, while an explicit idle or sleep choice remains observable.
 
 Test both asynchronous and synchronous cancellation-resistant tools, inherited child contexts, rejected new managed writes after a later admission, and successful settlement of a file operation accepted before cancellation.
+
+### Team Conversations and Personal Direct Chat
+
+Run `./venv/bin/python -m unittest discover -s test/test_att/test_conversations -t .` for the Phase 3 implementation gate.
+
+Exercise actual Text and Native personal invocations, including repeated provider call IDs in distinct requests, without using ordinary model answers as publications.
+
+Serialize joining, leaving, sending, edits, withdrawal, and archive closure with deterministic lock and writer barriers.
+
+Race full saves, queued proposal snapshots, cancellation, and real writer failures with off-registry membership staging; require atomic proposal and identity publication, unique reserved names, complete cleanup, and successful retry after restore.
+
+Verify complete personal views, frozen departure projections, rejoin gap exclusion, current-team author authority, metadata filtering, independent reply access, source-version changes during token counting, and read failures without false receipts.
+
+Verify that Text and Native reads acknowledge only actual checkpointed observations, cancelled Native siblings leave prepared bodies unread, and cancellation after observation acceptance retains both body and read fact in SQLite.
+
+Cancel Host reads before returning their bodies and require exact restoration of earlier read watermarks and explicit unread overrides; reject forged or stale compensation proofs in both runtime and SQL, and preserve proof scope during delta coalescing.
+
+Race personal detail changes with retirement in both lock orders and require active-identity revalidation and lifecycle serialization.
+
+Check 1,200-second withdrawal windows, committed-edit deadline renewal, persistent personal deletion, retained unread previews, unchanged read facts, and detail/count separation.
+
+Test directional fourth-message rejection, both block owners, explicit refusal lifting, crossed requests, immutable accepted historical requests, final-unblock generations, failed-write refunds, and restart-safe exact delivery receipts.
+
+Inject corrupt source, view, interval, preview, request, operation, and owner references into real SQLite databases and require original runtime objects and DocLib files to remain unchanged.
+
+Test nonpublication receipt command/status mismatches, missing or foreign message and revision references, wrong friendship principals and generations, and valid historical replay after later edits, withdrawal, relationship resets, and personal-control changes.
+
+Use staging and real writer barriers to race archive finalization with child creation, migration, cancellation, and restore; require reservation cleanup after failure and reject dissolved parents in SQL as well as runtime admission.
+
+Reject schema 12 before DDL and test that later queued team metadata cannot replace accepted interval-derived membership.
+
+Use the [Phase 3 engineering profile](autonomous_activity/Phase_3.md) for the exact archive-finalization boundary and later-phase exclusions.

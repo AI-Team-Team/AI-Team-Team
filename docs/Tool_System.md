@@ -270,6 +270,24 @@ Missing tool replies receive a safe interruption marker so the next ordinary int
 
 The four team-formation attitudes remain a separate domain vocabulary, and marking a formation email read cannot accept, decline, explicitly ignore, or withdraw a public attitude.
 
+### Personal Chat Tools
+
+The continuing personal runtime exposes `send_direct_message`, `list_team_messages`, `list_direct_messages`, `read_chat_message`, `edit_chat_message`, `withdraw_chat_message`, `control_chat_message`, `set_chat_details`, `inspect_direct_relationship`, `list_friendship_requests`, `request_friendship`, `respond_friendship`, and `control_direct_relationship` in both Text and Native modes.
+
+`send_team_message(markdown, reply_to=None)` is available only in captured AgentTeam scope and does not accept a sender, actor, policy, or team override.
+
+Direct send tools accept the recipient's Agent ID, while all personal controls derive their owner from the actual invocation.
+
+`read_chat_message` supports line and Unicode character continuation, content-token limits, and expected source versions, just like model-facing file reads.
+
+Chat previews and mail presentation do not mark messages read, cast votes, accept friendship, or publish model answers.
+
+These tools are not an additional team-discussion mode and are not exposed by legacy institutional discussion strategies.
+
+`list_chat_reminders(message_id=None, limit=50, cursor=None)` inspects owner-authorized captured unread previews separately from current source retrieval, including after withdrawal.
+
+See [Phase 3](dev/autonomous_activity/Phase_3.md) for frozen history, current-source withdrawal, recipient-owned reminders, exact receipts, and the archive-finalization boundary.
+
 ## 10. Persistence & Serialization
 
 To support complete state recovery and shared-agent provenance, the `AgentMessageModel` table stores structured tool calls plus invocation context:
@@ -278,4 +296,5 @@ To support complete state recovery and shared-agent provenance, the `AgentMessag
 * **`tool_call_id`**: A string column mapping the message to its specific trigger.
 * **`name`**: A string column specifying which tool was executed.
 * **`team_id`**: The team active for this message.
-* **`discussion_id`**: The discussion invocation that produced this message.
+* **`invocation_id`**: The personal invocation that produced this message.
+* **`source_chat_message_id`**: The authorized chat source explicitly read into the personal observation.

@@ -7,7 +7,7 @@ import threading
 
 from ai_team_team.database.models import ACTIVITY_TABLES
 from ai_team_team.database.persistence.records import dependency_closure, merge_records, record_digest
-from ai_team_team.database.persistence.records import DomainRecord, thaw
+from ai_team_team.database.persistence.records import DomainRecord, thaw, freeze
 from ai_team_team.database.persistence.receipts import CommitReceipt, settle_commit
 from ai_team_team.database.persistence.store.validation.detached import DetachedValidationCache
 
@@ -21,6 +21,7 @@ class DurableRecordService:
         self.index = {}
         self.lock = asyncio.Lock()
         self.receipts = {}
+        self.publishing_proposals = set()
         self._validation = DetachedValidationCache()
 
     def restore(self, records):
@@ -32,10 +33,10 @@ class DurableRecordService:
         with self._index_lock:
             return tuple(self.index.values())
 
-    def _merge(self, records):
+    def _merge(self, records, *, read_compensations=()):
         """Do not lose another worker's update between COW read and replace."""
         with self._index_lock:
-            self.index = {record.identity: record for record in merge_records(self.snapshot(), records)}
+            self.index = {record.identity: record for record in merge_records(self.snapshot(), records, read_compensations=read_compensations)}
 
     def capture_memberships(self, team_ids, *, publish=True):
         """Capture relationship facts without editing any Agent-owned field.
@@ -78,8 +79,11 @@ class DurableRecordService:
                 if previous:
                     stream["state_version"] = previous.version + 1
                 captured.append(DomainRecord.capture("chat_streams", stream))
+        messaging = getattr(self.manager, "_messaging", None)
+        if messaging is not None:
+            captured.extend(messaging.freeze_departures(captured, self.index))
         merged = merge_records(self.snapshot(), captured)
-        if publish:
+        if publish and captured:
             self.restore(merged)
         candidate = {row.identity: row for row in merged}
         # A projection may have been recorded in memory before any database
@@ -91,7 +95,7 @@ class DurableRecordService:
                 and row.values["leave_event_id"] is None))
         return dependency_closure(merge_records(prerequisites, captured), candidate)
 
-    async def commit(self, records, *, operation_id=None, notifications=(), dirty=None, allow_closing=False, agent_contexts=None):
+    async def commit(self, records, *, operation_id=None, notifications=(), dirty=None, allow_closing=False, agent_contexts=None, team_memberships=None, team_lifecycles=None, agent_registrations=None, team_proposals=None, read_compensations=()):
         """Commit a domain delta without flushing unrelated queued changes.
 
         Notification dispatch contains IDs and transition metadata only. A
@@ -102,7 +106,18 @@ class DurableRecordService:
         manager._resources.check_authority()
         if agent_contexts and (dirty is None or not set(agent_contexts).issubset(dirty["agents"])):
             raise ValueError("Checkpoint context overrides require an authoritative Agent delta.")
+        if team_memberships and (dirty is None or not set(team_memberships).issubset(dirty["teams"])):
+            raise ValueError("Membership publication requires an authoritative team delta.")
+        if team_lifecycles and (dirty is None or not set(team_lifecycles).issubset(dirty["teams"])):
+            raise ValueError("Lifecycle publication requires an authoritative team delta.")
+        if team_proposals and (dirty is None or not set(team_proposals).issubset(dirty["proposals"])):
+            raise ValueError("Proposal publication requires an authoritative proposal delta.")
+        registrations = agent_registrations or {}
+        if registrations and (dirty is None or not set(registrations).issubset(dirty["agents"])
+                or not {item.library_id for item in registrations.values()}.issubset(dirty["libraries"])):
+            raise ValueError("Identity publication requires authoritative Agent and private library deltas.")
         records = tuple(DomainRecord.capture(record.table_name, record.values) for record in records)
+        read_compensations = tuple(freeze(proof) for proof in read_compensations)
         if operation_id is None:
             operation_id = uuid.uuid4().hex
         if type(operation_id) is not str or not operation_id.strip():
@@ -113,6 +128,10 @@ class DurableRecordService:
             raise ValueError("Post-commit dispatch must reference a notification in the accepted operation.")
         async with manager._runtime_gate:
             manager._resources.check_authority()
+            for owner, item in registrations.items():
+                if (manager._agent_registry.pending.get(owner) is not item or item.library is None
+                        or item.generation != manager._resources.generation):
+                    raise ValueError("The Agent registration reservation is no longer valid.")
             restoring_elsewhere = (
                 manager._restore_in_progress
                 and asyncio.current_task() is not manager._restore_finalizer
@@ -121,6 +140,14 @@ class DurableRecordService:
                 raise RuntimeError("Runtime admission is closed.")
             async with self.lock:
                 manager._resources.check_authority()
+                for proof in read_compensations:
+                    prepared = DomainRecord.capture("chat_personal_views", proof["prepared"])
+                    prior = self.receipts.get(proof["operation_id"])
+                    if prior is None or prior[1] != (prepared,) or self.index.get(prepared.identity) != prepared:
+                        raise ValueError("Read compensation requires this exact unsettled-delivery receipt and projection.")
+                    from ai_team_team.database.persistence.read_compensation import permits_read_compensation
+                    if len(records) != 1 or not permits_read_compensation(prepared, records[0], (proof,)):
+                        raise ValueError("Read compensation may restore only its immediately preceding personal read fields.")
                 digest = await asyncio.to_thread(record_digest, records)
                 if operation_id in self.receipts:
                     previous, _previous_records = self.receipts[operation_id]
@@ -137,7 +164,7 @@ class DurableRecordService:
                 if manager._closing and not allow_closing:
                     raise RuntimeError("Runtime admission closed before acceptance.")
                 captured = dependency_closure(records, self.index)
-                merge_records(self.snapshot(), records)
+                merge_records(self.snapshot(), records, read_compensations=read_compensations)
                 checkpoint_dirty = dirty
                 dirty = manager._new_dirty_state()
                 if checkpoint_dirty is not None:
@@ -168,17 +195,26 @@ class DurableRecordService:
                             dirty["governance_rounds"].update(values)
                 dirty["record_dependency_agents"] = agents
                 dirty["record_dependency_teams"] = teams
+                if team_memberships:
+                    dirty["team_memberships"] = team_memberships
+                if team_lifecycles:
+                    dirty["team_lifecycles"] = team_lifecycles
+                if team_proposals:
+                    dirty["team_proposals"] = team_proposals
+                if registrations:
+                    dirty["_staged_agents"] = {owner: item.agent for owner, item in registrations.items()}
+                    dirty["_staged_libraries"] = {item.library_id: item.library for item in registrations.values()}
                 validation_candidate = None
                 if not manager.db_path:
                     scoped_auditors = {member.agent_id for team in manager.teams.values()
                                        if team.team_kind == "supervisory" for member in team.members}
                     state = {
-                        "agents": [{"agent_id": agent.agent_id, "name": agent.name, "lifecycle_state": agent.lifecycle_state} for agent in manager._agents_by_id.values() if agent.agent_id not in scoped_auditors],
-                        "teams": [{"team_id": team.team_id, "team_kind": "ordinary", "lifecycle_state": "active", "creator_type": "agent" if hasattr(team.creator, "agent_id") else "team", "creator_id": getattr(team.creator, "agent_id", getattr(team.creator, "team_id", None)), "members": tuple(member.agent_id for member in team.members)} for team in manager.teams.values() if team.team_kind == "ordinary"],
+                        "agents": [{"agent_id": agent.agent_id, "name": agent.name, "lifecycle_state": agent.lifecycle_state} for agent in {**manager._agents_by_id, **dirty.get("_staged_agents", {})}.values() if agent.agent_id not in scoped_auditors],
+                        "teams": [{"team_id": team.team_id, "team_kind": "ordinary", "lifecycle_state": (team_lifecycles or {}).get(team.team_id, getattr(team, "_lifecycle_state", "active")), "parent_team_id": team.parent_team.team_id if team.parent_team else None, "parent_agent_id": getattr(team, "_parent_agent_id", None), "creator_type": "agent" if hasattr(team.creator, "agent_id") else "team", "creator_id": getattr(team.creator, "agent_id", getattr(team.creator, "team_id", None)), "members": (team_memberships or {}).get(team.team_id, tuple(member.agent_id for member in team.members))} for team in manager.teams.values() if team.team_kind == "ordinary"],
                         "agent_inboxes": {agent.agent_id: list(agent.agent_inbox) for agent in manager._agents_by_id.values()},
                         **manager._memory.snapshot(),
                         "governance_rounds": manager._governance.snapshot(),
-                        "records": merge_records(self.snapshot(), captured),
+                        "records": merge_records(self.snapshot(), captured, read_compensations=read_compensations),
                     }
                     validation_candidate = await asyncio.to_thread(self._validation.prepare, state)
                     if manager._closing and not allow_closing:
@@ -202,22 +238,68 @@ class DurableRecordService:
                                 if row["agent_id"] in agent_contexts else row
                                 for row in snapshot["agents"]
                             ]
-                        snapshot["records"] = merge_records(snapshot.get("records", ()), captured)
+                        snapshot["records"] = merge_records(snapshot.get("records", ()), captured, read_compensations=read_compensations)
+                        snapshot["_read_compensations"] = read_compensations
                         snapshot["_operations"] = (receipt,)
                         future = asyncio.wrap_future(manager._persistence.submit(manager.db_path, snapshot))
+                        self.publishing_proposals.update(team_proposals or ())
                     else:
                         future = asyncio.get_running_loop().create_future()
                         future.set_result((receipt,))
                 try:
-                    committed_receipts = await settle_commit(future)
-                    if receipt not in committed_receipts:
-                        raise RuntimeError("The writer did not acknowledge this exact operation.")
+                    return await self._settle_publication(future, receipt, records, operation_id, notifications,
+                        validation_candidate, team_memberships, team_lifecycles, registrations, team_proposals, read_compensations)
                 finally:
-                    if future.done() and not future.cancelled() and future.exception() is None and receipt in future.result():
-                        self._merge(records)
+                    with manager._snapshot_lock:
+                        self.publishing_proposals.difference_update(team_proposals or ())
+
+    async def _settle_publication(self, future, receipt, records, operation_id, notifications,
+            validation_candidate, team_memberships, team_lifecycles, registrations, team_proposals, read_compensations):
+        manager = self.manager
+        try:
+            committed_receipts = await settle_commit(future)
+            if receipt not in committed_receipts:
+                raise RuntimeError("The writer did not acknowledge this exact operation.")
+        finally:
+            if future.done() and not future.cancelled() and future.exception() is None and receipt in future.result():
+                def publish():
+                    # Never retain resource authority while waiting for an
+                    # unrelated topology reader. An accepted commit survives cancellation.
+                    while True:
+                        manager._resources._lock.acquire()
+                        if manager._topology_lock.acquire(blocking=False):
+                            break
+                        manager._resources._lock.release()
+                        if manager._topology_lock.acquire(timeout=0.05):
+                            manager._topology_lock.release()
+                    try:
+                        with manager._snapshot_lock:
+                            for item in registrations.values():
+                                item.publish()
+                            self._merge(records, read_compensations=read_compensations)
+                            for team_id, proposals in (team_proposals or {}).items():
+                                manager.teams[team_id].proposals = proposals
+                            for team_id, member_ids in (team_memberships or {}).items():
+                                manager.teams[team_id].members = [manager._agents_by_id[owner] for owner in member_ids]
+                            for team_id, lifecycle in (team_lifecycles or {}).items():
+                                manager.teams[team_id]._lifecycle_state = lifecycle
+                    finally:
+                        manager._topology_lock.release()
+                        manager._resources._lock.release()
+
+                publication = None
+                if team_memberships or team_lifecycles or registrations or team_proposals:
+                    publication = asyncio.create_task(asyncio.to_thread(publish))
+                else:
+                    self._merge(records, read_compensations=read_compensations)
+                try:
+                    if publication is not None:
+                        await settle_commit(publication)
+                finally:
+                    if publication is None or (publication.done() and not publication.cancelled() and publication.exception() is None):
                         if validation_candidate is not None:
                             self._validation.accept(validation_candidate)
                         self.receipts[operation_id] = receipt, records
                         for notification_id in notifications:
                             manager._emit_callback("on_system_event", "notification_committed", {"notification_id": notification_id, "operation_id": operation_id})
-                return receipt
+        return receipt

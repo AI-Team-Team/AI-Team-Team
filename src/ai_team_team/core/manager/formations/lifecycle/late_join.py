@@ -3,7 +3,7 @@
 import asyncio
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from ....agent import Agent
 from ....formation import (
@@ -153,7 +153,6 @@ class FormationLateJoinMixin:
             invitation,
             actor,
             rollback_invitation=old_invitation,
-            rollback_inboxes=old_inboxes,
             decision_id=decision.decision_id,
         )
 
@@ -230,13 +229,11 @@ class FormationLateJoinMixin:
         invitee: Agent,
         *,
         rollback_invitation: Optional[TeamFormationInvitation] = None,
-        rollback_inboxes: Optional[Dict[str, list[dict[str, Any]]]] = None,
         decision_id: Optional[str] = None,
     ) -> FormationOperationResult:
         old_invitation = rollback_invitation or invitation.model_copy(deep=True)
-        old_inboxes = rollback_inboxes or self._copy_inboxes((invitee,))
         team: Optional[AgentTeam] = None
-        commit_started = False
+        operation_id = f"LATE-JOIN-{uuid.uuid4().hex}"
         try:
             self._require_active_agent(invitee)
             team = self.manager.teams.get(request.created_team_id or "")
@@ -244,57 +241,36 @@ class FormationLateJoinMixin:
                 raise ValueError("The created AgentTeam no longer exists.")
             async with team.state_lock:
                 self._require_active_agent(invitee)
-                old_members = list(team.members)
                 try:
                     if any(member.agent_id == invitee.agent_id for member in team.members):
                         raise ValueError(
                             "The invited Agent is already a member of this AgentTeam."
                         )
-                    with self.manager._resources.mutation():
-                        team.members.append(invitee)
                     now = time.time()
                     invitation.joined_at = now
                     invitation.late_join_pending = False
                     invitation.late_join_requested_at = None
                     invitation.late_join_decision = "approved"
-                    self._notify_agent(
-                        invitee.agent_id,
-                        "team_formation_late_joined",
-                        {"request_id": request.request_id, "team_id": team.team_id},
-                    )
-                    commit_started = True
-                    await self.manager._commit_dirty_state(
-                        self._dirty(
+                    await self.manager._messaging.replace_members(
+                        team, [*team.members, invitee], actor=self.manager._active_tool_agent.get() or invitee,
+                        locked=True, operation_id=operation_id, dirty=self._dirty(
                             request.request_id,
                             inbox_agent_ids={invitee.agent_id},
                             team_ids={team.team_id},
                             decision_history=decision_id is not None,
-                        )
+                        ), mail_specs=((invitee.agent_id, "team_formation_late_joined",
+                            {"request_id": request.request_id, "team_id": team.team_id}),),
                     )
                 except Exception:
-                    with self.manager._resources.mutation():
-                        team.members = old_members
                     raise
         except asyncio.CancelledError:
-            if not commit_started:
+            if operation_id not in self.manager._records.receipts:
                 self.invitations[(request.request_id, invitee.agent_id)] = old_invitation
-                restored_agents = [
-                    self.manager._agents_by_id[agent_id]
-                    for agent_id in old_inboxes
-                    if agent_id in self.manager._agents_by_id
-                ]
-                self._restore_inboxes(restored_agents, old_inboxes)
                 if decision_id is not None:
                     self.decisions.pop(decision_id, None)
             raise
         except Exception:
             self.invitations[(request.request_id, invitee.agent_id)] = old_invitation
-            restored_agents = [
-                self.manager._agents_by_id[agent_id]
-                for agent_id in old_inboxes
-                if agent_id in self.manager._agents_by_id
-            ]
-            self._restore_inboxes(restored_agents, old_inboxes)
             if decision_id is not None:
                 self.decisions.pop(decision_id, None)
             raise

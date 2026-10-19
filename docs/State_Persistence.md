@@ -28,6 +28,8 @@ The Host can explicitly select `persistence_mode="volatile"` without `db_path` f
 
 The [Phase 1 engineering profile](dev/autonomous_activity/Phase_1.md) describes schema 12 records, exact commit receipts, recoverable publication, and resource-generation leases.
 
+The [Phase 3 messaging profile](dev/autonomous_activity/Phase_3.md) activates incompatible schema 13 for explicit publications, exact chat command keys, private read/detail controls, historical views, friendship periods, and recipient-owned reminder evidence.
+
 The [Phase 2 personal runtime](dev/autonomous_activity/Phase_2.md) atomically checkpoints the sanitized personal window, Journal dependencies, notification claims, and activity progress.
 
 Open Native exchanges are excluded from saved model windows while their issued execution evidence remains retained.
@@ -109,10 +111,25 @@ The database stores:
 - ordinary teams with role-neutral `team_id ↔ agent_id` membership rows linked to historical intervals, explicit parent references, AgentTeam inboxes, and proposals;
 - consensual formation request projections, normalized content and revision fingerprints, immutable revision snapshots, append-only exact-revision invitation decisions, detached collaborative drafts, creation choices, late-join state, and resulting team references;
 - communication requests, ordered approvals, member ballots, directional Agreements, and peer-delivery records;
+- team and direct Markdown chat sources, append-only revisions and withdrawal evidence, independently owned personal views, captured reminder previews, exact operation receipts, preferences, and friendship requests and relationship generations;
 - identified governance cases with frozen electorates, immutable explicit personal-email ballots, and asynchronous migration requests;
 - document-library metadata, ACLs, managed cross-library links, paths, and file contents.
 
 An incremental membership change rewrites the affected team's `team_members` rows without rewriting an already persisted Agent record, Working Context, Journal, Memory Catalog, model binding, lifecycle state, or Private DocLib.
+
+Those rows are derived from the latest accepted open membership intervals after record application, so a coalesced or later progress snapshot cannot reopen a departed relationship.
+
+New membership identities, their Private DocLibs, and proposal replacements publish with the same receipt; ordinary snapshots cannot capture their unaccepted staging state or overwrite a replacement that is still settling.
+
+Departure and archive-finalization transactions freeze exact authorized source references, while later edits and withdrawals update only live views.
+
+Personal-runtime body reads acknowledge only observations included in their accepted Working Context checkpoint.
+
+Cancelled, unreturned Host reads compensate only their own immediately preceding read projection through an exact preparation receipt, preserving earlier read and unread facts without relaxing normal watermark validation.
+
+Withdrawal validation uses the persisted finite positive applied window, not a hard-coded ten-minute cap or a later configuration value.
+
+An accepted historical friendship request remains accepted after its relationship generation changes, without granting current contact authority.
 
 Each audit's supervisory AgentTeam and fresh auditors are fully registered in the running Manager but deliberately omitted from state snapshots, including full saves taken during an audit.
 
@@ -184,6 +201,6 @@ The optional [Selective Episodic Memory](Selective_Episodic_Memory.md) catalog c
 
 ## Schema policy
 
-- The current persistence schema version is `12`.
-- Compatibility with schema `11` and earlier SQLite layouts is intentionally unsupported.
+- The current persistence schema version is `13`.
+- Compatibility with schema `12` and earlier SQLite layouts is intentionally unsupported.
 - Create a new database when upgrading.

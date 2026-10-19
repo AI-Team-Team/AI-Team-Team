@@ -87,7 +87,8 @@ class NotificationMixin:
                 for row in self.manager._records.snapshot()
                 if row.table_name == "notification_claims" and row.values["status"] == "presented"
             }
-        return notice.values["notification_id"] not in presented and not self.suppressed(notice)
+        return (notice.values["notification_id"] not in presented
+                and self.manager._messaging.can_present(notice) and not self.suppressed(notice))
 
     def notice_can_wake(self, notice):
         if not self.notice_pending(notice):
@@ -377,6 +378,11 @@ class NotificationMixin:
                                 "Use open_agent_mail to inspect this mail; opening is not a reply or a public choice."
                             )
                 self.append(session, {"role": "user", "content": "\n".join(lines)})
+            summaries, chat_references = self.manager._messaging.frame_summaries(agent, include_references=True)
+            if summaries:
+                # Context presentation does not mark sources read. Recompute
+                # from authorized values for every actual model request.
+                self.append(session, {"role": "user", "content": summaries})
             record = capture(
                 self.manager,
                 "notification_frames",
@@ -387,7 +393,7 @@ class NotificationMixin:
                 arrival_cutoff=max(
                     (item.values["arrival_generation"] for item in notices), default=0
                 ),
-                summary_references=references,
+                summary_references=[*references, *chat_references],
             )
             await self.checkpoint(session, extra=(record,))
 

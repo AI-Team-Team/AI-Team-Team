@@ -1,6 +1,8 @@
 """Topology lookup and rendering for an ATT manager."""
 
+import asyncio
 import threading
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Mapping, Optional
 
 from ..agent import Agent
@@ -18,6 +20,43 @@ class TopologyService:
         self.manager = manager
         self.parent_map: dict[str, str] = {}
         self.lock = threading.RLock()
+        self.transition_lock = asyncio.Lock()
+        self._reserved: dict[str, object] = {}
+
+    def require_available(self, team: AgentTeam) -> None:
+        """Validate a topology participant inside the shared publication lock."""
+        with self.lock:
+            if (self.manager.teams.get(team.team_id) is not team
+                    or team.team_kind != "ordinary"
+                    or getattr(team, "_lifecycle_state", "active") != "active"
+                    or getattr(team, "_publication_pending", False)):
+                raise ValueError("Topology changes require active published registered ordinary AgentTeams.")
+            if team.team_id in self._reserved:
+                raise ValueError("An AgentTeam topology transition is awaiting commit.")
+
+    @property
+    def transition_pending(self) -> bool:
+        with self.lock:
+            return self.transition_lock.locked() or bool(self._reserved)
+
+    @contextmanager
+    def reserve_transition(self, team: AgentTeam):
+        """Fence new topology edges until receipt settlement, without an IO-held lock.
+
+        Async transitions also own transition_lock; synchronous team creation
+        checks the same reservation under the short topology publication lock.
+        The reservation is runtime coordination, not a published lifecycle.
+        """
+        token = object()
+        with self.manager._resources.topology_mutation():
+            self.require_available(team)
+            self._reserved[team.team_id] = token
+        try:
+            yield
+        finally:
+            with self.lock:
+                if self._reserved.get(team.team_id) is token:
+                    del self._reserved[team.team_id]
 
     def replace_parent_map(self, parent_map: Mapping[str, str]) -> None:
         """Replace index contents without breaking the Manager's shared reference."""
@@ -68,6 +107,7 @@ class TopologyService:
         level_one = [
             team for team in self.manager.teams.values()
             if team.team_kind == "ordinary" and team.parent_team is None
+            and getattr(team, "_lifecycle_state", "active") == "active"
         ]
 
         def traverse(team: AgentTeam, depth: int = 1, is_last: bool = True) -> None:
@@ -79,6 +119,8 @@ class TopologyService:
                 f"Progress: {team.team_progress}) [Level {team.depth}]"
             )
             for index, child in enumerate(team.child_teams):
+                if getattr(child, "_lifecycle_state", "active") != "active":
+                    continue
                 traverse(
                     child,
                     depth + 1,

@@ -211,6 +211,18 @@ class PersonalActivityConfig(BaseModel):
         return values
 
 
+class ConversationConfig(BaseModel):
+    """Presentation limits and a configurable withdrawal window, not retention limits."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, validate_assignment=True, validate_default=True)
+    title_max_characters: Annotated[int, Field(ge=1)] = 200
+    preview_characters: Annotated[int, Field(ge=1)] = 500
+    summary_preview_limit: Annotated[int, Field(ge=1)] = 20
+    withdrawal_window_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 600.0
+    team_details: bool = True
+    direct_details: bool = True
+
+
 class ATTConfig(BaseModel):
     """Strict, assignment-validated runtime configuration for ATT."""
 
@@ -287,6 +299,7 @@ class ATTConfig(BaseModel):
         default_factory=EpisodicMemoryConfig
     )
     activity: PersonalActivityConfig = Field(default_factory=PersonalActivityConfig)
+    conversations: ConversationConfig = Field(default_factory=ConversationConfig)
 
     _MAPPING_VALIDATORS: ClassVar[Dict[str, str]] = {
         "model_registry": "_validate_string_mapping",

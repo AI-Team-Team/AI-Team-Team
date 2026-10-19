@@ -7,12 +7,17 @@ from sqlalchemy import and_, select, text
 
 from ai_team_team.core.exceptions import StatePersistenceError, StateRestoreError
 from ai_team_team.database.models import ACTIVITY_TABLES, commit_receipts
-from ai_team_team.database.persistence.records import DomainRecord, thaw, validate_update
+from ai_team_team.database.persistence.records import DomainRecord, thaw, validate_update, record_digest
 from ai_team_team.database.persistence.receipts import CommitReceipt
 
 
-def write_records(session, records):
+def write_records(session, records, *, read_compensations=()):
     """Insert prerequisites under deferred restrictive FKs; validate before commit."""
+    for proof in read_compensations:
+        prepared = DomainRecord.capture("chat_personal_views", proof["prepared"])
+        accepted = read_receipt(session, proof["operation_id"])
+        if accepted is None or prepared.receipt_key not in accepted.dependencies or accepted.record_digest != record_digest((prepared,)):
+            raise StatePersistenceError("A cancelled read compensation has no matching accepted preparation receipt.")
     for record in records:
         table = ACTIVITY_TABLES[record.table_name]
         values = thaw(record.values)
@@ -31,7 +36,7 @@ def write_records(session, records):
             if dict(existing) != values:
                 raise StatePersistenceError("A durable version cannot identify conflicting projections.")
             continue
-        validate_update(DomainRecord.capture(record.table_name, existing), record)
+        validate_update(DomainRecord.capture(record.table_name, existing), record, read_compensations=read_compensations)
         session.execute(table.update().where(predicate).values(**values))
 
 

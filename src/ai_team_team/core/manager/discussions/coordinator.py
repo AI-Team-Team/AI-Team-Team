@@ -72,6 +72,8 @@ class DiscussionCoordinator(DiscussionSessionMixin):
                     raise RuntimeError("ATTManager is closing and rejects new discussions.")
                 if self.manager.teams.get(team.team_id) is not team:
                     raise ValueError("The discussion team is not registered.")
+                if getattr(team, "_lifecycle_state", "active") != "active" or getattr(team, "_publication_pending", False):
+                    raise ValueError("The discussion team is not an active published AgentTeam.")
                 team.is_running = True
                 member_snapshot = list(team.members)
             try:

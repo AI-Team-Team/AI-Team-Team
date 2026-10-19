@@ -37,6 +37,12 @@ class MigrationService:
             return "Migration requires two registered AgentTeams."
         if team.team_kind != "ordinary" or target.team_kind != "ordinary":
             return "System AgentTeams cannot migrate."
+        try:
+            for node in (team, target, original_parent):
+                if node is not None:
+                    manager._topology.require_available(node)
+        except ValueError as error:
+            return str(error)
         if team.parent_team is not original_parent:
             return "The current parent changed while approval was pending."
         if original_parent is not None and team not in original_parent.child_teams:
@@ -162,7 +168,7 @@ class MigrationService:
 
     async def complete_request(self, request_id):
         manager = self.manager
-        async with self.lock, manager._governance.lock:
+        async with self.lock, manager._governance.lock, manager._topology.transition_lock:
             if manager._restore_in_progress:
                 raise RuntimeError("ATTManager cannot resolve migration during restore.")
             item = self.requests.get(request_id)

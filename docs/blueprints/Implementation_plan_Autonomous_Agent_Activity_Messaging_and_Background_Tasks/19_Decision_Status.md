@@ -4,6 +4,8 @@
 
 This section records confirmed design contracts as of 2026-10-07.
 
+The direct-message edit admission clarification in D06 was confirmed on 2026-10-19.
+
 Exact API names, executor contracts, and numerical settings not explicitly confirmed remain subject to design review.
 
 ## 19.1 Decision record
@@ -15,7 +17,7 @@ Exact API names, executor contracts, and numerical settings not explicitly confi
 | D03 | Queue, independent-side exemption, and lineage routing confirmed; wake deferred. | Deliver non-exempt required approval requests as voluntary personal mail, waive only an independent endpoint's own parent or ancestor requirements, preserve non-independent counterpart approval, allow independent pairs to communicate permissively, and use both real lineages to their independent tops for cross-tree attached endpoints. | Route derivation and persistence implementation, with wake safeguards deferred to future work. |
 | D04 | Confirmed sleep and suppression behavior. | Mandatory sleep countdown, any-condition wake, positive day/hour/minute inputs, host-adjustable five-minute through two-day countdown bounds shared with timed suppression, permanent suppression, protected-notice bypass, and source-and-count unread summaries without previews after suppression ends. | Timer checkpoint precision and summary presentation integration. |
 | D05 | Rejoin, message behavior, and personal archives confirmed. | Complete Markdown messages outside DocLib, first non-code level-one title, configurable 200-character title limit, 500 body-character preview, current-member author-only mutation, unread edit reminders, persistent personal deletion, latest-committed-edit withdrawal deadlines, prior snapshots retained after rejoining without absence-period synchronization, existing reminder previews and receipts surviving withdrawal, and authorized personal archives surviving AT dissolution. | Storage and projection implementation rather than an unresolved archive-access policy. |
-| D06 | Confirmed. | Three messages per sender per relationship period, recipient-owned refusal clearance, metadata-only friendship requests, and explicit acceptance for crossed requests. | API naming and storage details. |
+| D06 | Confirmed. | Three stranger deliveries per sender per relationship period shared by new messages and successful edits, live block and recipient-refusal checks for edits, atomic revision/allowance/notification commits, idempotent retries without duplicate charges, unchanged state after failed or pre-commit-cancelled edits, preserved committed edits after caller cancellation, retained authorized historical reads, recipient-owned refusal clearance, metadata-only friendship requests, and explicit acceptance for crossed requests. | API naming and storage details. |
 | D07 | Confirmed. | Measure the configurable 120-second threshold from actual executor start, exclude queue and preflight, and detach the same execution without cancellation or restart. | Executor timing integration and cumulative retry/backoff accounting. |
 | D08 | Coordination and whitelist confirmed. | Explicit background permission, cross-owner conflicting-resource serialization, independent-resource concurrency, and no new version-check or overwrite-confirmation requirement. | External declaration validation and supported safety or isolation contracts. |
 | D09 | Confirmed. | Show live and unresolved attention or uncertainty counts, retain acknowledged queryable history, and add no automatic result deletion or sharing grant. | Query and summary implementation. |

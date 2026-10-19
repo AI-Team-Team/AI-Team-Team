@@ -112,7 +112,8 @@ class StoreWriteMixin(
             self._write_file_changes(session, snapshot.get("file_changes", {}))
             self._write_links(session, snapshot.get("links"))
             session.flush()
-            write_records(session, snapshot.get("records", ()))
+            write_records(session, snapshot.get("records", ()), read_compensations=snapshot.get("_read_compensations", ()))
+            self._sync_current_memberships(session, snapshot.get("records", ()), team_dependencies + snapshot.get("teams", []))
             candidate = self._validation.prepare(session)
             receipts = write_receipts(session, snapshot.get("_operations", ()))
             for receipt in receipts:

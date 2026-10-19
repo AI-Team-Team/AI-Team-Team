@@ -156,10 +156,11 @@ class TestATTGovernance(unittest.IsolatedAsyncioTestCase):
         # This makes it 3/3 Agree. Since all members voted, it should automatically evaluate and approve the proposal
         res_vote2 = await cast_vote_agent2(proposal_id=proposal_id2, vote="Agree")
         self.assertIn("Successfully cast vote", res_vote2)
-        self.assertEqual(proposal2["status"], "active") # Still 1 voter remaining (agent 3)
+        self.assertEqual(team.proposals[proposal_id2]["status"], "active") # Still 1 voter remaining (agent 3)
 
         res_vote3 = await cast_vote_agent3(proposal_id=proposal_id2, vote="Agree")
         self.assertIn("approved", res_vote3)
+        proposal2 = team.proposals[proposal_id2]  # Receipt publication replaces the proposal snapshot.
         self.assertEqual(proposal2["status"], "approved")
 
         # Verify that the new member is added
@@ -189,7 +190,7 @@ class TestATTGovernance(unittest.IsolatedAsyncioTestCase):
         res_final_vote = await cast_vote_auditor(proposal_id=proposal_id3, vote="Disagree")
 
         self.assertIn("rejected", res_final_vote)
-        self.assertEqual(proposal3["status"], "rejected")
+        self.assertEqual(team.proposals[proposal_id3]["status"], "rejected")
         # Dynamic_Auditor should still be in the team
         self.assertIn(new_agent, team.members)
 

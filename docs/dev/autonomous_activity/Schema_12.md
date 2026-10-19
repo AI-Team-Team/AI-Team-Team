@@ -134,7 +134,7 @@ Dissolution closes live intervals and removes live team discovery while retainin
 
 ### Pending Phase 3 constraint alignment
 
-The following clarifications are required implementation work rather than a claim that the current schema 12 constraint and relationship validator already implement them.
+The following clarifications describe the required behavior at the schema 12 freeze; [schema 13](Schema_13.md) implements the window and relationship-history corrections without migrating older databases.
 
 The current `window_seconds <= 600` check must be removed so the database retains basic positive-duration validation without turning the ten-minute default into a fixed maximum.
 

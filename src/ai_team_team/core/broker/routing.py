@@ -171,6 +171,9 @@ class BrokerRoutingMixin:
             raise ValueError("The recipient AgentTeam is not registered.")
         if sender.team_kind != "ordinary" or recipient.team_kind != "ordinary":
             raise PermissionError("System AgentTeams cannot be peer communication endpoints.")
+        if any(getattr(team, "_lifecycle_state", "active") != "active" or getattr(team, "_publication_pending", False)
+               for team in (sender, recipient)):
+            raise PermissionError("Peer communication requires active published AgentTeam endpoints.")
         actor = self.manager._agents_by_id.get(initiated_by_agent_id)
         if (
             actor is None

@@ -153,21 +153,32 @@ class CoreStateWriteMixin:
                 synchronize_session=False,
             )
         session.flush()
-        for team in teams:
-            session.execute(delete(team_members).where(team_members.c.team_id == team["team_id"]))
-            for member_id in team["members"]:
-                interval_id = next((record.values["interval_id"] for record in records
-                    if record.table_name == "membership_intervals" and record.values["team_id"] == team["team_id"]
-                    and record.values["agent_id"] == member_id and record.values["leave_event_id"] is None), None)
-                if interval_id is None:
-                    intervals = ACTIVITY_TABLES["membership_intervals"]
-                    interval_id = session.execute(select(intervals.c.interval_id).where(
-                        intervals.c.team_id == team["team_id"], intervals.c.agent_id == member_id, intervals.c.leave_event_id.is_(None))).scalar_one_or_none()
-                if interval_id is None:
-                    raise ValueError("Current membership requires an exact open historical interval.")
-                session.execute(
-                    team_members.insert().values(team_id=team["team_id"], agent_id=member_id, interval_id=interval_id)
-                )
+
+    @staticmethod
+    def _sync_current_memberships(session: Any, records, teams) -> None:
+        """Derive the live projection from accepted intervals, never stale metadata.
+
+        A later queued progress snapshot may legitimately contain an older
+        runtime member list while the relationship receipt is settling. The
+        interval records, with their independent versions, remain authoritative.
+        """
+        ordering = {team["team_id"]: team["members"] for team in teams}
+        identifiers = set(ordering) | {row.values["team_id"] for row in records if row.table_name == "membership_intervals"}
+        intervals = ACTIVITY_TABLES["membership_intervals"]
+        events, streams = ACTIVITY_TABLES["chat_events"], ACTIVITY_TABLES["chat_streams"]
+        for team_id in sorted(identifiers):
+            current = dict(session.execute(select(intervals.c.agent_id, intervals.c.interval_id).where(
+                intervals.c.team_id == team_id, intervals.c.leave_event_id.is_(None))).all())
+            ordered = [owner for owner in ordering.get(team_id, ()) if owner in current]
+            ordered.extend(sorted(current.keys() - set(ordered)))
+            session.execute(delete(team_members).where(team_members.c.team_id == team_id))
+            if ordered:
+                session.execute(team_members.insert(), [dict(team_id=team_id, agent_id=owner,
+                    interval_id=current[owner]) for owner in ordered])
+            dissolved = session.execute(select(events.c.event_id).join(streams, events.c.stream_id == streams.c.stream_id).where(
+                streams.c.team_id == team_id, events.c.event_kind == "dissolve")).first()
+            if dissolved:
+                session.query(TeamModel).filter_by(team_id=team_id).update({"lifecycle_state": "dissolved"}, synchronize_session=False)
 
     @staticmethod
     def _write_inboxes(session: Any, inboxes: Dict[str, Dict[str, Any]]) -> None:

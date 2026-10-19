@@ -11,6 +11,7 @@ Strict, assignment-validated configuration for the ATT runtime.
 ```python
 from ai_team_team import (
     ATTConfig,
+    ConversationConfig,
     EpisodicMemoryConfig,
     FileReadConfig,
     PermissiveCommunicationConfig,
@@ -20,6 +21,7 @@ from ai_team_team import (
 config = ATTConfig(
     communication=PermissiveCommunicationConfig(),
     file_read=FileReadConfig(),
+    conversations=ConversationConfig(),
     episodic_memory=EpisodicMemoryConfig(enabled=False),
     turn_failure_policy=TurnFailurePolicyConfig(),
     model_tokenizer_configs={
@@ -75,6 +77,15 @@ config = ATTConfig(
 | `file_read` | `FileReadConfig` | `FileReadConfig()` | Controls decoded content-token limits and missing-counter behavior for model-facing team and private file reads. |
 | `episodic_memory` | `EpisodicMemoryConfig` | `EpisodicMemoryConfig()` | Configures the optional Agent-owned episodic-memory catalog, which is disabled by default. |
 | `activity` | `PersonalActivityConfig` | `PersonalActivityConfig()` | Continuing-person scheduling, notification frames, finite sleep, cooldown accounting, and bounded model requests. |
+| `conversations` | `ConversationConfig` | `ConversationConfig()` | Title and preview bounds, withdrawal window, and default personal team/direct detail settings. |
+
+### `ConversationConfig`
+
+The strict, assignment-validated defaults are `title_max_characters=200`, `preview_characters=500`, `summary_preview_limit=20`, `withdrawal_window_seconds=600.0`, `team_details=True`, and `direct_details=True`.
+
+Character counts and preview limits must be positive integers; the withdrawal window must be finite and positive, without a fixed ten-minute maximum.
+
+Personal `set_chat_details()` overrides persist independently of the default configuration and do not modify team membership or Agent identity.
 
 ### `PersonalActivityConfig` and `ModelRequestPolicy`
 
@@ -236,6 +247,38 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
   Host-only acknowledgement after resource remediation, without resetting quota, switching the model, or bypassing live-request and provider waiting boundaries.
 * **`register_runtime_clock(clock: RuntimeClock) -> None`**
   Binds a Host clock before activity, requests, or timers are admitted; ordinary applications use the built-in clock.
+* **`await send_team_message(team_id, markdown, *, actor, operation_key=None, reply_to=None) -> SourceDeliveryReceipt`**
+  Deliberately publishes to a current ordinary AgentTeam and commits recipient views and notices before acknowledging delivery.
+* **`await send_direct_message(agent_id, markdown, *, actor, operation_key=None, reply_to=None) -> SourceDeliveryReceipt`**
+  Publishes personal chat under the canonical pair's live blocks, refusal, friendship, and directional stranger allowance.
+* **`list_team_messages(team_id, *, actor, unread_only=False, query=None, limit=50, cursor=None, include_deleted=False) -> ChatMessagePage`**
+  Returns authorized live and frozen personal history, filtering before metadata, search, or opaque pagination; previews do not mark read.
+* **`list_direct_messages(agent_id, *, actor, unread_only=False, query=None, limit=50, cursor=None, include_deleted=False) -> ChatMessagePage`**
+  Lists only the acting person's direct conversation with that endpoint.
+* **`await read_chat_message(message_id, *, actor, version=None, start_line=1, end_line=None, start_character=1, character_count=None, expected_file_version=None) -> ChatReadResult`**
+  Returns a token-gated authorized body range and commits its personal read marker; stale versions and failed reads return no content or false read receipt.
+* **`list_chat_reminders(*, actor, message_id=None, limit=50, cursor=None) -> ChatReminderPage`**
+  Inspects only that person's captured unread previews, including retained withdrawal evidence, without reopening a withdrawn source or clearing its unread revision.
+* **`await edit_chat_message(message_id, markdown, *, actor, operation_key=None) -> ChatOperationResult`**
+  Appends an author-only revision, checking current team scope or direct delivery admission; direct edits also consume stranger allowance while not friends.
+* **`await withdraw_chat_message(message_id, *, actor, operation_key=None) -> ChatOperationResult`**
+  Commits an author-attributed source marker within the configured window without erasing earlier frozen history or captured recipient reminders.
+* **`await control_chat_message(command, message_id, *, actor, operation_key=None) -> ChatOperationResult`**
+  Uses `mark_message_read`, `mark_message_unread`, `delete_message`, or `restore_message` to change only the actor's authorized personal view.
+* **`await set_chat_details(*, actor, team_details=None, direct_details=None, operation_key=None) -> ChatOperationResult`**
+  Changes personal bounded-preview preferences while preserving unread counts.
+* **`inspect_direct_relationship(agent_id, *, actor) -> ChatRelationship`**
+  Reports pair generation, friendship, each endpoint's independent controls, and the actor's remaining stranger deliveries.
+* **`list_friendship_requests(*, actor) -> tuple[FriendshipRequestView, ...]`**
+  Includes only requests sent to or from that person, including historical decisions.
+* **`await request_friendship(agent_id, *, actor, operation_key=None) -> ChatOperationResult`**
+  Creates or returns a pending metadata-only request without treating crossed requests or read mail as consent.
+* **`await respond_friendship(request_id, decision, *, actor, operation_key=None) -> ChatOperationResult`**
+  Accepts `accept`, `reject`, or `ignore` for the recipient, or `cancel` for the sender; obsolete generations cannot establish friendship.
+* **`await control_direct_relationship(agent_id, command, *, actor, operation_key=None) -> ChatOperationResult`**
+  Supports `block_agent`, `unblock_agent`, `remove_friendship`, or `lift_direct_refusal` without changing another person's owned controls.
+* **`await close_team_conversation(team_id)`**
+  Host-only finalization closes an ordinary leaf's current memberships and preserves personal archives; unresolved live children are rejected rather than assigned an inferred parent.
 * **`register_tool(name: str, description: str, func: Callable[..., Any], schema: Optional[Any] = None, *, memory_capture: str = "metadata_only", execution_contract: ToolExecutionContract | None = None)`**
   Registers a custom utility tool globally and requires explicit `memory_capture="content"` before its observation body may enter episodic recall content.
 * **`register_agent(agent: Agent) -> Agent`**

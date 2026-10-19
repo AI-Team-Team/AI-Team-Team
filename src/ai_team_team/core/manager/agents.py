@@ -22,6 +22,42 @@ class AgentRegistry:
         self.manager = manager
         self.active_by_name: Dict[str, Agent] = {}
         self.by_id: Dict[str, Agent] = {}
+        self.pending = {}
+        self._name_snapshot = frozenset()
+
+    def name_reserved(self, name: str) -> bool:
+        """An advisory staging read must not wait for the publication lock."""
+        return name in self._name_snapshot
+
+    def refresh_names(self):
+        """Caller owns the registry publication lock; readers capture one value."""
+        self._name_snapshot = frozenset(agent.name for agent in self.by_id.values()) | frozenset(
+            item.agent.name for item in self.pending.values()
+        )
+
+    def reserve(self, agent: Agent):
+        """Reserve a new identity without making it callable or discoverable."""
+        from .registrations import AgentRegistration
+
+        manager = self.manager
+        with manager._resources.topology_mutation():
+            if manager._closing:
+                raise RuntimeError("ATTManager is closing and rejects new Agents.")
+            if not isinstance(agent, Agent) or agent.lifecycle_state != "active" or getattr(agent, "_manager", None) is not None:
+                raise ValueError("A membership reservation requires a new active Agent.")
+            if agent.agent_id in self.by_id or agent.agent_id in self.pending or self.name_reserved(agent.name):
+                raise ValueError("The Agent identity or name is already reserved.")
+            expected = f"PDL-{agent.agent_id}"
+            if agent.private_doc_library_id not in {None, expected} or expected in manager.libraries:
+                raise ValueError("Private DocLib ownership is inconsistent.")
+            manager.resolve_model_alias(agent.llm_client)
+            _ = agent.lifecycle_lock
+            reservation = AgentRegistration(self, agent, os.path.join(
+                os.path.realpath(os.path.abspath(manager.config.workspace_root)), ".att_doc_libs"
+            ), manager._resources.generation)
+            self.pending[agent.agent_id] = reservation
+            self.refresh_names()
+            return reservation
 
     def replace_indexes(
         self,
@@ -34,6 +70,7 @@ class AgentRegistry:
             self.by_id = by_id
             self.manager.agents = active_by_name
             self.manager._agents_by_id = by_id
+            self.refresh_names()
 
     def register(self, agent: Agent, *, auto_save: bool = True) -> Agent:
         manager = self.manager
@@ -43,6 +80,8 @@ class AgentRegistry:
         with manager._resources.topology_mutation():
             if not isinstance(agent, Agent):
                 raise TypeError("agent must be an Agent instance.")
+            if agent.agent_id in self.pending or any(item.agent.name == agent.name for item in self.pending.values()):
+                raise ValueError("The Agent identity or name is reserved by a pending membership operation.")
             if agent.lifecycle_state != "active":
                 raise ValueError(
                     "Only a new active Agent can be registered; inactive "
@@ -79,8 +118,12 @@ class AgentRegistry:
                 raise ValueError("Private DocLib ownership is inconsistent.")
             agent._private_doc_library_id = lib_id
             agent._manager = manager
+            # Allocate runtime coordination before publishing this identity,
+            # never as a side effect of joining an unrelated AgentTeam.
+            _ = agent.lifecycle_lock
             self.by_id[agent.agent_id] = agent
             self.active_by_name[agent.name] = agent
+            self.refresh_names()
         if auto_save:
             manager._auto_save(agents={agent.agent_id}, libraries={lib_id})
             manager._memory.record_event(
@@ -305,6 +348,7 @@ class AgentRegistry:
                     moved = True
                 self.active_by_name.pop(agent.name, None)
                 self.by_id.pop(agent_id, None)
+                self.refresh_names()
                 manager.libraries.pop(lib_id, None)
                 manager._library_files.pop(lib_id, None)
                 manager.library_links.pop(lib_id, None)
@@ -327,6 +371,7 @@ class AgentRegistry:
         except Exception:
             with manager._resources._lock, manager._topology_lock:
                 self.by_id[agent_id] = agent
+                self.refresh_names()
                 self.active_by_name[agent.name] = agent
                 manager.libraries[lib_id] = library
                 manager._library_files[lib_id] = old_files

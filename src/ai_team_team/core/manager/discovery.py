@@ -93,6 +93,8 @@ class DiscoveryService:
                     )
                     for team in teams
                     if team.team_kind == "ordinary"
+                    and getattr(team, "_lifecycle_state", "active") == "active"
+                    and not getattr(team, "_publication_pending", False)
                 }
                 if entity_type != "agent"
                 else {}

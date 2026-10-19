@@ -29,6 +29,7 @@ from ..inbox import PersonalInboxService
 from ..libraries import LibraryService
 from ..lifecycle import LifecycleService
 from ..membership import MembershipService
+from ..messaging import MessagingService
 from ..migration import MigrationService
 from ..memory import MemoryService
 from ..restore import RestoreService
@@ -48,6 +49,7 @@ from .formations_api import FormationAPI
 from .governance_api import GovernanceAPI
 from .libraries_api import LibraryAPI
 from .memory_api import MemoryAPI
+from .messaging_api import MessagingAPI
 from .runtime_api import RuntimeAPI
 from .state_api import StateAPI
 from .teams_api import TeamAPI
@@ -65,6 +67,7 @@ class ATTManager(
     GovernanceAPI,
     DiscoveryAPI,
     ActivityAPI,
+    MessagingAPI,
 ):
     """Master controller managing the overall ATT topology."""
 
@@ -189,6 +192,7 @@ class ATTManager(
         self._closed = False
         self._callbacks = CallbackDispatcher(self)
         self._activity = PersonalActivityService(self)
+        self._messaging = MessagingService(self)
 
         self.tool_auditors: Dict[str, Callable[..., Tuple[bool, str]]] = {}
 

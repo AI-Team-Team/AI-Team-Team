@@ -43,6 +43,8 @@ class CheckpointMixin:
         """Never acknowledge a frame independently of its personal checkpoint."""
         manager = self.manager
         dirty = manager._new_dirty_state()
+        read_acknowledgements = tuple(session.pending_chat_read_acknowledgements) if window else ()
+        records = (*records, *manager._messaging.read_acknowledgement_records(read_acknowledgements))
         if window:
             dirty["agents"].add(session.agent_id)
             with manager._memory._lock:
@@ -73,6 +75,7 @@ class CheckpointMixin:
         finally:
             if operation_id in manager._records.receipts:
                 session.pending_event_ids.difference_update(dirty["memory_events"])
+                del session.pending_chat_read_acknowledgements[:len(read_acknowledgements)]
 
     async def checkpoint(self, session, *, end_invocation=False, interrupted=False, extra=()):
         records = list(extra)

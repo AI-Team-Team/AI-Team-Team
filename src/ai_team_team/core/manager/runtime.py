@@ -406,6 +406,9 @@ class RuntimeRegistry:
             if not manager.config.episodic_memory.enabled:
                 for name in {"search_memories", "recall_memory", "keep_memory_in_context", "forget_memory"}:
                     tools.pop(name, None)
+            if manager._activity.current.get() is not None:
+                from ai_team_team.tool.chat import build_chat_tools
+                tools.update(build_chat_tools(manager))
             return tools
         if team.team_kind == "supervisory":
             return {}
@@ -438,6 +441,9 @@ class RuntimeRegistry:
             from ai_team_team.tool.memory import build_memory_tools
 
             tools.update(build_memory_tools(manager))
+        if manager._activity.current.get() is not None:
+            from ai_team_team.tool.chat import build_chat_tools
+            tools.update(build_chat_tools(manager, team_scope=True))
         return tools
 
     def probe_native_tool_capability(

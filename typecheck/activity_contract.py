@@ -2,7 +2,7 @@
 
 from typing_extensions import assert_type
 
-from ai_team_team import ATTManager, Agent, PersonalActivityConfig
+from ai_team_team import ATTManager, Agent, PersonalActivityConfig, ConversationConfig, ChatMessagePage, ChatReadResult, ChatOperationResult, ChatRelationship
 
 from ai_team_team.core.activity.contracts import (
     ActivityAdmission,
@@ -54,3 +54,10 @@ async def personal_runtime(manager: ATTManager, person: Agent) -> None:
     )
     await manager.clear_agent_model_unavailability(person.agent_id)
     assert_type(manager.config.activity, PersonalActivityConfig)
+    assert_type(manager.config.conversations, ConversationConfig)
+    assert_type(manager.list_direct_messages(person.agent_id, actor=person), ChatMessagePage)
+    source = await manager.read_chat_message("message", actor=person, start_character=1, character_count=20)
+    assert_type(source, ChatReadResult)
+    edited = await manager.edit_chat_message("message", "Explicit revised source", actor=person)
+    assert_type(edited, ChatOperationResult)
+    assert_type(manager.inspect_direct_relationship("another-person", actor=person), ChatRelationship)

@@ -24,10 +24,13 @@ from .config import (
     PermissiveCommunicationConfig,
     EpisodicMemoryConfig,
     PersonalActivityConfig,
+    ConversationConfig,
     ModelRequestPolicy,
     FileReadConfig,
     TurnFailurePolicyConfig,
 )
+from .chat import ChatOperationResult, ChatReadResult, ChatRelationship, FriendshipRequestView, ChatReminderPage, ChatReminderSummary
+from .activity.contracts.api import ChatMessagePage, ChatMessageSummary
 from .memory import (
     AgentMemoryCard,
     AgentMemorySegment,

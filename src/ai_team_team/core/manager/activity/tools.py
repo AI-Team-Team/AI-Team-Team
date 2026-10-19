@@ -100,15 +100,18 @@ class ForegroundToolMixin:
             self.check_generation(session)
 
         try:
-            result = await executor.execute(
-                name,
-                args=args,
-                kwargs=kwargs,
-                call_id=call_id,
-                invocation_id=f"{session.invocation_id}:{call_id}",
-                tools=tools,
-                before_attempt=before_attempt,
-            )
+            try:
+                result = await executor.execute(
+                    name,
+                    args=args,
+                    kwargs=kwargs,
+                    call_id=call_id,
+                    invocation_id=execution_id,
+                    tools=tools,
+                    before_attempt=before_attempt,
+                )
+            finally:
+                read_acknowledgement = session.prepared_chat_reads.pop(execution_id, None)
             self.check_generation(session)
         except BaseException:
             async with self.lock:
@@ -177,6 +180,8 @@ class ForegroundToolMixin:
                             self.cooldown_deadlines.pop(key, None)
                         else:
                             self.cooldown_deadlines[key] = deadline
+        if not result.failed:
+            result._chat_read_acknowledgement = read_acknowledgement
         return result
 
     async def execute_batch(self, executions):

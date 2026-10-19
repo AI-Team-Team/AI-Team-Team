@@ -363,12 +363,14 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         late_invitee = self.invitees[1]
         initiator_inbox = [dict(message) for message in self.root.agent_inbox]
         invitee_inbox = [dict(message) for message in late_invitee.agent_inbox]
-        original_commit = self.manager._commit_dirty_state
+        original_commit = self.manager._records.commit
 
-        async def fail_commit(_dirty):
-            raise RuntimeError("Injected late-join persistence failure.")
+        async def fail_commit(*_records, **_kwargs):
+            if _kwargs.get("operation_id", "").startswith("LATE-JOIN-"):
+                raise RuntimeError("Injected late-join persistence failure.")
+            return await original_commit(*_records, **_kwargs)
 
-        self.manager._commit_dirty_state = fail_commit
+        self.manager._records.commit = fail_commit
         try:
             with self.assertRaisesRegex(RuntimeError, "late-join persistence"):
                 await self.manager.respond_team_invitation(
@@ -378,7 +380,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
                     attitude="accepted",
                 )
         finally:
-            self.manager._commit_dirty_state = original_commit
+            self.manager._records.commit = original_commit
         self.assertNotIn(late_invitee, team.members)
         invitation = self.manager.get_team_formation_invitation(
             request.request_id,

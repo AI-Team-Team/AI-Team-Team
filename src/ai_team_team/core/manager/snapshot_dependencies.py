@@ -71,7 +71,7 @@ def capture_memory_records(manager: Any, dirty: Dict[str, Any]) -> Dict[str, lis
 
 
 def collect_memory_identity_dependencies(
-    manager: Any, records: Dict[str, list], *, extra_agents=(), extra_teams=()
+    manager: Any, records: Dict[str, list], *, extra_agents=(), extra_teams=(), agent_lookup=None
 ) -> tuple[set[str], set[str]]:
     """Include insert-only identity and provenance targets, not historical event owners."""
     agent_ids = {
@@ -96,7 +96,7 @@ def collect_memory_identity_dependencies(
             agent_id = pending_agents.pop()
             if agent_id in seen_agents:
                 continue
-            agent = _require(manager._agents_by_id, agent_id, "memory owner Agent")
+            agent = _require(manager._agents_by_id if agent_lookup is None else agent_lookup, agent_id, "memory owner Agent")
             seen_agents.add(agent_id)
             for message in agent.messages:
                 team_id = message.get("team_id")

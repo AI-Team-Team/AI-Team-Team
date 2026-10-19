@@ -36,6 +36,8 @@ class SnapshotBuilder:
     def _capture_state_snapshot(self, dirty: Dict[str, Any]) -> Dict[str, Any]:
         manager = self.manager
         full = dirty["full"]
+        agent_lookup = {**manager._agents_by_id, **dirty.get("_staged_agents", {})}
+        library_lookup = {**manager.libraries, **dirty.get("_staged_libraries", {})}
         now = time.time()
         temporary_teams = {
             team_id: team
@@ -128,7 +130,7 @@ class SnapshotBuilder:
         # A file-only first delta still needs its library's concrete owner.
         # These are insert-only prerequisites, never authoritative Agent edits.
         for lib_id in dirty["libraries"] | set(dirty["file_changes"]):
-            library = manager.libraries.get(lib_id)
+            library = library_lookup.get(lib_id)
             if library is None:
                 continue
             if library.owner_agent_id is not None:
@@ -141,6 +143,7 @@ class SnapshotBuilder:
             memory_records,
             extra_agents=governance_agents,
             extra_teams=governance_teams,
+            agent_lookup=agent_lookup,
         )
         configs = None
         if full or dirty["configs"] or dependency_request_ids or migration_requests or dirty["libraries"] or dirty["file_changes"]:
@@ -163,7 +166,6 @@ class SnapshotBuilder:
                 "model_token_usage": dict(manager.model_token_usage),
             }
 
-        agent_lookup = dict(manager._agents_by_id)
         relevant_teams = (
             (team for team in manager.teams.values() if team.team_kind == "ordinary")
             if full
@@ -296,7 +298,7 @@ class SnapshotBuilder:
                 "team_id": team.team_id,
                 "state_version": max(1, manager._state_version),
                 "parent_agent_id": getattr(team, "_parent_agent_id", None),
-                "lifecycle_state": getattr(team, "_lifecycle_state", "active"),
+                "lifecycle_state": dirty.get("team_lifecycles", {}).get(team.team_id, getattr(team, "_lifecycle_state", "active")),
                 "team_kind": team.team_kind,
                 "preset_name": team.preset_name,
                 "team_purpose": team.team_purpose,
@@ -309,7 +311,7 @@ class SnapshotBuilder:
                 "creator_id": creator_id,
                 "status_map": team.status_snapshot(),
                 "system_instructions": getattr(team, "system_instructions", ""),
-                "members": [member.agent_id for member in team.members],
+                "members": list(dirty.get("team_memberships", {}).get(team_id, [member.agent_id for member in team.members])),
                 "message_timestamp": now,
             }
         teams = [
@@ -351,6 +353,9 @@ class SnapshotBuilder:
         proposal_ids = (
             set(manager.teams) if full else set(dirty["proposals"])
         ) - temporary_team_ids
+        # A batch captured while an accepted replacement is settling must not
+        # queue the old proposal snapshot behind its newer authoritative delta.
+        proposal_ids.difference_update(manager._records.publishing_proposals - set(dirty.get("team_proposals", {})))
         proposals = {
             team_id: [
                 {
@@ -360,14 +365,14 @@ class SnapshotBuilder:
                         for key, value in proposal.items()
                     },
                 }
-                for proposal_id, proposal in manager.teams[team_id].proposals.items()
+                for proposal_id, proposal in dirty.get("team_proposals", {}).get(team_id, manager.teams[team_id].proposals).items()
             ]
             for team_id in sorted(proposal_ids)
             if team_id in manager.teams
         }
 
         library_ids = (
-            set(manager.libraries) if full else set(dirty["libraries"])
+            set(library_lookup) if full else set(dirty["libraries"])
         ) - temporary_library_ids
         library_dependency_ids = {
             agent_lookup[agent_id].private_doc_library_id
@@ -380,7 +385,7 @@ class SnapshotBuilder:
         required_memory_libraries = {
             f"PDL-{agent_id}" for agent_id in memory_agent_ids
         } | {f"DL-{team_id}" for team_id in memory_team_ids}
-        missing_memory_libraries = required_memory_libraries - set(manager.libraries)
+        missing_memory_libraries = required_memory_libraries - set(library_lookup)
         if missing_memory_libraries:
             raise StatePersistenceError(
                 "Cannot persist episodic memory: missing DocLib dependencies: "
@@ -389,7 +394,7 @@ class SnapshotBuilder:
         library_dependency_ids.difference_update(library_ids | temporary_library_ids)
         serialized_libraries: Dict[str, Dict[str, Any]] = {}
         for lib_id in sorted(library_ids | library_dependency_ids):
-            library = manager.libraries.get(lib_id)
+            library = library_lookup.get(lib_id)
             if library is None:
                 continue
             serialized_libraries[lib_id] = {

@@ -135,6 +135,7 @@ class TeamLifecycleMixin:
                 for agent in members:
                     manager.agents.pop(agent.name, None)
                     manager._agents_by_id.pop(agent.agent_id, None)
+                manager._agent_registry.refresh_names()
                 for lib_id in library_ids:
                     manager.libraries.pop(lib_id, None)
                     manager._library_files.pop(lib_id, None)

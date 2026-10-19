@@ -29,6 +29,8 @@ REQUIRED_TABLES = {
     "sleep_conditions",
     "direct_relationships",
     "friendship_requests",
+    "chat_operations",
+    "chat_preferences",
     "chat_streams",
     "chat_events",
     "membership_intervals",
@@ -67,7 +69,7 @@ class TestSchemaActivation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             STATE_SCHEMA_VERSION,
             TARGET_STATE_SCHEMA_VERSION,
-            "Phase 1 must implement schema 12 before enabling the replacement runtime.",
+            "Runtime and physical checkpoint contracts must use the same schema.",
         )
         workspace = tempfile.TemporaryDirectory(prefix="att-phase0-schema-")
         self.addCleanup(workspace.cleanup)
@@ -86,7 +88,7 @@ class TestSchemaActivation(unittest.IsolatedAsyncioTestCase):
             physical_schema, database_path
         )
         self.assertEqual(version, (TARGET_STATE_SCHEMA_VERSION,))
-        self.assertEqual(REQUIRED_TABLES - tables, set(), "Schema 12 tables are missing.")
+        self.assertEqual(REQUIRED_TABLES - tables, set(), "Current activity tables are missing.")
         self.assertNotIn("governance_rounds", tables)
         self.assertNotIn("communication_ballots", tables)
         self.assertNotIn("discussion_id", columns)

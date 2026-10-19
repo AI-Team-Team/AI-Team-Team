@@ -55,6 +55,8 @@ class Session:
     recovery_deadline: float | None = None
     pending_event_ids: set = field(default_factory=set)
     interaction_waiters: list = field(default_factory=list)
+    prepared_chat_reads: dict = field(default_factory=dict)
+    pending_chat_read_acknowledgements: list = field(default_factory=list)
 
 
 def capture(manager, table: str, **values) -> DomainRecord:

@@ -266,9 +266,11 @@ class PersistenceCoordinator:
             return earlier
         if earlier.get("state_version", 1) > later.get("state_version", 1):
             earlier, later = later, earlier
+        read_compensations = tuple(earlier.get("_read_compensations", ())) + tuple(later.get("_read_compensations", ()))
         if later.get("full"):
             merged = dict(later)
-            merged["records"] = merge_records(earlier.get("records", ()), later.get("records", ()))
+            merged["records"] = merge_records(earlier.get("records", ()), later.get("records", ()), read_compensations=read_compensations)
+            merged["_read_compensations"] = read_compensations
             merged["_operations"] = tuple(earlier.get("_operations", ())) + tuple(later.get("_operations", ()))
             for key in ("deleted_agents", "deleted_teams", "deleted_libraries", "deleted_memory_references"):
                 merged[key] = tuple(set(earlier.get(key, ())) | set(later.get(key, ())))
@@ -276,7 +278,8 @@ class PersistenceCoordinator:
         merged = dict(earlier)
         merged["full"] = bool(earlier.get("full"))
         merged["state_version"] = max(later.get("state_version", 1), earlier.get("state_version", 1))
-        merged["records"] = merge_records(earlier.get("records", ()), later.get("records", ()))
+        merged["records"] = merge_records(earlier.get("records", ()), later.get("records", ()), read_compensations=read_compensations)
+        merged["_read_compensations"] = read_compensations
         merged["_operations"] = tuple(earlier.get("_operations", ())) + tuple(later.get("_operations", ()))
         merged["episodic_memory_enabled"] = later.get(
             "episodic_memory_enabled",

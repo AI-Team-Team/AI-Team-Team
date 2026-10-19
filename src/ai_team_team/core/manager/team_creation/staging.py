@@ -14,12 +14,12 @@ class TeamCreationStagingMixin:
     def unique_agent_name(self, base_name: str, team: AgentTeam) -> str:
         """Returns a registry-safe agent name for a team."""
         manager = self.manager
-        if base_name not in manager.agents:
+        if not manager._agent_registry.name_reserved(base_name):
             return base_name
         suffix = team.team_id.split("-", 1)[-1]
         candidate = f"{base_name}_{suffix}"
         counter = 2
-        while candidate in manager.agents:
+        while manager._agent_registry.name_reserved(candidate):
             candidate = f"{base_name}_{suffix}_{counter}"
             counter += 1
         return candidate

@@ -124,6 +124,7 @@ class MembershipValidationTests(unittest.IsolatedAsyncioTestCase):
                 session.execute(text("BEGIN IMMEDIATE"))
                 session.execute(text("PRAGMA defer_foreign_keys=ON"))
                 session.execute(text("DELETE FROM team_members WHERE team_id=:id"), {"id": team.team_id})
+                session.execute(text("UPDATE teams SET lifecycle_state='dissolved' WHERE team_id=:id"), {"id": team.team_id})
                 write_records(session, (dissolve, *closed, DomainRecord.capture("chat_streams", values)))
                 validate_database(session)
                 session.commit()

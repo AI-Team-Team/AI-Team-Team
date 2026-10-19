@@ -18,12 +18,16 @@ class ChatMessageSummary(ContractRecord):
     version: int = Field(gt=0)
     title: str | None
     preview: str
+    unread: bool = True
+    withdrawn: bool = False
+    frozen: bool = False
 
 
 class ChatMessagePage(ContractRecord):
     items: tuple[ChatMessageSummary, ...]
     total_count: int = Field(ge=0)
     unread_count: int = Field(ge=0)
+    next_cursor: str | None = None
 
 
 class ActivityRuntimeAPI(Protocol):

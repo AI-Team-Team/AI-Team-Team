@@ -83,11 +83,13 @@ class Agent:
     @asynccontextmanager
     async def invocation_guard(self):
         """Atomically starts one serialized invocation against lifecycle changes."""
-        async with self.lifecycle_lock:
-            if self.lifecycle_state != "active":
-                raise RuntimeError("Inactive agents cannot execute model calls.")
-            await self.lock.acquire()
+        # A queued invocation must not retain the lifecycle gate while waiting
+        # for the current invocation, whose chat/relationship tools need it.
+        await self.lock.acquire()
         try:
+            async with self.lifecycle_lock:
+                if self.lifecycle_state != "active":
+                    raise RuntimeError("Inactive agents cannot execute model calls.")
             yield
         finally:
             self.lock.release()

@@ -35,6 +35,10 @@ def validate_teams(
     parent_map: Dict[str, Optional[str]] = {}
     for row in payload.teams:
         team_id = row["team_id"]
+        if row.get("lifecycle_state", "active") not in {"active", "dissolved"}:
+            raise StateRestoreError("Invalid AgentTeam lifecycle state.")
+        if row.get("lifecycle_state") == "dissolved" and row.get("members"):
+            raise StateRestoreError("A dissolved AgentTeam cannot retain current memberships.")
         team_kind = row.get("team_kind")
         if team_kind != "ordinary":
             raise StateRestoreError(
@@ -59,7 +63,7 @@ def validate_teams(
         parent_agent_id = row.get("parent_agent_id")
         if parent_agent_id is not None and (parent_agent_id not in active_agent_ids or parent_id is not None):
             raise StateRestoreError("A current Agent parent must be active and exclusive.")
-        if parent_id is not None and any(parent["team_id"] == parent_id and parent.get("lifecycle_state", "active") != "active" for parent in payload.teams):
+        if row.get("lifecycle_state", "active") == "active" and parent_id is not None and any(parent["team_id"] == parent_id and parent.get("lifecycle_state", "active") != "active" for parent in payload.teams):
             raise StateRestoreError("A current AgentTeam parent cannot be dissolved.")
         _validate_team_creator(row, agent_id_set, team_id_set)
         for proposal in row.get("proposals", []):

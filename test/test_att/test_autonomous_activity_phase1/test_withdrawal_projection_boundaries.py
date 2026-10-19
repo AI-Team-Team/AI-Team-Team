@@ -102,12 +102,12 @@ class WithdrawalProjectionTests(unittest.IsolatedAsyncioTestCase):
         manager, path, client = make_manager(self)
         team, _, recipient = await install_chat(manager, kind="team")
         interval = next(row for row in manager._records.snapshot() if row.table_name == "membership_intervals" and row.values["team_id"] == team.team_id and row.values["agent_id"] == recipient.agent_id)
-        view = record("chat_personal_views", view_id="recipient-view", agent_id=recipient.agent_id, message_id="message",
-                      interval_id=interval.values["interval_id"], revision_id="revision", view_kind="live", read_at=2.5, unread_override=0, deleted=0)
+        previous_view = next(row for row in manager._records.snapshot() if row.table_name == "chat_personal_views" and row.values["agent_id"] == recipient.agent_id)
+        view = DomainRecord.capture("chat_personal_views", {**thaw(previous_view.values), "read_at": 2.5, "read_revision_number": 1, "state_version": previous_view.version + 1})
         notice = record("agent_notifications", notification_id="reminder", agent_id=recipient.agent_id, source_kind="team_message",
                         chat_message_id="message", classification="ordinary", deduplication_key="message-reminder", arrival_generation=1, created_at=2.0)
         preview = record("chat_reminder_previews", notification_id="reminder", agent_id=recipient.agent_id, revision_id="revision",
-                         preview={"title": "Fixture title", "body": "Captured fixture preview"}, visibility={"interval_id": interval.values["interval_id"]})
+                         preview={"title": "Fixture title", "body": "Captured fixture preview"}, visibility={"view_id": view.values["view_id"], "interval_id": interval.values["interval_id"]})
         await manager._records.commit((view, notice, preview))
         with manager._resources.mutation():
             team.members.remove(recipient)

@@ -12,11 +12,27 @@ The sending and receiving identities are the individuals, not implicitly the org
 
 Personal chat does not establish an AgentTeam communication Agreement or authorize a binding team commitment.
 
-Before a friendship request is accepted, the sender may send at most three stranger messages, subject to the recipient's refusal or block state.
+Before a friendship request is accepted, each sender has at most three stranger deliveries per relationship period, subject to the recipient's refusal or either person's block state.
+
+Each successfully committed new message or edit consumes one delivery from that sender's allowance while the pair is not friends.
 
 Accepting the request establishes a friendship and removes that stranger-message count limit.
 
 Unlimited friend messages means the absence of that particular relationship quota, not guaranteed replies, unlimited model budget, or exemption from host resource controls.
+
+## Direct-Message Edits
+
+Editing an existing direct message deliberately delivers new content to its recipient and must pass the same current block, refusal, friendship, and stranger-allowance checks as sending a new message.
+
+When the pair is not friends, each successful edit consumes one allowance unit from the editor's direction in the current relationship period, even if the original message was sent in an earlier period or while they were friends.
+
+The revision, allowance update, and recipient notification must commit atomically, and retrying the same admitted edit must not create another revision or consume another allowance unit.
+
+A rejected or failed edit, or an edit cancelled before acceptance commits, must not consume allowance, publish a revision or notification, or renew the withdrawal deadline.
+
+Cancellation after a successful commit does not undo that accepted edit or refund its allowance charge.
+
+These delivery restrictions do not revoke access to previously authorized chat history or reset either Agent's identity or memory.
 
 ## Rejection, Blocking, and Removing Friendship
 
@@ -56,9 +72,9 @@ The existence of a personal friendship does not let an Agent impersonate its fri
 
 ## Engineering Recommendations to Finalize
 
-- Durable counters with atomic admission so concurrent sends cannot exceed the three-message allowance.
-- Idempotent delivery so retrying one send does not create multiple messages or consume multiple allowance units.
-- A clear definition of successful acceptance into delivery and whether failed delivery consumes allowance.
+- Durable counters with atomic admission shared by new sends and edits so concurrent deliveries cannot exceed the three-message allowance.
+- Idempotent delivery so retrying one send or edit does not create multiple messages or revisions or consume multiple allowance units.
+- Commit-based acceptance so failed sends or edits do not consume allowance, while an accepted operation remains charged after caller cancellation.
 - Protection against quota reset through repeated requests, cancellation, or operations other than the agreed relationship-reset events.
 - Atomic admission against both parties' current block state and the applicable friendship or stranger allowance.
 - Preservation of each person's own block decision until that person clears it.

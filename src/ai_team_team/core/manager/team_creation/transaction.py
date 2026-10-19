@@ -239,11 +239,18 @@ class TeamCreationTransactionMixin:
                     for agent in stage["new_agents"]:
                         manager.register_agent(agent, auto_save=False)
                     team = stage["team"]
+                    batch = manager._persistence_batch.get()
+                    team._publication_pending = bool(batch and batch.get("_provisional"))
                     manager.teams[team.team_id] = team
                     parent = stage["parent"]
                     if parent is not None:
                         manager._team_parent_map[team.team_id] = parent.team_id
                         parent.add_child_team(team)
+                    if team_kind == "ordinary" and not team._publication_pending:
+                        # Fresh-team provisioning has no existing stream to
+                        # contend with. Publish its initial boundaries in the
+                        # same synchronous registry critical section.
+                        manager._records.capture_memberships({team.team_id})
                 except Exception:
                     # Keep rollback in the same publication critical section;
                     # directory readers must never see uncommitted Agents.
@@ -313,6 +320,13 @@ class TeamCreationTransactionMixin:
 
     def _rollback_team_creation(self, snapshot: Dict[str, Any]) -> None:
         manager = self.manager
+        removed_teams = set(manager.teams) - set(snapshot["teams"])
+        removed_streams = {row.values["stream_id"] for row in manager._records.snapshot()
+                           if row.table_name == "chat_streams" and row.values["team_id"] in removed_teams}
+        if removed_streams:
+            manager._records.restore(row for row in manager._records.snapshot()
+                if not (row.table_name in {"chat_streams", "chat_events", "membership_intervals"}
+                        and row.values["stream_id"] in removed_streams))
         prior_library_ids = set(snapshot["libraries"])
         for lib_id, library in list(manager.libraries.items()):
             if lib_id not in prior_library_ids:

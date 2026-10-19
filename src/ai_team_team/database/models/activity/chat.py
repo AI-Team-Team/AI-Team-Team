@@ -1,6 +1,6 @@
 """Ordered chat facts, historical membership, and personal visibility."""
 
-from sqlalchemy import Index, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, Index, UniqueConstraint
 
 from .columns import boolean, choice, document, identifier, integer, reference, table, timestamp
 
@@ -17,6 +17,14 @@ friendship_requests = table("friendship_requests",
     integer("generation"), choice("status", "pending accepted rejected ignored cancelled stale"),
     timestamp("created_at"), timestamp("responded_at", nullable=True),
     checks=("generation > 0", "sender_agent_id <> recipient_agent_id"))
+chat_operations = table("chat_operations",
+    reference("agent_id", "agents.agent_id", primary=True), identifier("operation_key", primary=True),
+    choice("command", "send_team send_direct edit withdraw mark_message_read mark_message_unread delete_message restore_message chat_details request_friendship accept_friendship reject_friendship ignore_friendship cancel_friendship_request block_agent unblock_agent remove_friendship lift_direct_refusal"),
+    identifier("request_digest"), document("result"),
+    reference("invocation_id", "activity_invocations.invocation_id", nullable=True),
+    timestamp("created_at"), append=True)
+chat_preferences = table("chat_preferences",
+    reference("agent_id", "agents.agent_id", primary=True), boolean("team_details"), boolean("direct_details"))
 chat_streams = table("chat_streams",
     identifier("stream_id", primary=True), reference("team_id", "teams.team_id", nullable=True, unique=True),
     reference("relationship_id", "direct_relationships.relationship_id", nullable=True, unique=True), integer("next_position"),
@@ -35,8 +43,11 @@ Index("uq_open_membership", membership_intervals.c.team_id, membership_intervals
 chat_messages = table("chat_messages",
     identifier("message_id", primary=True), reference("stream_id", "chat_streams.stream_id"),
     reference("author_agent_id", "agents.agent_id"), reference("publication_event_id", "chat_events.event_id", unique=True),
-    reference("invocation_id", "activity_invocations.invocation_id"), identifier("operation_key"),
-    timestamp("created_at"), append=True, constraints=(UniqueConstraint("invocation_id", "operation_key"),))
+    reference("invocation_id", "activity_invocations.invocation_id", nullable=True), identifier("operation_key"),
+    reference("reply_message_id", "chat_messages.message_id", nullable=True),
+    timestamp("created_at"), append=True, constraints=(UniqueConstraint("invocation_id", "operation_key"),
+        UniqueConstraint("author_agent_id", "operation_key"),
+        ForeignKeyConstraint(("author_agent_id", "operation_key"), ("chat_operations.agent_id", "chat_operations.operation_key"))))
 chat_revisions = table("chat_revisions",
     identifier("revision_id", primary=True), reference("message_id", "chat_messages.message_id"),
     reference("event_id", "chat_events.event_id", unique=True), integer("revision_number"),
@@ -46,7 +57,7 @@ chat_withdrawals = table("chat_withdrawals",
     identifier("withdrawal_id", primary=True), reference("message_id", "chat_messages.message_id", unique=True),
     reference("revision_id", "chat_revisions.revision_id"), reference("actor_agent_id", "agents.agent_id"),
     reference("event_id", "chat_events.event_id", unique=True), timestamp("window_seconds"),
-    timestamp("committed_at"), append=True, checks=("window_seconds > 0 AND window_seconds <= 600",))
+    timestamp("committed_at"), append=True, checks=("window_seconds > 0",))
 chat_message_projections = table("chat_message_projections",
     reference("message_id", "chat_messages.message_id", primary=True), reference("revision_id", "chat_revisions.revision_id"),
     reference("withdrawal_id", "chat_withdrawals.withdrawal_id", nullable=True))
@@ -54,8 +65,10 @@ chat_personal_views = table("chat_personal_views",
     identifier("view_id", primary=True), reference("agent_id", "agents.agent_id"), reference("message_id", "chat_messages.message_id"),
     reference("interval_id", "membership_intervals.interval_id", nullable=True), reference("revision_id", "chat_revisions.revision_id"),
     reference("withdrawal_id", "chat_withdrawals.withdrawal_id", nullable=True), choice("view_kind", "live frozen"),
-    integer("departure_cutoff", nullable=True), timestamp("read_at", nullable=True), boolean("unread_override"), boolean("deleted"),
-    checks=("(view_kind = 'live' AND departure_cutoff IS NULL) OR (view_kind = 'frozen' AND departure_cutoff IS NOT NULL AND departure_cutoff > 0)",),
+    integer("departure_cutoff", nullable=True), timestamp("read_at", nullable=True), integer("read_revision_number", nullable=True),
+    boolean("unread_override"), boolean("deleted"),
+    checks=("(view_kind = 'live' AND departure_cutoff IS NULL) OR (view_kind = 'frozen' AND departure_cutoff IS NOT NULL AND departure_cutoff > 0)",
+            "read_revision_number IS NULL OR read_revision_number > 0", "(read_at IS NULL) = (read_revision_number IS NULL)"),
     constraints=(UniqueConstraint("agent_id", "message_id", "interval_id"),))
 Index("uq_direct_personal_view", chat_personal_views.c.agent_id, chat_personal_views.c.message_id,
       unique=True, sqlite_where=chat_personal_views.c.interval_id.is_(None))

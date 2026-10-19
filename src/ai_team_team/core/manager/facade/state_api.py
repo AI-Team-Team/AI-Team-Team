@@ -75,6 +75,12 @@ class StateAPI:
                 raise RuntimeError("ATTManager is closing and cannot restore state.")
             if self._restore_in_progress:
                 raise StateRestoreError("Another state restoration is already in progress.")
+            if self._topology.transition_pending:
+                raise StateRestoreError("Cannot restore state while a topology transition is awaiting commit.")
+            if self._agent_registry.pending:
+                raise StateRestoreError("Cannot restore state while Agent registrations are awaiting membership commit.")
+            if self._messaging.read_deliveries:
+                raise StateRestoreError("Cannot restore state while a chat read delivery or its receipt cleanup is pending.")
             self._activity.assert_restore_ready()
             if self._active_formation_operations:
                 raise StateRestoreError(

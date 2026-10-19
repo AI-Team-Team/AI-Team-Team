@@ -146,7 +146,7 @@ class DomainRecord:
         return f"{self.table_name}:{self.identity[1]!r}@{self.version}"
 
 
-def merge_records(earlier, later):
+def merge_records(earlier, later, *, read_compensations=()):
     merged = {record.identity: record for record in earlier}
     for record in later:
         previous = merged.get(record.identity)
@@ -156,7 +156,7 @@ def merge_records(earlier, later):
                     raise StatePersistenceError("Conflicting bodies for the same durable record identity/version.")
             if record.version < previous.version:
                 continue
-            validate_update(previous, record)
+            validate_update(previous, record, read_compensations=read_compensations)
         merged[record.identity] = record
     return tuple(merged.values())
 
@@ -190,7 +190,7 @@ IMMUTABLE_FIELDS = {
 }
 
 
-def validate_update(previous, later):
+def validate_update(previous, later, *, read_compensations=()):
     """Captured authority is immutable even when its factual progress changes."""
     if previous == later:
         return
@@ -200,6 +200,9 @@ def validate_update(previous, later):
     if previous.table_name == "membership_intervals" and previous.values["leave_event_id"] is not None:
         if later.values["leave_event_id"] != previous.values["leave_event_id"]:
             raise StatePersistenceError("A closed membership interval cannot reopen or change departure.")
+    if previous.table_name == "friendship_requests" and previous.values["status"] != "pending":
+        if any(previous.values[field] != later.values[field] for field in ("status", "responded_at")):
+            raise StatePersistenceError("A resolved friendship decision cannot be rewritten.")
     monotonic = {
         "chat_streams": ("next_position",),
         "agent_activities": ("arrival_generation", "presentation_generation", "context_version"),
@@ -208,6 +211,11 @@ def validate_update(previous, later):
     }
     if any(later.values[field] < previous.values[field] for field in monotonic.get(previous.table_name, ())):
         raise StatePersistenceError("An authoritative ordering or occurrence cursor cannot move backwards.")
+    if previous.table_name == "chat_personal_views":
+        if (later.values["read_revision_number"] or 0) < (previous.values["read_revision_number"] or 0):
+            from .read_compensation import permits_read_compensation
+            if not permits_read_compensation(previous, later, read_compensations):
+                raise StatePersistenceError("A personal read revision watermark cannot move backwards.")
     if previous.table_name == "activity_admissions" and previous.values["disposition"] != "admitted":
         if later.values["disposition"] != previous.values["disposition"]:
             raise StatePersistenceError("An ended personal admission cannot be reopened.")

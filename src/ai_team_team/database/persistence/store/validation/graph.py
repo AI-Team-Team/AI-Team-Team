@@ -10,11 +10,12 @@ from sqlalchemy import select
 from ai_team_team.core.exceptions import StateRestoreError
 from ai_team_team.database.models import ACTIVITY_TABLES, Base
 from ai_team_team.database.persistence.records import valid_request_outcome
+from .chat_operations import validate_chat_operations
 
 
 SOURCE_COLUMNS = {
     "agents": ("agent_id",),
-    "teams": ("team_id",),
+    "teams": ("team_id", "lifecycle_state", "parent_team_id", "parent_agent_id"),
     "team_members": ("team_id", "agent_id", "interval_id"),
     "agent_messages": ("agent_id", "invocation_id", "source_execution_id", "source_chat_message_id"),
     "agent_memory_segments": ("segment_id", "agent_id", "invocation_id"),
@@ -86,6 +87,9 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
         require(row is not None, f"missing {name} reference")
         return row
 
+    for team in sources["teams"]:
+        if team["lifecycle_state"] == "active" and team["parent_team_id"] is not None:
+            require(source("teams", team["parent_team_id"])["lifecycle_state"] == "active", "a current AgentTeam parent cannot be dissolved")
     for row in rows["activity_admissions"]:
         if row["scope_kind"] == "agent_team":
             require(any(interval["team_id"] == row["scope_team_id"] and interval["agent_id"] == row["agent_id"]
@@ -136,11 +140,22 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
         relation = get("direct_relationships", row["relationship_id"])
         require({row["sender_agent_id"], row["recipient_agent_id"]} == {relation["agent_a_id"], relation["agent_b_id"]}, "friendship endpoint mismatch")
         require(row["generation"] <= relation["generation"], "friendship request future generation")
-        require(row["status"] != "accepted" or row["generation"] == relation["generation"], "stale friendship acceptance")
+        require((row["status"] == "pending") == (row["responded_at"] is None), "friendship response timestamp mismatch")
+        # An accepted older request is historical consent, not current authority.
+    for row in rows["direct_relationships"]:
+        if row["friendship"]:
+            require(not row["blocked_a"] and not row["blocked_b"], "friendship cannot survive an effective block")
+            require(any(request["relationship_id"] == row["relationship_id"] and request["generation"] == row["generation"]
+                        and request["status"] == "accepted" for request in rows["friendship_requests"]), "friendship has no current consent")
+    validate_chat_operations(rows, get, require)
     events = {row["event_id"]: row for row in rows["chat_events"]}
     for row in rows["chat_streams"]:
         positions = [event["sequence"] for event in rows["chat_events"] if event["stream_id"] == row["stream_id"]]
         require(not positions or row["next_position"] > max(positions), "stream ordering cursor mismatch")
+        if row["team_id"]:
+            dissolved = [event for event in rows["chat_events"] if event["stream_id"] == row["stream_id"] and event["event_kind"] == "dissolve"]
+            require(len(dissolved) <= 1 and (not dissolved or dissolved[0]["sequence"] == max(positions)), "dissolved stream has later shared events")
+            require((source("teams", row["team_id"])["lifecycle_state"] == "dissolved") == bool(dissolved), "dissolution source projection mismatch")
     intervals = {}
     for row in rows["membership_intervals"]:
         stream = get("chat_streams", row["stream_id"])
@@ -173,9 +188,17 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
     for row in rows["chat_messages"]:
         event = events[row["publication_event_id"]]
         stream = get("chat_streams", row["stream_id"])
-        invocation = get("activity_invocations", row["invocation_id"])
         require(event["stream_id"] == row["stream_id"] and event["event_kind"] == "send", "message publication mismatch")
-        require(event["actor_agent_id"] == row["author_agent_id"] == invocation["agent_id"], "message author mismatch")
+        require(event["actor_agent_id"] == row["author_agent_id"], "message author mismatch")
+        operation = get("chat_operations", row["author_agent_id"], row["operation_key"])
+        require(operation["result"].get("status") == "DELIVERED" and operation["result"].get("message_id") == row["message_id"], "message has no exact publication receipt")
+        if row["invocation_id"] is not None:
+            invocation = get("activity_invocations", row["invocation_id"])
+            require(invocation["agent_id"] == row["author_agent_id"], "message invocation owner mismatch")
+        else:
+            operation = get("chat_operations", row["author_agent_id"], row["operation_key"])
+            require(operation["invocation_id"] is None and operation["command"] in {"send_team", "send_direct"}
+                    and operation["result"].get("message_id") == row["message_id"], "Host publication has no command evidence")
         require(authorized(stream, row["author_agent_id"], event["sequence"]), "publication outside membership")
         require((row["message_id"],) in indexes["chat_message_projections"], "published message has no body projection")
     revisions = {}
@@ -191,6 +214,8 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
     for history in revisions.values():
         history.sort(key=lambda row: row["revision_number"])
         require([row["revision_number"] for row in history] == list(range(1, len(history) + 1)), "revision sequence gap")
+        require(all(events[left["event_id"]]["sequence"] < events[right["event_id"]]["sequence"]
+                    and left["committed_at"] <= right["committed_at"] for left, right in zip(history, history[1:])), "revision chronology mismatch")
     for row in rows["chat_withdrawals"]:
         message = get("chat_messages", row["message_id"])
         revision = get("chat_revisions", row["revision_id"])
@@ -213,6 +238,7 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
         stream = get("chat_streams", message["stream_id"])
         revision = get("chat_revisions", row["revision_id"])
         require(revision["message_id"] == row["message_id"], "view revision mismatch")
+        require((row["read_revision_number"] or 0) <= revision["revision_number"], "read watermark exceeds authorized revision")
         position = events[message["publication_event_id"]]["sequence"]
         require(authorized(stream, row["agent_id"], position), "unauthorized personal view")
         if stream["team_id"]:
@@ -220,16 +246,44 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
             require(interval["agent_id"] == row["agent_id"] and interval["team_id"] == stream["team_id"], "view membership owner mismatch")
             join, leave = events[interval["join_event_id"]], events.get(interval["leave_event_id"])
             require(join["sequence"] < position and (leave is None or position < leave["sequence"]), "view outside exact membership interval")
+            require(row["view_kind"] != "live" or leave is None, "live view has a closed membership interval")
             if row["view_kind"] == "frozen":
                 require(leave is not None and row["departure_cutoff"] == leave["sequence"], "frozen departure cutoff mismatch")
                 require(events[revision["event_id"]]["sequence"] < row["departure_cutoff"], "post-departure revision leak")
         else:
             require(row["interval_id"] is None, "direct view has team interval")
+            require(row["view_kind"] == "live", "a direct view cannot impersonate a frozen team archive")
+        if row["view_kind"] == "live":
+            projection = get("chat_message_projections", row["message_id"])
+            require((row["revision_id"], row["withdrawal_id"]) == (projection["revision_id"], projection["withdrawal_id"]), "live personal projection mismatch")
+        else:
+            permitted = [item for item in revisions[row["message_id"]] if events[item["event_id"]]["sequence"] < row["departure_cutoff"]]
+            require(revision["revision_number"] == max(item["revision_number"] for item in permitted), "frozen revision is not the departure-time projection")
+            withdrawal_id = withdrawals.get(row["message_id"])
+            withdrawal = get("chat_withdrawals", withdrawal_id) if withdrawal_id else None
+            expected = withdrawal_id if withdrawal and events[withdrawal["event_id"]]["sequence"] < row["departure_cutoff"] else None
+            require(row["withdrawal_id"] == expected, "frozen withdrawal projection mismatch")
         if row["withdrawal_id"]:
             withdrawal = get("chat_withdrawals", row["withdrawal_id"])
             require(withdrawal["message_id"] == row["message_id"], "view withdrawal mismatch")
             if row["departure_cutoff"]:
                 require(events[withdrawal["event_id"]]["sequence"] < row["departure_cutoff"], "post-departure withdrawal leak")
+
+    for message in rows["chat_messages"]:
+        stream = get("chat_streams", message["stream_id"])
+        position = events[message["publication_event_id"]]["sequence"]
+        actual = {(view["agent_id"], view["interval_id"]) for view in rows["chat_personal_views"] if view["message_id"] == message["message_id"]}
+        if stream["team_id"]:
+            expected = {(interval["agent_id"], interval["interval_id"]) for interval in rows["membership_intervals"]
+                        if interval["team_id"] == stream["team_id"] and events[interval["join_event_id"]]["sequence"] < position
+                        and (interval["leave_event_id"] is None or position < events[interval["leave_event_id"]]["sequence"])}
+        else:
+            relation = get("direct_relationships", stream["relationship_id"])
+            expected = {(relation["agent_a_id"], None), (relation["agent_b_id"], None)}
+        require(actual == expected, "publication personal views are incomplete")
+        if message["reply_message_id"]:
+            require(any(view["agent_id"] == message["author_agent_id"] and view["message_id"] == message["reply_message_id"]
+                        for view in rows["chat_personal_views"]), "reply has no authorized author view")
 
     for row in rows["executions"]:
         invocation = get("activity_invocations", row["invocation_id"])
@@ -272,6 +326,14 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
     for row in rows["chat_reminder_previews"]:
         notice, revision = get("agent_notifications", row["notification_id"]), get("chat_revisions", row["revision_id"])
         require(notice["agent_id"] == row["agent_id"] and notice["chat_message_id"] == revision["message_id"], "reminder preview source mismatch")
+        require(type(row["preview"]) is dict and set(row["preview"]) == {"title", "body"}
+                and all(type(value) is str for value in row["preview"].values()), "invalid captured reminder preview")
+        require(type(row["visibility"]) is dict, "invalid reminder visibility")
+        view = get("chat_personal_views", row["visibility"].get("view_id"))
+        require(view["agent_id"] == row["agent_id"] and view["message_id"] == revision["message_id"]
+                and view["interval_id"] == row["visibility"].get("interval_id"), "reminder visibility owner mismatch")
+        if view["departure_cutoff"]:
+            require(events[revision["event_id"]]["sequence"] < view["departure_cutoff"], "post-departure reminder leak")
     for row in rows["recovery_incidents"]:
         for name, field in (("activity_invocations", "invocation_id"), ("executions", "execution_id")):
             if row[field]:

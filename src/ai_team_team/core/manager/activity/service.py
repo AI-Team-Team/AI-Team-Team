@@ -94,6 +94,7 @@ class PersonalActivityService(
             if (
                 team is None
                 or team.team_kind != "ordinary"
+                or getattr(team, "_publication_pending", False)
                 or agent not in team.members
                 or getattr(team, "_lifecycle_state", "active") != "active"
             ):

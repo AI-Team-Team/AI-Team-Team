@@ -22,8 +22,8 @@ class MembershipService:
         changed_agents: set[str] = set()
         changed = False
         membership_changed = False
-        async with team.state_lock:
-            for proposal in team.proposals.values():
+        async with manager._messaging.membership_transaction(team) as change:
+            for proposal in change.proposals.values():
                 details = proposal.setdefault("proposed_details", {})
                 if proposal.get("status") != "approved" or details.get("executed") is True:
                     continue
@@ -62,12 +62,11 @@ class MembershipService:
                         role_description=details.get("role_description", ""),
                         system_instructions=details.get("system_instructions", ""),
                     )
-                    if any(member.name == new_agent.name for member in team.members):
+                    if any(member.name == new_agent.name for member in change.members):
                         proposal["status"] = "rejected"
                         continue
-                    manager.register_agent(new_agent, auto_save=False)
-                    with manager._resources.mutation():
-                        team.members.append(new_agent)
+                    change.register_agent(new_agent)
+                    change.members.append(new_agent)
                     changed_agents.add(new_agent.agent_id)
                     membership_changed = True
                     manager.logger.info(
@@ -76,18 +75,17 @@ class MembershipService:
                         team.team_id,
                     )
                 elif action == "remove":
-                    if len(team.members) <= manager.config.min_subagent_team_size:
+                    if len(change.members) <= manager.config.min_subagent_team_size:
                         proposal["status"] = "rejected"
                         continue
                     target_agent = next(
-                        (member for member in team.members if member.name == target),
+                        (member for member in change.members if member.name == target),
                         None,
                     )
                     if target_agent is None:
                         proposal["status"] = "rejected"
                         continue
-                    with manager._resources.mutation():
-                        team.members.remove(target_agent)
+                    change.members.remove(target_agent)
                     membership_changed = True
                     manager.logger.info(
                         "Deferred execution removed member %s from team %s.",
@@ -96,14 +94,3 @@ class MembershipService:
                     )
                 else:
                     proposal["status"] = "rejected"
-
-        if changed:
-            manager._auto_save(
-                agents=changed_agents,
-                teams=({team.team_id} if membership_changed else set()),
-                proposals={team.team_id},
-                libraries={
-                    manager._agents_by_id[agent_id].private_doc_library_id
-                    for agent_id in changed_agents
-                },
-            )

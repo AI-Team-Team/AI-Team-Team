@@ -1,5 +1,7 @@
 """One personal window and fresh, explicitly scoped provider instructions."""
 
+import json
+
 from ai_team_team.core.strategies.shared import (
     _append_agent_message,
     _append_private_window_message,
@@ -82,6 +84,9 @@ class ContextMixin:
             "Activity continues by default. Ordinary answers and silence are personal, not public messages or completion. "
             "Use set_activity_intent for deliberate idle or finite sleep. Use set_operation_scope to request a different "
             "authorized scope after the current complete tool batch. Receiving or reading mail never casts a ballot.",
+            "Team chat, personal direct chat, and personal mail are distinct. Use send_team_message or send_direct_message "
+            "only for deliberate publication. Chat previews never mark a source read. Historical team inspection grants "
+            "no current team, tool, or file authority. Friendship grants no team or file access.",
         ]
         if self.manager.config.episodic_memory.enabled:
             parts.append(self.manager._memory.retained_context(agent.agent_id))
@@ -126,6 +131,8 @@ class ContextMixin:
             tool_attempts=result.attempts,
             invocation_id=session.invocation_id,
         )
+        if result.name == "read_chat_message" and not result.failed:
+            message["source_chat_message_id"] = json.loads(result.content)["message_id"]
         if result.name in _PRIVATE_TOOL_NAMES:
             _append_private_window_message(agent, message, team, self.manager)
         elif result.name in _MEMORY_RECALL_TOOL_NAMES:
@@ -144,3 +151,5 @@ class ContextMixin:
                 capture_content=result.name in tools
                 and tools[result.name].memory_capture == "content",
             )
+        if result._chat_read_acknowledgement is not None and not result.failed:
+            session.pending_chat_read_acknowledgements.append(result._chat_read_acknowledgement)

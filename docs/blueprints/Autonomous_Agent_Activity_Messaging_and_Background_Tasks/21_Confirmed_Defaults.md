@@ -15,7 +15,8 @@
 - Team-message counts remain visible, and the AI can enable or disable detailed previews.
 - Previews do not mark messages read, tool reads do, and the AI may explicitly change its own read and unread state.
 - Team chat visibility follows the union of actual membership intervals, preserving eligible history after departure without revealing absence-period messages on rejoining.
-- Stranger contact permits at most three messages before accepted friendship, unless rejection or blocking stops receipt.
+- Stranger contact permits at most three deliveries per sender per relationship period before accepted friendship, with new messages and successful edits sharing that allowance and current refusal or blocking checks.
+- Direct edits commit the revision, allowance charge, and notification atomically, idempotent retries do not charge again, failed edits do not renew withdrawal deadlines, and delivery restrictions do not erase previously authorized history.
 - Accepted friendship removes the stranger-message cap, while removing friendship resets the allowance and permits a renewed request.
 - Either person's block prevents direct sends in both directions and ends friendship, while both cleared blocks return the pair to stranger contact with a fresh allowance.
 - Background execution can be explicit or automatically detached after a configurable threshold whose default is 120 seconds.

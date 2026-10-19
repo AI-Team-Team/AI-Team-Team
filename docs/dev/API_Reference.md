@@ -327,7 +327,7 @@ Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/
 
 ## Database Schema & ORM Models
 
-SQLAlchemy models and relational activity tables mapping schema 12 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
+SQLAlchemy models and relational activity tables mapping schema 13 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
 * **`AgentModel`, `AgentMessageModel`, and `AgentInboxModel`**: Use immutable `agent_id` primary/foreign keys and persist lifecycle profiles, bounded Working Context, and identity-addressed notifications.

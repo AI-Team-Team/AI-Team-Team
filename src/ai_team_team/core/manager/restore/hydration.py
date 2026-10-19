@@ -76,6 +76,7 @@ class RestoreHydrationMixin:
             agent._model_alias = alias
             agent._private_doc_library_id = f"PDL-{agent.agent_id}"
             agent._manager = manager
+            _ = agent.lifecycle_lock
             agent.last_context = json.loads(row["last_context"]) if row["last_context"] else None
             agent.messages = []
             agent.message_history = []

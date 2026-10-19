@@ -215,7 +215,12 @@ class FormationCreationMixin:
             finally:
                 manager._persistence_batch.reset(batch_token)
             await manager._commit_dirty_state(dirty)
-        except Exception:
+        except BaseException:
+            committed = team is not None and any(row.table_name == "chat_streams" and row.values["team_id"] == team.team_id
+                                                 for row in manager._records.snapshot())
+            if committed:
+                team._publication_pending = False
+                raise
             self.requests[request.request_id] = old_request
             for agent_id, invitation in old_invitations.items():
                 self.invitations[(request.request_id, agent_id)] = invitation
@@ -226,6 +231,8 @@ class FormationCreationMixin:
                 with manager._topology_lock:
                     manager._rollback_team_creation(old_runtime)
             raise
+
+        team._publication_pending = False
 
         manager._emit_callback(
             "on_system_event",

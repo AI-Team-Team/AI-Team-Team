@@ -11,7 +11,7 @@
 >
 > Agent identity, personal memory, membership consent, and permission boundaries remain core requirements.
 >
-> Phase 0 freezes contracts, Phase 1 activates schema 12 durability foundations, and Phase 2 adds continuing personal activity and bounded model requests; messaging, background execution, institutional round removal, and the remaining breaking changes are still in progress.
+> Phase 0 freezes contracts, Phase 1 establishes durability foundations, Phase 2 adds continuing personal activity and bounded model requests, and Phase 3 adds explicit team conversations and personal direct chat on schema 13; background execution, institutional round removal, and the remaining breaking changes are still in progress.
 >
 > See the [Design Blueprints](docs/blueprints/README.md) for the design, implementation phases, and deferred features.
 
@@ -145,6 +145,8 @@ Durable sessions require an explicit database path; the Host may explicitly choo
 The [Phase 1 persistence foundations](docs/dev/autonomous_activity/Phase_1.md) install incompatible schema 12, immutable record deltas, exact commit receipts, recoverable directory publication, and stale-worker fencing while the later runtime replacement remains in progress.
 
 The [Phase 2 personal runtime](docs/dev/autonomous_activity/Phase_2.md) adds per-person admission, continuing activity, explicit idle or finite sleep, captured scopes, durable notification frames, and bounded model requests with persistent quota claims.
+
+The [Phase 3 conversation service](docs/dev/autonomous_activity/Phase_3.md) adds explicit team and direct publications, friendship and contact controls, frozen personal archives, independent read state, and schema 13 without automatically broadcasting model answers.
 
 ### Failure Semantics Follow the Type of Decision
 
@@ -364,6 +366,9 @@ flowchart TB
     subgraph Coordination["Autonomous Coordination and Safety"]
         Governance["Membership, Migration,<br/>and Parent Failover Governance"]
         Communication["Peer Communication<br/>policy, requests, approvals, agreements, delivery"]
+        Conversations["Explicit Team and Personal Chat<br/>Markdown messages, versions, and withdrawal"]
+        Contact["Personal Contact Relationships<br/>friendship, blocks, refusal, stranger allowance"]
+        ChatViews["Authorized Personal Chat Views<br/>read state, reminders, and frozen archives"]
         Knowledge["Private Publish, Team Files,<br/>Gated Reading, and Managed Links"]
         Supervision["Fresh Managed Supervisory ATs<br/>content and operational audits"]
         Alerts["Deduplicated Parent or Root Alerts"]
@@ -411,6 +416,12 @@ flowchart TB
     Model -->|parent failover request| Governance
     Governance -->|selected model binding| Model
     Tools --> Communication
+    Tools --> Conversations
+    Tools --> Contact
+    Membership --> Conversations
+    Contact --> Conversations
+    Conversations --> ChatViews
+    ChatViews --> PersonalBoundary
     Communication -->|approval session| DiscussionLock
     Tools --> Knowledge
     PrivateDocLib --> Knowledge
@@ -432,6 +443,9 @@ flowchart TB
     Governance --> Dirty
     Formation --> Dirty
     Communication --> Dirty
+    Conversations --> Dirty
+    Contact --> Dirty
+    ChatViews --> Dirty
     Knowledge --> Dirty
     DiscussionResult --> Events
     DiscussionResult -->|return| HostApp
@@ -456,7 +470,7 @@ flowchart TB
     class HostApp,Config,Bindings,Manager host;
     class Root,Agents,AgentInbox,Membership,Teams,Discovery,Formation,DelegationAdmission identity;
     class DiscussionLock,Rounds,Turns,AgentLock,WaitGraph,Strategy,Model,Tools,RoundResults,DiscussionResult execution;
-    class Governance,Communication governance;
+    class Governance,Communication,Conversations,Contact,ChatViews governance;
     class PrivateDocLib,TeamDocLib,Knowledge knowledge;
     class Supervision,Alerts supervision;
     class WorkingContext,Journal,Catalog,Indexer,Recall memory;

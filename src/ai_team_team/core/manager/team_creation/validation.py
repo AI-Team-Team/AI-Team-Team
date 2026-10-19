@@ -77,6 +77,8 @@ class TeamCreationValidationMixin:
             raise ValueError("The creator AgentTeam must be registered.")
         if isinstance(creator, AgentTeam) and creator.team_kind != "ordinary":
             raise ValueError("A system AgentTeam cannot create child teams.")
+        if isinstance(creator, AgentTeam):
+            manager._topology.require_available(creator)
         if isinstance(creator, Agent) and (
             creator.lifecycle_state != "active"
             or manager._agents_by_id.get(creator.agent_id) is not creator
@@ -211,6 +213,8 @@ class TeamCreationValidationMixin:
             current_parent = manager.get_agent_team(creator)
         if current_parent is not stage["parent"]:
             raise ValueError("The proposed parent changed during team staging.")
+        if current_parent is not None:
+            manager._topology.require_available(current_parent)
         required_agent_id = stage.get("required_creator_member_agent_id")
         if required_agent_id is not None:
             required_agent = manager._agents_by_id.get(required_agent_id)
