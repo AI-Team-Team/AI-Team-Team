@@ -14,6 +14,8 @@ The numbered strategy and member-turn descriptions below remain transitional ins
 
 Foreground execution evidence now commits before each real attempt, including opted-in retries; undeclared custom tools still cannot detach into background work.
 
+The [Phase 4 execution service](dev/autonomous_activity/Phase_4.md) owns explicitly background and automatically detached operations independently of the foreground observer, with canonical resource exclusion and factual cancellation.
+
 To make reasoning execution vendor-independent and model-agnostic, the ATT framework decouples the reasoning loop from individual LLM clients. It implements a Strategy Pattern to govern how agent turns are executed.
 
 ```plaintext
@@ -287,6 +289,40 @@ These tools are not an additional team-discussion mode and are not exposed by le
 `list_chat_reminders(message_id=None, limit=50, cursor=None)` inspects owner-authorized captured unread previews separately from current source retrieval, including after withdrawal.
 
 See [Phase 3](dev/autonomous_activity/Phase_3.md) for frozen history, current-source withdrawal, recipient-owned reminders, exact receipts, and the archive-finalization boundary.
+
+### Personal Background Task Tools
+
+The personal runtime exposes `start_background_task(tool_name, arguments, description="", labels=None)`, `list_background_tasks`, `search_background_tasks`, `inspect_background_task`, `read_background_task_result`, `cancel_background_task`, and `acknowledge_background_task` in both Text and Native modes.
+
+Owner and original scope come from the invocation rather than model-supplied actor, executor, or policy overrides.
+
+Only the invocation's available tools with an explicit background declaration may be started, and self-modifying operations remain foreground-only.
+
+Undeclared custom tools also remain foreground-only, but their conservative global resource reservation participates in the same exclusion mechanism as background work rather than bypassing it.
+
+Every registered foreground-only operation shares admission, resource resolution, executor dispatch, and final source authorization with background-capable operations while keeping the original personal Session.
+
+Self-modification does not bypass explicit claims or mixed-effect contracts, and the configured executor runs instead of an unrelated callable placeholder.
+
+Custom personal execution controls must declare their self-modifying contract; controls without shared claims can coordinate personal activity, but no tool may hold shared resource reservations while synchronously waiting on nested model activity.
+
+A pure self-modification declaration does not implicitly grant file access, and a nonempty global resource claim retains opaque source provenance rather than imply a source-free result.
+
+Automatic detachment defaults to 120 seconds of actual execution, including retries and backoff without a second dispatch.
+
+The original Native tool call receives exactly one normal result or structured task handle, with later output delivered through a personal notification and explicit token-bounded result reading.
+
+Task summaries contain counts rather than bodies, and attention acknowledgement neither changes execution outcome nor deletes retained results.
+
+Managed-link bindings and actual physical paths are revalidated at resource access and commit boundaries, and failure bodies require the same final source authorization as successful results.
+
+Accepted stop requests survive observer cancellation, while an operation that has already returned finishes local result settlement without being misreported as cancelled.
+
+Stop-hook framework errors remain observable through cancellation and shutdown even when the external stop outcome is uncertain or a synchronous hook finishes after its grace period.
+
+Heartbeat and progress timeout decisions serialize with accepted samples and retain crossed deadlines during slow observation commits, preventing stale stalls and lost monitor wakeups.
+
+Private reads remain transient, and source revocation prevents new source access even when the default retained-result policy permits reading a previously lawfully committed personal result.
 
 ## 10. Persistence & Serialization
 

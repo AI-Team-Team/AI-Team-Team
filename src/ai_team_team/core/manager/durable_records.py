@@ -95,7 +95,7 @@ class DurableRecordService:
                 and row.values["leave_event_id"] is None))
         return dependency_closure(merge_records(prerequisites, captured), candidate)
 
-    async def commit(self, records, *, operation_id=None, notifications=(), dirty=None, allow_closing=False, agent_contexts=None, team_memberships=None, team_lifecycles=None, agent_registrations=None, team_proposals=None, read_compensations=()):
+    async def commit(self, records, *, operation_id=None, notifications=(), dirty=None, allow_closing=False, agent_contexts=None, team_memberships=None, team_lifecycles=None, agent_registrations=None, team_proposals=None, read_compensations=(), authority_check=None):
         """Commit a domain delta without flushing unrelated queued changes.
 
         Notification dispatch contains IDs and transition metadata only. A
@@ -171,8 +171,11 @@ class DurableRecordService:
                     manager._merge_dirty_state(dirty, checkpoint_dirty)
                     dirty["_relationships_supplied"] = checkpoint_dirty.get("_relationships_supplied", False)
                 dirty["configs"] = True
-                agents, teams = set(), set()
+                agents, teams, source_libraries = set(), set(), set()
                 for record in captured:
+                    if record.table_name == "executions":
+                        source_libraries.update(reference["lib_id"] for reference in record.values["source_references"] or ()
+                                                if reference["kind"] == "library")
                     table = ACTIVITY_TABLES[record.table_name]
                     for constraint in table.foreign_key_constraints:
                         target = constraint.referred_table.name
@@ -195,6 +198,7 @@ class DurableRecordService:
                             dirty["governance_rounds"].update(values)
                 dirty["record_dependency_agents"] = agents
                 dirty["record_dependency_teams"] = teams
+                dirty["record_dependency_libraries"] = source_libraries
                 if team_memberships:
                     dirty["team_memberships"] = team_memberships
                 if team_lifecycles:
@@ -210,6 +214,10 @@ class DurableRecordService:
                                        if team.team_kind == "supervisory" for member in team.members}
                     state = {
                         "agents": [{"agent_id": agent.agent_id, "name": agent.name, "lifecycle_state": agent.lifecycle_state} for agent in {**manager._agents_by_id, **dirty.get("_staged_agents", {})}.values() if agent.agent_id not in scoped_auditors],
+                        "libraries": [{"lib_id": lib.lib_id, "name": lib.name, "library_kind": lib.library_kind,
+                            "owner_agent_id": lib.owner_agent_id, "owner_team_id": lib.owner_team_id,
+                            "lifecycle_state": lib.lifecycle_state, "description": lib.description,
+                            "is_public_visible": lib.is_public_visible} for lib in manager.libraries.values()],
                         "teams": [{"team_id": team.team_id, "team_kind": "ordinary", "lifecycle_state": (team_lifecycles or {}).get(team.team_id, getattr(team, "_lifecycle_state", "active")), "parent_team_id": team.parent_team.team_id if team.parent_team else None, "parent_agent_id": getattr(team, "_parent_agent_id", None), "creator_type": "agent" if hasattr(team.creator, "agent_id") else "team", "creator_id": getattr(team.creator, "agent_id", getattr(team.creator, "team_id", None)), "members": (team_memberships or {}).get(team.team_id, tuple(member.agent_id for member in team.members))} for team in manager.teams.values() if team.team_kind == "ordinary"],
                         "agent_inboxes": {agent.agent_id: list(agent.agent_inbox) for agent in manager._agents_by_id.values()},
                         **manager._memory.snapshot(),
@@ -222,7 +230,9 @@ class DurableRecordService:
                 # Resource authorization precedes the snapshot lock, matching
                 # managed file commits that publish their snapshot delta.
                 manager._resources.check_authority()
-                with manager._snapshot_lock:
+                with manager._resources._lock, manager._snapshot_lock:
+                    if authority_check is not None:
+                        authority_check()
                     manager._state_version += 1
                     version = manager._state_version
                     receipt = CommitReceipt(operation_id, version,

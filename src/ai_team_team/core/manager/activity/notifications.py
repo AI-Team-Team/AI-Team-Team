@@ -377,6 +377,11 @@ class NotificationMixin:
                             lines.append(
                                 "Use open_agent_mail to inspect this mail; opening is not a reply or a public choice."
                             )
+                    elif item["source_kind"] == "execution":
+                        execution = self.manager._records.index[("executions", (item["source_id"],))]
+                        lines.append(f"Execution {item['source_id']}: last confirmed {execution.values['status']}; "
+                            f"outcome unconfirmed: {bool(execution.values['outcome_unconfirmed'])}. "
+                            "Use task inspection and result tools deliberately; presentation is not acknowledgement.")
                 self.append(session, {"role": "user", "content": "\n".join(lines)})
             summaries, chat_references = self.manager._messaging.frame_summaries(agent, include_references=True)
             if summaries:

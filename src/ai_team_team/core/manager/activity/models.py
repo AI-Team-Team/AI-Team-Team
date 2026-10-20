@@ -207,6 +207,7 @@ class ModelRequestService:
         require_json=False,
         maintenance_segment=None,
         audit_profile=None,
+        system_instruction_factory=None,
     ):
         manager, activity = self.manager, self.activity
         policy = manager.config.activity.llm
@@ -222,6 +223,8 @@ class ModelRequestService:
         failure = None
         immutable_prompt = freeze(prompt)
         prompt_copy = await asyncio.to_thread(thaw, immutable_prompt)
+        if system_instruction_factory is not None:
+            system_instruction = system_instruction_factory()
         input_tokens = await asyncio.to_thread(
             _count_request_input_tokens, manager, alias, prompt_copy, system_instruction, tools
         )
@@ -230,6 +233,8 @@ class ModelRequestService:
         for attempt in range(1, retries + 2):
             if attempt > 1 and maintenance_segment is None and audit_profile is None:
                 await activity.prepare_frame(session)
+                if system_instruction_factory is not None:
+                    system_instruction = system_instruction_factory()
                 prompt_copy = await asyncio.to_thread(
                     thaw, freeze(activity.require_agent(session.agent_id).messages)
                 )

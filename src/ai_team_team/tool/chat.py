@@ -94,8 +94,12 @@ def build_chat_tools(manager, *, team_scope=False):
     if team_scope:
         functions["send_team_message"] = (send_team_message, "Deliberately publishes Markdown in the captured current AgentTeam; private answers and tool results are never published automatically.")
     read_only = {"list_team_messages", "list_direct_messages", "inspect_direct_relationship", "list_friendship_requests", "list_chat_reminders"}
-    return {name: Tool(name, description, function, execution_contract={
+    tools = {name: Tool(name, description, function,
+        result_storage="transient" if name == "read_chat_message" else "protected", execution_contract={
         "effects": ("read_only",) if name in read_only else ("domain_mutation",),
         "background_allowed": False, "required_scope": "agent_team" if name == "send_team_message" else "either",
         "mutation_safety": "managed_lease", "cancellation": "cooperative",
     }) for name, (function, description) in functions.items()}
+    for tool in tools.values():
+        tool._builtin = True
+    return tools

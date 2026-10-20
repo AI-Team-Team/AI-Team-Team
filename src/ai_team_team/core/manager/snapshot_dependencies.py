@@ -6,6 +6,37 @@ from ..agent import Agent
 from ..exceptions import StatePersistenceError
 from ..memory import MemoryIndexStatus
 from ..team import AgentTeam
+from ai_team_team.database.models import ACTIVITY_TABLES
+from ai_team_team.database.persistence.records import dependency_closure
+
+
+def capture_execution_dependencies(manager, agent_ids, memory_records):
+    """Retain concrete observation sources even on a first partial checkpoint."""
+    execution_ids = {message["source_execution_id"]
+        for owner in agent_ids if owner in manager._agents_by_id
+        for message in manager._agents_by_id[owner].messages if message.get("source_execution_id")}
+    execution_ids.update(event["source_execution_id"] for event in memory_records["memory_events"]
+                         if event.get("source_execution_id"))
+    selected = []
+    for execution_id in execution_ids:
+        _require(manager._records.index, ("executions", (execution_id,)), "observation execution")
+    for row in manager._records.snapshot():
+        if row.table_name in {"executions", "execution_attempts", "execution_payloads", "execution_observations", "execution_controls"} and row.values["execution_id"] in execution_ids:
+            selected.append(row)
+    records = dependency_closure(selected, manager._records.index)
+    agents, teams, libraries = set(), set(), set()
+    for record in records:
+        for constraint in ACTIVITY_TABLES[record.table_name].foreign_key_constraints:
+            target = constraint.referred_table.name
+            values = {record.values[item.parent.name] for item in constraint.elements}
+            values.discard(None)
+            if target == "agents":
+                agents.update(values)
+            elif target == "teams":
+                teams.update(values)
+        if record.table_name == "executions":
+            libraries.update(source["lib_id"] for source in record.values["source_references"] or () if source["kind"] == "library")
+    return records, agents, teams, libraries
 
 
 def capture_memory_records(manager: Any, dirty: Dict[str, Any]) -> Dict[str, list]:

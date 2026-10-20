@@ -180,7 +180,7 @@ IMMUTABLE_FIELDS = {
     "chat_streams": "team_id relationship_id",
     "membership_intervals": "team_id agent_id stream_id join_event_id",
     "chat_personal_views": "agent_id message_id interval_id",
-    "executions": "agent_id invocation_id scope_kind scope_team_id tool_name effects runtime_generation created_at",
+    "executions": "agent_id invocation_id scope_kind scope_team_id tool_name effects runtime_generation created_at call_id contract_snapshot metadata source_references",
     "execution_controls": "execution_id requester_agent_id operation requested_at",
     "sleep_plans": "agent_id latest_wake_seconds minimum_seconds maximum_seconds",
     "audit_runs": "subject_agent_id subject_team_id temporary_team_id template electorate runtime_generation created_at deadline token_budget",
@@ -231,6 +231,12 @@ def validate_update(previous, later, *, read_compensations=()):
     if previous.table_name in {"executions", "audit_execution_evidence"}:
         if previous.values["status"] in {"completed", "failed", "cancelled"} and previous.values["status"] != later.values["status"]:
             raise StatePersistenceError("A confirmed execution outcome cannot be reversed.")
+    if previous.table_name == "executions":
+        for field in ("started_at", "finished_at"):
+            if previous.values[field] is not None and later.values[field] != previous.values[field]:
+                raise StatePersistenceError("Confirmed execution timing cannot be rewritten.")
+        if previous.values["visibility"] != "foreground" and later.values["visibility"] != previous.values["visibility"]:
+            raise StatePersistenceError("Background visibility cannot be withdrawn or changed.")
     if previous.table_name == "model_token_claims" and previous.values["settlement"] != "reserved":
         if any(previous.values[field] != later.values[field] for field in ("settlement", "actual_usage", "settled_at")):
             raise StatePersistenceError("A confirmed token settlement cannot be rewritten.")

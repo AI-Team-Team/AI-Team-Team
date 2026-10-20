@@ -100,8 +100,8 @@ Per-callback observation tasks isolate self-cancellation from the ordered dispat
     Registers custom dynamic committee presets.
   * `get_preset(name: str) -> dict`
     Retrieves a registered preset or defaults to `generic`.
-  * `register_tool(name: str, description: str, func: Callable[..., Any], schema: Optional[Any] = None, *, memory_capture: str = "metadata_only")`
-    Registers a custom tool globally with metadata-only Journal capture unless content capture is explicitly selected.
+  * `register_tool(name, description=None, func=None, schema=None, *, memory_capture="metadata_only", execution_contract=None, executor="callable", resource_resolver=None, retry_safe=False, result_storage="protected")`
+    Registers a validated tool with independent background, resource, retry, storage, and Journal-capture declarations; runtime executor and resource-resolver bindings are Host-owned.
   * `register_tool_auditor(tool_name: str, auditor_func: Callable[..., Tuple[bool, str]])`
     Registers an auditing hook callback that intercepts specific tool calls before execution.
   * `register_tools_context(context: Dict[str, Any])`
@@ -327,7 +327,7 @@ Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/
 
 ## Database Schema & ORM Models
 
-SQLAlchemy models and relational activity tables mapping schema 13 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
+SQLAlchemy models and relational activity tables mapping schema 14 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
 * **`AgentModel`, `AgentMessageModel`, and `AgentInboxModel`**: Use immutable `agent_id` primary/foreign keys and persist lifecycle profiles, bounded Working Context, and identity-addressed notifications.
@@ -340,6 +340,28 @@ SQLAlchemy models and relational activity tables mapping schema 13 are grouped i
 * **`CommunicationAgreementModel` & `PeerMessageModel`**: Persist directional endpoint channels, revocation state, and idempotent delivery lifecycle.
 * **`GovernanceRoundModel`, `GovernanceBallotModel`, and `MigrationRequestModel`**: Persist frozen personal-email rounds, append-only explicit choices, and revalidated asynchronous migration requests.
 * **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel` & `DocLibLinkModel`**: Persists library kind, mutually exclusive team/agent ownership, lifecycle, ACL segments, physical document contents, and managed team-library link targets.
+
+### Registered Execution Service
+
+`core.manager.executions` owns all registered personal-tool admission, canonical resource scheduling, executor dispatch, actual-start timing, threshold observation, factual stop controls, health evidence, and owner-only queries.
+
+The personal runner uses the same classified `ToolExecutor` for argument validation, auditors, typed failures, and retries, while coordinated foreground-only controls retain their personal invocation context.
+
+Foreground-only effects never select a separate callable or bypass resource resolvers and final source checks, and tools cannot wait for nested personal models while retaining shared resource claims.
+
+Both direct model invocation and personal interaction enforce that boundary before admission; a permitted source-free nested invocation isolates the parent's tool-resource context without removing its revocable authority or dependency edges.
+
+`ExecutorCall` carries immutable execution provenance and validated inputs without the owner's Session or model window.
+
+Runtime bindings implement `async execute(call)` and optional declared stop hooks; persisted names never authorize replay or automatic reconnection during restore.
+
+Stop protocol tasks retain fatal framework errors from immediate and late hooks for propagation through cancellation and shutdown without treating the error as proof of an external stop.
+
+Timeout observations and accepted heartbeat/progress samples use the same activity lock, and monitor scheduling retains a deadline crossed during an awaited observation commit.
+
+`ResourceClaim` describes protected read/write footprints, including directory descendants and physical link targets, with synchronous physical path locks as a final publication boundary.
+
+See the [Phase 4 implementation profile](autonomous_activity/Phase_4.md) and [schema 14](autonomous_activity/Schema_14.md).
 
 ### Database Session Factory
 

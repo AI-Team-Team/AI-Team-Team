@@ -156,6 +156,9 @@ class ToolResult:
         self.attempts = attempts
         # Ephemeral trusted delivery evidence, never serialized as tool content.
         self._chat_read_acknowledgement = None
+        self._background_handle = False
+        self._private_result = False
+        self._execution_id = None
 
     @property
     def failed(self) -> bool:

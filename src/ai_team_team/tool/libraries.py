@@ -29,18 +29,8 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
         if not caller_team:
             raise ToolPermissionError("The active AgentTeam could not be resolved.")
             
-        import uuid
-        lib_id = f"DL-{uuid.uuid4().hex[:6]}"
-        lib = att_manager._new_document_library(
-            lib_id=lib_id,
-            name=name,
-            owner_team_id=caller_team.team_id,
-            description=description,
-            is_public_visible=is_public,
-        )
-        att_manager.libraries[lib_id] = lib
-        att_manager._auto_save(libraries={lib_id})
-        return f"Successfully created document library '{name}' with ID '{lib_id}'."
+        lib = await att_manager._library_service.create_team_library(caller_team, name, description, is_public)
+        return f"Successfully created document library '{name}' with ID '{lib.lib_id}'."
 
     async def update_library_metadata(lib_id: str, description: Optional[str] = None, is_public: Optional[bool] = None) -> str:
         """Updates description or visibility of a library owned by the caller's team. Arguments: lib_id (str), description (str, optional), is_public (bool, optional)"""
@@ -154,7 +144,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             )
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError(
                 f"Managed library link creation failed: {exc}"
             ) from exc
@@ -182,7 +172,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             return f"Successfully written file '{path}' in library '{lib_id}'."
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError(
                 f"Writing path {path!r} in library {lib_id!r} failed: {exc}"
             ) from exc
@@ -234,7 +224,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             raise
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError(
                 f"Reading path {path!r} in library {lib_id!r} failed: {exc}"
             ) from exc
@@ -259,14 +249,12 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             result = await att_manager.delete_library_path(
                 caller_team.team_id, lib_id, path
             )
-            if result.startswith("Error: "):
-                raise ToolBusinessError(result.removeprefix("Error: "))
             return result
         except ToolError:
             raise
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError(
                 f"Deleting path {path!r} in library {lib_id!r} failed: {exc}"
             ) from exc
@@ -296,7 +284,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             return f"Contents of library '{lib_id}' path '{path}':\n" + "\n".join(items)
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError(
                 f"Listing path {path!r} in library {lib_id!r} failed: {exc}"
             ) from exc
@@ -310,7 +298,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             return "Private workspace is empty." if not items else "\n".join(items)
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError("Private file listing failed.") from exc
 
     async def read_private_file(
@@ -343,7 +331,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             ) from exc
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError("Private file reading failed.") from exc
 
     async def write_private_file(path: str, content: str) -> str:
@@ -355,7 +343,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             return f"Successfully wrote private file '{path}'."
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError("Private file writing failed.") from exc
 
     async def delete_private_file(path: str) -> str:
@@ -366,7 +354,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             return await att_manager.delete_private_file(path)
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError("Private file deletion failed.") from exc
 
     async def move_private_file(
@@ -384,7 +372,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             return f"Successfully moved private file to '{target_path}'."
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError("Private file move failed.") from exc
 
     async def publish_private_file(
@@ -406,7 +394,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             ) from exc
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError("Private file publication failed.") from exc
 
     async def move_library_file(
@@ -432,7 +420,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             return f"Successfully moved library file to '{target_path}'."
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise ToolBusinessError(
                 f"Library file move failed: {exc}"
             ) from exc

@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from ai_team_team import ATTConfig, ATTManager, Agent, LLMResponse, ToolCall
+from ai_team_team.core.activity.contracts import ToolExecutionContract
 from test.async_waits import DEFAULT_RUNTIME_TIMEOUT, runtime_watchdog, wait_for_runtime
 from test.test_att.test_autonomous_activity_phase0._fixtures import (
     LogicalClock,
@@ -24,6 +25,12 @@ def idle(*, native=True):
         if native
         else LLMResponse(text="Action: set_activity_intent(intent={'kind': 'idle'})")
     )
+
+
+def personal_control_contract():
+    """Declare fixture tools that coordinate the existing personal executor."""
+    return ToolExecutionContract(effects=("self_modification",), background_allowed=False,
+        required_scope="personal", mutation_safety="trusted_host")
 
 
 class ActivityTestCase(unittest.IsolatedAsyncioTestCase):

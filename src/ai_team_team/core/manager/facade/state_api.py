@@ -61,6 +61,9 @@ class StateAPI:
 
     async def close(self) -> None:
         """Closes runtime work, callbacks, and persistence resources."""
+        if self._executions.current.get() is not None:
+            from ...exceptions import ToolPermissionError
+            raise ToolPermissionError("Execution workers cannot close their owner's manager lifecycle.")
         if self._closed:
             return
         if self._close_task is None:
@@ -82,6 +85,7 @@ class StateAPI:
             if self._messaging.read_deliveries:
                 raise StateRestoreError("Cannot restore state while a chat read delivery or its receipt cleanup is pending.")
             self._activity.assert_restore_ready()
+            self._executions.assert_restore_ready()
             if self._active_formation_operations:
                 raise StateRestoreError(
                     "Cannot restore state while a team formation operation is active."
@@ -135,6 +139,7 @@ class StateAPI:
                 self.db_path = path
             async with self._activity.lock:
                 await self._activity.after_restore(restoration_start=restoration_start)
+                self._executions.reset_after_restore()
             recovered = True
         finally:
             self._finish_restore_protection()

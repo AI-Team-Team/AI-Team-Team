@@ -8,7 +8,7 @@ from unittest.mock import patch
 from ai_team_team import Agent, LLMResponse, Tool, ToolCall
 from ai_team_team.core.tool_runtime import ToolExecutor
 
-from ._support import ActivityTestCase
+from ._support import ActivityTestCase, personal_control_contract
 
 
 class RegistrationPublicationTests(ActivityTestCase):
@@ -57,8 +57,8 @@ class RegistrationPublicationTests(ActivityTestCase):
                 raise TimeoutError("Registration did not reach its authority check.")
             raise asyncio.CancelledError("Cancel the waiting registration")
 
-        self.manager.register_tool("register_person", func=register_person)
-        self.manager.register_tool("cancel_batch", func=cancel_batch)
+        self.manager.register_tool("register_person", func=register_person, execution_contract=personal_control_contract())
+        self.manager.register_tool("cancel_batch", func=cancel_batch, execution_contract=personal_control_contract())
         self.steps(LLMResponse(tool_calls=[
             ToolCall("register", "register_person", {}),
             ToolCall("cancel", "cancel_batch", {}),

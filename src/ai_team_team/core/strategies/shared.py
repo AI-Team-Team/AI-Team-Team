@@ -29,6 +29,11 @@ _MEMORY_RECALL_TOOL_NAMES = {"recall_memory"}
 _MEMORY_WINDOW_MARKER = "[ATT_MEMORY_RECALL]"
 
 
+def _is_private_call(name, arguments):
+    return name in _PRIVATE_TOOL_NAMES or (name == "start_background_task"
+        and isinstance(arguments, dict) and arguments.get("tool_name") in _PRIVATE_TOOL_NAMES)
+
+
 def _compose_business_system_instruction(
     team_instruction: str,
     agent: Agent,
@@ -210,7 +215,8 @@ def _redact_private_tool_calls(
         name = item.get("name")
         if isinstance(function, dict):
             name = function.get("name", name)
-        if name in _PRIVATE_TOOL_NAMES:
+        arguments = function.get("arguments", {}) if isinstance(function, dict) else item.get("arguments", {})
+        if _is_private_call(name, arguments):
             if isinstance(function, dict):
                 safe_function = dict(function)
                 safe_function["arguments"] = {"private_payload": "redacted"}

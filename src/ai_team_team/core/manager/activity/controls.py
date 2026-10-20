@@ -79,7 +79,8 @@ class ControlMixin:
             mutation_safety="managed_lease",
         )
         return {
-            name: Tool(name=name, func=func, execution_contract=contract)
+            name: Tool(name=name, func=func, execution_contract=contract,
+                       resource_resolver=lambda scope, arguments: ())
             for name, func in (
                 ("set_activity_intent", set_activity_intent),
                 ("set_operation_scope", set_operation_scope),

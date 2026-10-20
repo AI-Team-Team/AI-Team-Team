@@ -28,7 +28,7 @@ from .notifications import (
 )
 from .scope import AgentTeamScope, InvocationScope, OperationScope, PersonalScope
 
-TARGET_STATE_SCHEMA_VERSION = "13"
+TARGET_STATE_SCHEMA_VERSION = "14"
 
 __all__ = [
     "ActivityAdmission",

@@ -18,6 +18,10 @@ class RuntimeAPI:
         *,
         memory_capture: str = "metadata_only",
         execution_contract: Optional[Any] = None,
+        executor: str = "callable",
+        resource_resolver: Optional[Callable[..., Any]] = None,
+        retry_safe: bool = False,
+        result_storage: str = "protected",
     ):
         return self._runtime.register_tool(
             name,
@@ -26,6 +30,10 @@ class RuntimeAPI:
             schema,
             memory_capture=memory_capture,
             execution_contract=execution_contract,
+            executor=executor,
+            resource_resolver=resource_resolver,
+            retry_safe=retry_safe,
+            result_storage=result_storage,
         )
 
     def register_tool_auditor(self, tool_name: str, auditor_func: Callable[..., Tuple[bool, str]]):

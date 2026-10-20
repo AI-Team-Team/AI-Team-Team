@@ -47,6 +47,9 @@ class ActivityRecoveryMixin:
             and row.values["outcome"] == "pending"
         }
         for row in records:
+            if row.table_name == "executions" and row.values["status"] in {"queued", "running"}:
+                reset.append(capture(self.manager, "executions", execution_id=row.values["execution_id"],
+                                     outcome_unconfirmed=1, attention="required"))
             if (
                 row.table_name == "activity_admissions"
                 and row.values["agent_id"] in tracked

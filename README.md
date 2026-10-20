@@ -11,7 +11,7 @@
 >
 > Agent identity, personal memory, membership consent, and permission boundaries remain core requirements.
 >
-> Phase 0 freezes contracts, Phase 1 establishes durability foundations, Phase 2 adds continuing personal activity and bounded model requests, and Phase 3 adds explicit team conversations and personal direct chat on schema 13; background execution, institutional round removal, and the remaining breaking changes are still in progress.
+> Phase 0 freezes contracts, Phase 1 establishes durability foundations, Phase 2 adds continuing personal activity and bounded model requests, Phase 3 adds explicit team conversations and personal direct chat, and Phase 4 adds registered execution and background detachment on schema 14; institutional round removal and the remaining breaking changes are still in progress.
 >
 > See the [Design Blueprints](docs/blueprints/README.md) for the design, implementation phases, and deferred features.
 
@@ -147,6 +147,8 @@ The [Phase 1 persistence foundations](docs/dev/autonomous_activity/Phase_1.md) i
 The [Phase 2 personal runtime](docs/dev/autonomous_activity/Phase_2.md) adds per-person admission, continuing activity, explicit idle or finite sleep, captured scopes, durable notification frames, and bounded model requests with persistent quota claims.
 
 The [Phase 3 conversation service](docs/dev/autonomous_activity/Phase_3.md) adds explicit team and direct publications, friendship and contact controls, frozen personal archives, independent read state, and schema 13 without automatically broadcasting model answers.
+
+The [Phase 4 execution service](docs/dev/autonomous_activity/Phase_4.md) tracks one execution across foreground waiting and background detachment, coordinates conflicting resources, and delivers protected results to the same owner without creating another model-driven copy of that person.
 
 ### Failure Semantics Follow the Type of Decision
 
@@ -338,6 +340,8 @@ flowchart TB
         Strategy["Text ReAct or Native Tool Calling"]
         Model["LLM Adapter, Atomic Token Budget,<br/>and Configured Failover"]
         Tools["Validated Tool Runtime<br/>ContextVars, schema, auditor, typed results"]
+        ExecutionService["Registered Execution Service<br/>one execution, declared effects, resource coordination"]
+        BackgroundTasks["Personal Background Tasks<br/>explicit start or timed detachment; owner-only results"]
         RoundResults["Turn and Round Results<br/>completed or incomplete members"]
         DiscussionResult["Transcript or Structured Discussion Result"]
 
@@ -352,6 +356,9 @@ flowchart TB
         AgentLock --> PersonalBoundary
         PersonalBoundary --> RequestEvidence
         PersonalBoundary --> Tools
+        Tools --> ExecutionService
+        ExecutionService -->|explicit or detached| BackgroundTasks
+        BackgroundTasks -->|addressed result notice| PersonalActivity
         Tools -->|complete batch| PersonalBoundary
         RequestEvidence --> Model
         PersonalBoundary -->|continuing yield| PersonalActivity
@@ -447,6 +454,8 @@ flowchart TB
     Contact --> Dirty
     ChatViews --> Dirty
     Knowledge --> Dirty
+    ExecutionService --> Dirty
+    BackgroundTasks --> Events
     DiscussionResult --> Events
     DiscussionResult -->|return| HostApp
     Alerts --> Events
@@ -469,7 +478,7 @@ flowchart TB
 
     class HostApp,Config,Bindings,Manager host;
     class Root,Agents,AgentInbox,Membership,Teams,Discovery,Formation,DelegationAdmission identity;
-    class DiscussionLock,Rounds,Turns,AgentLock,WaitGraph,Strategy,Model,Tools,RoundResults,DiscussionResult execution;
+    class PersonalActivity,PersonalBoundary,RequestEvidence,DiscussionLock,Rounds,Turns,AgentLock,WaitGraph,Strategy,Model,Tools,ExecutionService,BackgroundTasks,RoundResults,DiscussionResult execution;
     class Governance,Communication,Conversations,Contact,ChatViews governance;
     class PrivateDocLib,TeamDocLib,Knowledge knowledge;
     class Supervision,Alerts supervision;

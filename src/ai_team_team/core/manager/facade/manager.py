@@ -16,6 +16,7 @@ from ...team import AgentTeam
 from ...token_budget import TokenBudgetLedger
 from ..agents import AgentRegistry
 from ..activity import PersonalActivityService
+from ..executions import ExecutionService
 from ..alerts import AlertService
 from ..callbacks import CallbackDispatcher
 from ..communication_validation import CommunicationStateValidator
@@ -43,6 +44,7 @@ from ..team_creation import TeamCreationService
 from ..topology import TopologyService
 from .agents_api import AgentAPI
 from .activity_api import ActivityAPI
+from .executions_api import ExecutionAPI
 from .discussions_api import DiscussionAPI
 from .discovery_api import DiscoveryAPI
 from .formations_api import FormationAPI
@@ -68,6 +70,7 @@ class ATTManager(
     DiscoveryAPI,
     ActivityAPI,
     MessagingAPI,
+    ExecutionAPI,
 ):
     """Master controller managing the overall ATT topology."""
 
@@ -147,6 +150,7 @@ class ATTManager(
         self._agent_wait_edge_counts: Dict[Tuple[str, str], int] = {}
         self._state_version = 0
         self._records = DurableRecordService(self)
+        self._executions = ExecutionService(self)
         self._snapshots = SnapshotBuilder(self)
         self._restore = RestoreService(self)
         self._state_validator = StateValidator(self)

@@ -10,7 +10,7 @@ Phase 0 was completed on 2026-10-08.
 
 The [Phase 0 contract freeze](../../../docs/dev/autonomous_activity/README.md) contains strict value contracts, the replacement inventory, target schema 12, built-in effect declarations, deterministic fixtures, and a separately runnable red specification gate.
 
-The replacement runtime and schema activation remain unimplemented, with subsequent phases recorded as planned work.
+The [phase-specific implementation records](../../dev/autonomous_activity/README.md) distinguish the implemented durable foundations, continuing personal activity, conversations, and registered background execution from remaining institutional and lifecycle replacement work.
 
 Reattachment requires the prospective parent's acceptance, unilateral voluntary detachment is enabled by default through a configurable Host setting, and cross-tree lineage approval follows both actual lineages to their independent top-level teams without adding a common Root absent from the topology.
 

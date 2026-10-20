@@ -7,7 +7,7 @@ from ai_team_team import LLMResponse, RetryableToolError, StatePersistenceError,
 from ai_team_team.core.tool_runtime import ToolExecutor
 from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep
 
-from ._support import ActivityTestCase, call, idle
+from ._support import ActivityTestCase, call, idle, personal_control_contract
 
 
 class CooldownTransactionTests(ActivityTestCase):
@@ -20,7 +20,7 @@ class CooldownTransactionTests(ActivityTestCase):
                     started, release = asyncio.Event(), asyncio.Event()
                     committing, commit_release, returned = asyncio.Event(), asyncio.Event(), asyncio.Event()
                     calls = results = 0
-                    original_commit = self.manager._activity.commit
+                    original_commit = self.manager._records.commit
                     original_execute = ToolExecutor.execute
                     self.manager.config.activity.cooldown_downtime = mode
 
@@ -32,11 +32,11 @@ class CooldownTransactionTests(ActivityTestCase):
                         await release.wait()
                         raise exception("Synthetic simultaneous service failure")
 
-                    async def commit(session, records=(), **kwargs):
+                    async def commit(records=(), **kwargs):
                         if any(row.table_name == "tool_cooldowns" for row in records):
                             committing.set()
                             await commit_release.wait()
-                        return await original_commit(session, records, **kwargs)
+                        return await original_commit(records, **kwargs)
 
                     async def execute(executor, tool_name, *args, **kwargs):
                         nonlocal results
@@ -47,14 +47,14 @@ class CooldownTransactionTests(ActivityTestCase):
                                 returned.set()
                         return result
 
-                    self.manager.register_tool(name, func=fault)
+                    self.manager.register_tool(name, func=fault, execution_contract=personal_control_contract())
                     self.steps(
                         LLMResponse(tool_calls=[ToolCall("a", name, {}), ToolCall("b", name, {})]),
                         call(name, call_id="cooling"),
                         idle(),
                     )
                     with (
-                        patch.object(self.manager._activity, "commit", commit),
+                        patch.object(self.manager._records, "commit", commit),
                         patch.object(ToolExecutor, "execute", execute),
                     ):
                         admission = await self.manager.activate_agent(self.root.agent_id)
@@ -102,7 +102,7 @@ class CooldownTransactionTests(ActivityTestCase):
         def fault():
             raise RetryableToolError("Synthetic service failure")
 
-        tool = Tool("fault", func=fault)
+        tool = Tool("fault", func=fault, execution_contract=personal_control_contract())
         try:
             with patch.object(self.manager._records, "commit", reject):
                 with self.assertRaisesRegex(StatePersistenceError, "cooldown receipt"):
@@ -114,6 +114,8 @@ class CooldownTransactionTests(ActivityTestCase):
         finally:
             barrier.release()
             await self.wait(admission)
+        with self.assertRaises(StatePersistenceError):
+            await self.manager.close()
 
     async def test_cancelled_observer_publishes_a_successfully_committed_deadline(self):
         session, admission, barrier = await self.active_session()
@@ -130,7 +132,7 @@ class CooldownTransactionTests(ActivityTestCase):
         def fault():
             raise RetryableToolError("Synthetic service failure")
 
-        tool = Tool("fault", func=fault)
+        tool = Tool("fault", func=fault, execution_contract=personal_control_contract())
         with patch.object(self.manager._records, "commit", commit):
             execution = asyncio.create_task(self.manager._activity.execute_tool(
                 session, "fault", [], {}, call_id="fault", tools={"fault": tool}
@@ -140,6 +142,9 @@ class CooldownTransactionTests(ActivityTestCase):
                 self.assertFalse(self.manager._activity.cooldown_deadlines)
                 self.clock.advance(30)
                 execution.cancel()
+                await asyncio.sleep(0)
+                self.assertFalse(execution.done(), "Accepted local settlement must survive observer cancellation.")
+                release.set()
                 with self.assertRaises(asyncio.CancelledError):
                     await execution
                 row = self.records("tool_cooldowns")[0]

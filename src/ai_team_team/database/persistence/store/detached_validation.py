@@ -63,6 +63,7 @@ def validate_detached_records(state, *, partial=False):
             index[record.identity] = record
         sources = {
             "agents": {row["agent_id"]: row for row in state["agents"]},
+            "libraries": {row["lib_id"]: row for row in state.get("libraries", ())},
             "teams": {row["team_id"]: row for row in state["teams"]},
             "agent_memory_segments": {
                 row["segment_id"]: row for row in state.get("memory_segments", ())

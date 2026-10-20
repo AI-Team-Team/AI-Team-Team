@@ -37,6 +37,7 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
             model_token_limits={"default": 2}  # Set very small limit to guarantee immediate circuit breaker
         )
         manager = ATTManager(root_ai=self.root_ai, config=config, persistence_mode="volatile")
+        self.addAsyncCleanup(manager.close)
         team = manager.create_agent_team(creator=self.root_ai, member_count=3)
         
         # Disable failover to let exception propagate directly
@@ -61,6 +62,7 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
             failover_policy="auto"
         )
         manager = ATTManager(root_ai=self.root_ai, config=config, persistence_mode="volatile")
+        self.addAsyncCleanup(manager.close)
         
         # Register a gemini-3.5 mock client
         mock_gemini = MagicMock()
@@ -110,6 +112,7 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
             failover_policy="parent"
         )
         manager = ATTManager(root_ai=self.root_ai, config=config, persistence_mode="volatile")
+        self.addAsyncCleanup(manager.close)
         manager.llm_clients["low-budget"] = self.mock_client
         
         # Mock opus client
@@ -179,6 +182,7 @@ class TestATTFailover(unittest.IsolatedAsyncioTestCase):
             parent_failover_timeout_seconds=10,
         )
         manager = ATTManager(root_ai=self.root_ai, config=config, persistence_mode="volatile")
+        self.addAsyncCleanup(manager.close)
         manager.register_llm_client("default", self.mock_client)
         low_client = MagicMock()
         low_client.generate = AsyncMock(return_value="Final Answer: low")

@@ -25,6 +25,8 @@ class MemoryJournalMixin:
         agent: Optional["Agent"] = None,
         team: Optional["AgentTeam"] = None,
         invocation_id: Optional[str] = None,
+        source_execution_id: Optional[str] = None,
+        source_chat_message_id: Optional[str] = None,
         discussion_id: Optional[str] = None,
         turn_id: Optional[str] = None,
         role: Optional[str] = None,
@@ -48,6 +50,8 @@ class MemoryJournalMixin:
                 agent_name_snapshot=agent.name if agent else None,
                 team_id=team.team_id if team else None,
                 invocation_id=invocation_id or (active.invocation_id if active is not None else None),
+                source_execution_id=source_execution_id,
+                source_chat_message_id=source_chat_message_id,
                 discussion_id=(
                     discussion_id
                     if discussion_id is not None
@@ -113,6 +117,8 @@ class MemoryJournalMixin:
             agent=agent,
             team=team,
             role=str(message.get("role", "user")),
+            source_execution_id=message.get("source_execution_id"),
+            source_chat_message_id=message.get("source_chat_message_id"),
             payload=payload,
             redacted=redacted,
         )

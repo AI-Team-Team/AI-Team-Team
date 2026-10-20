@@ -87,6 +87,7 @@ class ContextMixin:
             "Team chat, personal direct chat, and personal mail are distinct. Use send_team_message or send_direct_message "
             "only for deliberate publication. Chat previews never mark a source read. Historical team inspection grants "
             "no current team, tool, or file authority. Friendship grants no team or file access.",
+            self.manager._executions.summary(agent),
         ]
         if self.manager.config.episodic_memory.enabled:
             parts.append(self.manager._memory.retained_context(agent.agent_id))
@@ -117,7 +118,7 @@ class ContextMixin:
                 "role": "tool",
                 "name": result.name,
                 "tool_call_id": result.tool_call_id,
-                "content": f"[{result.status.value}] {result.content}",
+                "content": result.content if result._background_handle else f"[{result.status.value}] {result.content}",
             }
             if native
             else {
@@ -131,9 +132,11 @@ class ContextMixin:
             tool_attempts=result.attempts,
             invocation_id=session.invocation_id,
         )
+        if result._execution_id is not None:
+            message["source_execution_id"] = result._execution_id
         if result.name == "read_chat_message" and not result.failed:
             message["source_chat_message_id"] = json.loads(result.content)["message_id"]
-        if result.name in _PRIVATE_TOOL_NAMES:
+        if result.name in _PRIVATE_TOOL_NAMES or result._private_result or result.name == "read_background_task_result":
             _append_private_window_message(agent, message, team, self.manager)
         elif result.name in _MEMORY_RECALL_TOOL_NAMES:
             _append_transient_window_message(

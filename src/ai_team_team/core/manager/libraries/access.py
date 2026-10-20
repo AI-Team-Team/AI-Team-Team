@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+from contextlib import ExitStack
 from typing import Optional, Tuple
 
 from ai_team_team.doc_library import DocumentLibrary
@@ -143,9 +144,30 @@ class LibraryAccessMixin:
         )
         if not await asyncio.to_thread(target_library.is_file, resolved_target):
             raise FileNotFoundError("Managed links may target existing files only.")
-        with self.manager._snapshot_lock:
-            self.manager.library_links.setdefault(source_lib_id, {})[source_path] = {
-                "target_lib_id": target_lib_id,
-                "target_path": target_path,
-            }
-            self.manager._auto_save(links={source_lib_id})
+        source_library = self.manager.libraries[source_lib_id]
+
+        def publish_link():
+            ordered = sorted(((source_library, source_path), (target_library, resolved_target)),
+                             key=lambda item: (item[0].lib_id, item[1]))
+            with ExitStack() as locks:
+                for library, path in ordered:
+                    locks.enter_context(library._path_locks.hold(((os.path.normcase(path).replace("\\", "/"), False),)))
+                with self.manager._resources.mutation():
+                    self.manager._resources._validate(source_library)
+                    self.manager._resources.authorize(source_library, "write_file", (source_path,))
+                    if not self.manager.check_library_access(team_id, source_lib_id, source_path, "WRITE"):
+                        raise PermissionError("The link-path WRITE permission changed before publication.")
+                    current_library, current_path = self.manager._resolve_library_target(
+                        team_id, target_lib_id, target_path, "READ", initial_visited={(source_lib_id, source_path)})
+                    if current_library is not target_library or current_path != resolved_target:
+                        raise ValueError("The managed-link target changed before publication.")
+                    if source_path in self.manager.library_links.get(source_lib_id, {}) or source_library.path_exists(source_path):
+                        raise FileExistsError("The link path became occupied before publication.")
+                    if not target_library.is_file(resolved_target):
+                        raise FileNotFoundError("The link target disappeared before publication.")
+                    with self.manager._snapshot_lock:
+                        self.manager.library_links.setdefault(source_lib_id, {})[source_path] = {
+                            "target_lib_id": target_lib_id, "target_path": target_path}
+                        self.manager._auto_save(links={source_lib_id})
+
+        await asyncio.to_thread(publish_link)

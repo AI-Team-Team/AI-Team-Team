@@ -11,10 +11,12 @@ from ai_team_team.core.exceptions import StateRestoreError
 from ai_team_team.database.models import ACTIVITY_TABLES, Base
 from ai_team_team.database.persistence.records import valid_request_outcome
 from .chat_operations import validate_chat_operations
+from .executions import validate_executions
 
 
 SOURCE_COLUMNS = {
     "agents": ("agent_id",),
+    "libraries": ("lib_id", "library_kind", "owner_team_id", "owner_agent_id"),
     "teams": ("team_id", "lifecycle_state", "parent_team_id", "parent_agent_id"),
     "team_members": ("team_id", "agent_id", "interval_id"),
     "agent_messages": ("agent_id", "invocation_id", "source_execution_id", "source_chat_message_id"),
@@ -285,21 +287,7 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
             require(any(view["agent_id"] == message["author_agent_id"] and view["message_id"] == message["reply_message_id"]
                         for view in rows["chat_personal_views"]), "reply has no authorized author view")
 
-    for row in rows["executions"]:
-        invocation = get("activity_invocations", row["invocation_id"])
-        require((row["agent_id"], row["scope_kind"], row["scope_team_id"], row["runtime_generation"]) ==
-                (invocation["agent_id"], invocation["scope_kind"], invocation["scope_team_id"], invocation["runtime_generation"]), "execution captured scope mismatch")
-        require(type(row["effects"]) is list and bool(row["effects"])
-                and all(type(effect) is str and effect in {"read_only", "artifact_write", "domain_mutation", "self_modification", "undeclared"} for effect in row["effects"])
-                and len(set(row["effects"])) == len(row["effects"]), "execution effects snapshot invalid")
-    for row in rows["execution_payloads"]:
-        require(get("executions", row["execution_id"])["agent_id"] == row["agent_id"], "payload owner mismatch")
-    for row in rows["execution_observations"]:
-        if row["attempt_id"]:
-            require(get("execution_attempts", row["attempt_id"])["execution_id"] == row["execution_id"], "observation attempt mismatch")
-    for row in rows["execution_controls"]:
-        require(get("executions", row["execution_id"])["agent_id"] == row["requester_agent_id"], "control requester mismatch")
-        require((row["acknowledgement"] == "acknowledged") == (row["acknowledged_at"] is not None), "control acknowledgement evidence mismatch")
+    validate_executions(rows, source, get, require)
     for row in rows["sleep_conditions"]:
         if row["execution_id"]:
             require(get("executions", row["execution_id"])["agent_id"] == get("sleep_plans", row["sleep_id"])["agent_id"], "sleep condition execution owner mismatch")

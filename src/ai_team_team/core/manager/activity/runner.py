@@ -12,6 +12,7 @@ from ai_team_team.core.strategies.shared import (
     _redact_private_tool_calls,
     _scrub_private_window_messages,
     _PRIVATE_TOOL_NAMES,
+    _is_private_call,
 )
 from ai_team_team.core.text_action import parse_text_action, parse_tool_arguments
 
@@ -50,6 +51,7 @@ class RunnerMixin(ForegroundToolMixin):
                         raise
                 finally:
                     _scrub_private_window_messages(agent)
+                    self.manager._executions.scrub_transient_results(session.agent_id, session.invocation_id)
         except BaseException as error:
             if session.active:
                 await self.interrupt(session, error, window=False)
@@ -152,12 +154,15 @@ class RunnerMixin(ForegroundToolMixin):
             self.check_generation(session)
             tools = manager.get_available_tools(self.team_for(session), agent)
             tools.update(self.control_tools(session))
+            from ai_team_team.tool.executions import build_execution_tools
+            tools.update(build_execution_tools(manager))
             await self.prepare_frame(session)
             response = await self.models.generate(
                 session,
                 client=agent.llm_client,
                 prompt=agent.messages,
                 system_instruction=self.instructions(session, tools, native),
+                system_instruction_factory=lambda: self.instructions(session, tools, native),
                 tools=list(tools.values()) if native else None,
             )
             self.check_generation(session)
@@ -192,7 +197,7 @@ class RunnerMixin(ForegroundToolMixin):
             "content": _privacy_safe_agent_output(agent, response.text or ""),
         }
         if calls:
-            if any(call.name in _PRIVATE_TOOL_NAMES for call in calls):
+            if any(_is_private_call(call.name, call.arguments) for call in calls):
                 message["content"] = "[private tool payload redacted]"
             message["tool_calls"] = _redact_private_tool_calls([call.to_dict() for call in calls])
         self.append(session, message, capture_content=not calls)
@@ -353,6 +358,7 @@ class RunnerMixin(ForegroundToolMixin):
                     payload={"intent": session.intent},
                 )
                 _scrub_private_window_messages(self.require_agent(session.agent_id))
+                self.manager._executions.scrub_transient_results(session.agent_id, session.invocation_id)
                 session.pending_segment_id = (
                     await self.manager._memory.finalize_activity_invocation(
                         self.require_agent(session.agent_id),

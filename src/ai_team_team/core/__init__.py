@@ -25,11 +25,13 @@ from .config import (
     EpisodicMemoryConfig,
     PersonalActivityConfig,
     ConversationConfig,
+    ExecutionConfig,
     ModelRequestPolicy,
     FileReadConfig,
     TurnFailurePolicyConfig,
 )
 from .chat import ChatOperationResult, ChatReadResult, ChatRelationship, FriendshipRequestView, ChatReminderPage, ChatReminderSummary
+from .execution import ResourceClaim, TaskControlResult, TaskPage, TaskView
 from .activity.contracts.api import ChatMessagePage, ChatMessageSummary
 from .memory import (
     AgentMemoryCard,

@@ -13,6 +13,7 @@ from ai_team_team import (
     ATTConfig,
     ConversationConfig,
     EpisodicMemoryConfig,
+    ExecutionConfig,
     FileReadConfig,
     PermissiveCommunicationConfig,
     TurnFailurePolicyConfig,
@@ -23,6 +24,7 @@ config = ATTConfig(
     file_read=FileReadConfig(),
     conversations=ConversationConfig(),
     episodic_memory=EpisodicMemoryConfig(enabled=False),
+    executions=ExecutionConfig(),
     turn_failure_policy=TurnFailurePolicyConfig(),
     model_tokenizer_configs={
         "analysis": "bert-base-uncased",
@@ -78,6 +80,17 @@ config = ATTConfig(
 | `episodic_memory` | `EpisodicMemoryConfig` | `EpisodicMemoryConfig()` | Configures the optional Agent-owned episodic-memory catalog, which is disabled by default. |
 | `activity` | `PersonalActivityConfig` | `PersonalActivityConfig()` | Continuing-person scheduling, notification frames, finite sleep, cooldown accounting, and bounded model requests. |
 | `conversations` | `ConversationConfig` | `ConversationConfig()` | Title and preview bounds, withdrawal window, and default personal team/direct detail settings. |
+| `executions` | `ExecutionConfig` | `ExecutionConfig()` | Independent executor capacity, background detachment, bounded stop-hook waiting, and retained-result access. |
+
+### `ExecutionConfig`
+
+The strict defaults are `automatic_detachment_seconds=120.0`, `max_concurrent_executions=8`, `cancellation_grace_seconds=2.0`, and `retain_results_after_source_revocation=True`.
+
+The threshold starts at actual executor dispatch, includes retry and backoff, and excludes initial queue and preflight time.
+
+Setting retained-result access to `False` requires current authority for the original protected sources without borrowing a later team scope, deleting execution history, or rereading those sources automatically.
+
+Stop-hook waiting is bounded independently of persistence, and accepted local commits have no arbitrary flush timeout.
 
 ### `ConversationConfig`
 
@@ -279,8 +292,10 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
   Supports `block_agent`, `unblock_agent`, `remove_friendship`, or `lift_direct_refusal` without changing another person's owned controls.
 * **`await close_team_conversation(team_id)`**
   Host-only finalization closes an ordinary leaf's current memberships and preserves personal archives; unresolved live children are rejected rather than assigned an inferred parent.
-* **`register_tool(name: str, description: str, func: Callable[..., Any], schema: Optional[Any] = None, *, memory_capture: str = "metadata_only", execution_contract: ToolExecutionContract | None = None)`**
+* **`register_tool(name, description=None, func=None, schema=None, *, memory_capture="metadata_only", execution_contract=None, executor="callable", resource_resolver=None, retry_safe=False, result_storage="protected")`**
   Registers a custom utility tool globally and requires explicit `memory_capture="content"` before its observation body may enter episodic recall content.
+  Background execution requires an affirmative execution contract, while executor and resource-resolver bindings remain Host-only runtime objects.
+  `result_storage="transient"` prevents the task body from being persisted without changing the tool's independent retry declaration.
 * **`register_agent(agent: Agent) -> Agent`**
   Registers one stable identity and creates its unique private DocLib. Direct mutation of `manager.agents` is unsupported.
 * **`get_private_library_id(agent_id: str) -> str`**
@@ -699,3 +714,40 @@ Private tools do not accept an Agent or library ID. They always use the current 
 * **`delete_private_file(path: str) -> str`**
 * **`move_private_file(source_path: str, target_path: str, overwrite: bool = False) -> str`**
 * **`publish_private_file(source_path: str, target_path: str, overwrite: bool = False) -> str`** — copies an ordinary file to the current team's built-in DocLib. The default rejects collisions and `overwrite=True` still requires live target `WRITE` permission.
+
+## Registered Execution and Background Tasks
+
+Host methods require an explicit registered `actor`, while model tools derive the owner from the current personal invocation and accept no actor, sender, executor, or policy override.
+
+| Host method | Result and contract |
+| --- | --- |
+| `register_executor(name, executor)` | Registers a unique runtime-only binding implementing `async execute(call)`, with a real `cancel(execution_id)` hook when provider or isolated cancellation is declared. |
+| `await start_background_task(tool_name, arguments, *, actor, scope=None, description="", labels=())` | Returns `BackgroundTaskHandle` after admission commits, without waiting for queued or running execution to finish. |
+| `list_background_tasks(*, actor, status=None, query=None, limit=50, cursor=None, include_foreground=False)` | Returns an owner-filtered `TaskPage`; search covers metadata, never protected result bodies. |
+| `inspect_background_task(execution_id, *, actor)` | Returns `TaskView` with independent execution, health, attention, and uncertainty facts, without a body. |
+| `await read_background_task_result(execution_id, *, actor, start_line=1, end_line=None, start_character=1, character_count=None, expected_file_version=None)` | Returns a token-bounded `FileReadResult` after source-policy and owner revalidation; does not acknowledge attention. |
+| `await cancel_background_task(execution_id, *, actor)` | Returns `TaskControlResult` distinguishing confirmed cancellation, an unconfirmed stop, and an already terminal outcome. |
+| `await acknowledge_background_task(execution_id, *, actor)` | Acknowledges attention without changing outcome, reading a source message, or deleting history. |
+| `await report_execution_health(execution_id, health, evidence_kind, evidence=None)` | Trusted live-executor evidence only, limited to declared signals and classified counters/status rather than arbitrary text. |
+
+The model tool family additionally exposes `search_background_tasks(query, ...)` as an explicit metadata-search convenience.
+
+The default callable executor confirms the registered callable's return, and a returned remote job ID alone confirms only the operation that actually returned it, not remote job completion.
+
+Custom shared-resource coordination uses a synchronous `resource_resolver(scope, arguments)` returning `ResourceClaim(namespace, resource_id, path="", access="write", subtree=False)` values.
+
+Foreground-only tools retain their personal Session while sharing admission, resource coordination, executor dispatch, and result authorization with background-capable tools, including mixed self-modification contracts.
+
+Undeclared foreground tools use conservative global exclusion, while pure self-modification controls do not implicitly acquire shared file access; a tool holding any shared reservation cannot synchronously wait on nested personal model activity.
+
+Cancellation of a stop observer does not undo an accepted control request, and cancellation or close does not discard an operation's already returned outcome while its local result commit is pending.
+
+Library claims must name registered physical targets and canonical virtual paths, while unresolved independence receives conservative exclusion.
+
+Nonempty global or external resource claims preserve opaque source provenance and fail closed when retained-result source revalidation is required; an explicit empty resolver may declare a source-free operation.
+
+Authoritative framework errors in stop hooks propagate from cancellation and `close()` independently of uncertain external stop outcomes, including late synchronous hook failures observed before shutdown completes.
+
+The automatic threshold changes foreground waiting rather than the operation's identity or retry policy, and later outcomes notify only the same owner.
+
+See [Phase 4](../dev/autonomous_activity/Phase_4.md) and the [execution flowchart](../flowcharts/Background_Tasks.md) for admission, resource, privacy, cancellation, and restore boundaries.

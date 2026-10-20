@@ -161,6 +161,11 @@ class LifecycleService:
         # A restore finalizer reconstructs local activity indexes. Never sample
         # or close a mixture of the old indexes and newly published records.
         activity_error = None
+        execution_error = None
+        try:
+            await manager._executions.close()
+        except BaseException as error:
+            execution_error = error
         try:
             await manager._activity.close()
         except BaseException as error:
@@ -242,11 +247,14 @@ class LifecycleService:
             raise audit_error
         if activity_error is not None:
             raise activity_error
+        if execution_error is not None:
+            raise execution_error
 
     @asynccontextmanager
     async def agent_invocation(self, agent: Agent, *, allow_runtime: bool = False):
         """Starts a model invocation atomically against restore and retirement."""
         manager = self.manager
+        manager._executions.check_model_wait()
         if manager.db_path:
             await manager._persistence.prepare_runtime(manager.db_path)
         dependency_edges: Tuple[Tuple[str, str], ...] = ()
@@ -297,6 +305,10 @@ class LifecycleService:
         chain_token = manager._agent_invocation_chain.set(
             (*dependency_chain, (agent.agent_id, invocation_id))
         )
+        # A nested person's tools own their resource footprint, never the
+        # source-free coordinating tool's reservation. Revocable execution
+        # authority and invocation dependency edges remain inherited.
+        resource_token = manager._executions.resource_job.set(None)
         try:
             yield
         finally:
@@ -304,7 +316,10 @@ class LifecycleService:
                 await invocation.__aexit__(None, None, None)
             finally:
                 try:
-                    manager._agent_invocation_chain.reset(chain_token)
+                    try:
+                        manager._executions.resource_job.reset(resource_token)
+                    finally:
+                        manager._agent_invocation_chain.reset(chain_token)
                 finally:
                     async with manager._runtime_gate:
                         manager._active_agent_invocation_tokens.discard(

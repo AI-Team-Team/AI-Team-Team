@@ -92,13 +92,15 @@ class TeamFileMixin:
         clean_path = self.manager._normalize_library_file_path(path)
         if not self.manager.check_library_access(team_id, lib_id, clean_path, "WRITE"):
             raise PermissionError(f"Permission denied for WRITE on '{lib_id}:{clean_path}'.")
-        with self.manager._snapshot_lock:
+        with self.manager._resources.mutation(), self.manager._snapshot_lock:
+            self.manager._resources.authorize(self.manager.libraries[lib_id], "delete_file", (clean_path,))
             link_map = self.manager.library_links.get(lib_id, {})
             if clean_path in link_map:
                 del link_map[clean_path]
                 self.manager._auto_save(links={lib_id})
                 return f"Successfully deleted managed link '{path}' in library '{lib_id}'."
-        return await asyncio.to_thread(self.manager.libraries[lib_id].delete_file, clean_path)
+        async with self.manager.suppress_auto_save():
+            return await asyncio.to_thread(self.manager.libraries[lib_id].delete_file, clean_path)
 
     async def list_library_contents(self, team_id: str, lib_id: str, path: str = "/") -> List[str]:
         clean_acl_path = self.manager.normalize_library_path(path)

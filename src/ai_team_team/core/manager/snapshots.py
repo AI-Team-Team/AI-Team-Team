@@ -12,6 +12,7 @@ from ..memory.sanitization import sanitize_working_context_message
 from ..team import AgentTeam
 from .snapshot_dependencies import (
     capture_memory_records,
+    capture_execution_dependencies,
     collect_memory_identity_dependencies,
 )
 
@@ -129,7 +130,7 @@ class SnapshotBuilder:
         governance_teams.update(dirty["inboxes"])
         # A file-only first delta still needs its library's concrete owner.
         # These are insert-only prerequisites, never authoritative Agent edits.
-        for lib_id in dirty["libraries"] | set(dirty["file_changes"]):
+        for lib_id in dirty["libraries"] | set(dirty["file_changes"]) | set(dirty.get("record_dependency_libraries", ())):
             library = library_lookup.get(lib_id)
             if library is None:
                 continue
@@ -137,14 +138,35 @@ class SnapshotBuilder:
                 governance_agents.add(library.owner_agent_id)
             if library.owner_team_id is not None:
                 governance_teams.add(library.owner_team_id)
+            if lib_id in dirty.get("record_dependency_libraries", ()):
+                for permissions in manager.library_permissions.get(lib_id, {}).values():
+                    governance_teams.update(permissions)
         governance_agents.add(manager.root_ai.agent_id)
-        memory_agent_ids, memory_team_ids = collect_memory_identity_dependencies(
-            manager,
-            memory_records,
-            extra_agents=governance_agents,
-            extra_teams=governance_teams,
-            agent_lookup=agent_lookup,
-        )
+        authoritative_agents = {identifier if identifier in agent_lookup else manager.agents[identifier].agent_id
+                                for identifier in dirty["agents"] if identifier in agent_lookup or identifier in manager.agents} - temporary_agent_ids
+        execution_dependencies = ()
+        while True:
+            memory_agent_ids, memory_team_ids = collect_memory_identity_dependencies(
+                manager, memory_records, extra_agents=governance_agents | authoritative_agents,
+                extra_teams=governance_teams, agent_lookup=agent_lookup)
+            if full:
+                break
+            execution_dependencies, owners, scopes, sources = capture_execution_dependencies(manager, memory_agent_ids, memory_records)
+            for lib_id in sources:
+                library = library_lookup.get(lib_id)
+                if library is None:
+                    raise StatePersistenceError(f"Cannot persist execution: missing source DocLib {lib_id!r}.")
+                if library.owner_agent_id is not None:
+                    owners.add(library.owner_agent_id)
+                if library.owner_team_id is not None:
+                    scopes.add(library.owner_team_id)
+                for permissions in manager.library_permissions.get(lib_id, {}).values():
+                    scopes.update(permissions)
+            dirty.setdefault("record_dependency_libraries", set()).update(sources)
+            if owners.issubset(memory_agent_ids) and scopes.issubset(memory_team_ids):
+                break
+            governance_agents.update(owners)
+            governance_teams.update(scopes)
         configs = None
         if full or dirty["configs"] or dependency_request_ids or migration_requests or dirty["libraries"] or dirty["file_changes"]:
             configs = {
@@ -382,6 +404,7 @@ class SnapshotBuilder:
         if not full:
             library_dependency_ids.update(f"PDL-{agent_id}" for agent_id in memory_agent_ids)
             library_dependency_ids.update(f"DL-{team_id}" for team_id in memory_team_ids)
+            library_dependency_ids.update(dirty.get("record_dependency_libraries", ()))
         required_memory_libraries = {
             f"PDL-{agent_id}" for agent_id in memory_agent_ids
         } | {f"DL-{team_id}" for team_id in memory_team_ids}
@@ -416,6 +439,7 @@ class SnapshotBuilder:
             {
                 **serialized_libraries[lib_id],
                 "files": dict(manager._library_files.get(lib_id, {})),
+                "permissions": {path: dict(grants) for path, grants in manager.library_permissions.get(lib_id, {}).items()},
             }
             for lib_id in sorted(library_dependency_ids)
             if lib_id in serialized_libraries
@@ -539,7 +563,7 @@ class SnapshotBuilder:
         ]
 
         snapshot = {
-            "records": manager._records.snapshot() if full else relationship_records,
+            "records": manager._records.snapshot() if full else tuple({row.identity: row for row in (*relationship_records, *execution_dependencies)}.values()),
             "state_version": manager._state_version,
             "full": full,
             "episodic_memory_enabled": manager.config.episodic_memory.enabled,

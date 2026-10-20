@@ -8,7 +8,7 @@ from unittest.mock import patch
 from ai_team_team import Agent, LLMResponse, Tool, ToolCall
 from ai_team_team.core.tool_runtime import ToolExecutor
 
-from ._support import ActivityTestCase, idle
+from ._support import ActivityTestCase, idle, personal_control_contract
 
 
 class ExecutionAuthorityTests(ActivityTestCase):
@@ -50,8 +50,8 @@ class ExecutionAuthorityTests(ActivityTestCase):
                 raise
             return "Must not succeed"
 
-        self.manager.register_tool("cancel_batch", func=cancel_batch)
-        self.manager.register_tool("late_write", func=late_write)
+        self.manager.register_tool("cancel_batch", func=cancel_batch, execution_contract=personal_control_contract())
+        self.manager.register_tool("late_write", func=late_write, execution_contract=personal_control_contract())
         self.steps(
             LLMResponse(
                 tool_calls=[
@@ -85,8 +85,12 @@ class ExecutionAuthorityTests(ActivityTestCase):
         execution = next(
             row for row in self.records("executions") if row.values["tool_name"] == "late_write"
         )
-        self.assertEqual(execution.values["status"], "running")
-        self.assertEqual(execution.values["outcome_unconfirmed"], 1)
+        # The late invocation now has a confirmed permission-denied result;
+        # settling that fact does not grant any authority to its side effects.
+        self.assertEqual(execution.values["status"], "failed")
+        self.assertEqual(execution.values["outcome_unconfirmed"], 0)
+        payload = self.manager._records.index[("execution_payloads", (f"RESULT-{execution.values['execution_id']}",))]
+        self.assertEqual(payload.values["content"]["status"], "denied")
         self.assertNotIn("NEW_WRITE_FROM_ENDED_EXECUTION", str(self.root.message_history))
 
     async def test_cancelled_synchronous_tool_cannot_start_a_late_write(self):

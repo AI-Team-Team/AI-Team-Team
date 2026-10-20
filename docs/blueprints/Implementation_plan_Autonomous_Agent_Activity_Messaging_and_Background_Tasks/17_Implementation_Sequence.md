@@ -92,6 +92,10 @@ Gate: join and leave races have unambiguous visibility, previews do not mark rea
 
 Gate: detachment causes exactly one execution, results reach only the same owner, stale workers cannot write managed state, and cancellation does not invent terminal outcomes.
 
+Implementation details, configuration, schema 14, and the Phase 4 verification gate are recorded in [Registered Execution and Background Detachment](../../dev/autonomous_activity/Phase_4.md).
+
+The Phase 4 gate passed local Python 3.13 verification on 2026-10-20, including 835 full-suite tests, the five frozen specifications, 83.61 percent branch coverage, type and lint checks, and installed-distribution recovery checks.
+
 ## Phase 5: Institutional adapters and complete round removal
 
 - Replace governance solicitation rounds with cases and electorate revisions while retaining explicit mail ballots.

@@ -7,10 +7,13 @@ from .columns import SCOPE_CHECK, boolean, choice, document, identifier, integer
 
 executions = table("executions",
     identifier("execution_id", primary=True), reference("agent_id", "agents.agent_id"),
-    reference("invocation_id", "activity_invocations.invocation_id"), *scope(), identifier("tool_name"), document("effects"),
+    reference("invocation_id", "activity_invocations.invocation_id", nullable=True), *scope(), identifier("tool_name"), document("effects"),
     integer("runtime_generation"), choice("visibility", "foreground explicit_background detached"),
     choice("status", "queued running completed failed cancelled"), choice("attention", "none required acknowledged"),
     boolean("outcome_unconfirmed"), timestamp("created_at"),
+    identifier("call_id", nullable=True), document("contract_snapshot", nullable=True),
+    document("metadata", nullable=True), document("source_references", nullable=True),
+    timestamp("started_at", nullable=True), timestamp("finished_at", nullable=True),
     checks=(SCOPE_CHECK, "runtime_generation > 0", "status NOT IN ('completed', 'failed', 'cancelled') OR outcome_unconfirmed = 0"))
 execution_attempts = table("execution_attempts",
     identifier("attempt_id", primary=True), reference("execution_id", "executions.execution_id"),
@@ -20,12 +23,15 @@ execution_attempts = table("execution_attempts",
 execution_payloads = table("execution_payloads",
     identifier("payload_id", primary=True), reference("agent_id", "agents.agent_id"),
     reference("execution_id", "executions.execution_id"), choice("content_kind", "input result"),
-    document("content"), identifier("digest"), append=True)
+    document("content"), identifier("digest"), append=True,
+    constraints=(UniqueConstraint("execution_id", "content_kind"),))
 execution_observations = table("execution_observations",
     identifier("observation_id", primary=True), reference("execution_id", "executions.execution_id"),
     reference("attempt_id", "execution_attempts.attempt_id", nullable=True),
     choice("health", "healthy degraded stalled error unknown"), identifier("evidence_kind"), document("evidence"),
-    timestamp("observed_at"), boolean("uncertain"), append=True)
+    timestamp("observed_at"), boolean("uncertain"), integer("observation_index", nullable=True), append=True,
+    checks=("observation_index IS NULL OR observation_index > 0",),
+    constraints=(UniqueConstraint("execution_id", "observation_index"),))
 execution_controls = table("execution_controls",
     identifier("control_id", primary=True), reference("execution_id", "executions.execution_id"),
     reference("requester_agent_id", "agents.agent_id"), choice("operation", "stop suspend"),

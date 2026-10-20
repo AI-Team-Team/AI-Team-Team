@@ -211,6 +211,16 @@ class PersonalActivityConfig(BaseModel):
         return values
 
 
+class ExecutionConfig(BaseModel):
+    """Executor capacity is independent of personal activity and model admission."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, validate_assignment=True, validate_default=True)
+    automatic_detachment_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 120.0
+    max_concurrent_executions: Annotated[int, Field(ge=1)] = 8
+    cancellation_grace_seconds: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 2.0
+    retain_results_after_source_revocation: bool = True
+
+
 class ConversationConfig(BaseModel):
     """Presentation limits and a configurable withdrawal window, not retention limits."""
 
@@ -300,6 +310,7 @@ class ATTConfig(BaseModel):
     )
     activity: PersonalActivityConfig = Field(default_factory=PersonalActivityConfig)
     conversations: ConversationConfig = Field(default_factory=ConversationConfig)
+    executions: ExecutionConfig = Field(default_factory=ExecutionConfig)
 
     _MAPPING_VALIDATORS: ClassVar[Dict[str, str]] = {
         "model_registry": "_validate_string_mapping",

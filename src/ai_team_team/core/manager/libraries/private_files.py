@@ -1,6 +1,8 @@
 """Library operations for PrivateFileMixin."""
 
 import asyncio
+import os
+from contextlib import ExitStack
 from typing import List, Optional
 
 from ai_team_team.gated_reader import FileReadResult, FileVersionChangedError
@@ -77,7 +79,8 @@ class PrivateFileMixin:
     async def delete_private_file(self, path: str) -> str:
         """Deletes private content only for the current invocation agent."""
         _, library = self.manager._require_private_agent_context()
-        return await asyncio.to_thread(library.delete_file, path)
+        async with self.manager.suppress_auto_save():
+            return await asyncio.to_thread(library.delete_file, path)
 
     async def move_private_file(
         self,
@@ -123,13 +126,16 @@ class PrivateFileMixin:
             raise FileExistsError("The target path is a managed link and cannot be overwritten.")
 
         def copy_under_locks() -> None:
-            ordered = sorted((private_library, target_library), key=lambda item: item.lib_id)
-            with ordered[0]._lock:
-                with ordered[1]._lock:
-                    if not private_library.is_file(clean_source):
-                        raise FileNotFoundError(f"Private file {source_path!r} does not exist.")
-                    content = private_library.read_text(clean_source)
-                    target_library.write_file_atomic(clean_target, content, overwrite=overwrite)
+            ordered = sorted(((private_library, clean_source), (target_library, clean_target)),
+                             key=lambda item: (item[0].lib_id, item[1]))
+            with ExitStack() as locks:
+                for library, path in ordered:
+                    locks.enter_context(library._path_locks.hold(((os.path.normcase(path).replace("\\", "/"), False),)))
+                private_library._ensure_writable()
+                if not private_library.is_file(clean_source):
+                    raise FileNotFoundError(f"Private file {source_path!r} does not exist.")
+                content = private_library.read_text(clean_source)
+                target_library.write_file_atomic(clean_target, content, overwrite=overwrite)
 
         await asyncio.to_thread(copy_under_locks)
         self.manager._emit_callback(

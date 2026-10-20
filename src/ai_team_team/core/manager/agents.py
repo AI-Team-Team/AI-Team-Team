@@ -211,6 +211,9 @@ class AgentRegistry:
             raise ValueError("Agent still creates teams: " + ", ".join(sorted(creator_teams)))
         if agent.lock.locked():
             raise ValueError("Agent has an active model invocation.")
+        if any(row.table_name == "executions" and row.values["agent_id"] == agent_id
+               and row.values["status"] in {"queued", "running"} for row in manager._records.snapshot()):
+            raise ValueError("Agent owns live or unconfirmed executions; resolve them before retirement.")
         if selected == "delete":
             history_refs = [
                 row.receipt_key

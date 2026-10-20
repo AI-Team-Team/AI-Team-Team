@@ -25,6 +25,8 @@ class ToolExecutionContract(ContractRecord):
     mutation_safety: Literal["none", "managed_lease", "isolated", "trusted_host"] = "none"
     cancellation: Literal["none", "cooperative", "provider", "isolated"] = "none"
     health_signals: tuple[Literal["heartbeat", "progress", "provider"], ...] = ()
+    heartbeat_timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    progress_timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def check_effects(self) -> "ToolExecutionContract":
@@ -32,6 +34,9 @@ class ToolExecutionContract(ContractRecord):
             raise ValueError("Tool effects must be unique.")
         if len(set(self.health_signals)) != len(self.health_signals):
             raise ValueError("Health capabilities must be unique.")
+        for signal in ("heartbeat", "progress"):
+            if getattr(self, f"{signal}_timeout_seconds") is not None and signal not in self.health_signals:
+                raise ValueError("Health timeouts require the corresponding declared signal.")
         if self.background_allowed:
             if {"self_modification", "undeclared"}.intersection(self.effects):
                 raise ValueError(

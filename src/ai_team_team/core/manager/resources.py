@@ -94,7 +94,15 @@ class ResourceGate:
         if actor is not None and (self.manager._agents_by_id.get(actor.agent_id) is not actor or actor.lifecycle_state != "active"):
             raise PermissionError("The captured resource owner is no longer active.")
 
-    def authorize(self, library, method, paths):
+    def authorize(self, library, method, paths, *, physical=False):
+        with self._lock:
+            service = getattr(self.manager, "_executions", None)
+            job = service.resource_job.get() if service is not None else None
+            if job is not None:
+                service.validate_bindings(job, library=library if physical else None, method=method, paths=paths)
+            self._authorize(library, method, paths)
+
+    def _authorize(self, library, method, paths):
         actor = self.manager._active_tool_agent.get()
         if actor is None:
             return  # The host process remains the trusted administrator.
@@ -176,7 +184,7 @@ class ResourceGate:
         with self._lock:
             accepted = any(item.library is library and item.active for item in self._operations.get())
             self._validate(library, accepted=accepted)
-            self.authorize(library, method, paths)
+            self.authorize(library, method, paths, physical=True)
             yield
 
     def begin_publication(self):

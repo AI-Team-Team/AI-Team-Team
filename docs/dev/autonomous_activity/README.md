@@ -10,19 +10,22 @@ Phase 2 adds the [continuing-person runtime and model boundaries](Phase_2.md), p
 
 Phase 3 adds [team conversations and personal direct chat](Phase_3.md), including authorized frozen history, explicit read controls, friendship, atomic admission, and schema 13.
 
+Phase 4 adds [registered execution and background detachment](Phase_4.md), with resource coordination, protected owner-only results, independent task dimensions, factual stopping, and schema 14.
+
 The governing [blueprint](../../blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md) and [implementation plan](../../blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md), including the confirmed decisions recorded on 2026-10-07, remain authoritative.
 
 This directory records their engineering contracts and phase-specific verification artifacts.
 
 All D01 through D15 decisions remain confirmed, and no institution is reopened by these specifications.
 
-The running persistence schema is now `13`; schema 12 and earlier are rejected without migration.
+The running persistence schema is now `14`; schema 13 and earlier are rejected without migration.
 
 ## Deliverables
 
 - [Engineering contracts](Contracts.md): scope, intent, presentation, effects, admission, and cancellation boundaries.
 - [Schema 12](Schema_12.md): relational groups, reference constraints, ordering, and publication protocol.
 - [Schema 13](Schema_13.md): chat command receipts, personal preferences, explicit reply references, and authoritative conversation projections.
+- [Schema 14](Schema_14.md): captured executor contracts, protected source provenance, Host execution origin, timing evidence, and unique input/result records.
 - [Replacement inventory](Replacement_Inventory.md): ownership and disposition of round-dependent code and documentation.
 - [Machine-readable line inventory](round_dependencies.json): every selected source occurrence, including exports, tests, callbacks, diagrams, and examples.
 - [Built-in effect declarations](tool_effects.json): the reviewed target registration contracts, not permissions already installed in `Tool`.
@@ -31,6 +34,7 @@ The running persistence schema is now `13`; schema 12 and earlier are rejected w
 - [Phase 1 implementation](Phase_1.md): immutable durable records, exact receipts, recoverable publication, mutation leases, and the scope of the initial recovery plan.
 - [Phase 2 implementation](Phase_2.md): one personal admission, fair continuation, explicit controls, notification frames, exact personal checkpoints, and bounded ordinary/audit/maintenance requests.
 - [Phase 3 implementation](Phase_3.md): deliberate publications, historical membership visibility, direct relationships, read and withdrawal evidence, and isolated personal reminders.
+- [Phase 4 implementation](Phase_4.md): execution ownership, explicit and threshold detachment, resource coordination, results, controls, and supported health evidence.
 
 ## Green and Red Checks
 
@@ -42,7 +46,7 @@ Run the implemented Phase 0 checks with:
 ./venv/bin/ruff check src test typecheck
 ```
 
-Run the intentionally failing replacement specifications separately:
+Run the original replacement specifications separately:
 
 ```bash
 ./venv/bin/python -m unittest discover -s test/test_att/test_autonomous_activity_phase0 -t . -p 'spec_*.py'
@@ -50,7 +54,7 @@ Run the intentionally failing replacement specifications separately:
 
 The separately invoked specifications target the real `ATTManager` and contain behavioral assertions rather than a fake replacement engine.
 
-Four now pass and run in ordinary personal-runtime discovery; the remaining background specification explicitly fails when threshold detachment does not produce its required Native handle.
+All five runtime specifications now pass, with the four personal specifications and the background-detachment specification also running in ordinary discovery.
 
 Runtime cleanup also rejects scripted-client requests whose exceptions were swallowed, and coalescing checks the preserved scope and complete request count.
 
@@ -60,11 +64,11 @@ The completed schema specification is now in ordinary [Phase 1 discovery](../../
 
 The promoted personal specifications cover default continuation without automatic publication, shared-person admission coalescing, idle-mail activation without inferred read state, and next-frame notification during a tool wait.
 
-One-execution Native detachment remains Phase 4 work.
+The Phase 4 background package promotes one-execution Native detachment without duplicating the underlying operation or its original tool observation.
 
 They do not call old discussion APIs, use a fake replacement runtime, skip missing features, or convert missing implementation into `expectedFailure` success.
 
-Their `spec_*.py` filenames deliberately keep an unfinished architecture's red gate separate from the current `test_*.py` regression suite.
+Their `spec_*.py` filenames retain the original separately runnable gate, while implemented contracts are also exercised by ordinary `test_*.py` discovery.
 
 Phase 0 completion requires that the green checks pass and that each red failure identifies an unimplemented contract rather than an import error, broken fixture, leaked task, or accidental external request.
 

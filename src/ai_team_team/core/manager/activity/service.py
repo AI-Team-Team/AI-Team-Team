@@ -117,7 +117,7 @@ class PersonalActivityService(
         )
 
     def register_clock(self, clock):
-        if self.sessions or self.workers or self.timers or self.models.tasks:
+        if self.sessions or self.workers or self.timers or self.models.tasks or self.manager._executions.jobs:
             raise RuntimeError("Bind the runtime clock before activity or timers are admitted.")
         for name in ("monotonic", "wall_time", "sleep"):
             if not callable(getattr(clock, name, None)):
@@ -317,6 +317,7 @@ class PersonalActivityService(
 
     async def interact(self, agent, prompt, *, scope=None):
         """Observe a personal answer without stopping its continuing activity."""
+        self.manager._executions.check_model_wait()
         async with self.interaction_dependency(agent.agent_id):
             return await self._interact(agent, prompt, scope=scope)
 

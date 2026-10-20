@@ -14,7 +14,7 @@ from test.test_att.test_autonomous_activity_phase0._fixtures import (
     ScriptedModelClient,
 )
 
-from ._support import ActivityTestCase, call, idle
+from ._support import ActivityTestCase, call, idle, personal_control_contract
 
 
 DEPENDENCY_CHAIN_TIMEOUT_SECONDS = 60
@@ -108,7 +108,7 @@ class InteractionDependencyTests(ActivityTestCase):
                 return "Dependency rejected before delivery"
             self.fail("A synchronous self dependency must not be accepted.")
 
-        self.manager.register_tool("ask_self", func=ask_self)
+        self.manager.register_tool("ask_self", func=ask_self, execution_contract=personal_control_contract())
         self.steps(call("ask_self"), idle())
         admission = await self.manager.activate_agent(self.root.agent_id)
         await self.wait(admission)
@@ -134,7 +134,7 @@ class InteractionDependencyTests(ActivityTestCase):
             answers.append(result.answer)
             return result.answer
 
-        self.manager.register_tool("ask_other", func=ask_other)
+        self.manager.register_tool("ask_other", func=ask_other, execution_contract=personal_control_contract())
         self.steps(call("ask_other"), idle())
         admission = await self.manager.activate_agent(self.root.agent_id)
         try:
@@ -180,7 +180,7 @@ class InteractionDependencyTests(ActivityTestCase):
                 rejected.append(str(error))
                 return "Cycle rejected before source acceptance"
 
-        self.manager.register_tool("ask_person", func=ask_person)
+        self.manager.register_tool("ask_person", func=ask_person, execution_contract=personal_control_contract())
         for index, client in enumerate(clients):
             target = people[(index + 1) % len(people)]
             client.steps.extend(
@@ -219,7 +219,7 @@ class InteractionDependencyTests(ActivityTestCase):
             result = await self.manager.execute_agent_interaction(other, private_content)
             return result.answer
 
-        self.manager.register_tool("ask_private_source", func=ask_private_source)
+        self.manager.register_tool("ask_private_source", func=ask_private_source, execution_contract=personal_control_contract())
         self.steps(call("ask_private_source"), LLMResponse(text="Complete"), idle())
         observer = asyncio.create_task(
             self.manager.execute_agent_interaction(self.root, private_content)
@@ -292,7 +292,7 @@ class InteractionDependencyTests(ActivityTestCase):
             result = await self.manager.execute_agent_interaction(people[index], "Reply")
             return result.answer
 
-        self.manager.register_tool("ask", func=ask)
+        self.manager.register_tool("ask", func=ask, execution_contract=personal_control_contract())
         self.steps(
             LLMResponse(
                 tool_calls=[
@@ -327,7 +327,7 @@ class InteractionDependencyTests(ActivityTestCase):
             result = await self.manager.execute_agent_interaction(other, "Continue independently")
             return result.answer
 
-        self.manager.register_tool("ask_other", func=ask_other)
+        self.manager.register_tool("ask_other", func=ask_other, execution_contract=personal_control_contract())
         self.steps(call("ask_other"))
         admission = await self.manager.activate_agent(self.root.agent_id)
         try:

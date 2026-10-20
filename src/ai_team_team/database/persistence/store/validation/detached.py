@@ -19,6 +19,7 @@ def source_rows(state):
     """Match the full reference validator's retained SQL source projections."""
     sources = {
         "agents": {row["agent_id"]: row for row in state["agents"]},
+        "libraries": {row["lib_id"]: row for row in state.get("libraries", ())},
         "teams": {row["team_id"]: row for row in state["teams"]},
         "agent_memory_segments": {row["segment_id"]: row for row in state.get("memory_segments", ())},
         "system_memory_events": {row["event_id"]: row for row in state.get("memory_events", ())},

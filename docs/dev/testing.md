@@ -28,7 +28,27 @@ The autonomous-activity replacement has a [Phase 0 contract freeze](autonomous_a
 
 Ordinary discovery includes schema activation, publication safety, and the four implemented personal specifications in `test/test_att/test_agent_activity/`.
 
-`./venv/bin/python -m unittest discover -s test/test_att/test_autonomous_activity_phase0 -t . -p 'spec_*.py'` still exposes the unimplemented background-detachment requirement explicitly, without skips or expected-failure success.
+`./venv/bin/python -m unittest discover -s test/test_att/test_autonomous_activity_phase0 -t . -p 'spec_*.py'` now passes all five runtime specifications, with completed specifications also included in ordinary discovery rather than skipped or converted to expected failures.
+
+Use `./venv/bin/python -m unittest discover -s test/test_att/test_background_tasks -t .` for the [Phase 4 execution gate](autonomous_activity/Phase_4.md), including same-execution detachment, independent-resource concurrency, stop acknowledgement, late fencing, owner-only result reads, source revocation, and no-replay recovery.
+
+Race managed-link changes against both attempt receipts and physical filesystem access, and verify that failed result bodies cannot bypass final source authorization.
+
+Cancel queued and running stop observers during accepted commits, cancel returned outcomes during local preparation, and require shutdown to drain local finalizers without applying the external cancellation grace period to persistence.
+
+Verify cross-owner foreground/background exclusion, actual synchronous-thread reservation lifetime, typed late failures, fatal-error propagation, and health transitions that revisit an earlier state without losing observation order.
+
+Test mixed self-modification contracts against declared background reservations and source revocation, and verify that foreground provider bindings run instead of placeholder callables without losing the original personal Session.
+
+Exercise nested institutional tools from source-free personal coordination, and reject both direct and interaction-based model waits while a shared reservation is held.
+
+Distinguish opaque global claims from explicit empty source-free resolvers, including after save and restore under restrictive retained-result access.
+
+Inject immediate, cancelled-observer, and late synchronous stop-hook framework failures, preserve concurrent factual completion, and require shutdown to propagate the failure without claiming an unconfirmed external stop.
+
+Queue a healthy sample ahead of a timeout at the real activity lock and delay a different signal's stall receipt across its deadline; use the logical clock to verify both absence of stale stalls and rearmed future timers.
+
+Fixtures that deliberately coordinate personal invocation state or cancel parallel personal controls must declare a foreground self-modification contract rather than rely on undeclared shared-resource independence.
 
 Use `./venv/bin/python -m unittest discover -s test/test_att/test_agent_activity -t test` to verify coalescing, continuing activity, batch scope, mail presentation, request/claim settlement, finite timers, late fencing, and scoped audit/index profiles.
 
@@ -208,7 +228,7 @@ self.assertIn(
 )
 ```
 
-Schema 11 and earlier databases must be rejected before DDL.
+The current schema is 14; schema 13 and earlier databases must be rejected before DDL.
 
 ### Reliability
 

@@ -46,6 +46,7 @@ class LibraryWriteMixin:
                         content=content,
                     )
                 )
+            cls._write_permissions(session, {library["lib_id"]: library.get("permissions", {})})
 
     @staticmethod
     def _write_permissions(

@@ -21,6 +21,27 @@ class ToolExecutor:
         self.agent = agent
         self.manager = manager
 
+    @staticmethod
+    def failure_result(error, *, call_id, tool_name, raw=None, attempts=1):
+        """Classify both immediate and late outcomes without replaying a call."""
+        if isinstance(error, (ATTException, asyncio.CancelledError)) or not isinstance(error, Exception):
+            raise error
+        if isinstance(error, ToolArgumentError):
+            status, kind = ToolResultStatus.INVALID_ARGUMENTS, error.error_kind or "argument_validation"
+        elif isinstance(error, (ToolPermissionError, PermissionError)):
+            status, kind = ToolResultStatus.DENIED, getattr(error, "error_kind", None) or "permission_denied"
+        elif isinstance(error, FileNotFoundError):
+            status, kind = ToolResultStatus.BUSINESS_ERROR, "not_found"
+        elif isinstance(error, ToolBusinessError):
+            status, kind = ToolResultStatus.BUSINESS_ERROR, error.error_kind or "business_error"
+        elif isinstance(error, RetryableToolError):
+            status, kind = ToolResultStatus.TRANSIENT_ERROR, "transient_execution"
+        else:
+            status, kind = ToolResultStatus.INTERNAL_ERROR, "tool_internal_error"
+        content = "The requested file does not exist." if kind == "not_found" else (
+            f"{type(error).__name__}: {error}" if status == ToolResultStatus.INTERNAL_ERROR else str(error))
+        return ToolResult(call_id, tool_name, content, raw, status=status, error_kind=kind, attempts=attempts)
+
     async def execute(
         self,
         tool_name: str,
@@ -32,6 +53,9 @@ class ToolExecutor:
         raw: Any = None,
         tools: Optional[Mapping[str, Any]] = None,
         before_attempt: Any = None,
+        invoke: Any = None,
+        retry_config: Any = None,
+        retry_sleep: Any = None,
     ) -> ToolResult:
         registry = tools if tools is not None else getattr(self.team, "tools", {})
         tool = registry.get(tool_name)
@@ -67,6 +91,9 @@ class ToolExecutor:
                     call_id=call_id,
                     raw=raw,
                     before_attempt=before_attempt,
+                    invoke=invoke,
+                    retry_config=retry_config,
+                    retry_sleep=retry_sleep,
                 )
         finally:
             if self.manager and active_agent_token is not None:
@@ -77,7 +104,8 @@ class ToolExecutor:
                 self.manager._active_tool_invocation_id.reset(invocation_token)
 
     async def _execute_authorized(
-        self, tool, tool_name, args, kwargs, *, call_id, raw, before_attempt
+        self, tool, tool_name, args, kwargs, *, call_id, raw, before_attempt,
+        invoke=None, retry_config=None, retry_sleep=None,
     ) -> ToolResult:
         try:
             checked_args, checked_kwargs = tool.validate_arguments(
@@ -129,17 +157,22 @@ class ToolExecutor:
         policy = self.manager.config.tool_execution_retry_policy if self.manager else "never"
         max_retries = self.manager.config.max_tool_execution_retries if self.manager else 0
         backoff = self.manager.config.tool_execution_retry_backoff_factor if self.manager else 0.0
+        retry_safe = tool.retry_safe
+        if retry_config is not None:
+            policy, max_retries, backoff = (retry_config[key] for key in ("policy", "max_retries", "backoff"))
+            retry_safe = retry_config["retry_safe"]
         attempts = 0
         while True:
             attempts += 1
             # Trusted runtime evidence is accepted before each actual
             # execution, never before validation or the tool auditor.
-            if before_attempt is not None:
-                await before_attempt(attempts)
-            if self.manager:
-                self.manager._resources.check_authority()
             try:
-                value = await tool.invoke_validated(*checked_args, **checked_kwargs)
+                if before_attempt is not None:
+                    await before_attempt(attempts)
+                if self.manager:
+                    self.manager._resources.check_authority()
+                value = await (invoke(*checked_args, **checked_kwargs) if invoke is not None
+                               else tool.invoke_validated(*checked_args, **checked_kwargs))
                 return ToolResult(
                     call_id,
                     tool_name,
@@ -147,75 +180,15 @@ class ToolExecutor:
                     raw,
                     attempts=attempts,
                 )
-            except ToolArgumentError as exc:
-                return ToolResult(
-                    call_id,
-                    tool_name,
-                    str(exc),
-                    raw,
-                    status=ToolResultStatus.INVALID_ARGUMENTS,
-                    error_kind=exc.error_kind or "argument_validation",
-                    attempts=attempts,
-                )
-            except (ToolPermissionError, PermissionError) as exc:
-                return ToolResult(
-                    call_id,
-                    tool_name,
-                    str(exc),
-                    raw,
-                    status=ToolResultStatus.DENIED,
-                    error_kind=(getattr(exc, "error_kind", None) or "permission_denied"),
-                    attempts=attempts,
-                )
-            except FileNotFoundError:
-                return ToolResult(
-                    call_id,
-                    tool_name,
-                    "The requested file does not exist.",
-                    raw,
-                    status=ToolResultStatus.BUSINESS_ERROR,
-                    error_kind="not_found",
-                    attempts=attempts,
-                )
-            except ToolBusinessError as exc:
-                return ToolResult(
-                    call_id,
-                    tool_name,
-                    str(exc),
-                    raw,
-                    status=ToolResultStatus.BUSINESS_ERROR,
-                    error_kind=exc.error_kind or "business_error",
-                    attempts=attempts,
-                )
             except RetryableToolError as exc:
                 eligible = policy == "typed_transient" or (
-                    policy == "retry_safe" and tool.retry_safe
+                    policy == "retry_safe" and retry_safe
                 )
                 if eligible and attempts <= max_retries:
                     delay = float(backoff) * (2 ** (attempts - 1))
                     if delay:
-                        await asyncio.sleep(delay)
+                        await (retry_sleep or asyncio.sleep)(delay)
                     continue
-                return ToolResult(
-                    call_id,
-                    tool_name,
-                    str(exc),
-                    raw,
-                    status=ToolResultStatus.TRANSIENT_ERROR,
-                    error_kind="transient_execution",
-                    attempts=attempts,
-                )
-            except ATTException:
-                raise
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                return ToolResult(
-                    call_id,
-                    tool_name,
-                    f"{type(exc).__name__}: {exc}",
-                    raw,
-                    status=ToolResultStatus.INTERNAL_ERROR,
-                    error_kind="tool_internal_error",
-                    attempts=attempts,
-                )
+                return self.failure_result(exc, call_id=call_id, tool_name=tool_name, raw=raw, attempts=attempts)
+            except BaseException as exc:
+                return self.failure_result(exc, call_id=call_id, tool_name=tool_name, raw=raw, attempts=attempts)

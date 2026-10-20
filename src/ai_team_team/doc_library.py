@@ -14,6 +14,7 @@ from .gated_reader import (
     file_version_from_stat,
     read_text_stream_selection,
 )
+from .resource_locks import PathLocks
 
 logger = logging.getLogger("ATT.DocLib")
 
@@ -23,15 +24,16 @@ def managed_operation(function):
     @wraps(function)
     def guarded(self, *args, **kwargs):
         gate = self._resource_gate
-        with gate.operation(self) if gate else nullcontext():
+        paths = [args[0] if args else kwargs.get("path", "/")]
+        if function.__name__ == "move_file":
+            paths = [args[0] if args else kwargs["source_path"], args[1] if len(args) > 1 else kwargs["target_path"]]
+        elif function.__name__ == "replace_all_files":
+            paths = ["/"]
+        tree = function.__name__ in {"delete_file", "list_contents", "replace_all_files"}
+        protected = tuple((os.path.normcase(self._normalize_path(path, allow_root=True)).replace("\\", "/"), tree) for path in paths)
+        with gate.operation(self) if gate else nullcontext(), self._path_locks.hold(protected):
             if gate:
-                paths = [args[0] if args else kwargs.get("path", "/")]
-                if function.__name__ == "move_file":
-                    paths = [args[0] if args else kwargs["source_path"],
-                             args[1] if len(args) > 1 else kwargs["target_path"]]
-                elif function.__name__ == "replace_all_files":
-                    paths = ["/"]
-                gate.authorize(self, function.__name__, paths)
+                gate.authorize(self, function.__name__, paths, physical=True)
             return function(self, *args, **kwargs)
     return guarded
 
@@ -82,6 +84,7 @@ class DocumentLibrary:
         self._on_change = on_change
         self._suppress_notifications = False
         self._lock = threading.RLock()
+        self._path_locks = PathLocks()
         self._resource_gate = None
         self._resource_generation = 0
         
@@ -154,7 +157,7 @@ class DocumentLibrary:
         expected_file_version: Optional[str] = None,
     ) -> FileSourceSlice:
         """Reads a secure normalized source prefix for model-facing gating."""
-        with self._lock:
+        with nullcontext():
             normalized_path = self._normalize_path(path, allow_root=False)
             fd = self._open_file_descriptor(
                 normalized_path, os.O_RDONLY, create_parents=False
@@ -180,7 +183,7 @@ class DocumentLibrary:
     def _assert_file_version(self, path: str, expected_file_version: str) -> None:
         """Verifies that a physical file path still names the expected version."""
 
-        with self._lock:
+        with nullcontext():
             normalized_path = self._normalize_path(path, allow_root=False)
             fd = self._open_file_descriptor(
                 normalized_path, os.O_RDONLY, create_parents=False
@@ -195,32 +198,35 @@ class DocumentLibrary:
     def delete_file(self, path: str) -> str:
         """Deletes a file or directory path within the library."""
         gate = self._resource_gate
-        with self._lock, gate.commit(self, "delete_file", (path,)) if gate else nullcontext():
-            self._ensure_writable()
-            normalized_path = self._normalize_path(path, allow_root=False)
-            safe_path = self._resolve_path(normalized_path, allow_root=False)
-            if not os.path.exists(safe_path):
-                return f"Error: Path '{path}' does not exist in library '{self.lib_id}'."
-
-            try:
-                if os.path.isdir(safe_path):
-                    deleted_paths = []
-                    for root, _, files in os.walk(safe_path):
-                        for filename in files:
-                            deleted_paths.append(
-                                os.path.relpath(
-                                    os.path.join(root, filename), self.root_dir
-                                ).replace(os.sep, "/")
-                            )
-                    shutil.rmtree(safe_path)
+        self._ensure_writable()
+        normalized_path = self._normalize_path(path, allow_root=False)
+        safe_path = self._resolve_path(normalized_path, allow_root=False)
+        if not os.path.exists(safe_path):
+            raise FileNotFoundError(f"Path '{path}' does not exist in library '{self.lib_id}'.")
+        staging = None
+        try:
+            if os.path.isdir(safe_path):
+                deleted_paths = [os.path.relpath(os.path.join(root, filename), self.root_dir).replace(os.sep, "/")
+                    for root, _, files in os.walk(safe_path) for filename in files]
+                staging = tempfile.mkdtemp(prefix=".att-delete-", dir=os.path.dirname(self.root_dir))
+                with gate.commit(self, "delete_file", (path,)) if gate else nullcontext():
+                    self._ensure_writable()
+                    safe_path = self._resolve_path(normalized_path, allow_root=False)
+                    os.replace(safe_path, os.path.join(staging, "removed"))
                     for deleted_path in deleted_paths:
                         self._notify_change(deleted_path, None)
-                    return f"Successfully deleted directory '{path}' in library '{self.lib_id}'."
+                # The managed source disappeared atomically. Recursive physical
+                # cleanup must not retain the global authority/publication lock.
+                return f"Successfully deleted directory '{path}' in library '{self.lib_id}'."
+            with gate.commit(self, "delete_file", (path,)) if gate else nullcontext():
+                self._ensure_writable()
+                safe_path = self._resolve_path(normalized_path, allow_root=False)
                 os.remove(safe_path)
                 self._notify_change(normalized_path, None)
                 return f"Successfully deleted file '{path}' in library '{self.lib_id}'."
-            except Exception as e:
-                return f"Error deleting '{path}' in library '{self.lib_id}': {e}"
+        finally:
+            if staging is not None:
+                shutil.rmtree(staging, ignore_errors=True)
 
     @managed_operation
     def list_contents(self, path: str = "/") -> List[str]:
@@ -450,7 +456,7 @@ class DocumentLibrary:
     @managed_operation
     def read_text(self, path: str) -> str:
         """Reads complete text for trusted manager-side copy operations."""
-        with self._lock:
+        with nullcontext():
             normalized = self._normalize_path(path, allow_root=False)
             fd = self._open_file_descriptor(
                 normalized, os.O_RDONLY, create_parents=False
@@ -463,7 +469,7 @@ class DocumentLibrary:
         self, source_path: str, target_path: str, overwrite: bool = False
     ) -> None:
         """Atomically moves one physical file within this library."""
-        with self._lock:
+        with nullcontext():
             self._ensure_writable()
             source = self._normalize_path(source_path, allow_root=False)
             target = self._normalize_path(target_path, allow_root=False)
@@ -500,7 +506,7 @@ class DocumentLibrary:
         self, path: str, content: str, overwrite: bool = False
     ) -> None:
         """Publishes a complete file through a same-directory atomic replace."""
-        with self._lock:
+        with nullcontext():
             self._ensure_writable()
             normalized = self._normalize_path(path, allow_root=False)
             fd, staging = tempfile.mkstemp(prefix=".att-copy-", dir=os.path.dirname(self.root_dir))

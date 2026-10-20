@@ -12,6 +12,7 @@ from .libraries import build_library_tools
 from .membership import build_membership_tools
 from .memory import build_memory_tools
 from .migration import build_migration_tools
+from .effects import declare_builtin_effects
 
 
 def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, Tool]:
@@ -36,4 +37,4 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
     tools["initiate_membership_vote"] = membership_tools["initiate_membership_vote"]
     tools["cast_vote"] = membership_tools["cast_vote"]
     tools["retract_membership_vote"] = membership_tools["retract_membership_vote"]
-    return tools
+    return declare_builtin_effects(tools)

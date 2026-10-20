@@ -7,7 +7,7 @@ from ai_team_team import Agent, LLMResponse, StatePersistenceError, ToolCall
 from ai_team_team.core.activity.contracts import AgentTeamScope
 from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep
 
-from ._support import ActivityTestCase, idle
+from ._support import ActivityTestCase, idle, personal_control_contract
 
 
 class DispatchReceiptBoundaryTests(ActivityTestCase):
@@ -26,8 +26,8 @@ class DispatchReceiptBoundaryTests(ActivityTestCase):
                 sibling_cancelled.set()
             return "unreachable"
 
-        self.manager.register_tool("cancelled_tool", func=cancelled_tool)
-        self.manager.register_tool("waiting_tool", func=waiting_tool)
+        self.manager.register_tool("cancelled_tool", func=cancelled_tool, execution_contract=personal_control_contract())
+        self.manager.register_tool("waiting_tool", func=waiting_tool, execution_contract=personal_control_contract())
         self.steps(LLMResponse(tool_calls=[
             ToolCall("cancelled", "cancelled_tool", {}),
             ToolCall("waiting", "waiting_tool", {}),

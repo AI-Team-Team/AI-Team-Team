@@ -46,10 +46,16 @@ class RuntimeRegistry:
         *,
         memory_capture: str = "metadata_only",
         execution_contract: Optional[Any] = None,
+        executor: str = "callable",
+        resource_resolver: Optional[Callable[..., Any]] = None,
+        retry_safe: bool = False,
+        result_storage: str = "protected",
     ):
         """Registers a custom utility tool to all teams."""
         manager = self.manager
-        tool = Tool(name, description, func, schema, memory_capture=memory_capture, execution_contract=execution_contract)
+        tool = Tool(name, description, func, schema, memory_capture=memory_capture, execution_contract=execution_contract,
+                    executor=executor, resource_resolver=resource_resolver, retry_safe=retry_safe, result_storage=result_storage)
+        manager._executions.validate_binding(tool)
         manager.global_tools[tool.name] = tool
         # Bind to existing teams
         for team in manager.teams.values():

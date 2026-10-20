@@ -30,6 +30,8 @@ The [Phase 1 engineering profile](dev/autonomous_activity/Phase_1.md) describes 
 
 The [Phase 3 messaging profile](dev/autonomous_activity/Phase_3.md) activates incompatible schema 13 for explicit publications, exact chat command keys, private read/detail controls, historical views, friendship periods, and recipient-owned reminder evidence.
 
+The [Phase 4 execution profile](dev/autonomous_activity/Phase_4.md) activates incompatible schema 14 for explicit and detached execution, immutable declaration and source provenance, protected input/result references, factual cancellation, and owner-only result recovery without replay.
+
 The [Phase 2 personal runtime](dev/autonomous_activity/Phase_2.md) atomically checkpoints the sanitized personal window, Journal dependencies, notification claims, and activity progress.
 
 Open Native exchanges are excluded from saved model windows while their issued execution evidence remains retained.
@@ -201,6 +203,6 @@ The optional [Selective Episodic Memory](Selective_Episodic_Memory.md) catalog c
 
 ## Schema policy
 
-- The current persistence schema version is `13`.
-- Compatibility with schema `12` and earlier SQLite layouts is intentionally unsupported.
+- The current persistence schema version is `14`.
+- Compatibility with schema `13` and earlier SQLite layouts is intentionally unsupported.
 - Create a new database when upgrading.

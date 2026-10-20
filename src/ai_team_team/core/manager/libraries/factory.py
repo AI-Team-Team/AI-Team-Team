@@ -1,11 +1,61 @@
 """Library operations for LibraryFactoryMixin."""
 
 from typing import Optional
+import asyncio
+import os
+import shutil
+import tempfile
+import uuid
 
 from ai_team_team.doc_library import DocumentLibrary
 
 
 class LibraryFactoryMixin:
+    async def create_team_library(self, team, name, description, is_public=False):
+        """Provision off-registry and publish with the captured execution lease."""
+        manager = self.manager
+        workspace = os.path.realpath(os.path.abspath(manager.config.workspace_root))
+        lib_id = f"DL-{uuid.uuid4().hex}"
+
+        def provision():
+            managed = os.path.join(workspace, ".att_doc_libs")
+            if os.path.islink(managed):
+                raise PermissionError("A managed library namespace cannot be a symlink.")
+            os.makedirs(managed, exist_ok=True)
+            staging = tempfile.mkdtemp(prefix=".att-library-stage-", dir=managed)
+            published = False
+            try:
+                library = manager._build_document_library(lib_id=lib_id, name=name, owner_team_id=team.team_id,
+                    description=description, is_public_visible=is_public, storage_dir=staging)
+                with manager._resources.topology_mutation(), manager._snapshot_lock:
+                    if (manager.teams.get(team.team_id) is not team or getattr(team, "_lifecycle_state", "active") != "active"
+                            or os.path.realpath(os.path.abspath(manager.config.workspace_root)) != workspace):
+                        raise PermissionError("The creating team or workspace changed before library publication.")
+                    manager._resources.authorize(team.doc_library, "write_file", ("/",))
+                    target = os.path.join(managed, lib_id)
+                    if lib_id in manager.libraries or os.path.lexists(target):
+                        raise FileExistsError("The reserved library identity is occupied.")
+                    os.rename(staging, target)
+                    library.root_dir = target
+                    manager._resources.bind(library)
+                    manager.libraries[lib_id] = library
+                    manager._library_files[lib_id] = {}
+                    try:
+                        manager._auto_save(libraries={lib_id})
+                    except BaseException:
+                        manager.libraries.pop(lib_id, None)
+                        manager._library_files.pop(lib_id, None)
+                        os.rename(target, staging)
+                        library.root_dir = staging
+                        raise
+                    published = True
+                return library
+            finally:
+                if not published:
+                    shutil.rmtree(staging, ignore_errors=True)
+
+        return await asyncio.to_thread(provision)
+
     def _new_document_library(
         self,
         *,
