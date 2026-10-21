@@ -15,6 +15,7 @@ from ai_team_team.core.tool_runtime import ToolExecutor
 from ai_team_team.database.persistence.receipts import settle_commit
 from ai_team_team.database.persistence.records import thaw
 from ..activity.values import capture, identifier, scope_fields
+from ..timing import wait_until
 from .resources import builtin_resources
 from .values import CallableExecutor, ExecutorCall, Job
 
@@ -209,7 +210,7 @@ class DispatchMixin:
             await asyncio.wait((started, finished), return_when=asyncio.FIRST_COMPLETED)
             if not job.finished.is_set() and job.tool.execution_contract.background_allowed:
                 deadline = job.started_monotonic + self.manager.config.executions.automatic_detachment_seconds
-                timer = asyncio.create_task(self.clock.sleep(max(0, deadline - self.clock.monotonic())))
+                timer = asyncio.create_task(wait_until(self.clock, deadline))
                 await asyncio.wait((finished, timer), return_when=asyncio.FIRST_COMPLETED)
                 async with self.manager._activity.lock:
                     if not job.finished.is_set():

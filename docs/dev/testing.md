@@ -48,6 +48,10 @@ Inject immediate, cancelled-observer, and late synchronous stop-hook framework f
 
 Queue a healthy sample ahead of a timeout at the real activity lock and delay a different signal's stall receipt across its deadline; use the logical clock to verify both absence of stale stalls and rearmed future timers.
 
+Delay the first execution of a detachment or health timer Task until after the logical clock advances, and verify that its absolute deadline is not shifted by Task scheduling.
+
+Keep the immediate clock-advance regressions across supported Python versions, and check remaining-time waits, completion races, cancellation cleanup, and refreshed health deadlines without increasing watchdogs or adding arbitrary sleeps.
+
 Fixtures that deliberately coordinate personal invocation state or cancel parallel personal controls must declare a foreground self-modification contract rather than rely on undeclared shared-resource independence.
 
 Use `./venv/bin/python -m unittest discover -s test/test_att/test_agent_activity -t test` to verify coalescing, continuing activity, batch scope, mail presentation, request/claim settlement, finite timers, late fencing, and scoped audit/index profiles.

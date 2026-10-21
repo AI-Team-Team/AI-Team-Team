@@ -51,6 +51,8 @@ The strict `ATTConfig.executions` group provides the following settings.
 
 The foreground observer waits for actual completion or the detachment threshold without cancelling the worker merely because the threshold elapsed.
 
+The threshold is an absolute monotonic deadline anchored to actual executor start; its timer calculates the remaining delay when the timer Task runs, so delayed scheduling cannot restart the waiting interval.
+
 Completion and promotion serialize their authoritative transitions so an original call gets either its normal result or one `BackgroundTaskHandle`, never two observations.
 
 Automatic detachment preserves execution and attempt identity instead of dispatching a second copy.
@@ -144,6 +146,8 @@ Healthy heartbeat and progress samples refresh independently, and a successfully
 Timeout decisions and accepted samples share one ordering lock, so a queued timeout cannot overrule a newer accepted heartbeat using an obsolete deadline.
 
 The monitor retains the next unchecked deadline across awaited observation commits and rearms from refreshed samples without clearing a newer update signal.
+
+Health timers use the same absolute-deadline wait as detachment timers; a timer first scheduled after its deadline checks the existing timeout instead of starting a new relative interval.
 
 ## Cancellation, Close, and Recovery
 

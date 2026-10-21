@@ -4,6 +4,7 @@ import asyncio
 
 from ai_team_team.core.exceptions import ToolArgumentError
 from ..activity.values import capture, identifier
+from ..timing import wait_until
 from ai_team_team.database.persistence.records import thaw
 
 
@@ -92,7 +93,7 @@ class HealthMixin:
                         # keep it so the next iteration wakes immediately.
                         waiting.append(deadline)
             changed = asyncio.create_task(job.health_updated.wait())
-            timer = asyncio.create_task(self.clock.sleep(max(0, min(waiting) - self.clock.monotonic()))) if waiting else None
+            timer = asyncio.create_task(wait_until(self.clock, min(waiting))) if waiting else None
             try:
                 await asyncio.wait((changed, timer) if timer else (changed,), return_when=asyncio.FIRST_COMPLETED)
             finally:
