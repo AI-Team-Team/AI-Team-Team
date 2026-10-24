@@ -22,6 +22,12 @@ Ordinary-Agent death retains the existing identity, saved memory and history, to
 
 A dead Agent is not an active participant and cannot be a normal discovery candidate, invitee, or wake recipient.
 
+The `dead` lifecycle state is terminal, and no Host or Agent operation may reactivate that identity.
+
+`reactivate_agent()` accepts only the `retained` and `archived` states corresponding to the `retain` and `archive` policies.
+
+Restoration preserves dead identities as historical records without making them eligible for activation or reactivation.
+
 Runtime callables, live clients, coroutine stacks, and hidden model reasoning are not serializable history, and retained records do not override existing transient-observation privacy rules.
 
 Death is a privileged Host-only lifecycle transition with an explicit warning about live or uncertain execution consequences, not an ordinary Agent tool.

@@ -42,6 +42,10 @@ It does not mean that the Agent has been retired, archived, or deleted.
 
 Automatic activation must not silently reactivate an inactive identity or reconstruct a deleted person.
 
+Death is a terminal lifecycle state that retains the person's identity and applicable history and private artifacts but permits no reactivation, including by the Host.
+
+`reactivate_agent()` applies only to identities retained or archived under the `retain` or `archive` policy.
+
 ## Voluntary Sleep and Temporary Do-Not-Disturb
 
 The AI may deliberately put its own model activity to sleep and specify conditions for waking the same continuing person.
