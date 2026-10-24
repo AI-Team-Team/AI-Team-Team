@@ -24,6 +24,8 @@ from ai_team_team import (
     StateRestoreError,
 )
 from ai_team_team.core.utils import generate_with_retry
+from ai_team_team.core.manager.activity.values import ModelUnavailable
+from test.personal_activity import interact_and_idle
 from ai_team_team.database.persistence import (
     DatabaseStore,
     PersistenceCoordinator,
@@ -50,7 +52,7 @@ def _write_and_hold(db_path, workspace, ready, release):
             persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("process-model", client)
-        team = manager.create_agent_team(manager.root_ai)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
         await manager.save_state()
         ready.put(team.team_id)
         release.wait(10)
@@ -71,6 +73,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 self.active = 0
                 self.maximum = 0
                 self.system_prompts = []
+                self.calls = 0
 
             async def generate(self, prompt, system_instruction=None, **kwargs):
                 self.active += 1
@@ -78,7 +81,8 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 self.system_prompts.append(system_instruction or "")
                 await asyncio.sleep(0.03)
                 self.active -= 1
-                return "Final Answer: shared"
+                self.calls += 1
+                return "Final Answer: shared" if self.calls % 2 else "Action: set_activity_intent(intent={'kind': 'idle'})"
 
         client = SerialClient()
         root = Agent("Root", "Architect", client)
@@ -95,12 +99,12 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             "HelperD": {"model": "shared-model"},
         }
         team_a = manager.bootstrap_agent_team(
-            root,
+            root, parent=root,
             member_configs=configs_a,
             existing_members=[shared],
         )
         team_b = manager.bootstrap_agent_team(
-            root,
+            root, parent=root,
             member_configs=configs_b,
             existing_member_ids=[shared.agent_id],
         )
@@ -116,12 +120,15 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             child = shared.launch_att(manager)
         finally:
             manager._active_team.reset(team_token)
-        self.assertIs(child.parent_team, team_a)
+        self.assertIsNone(child.organizational_parent)
 
-        await asyncio.gather(
-            team_a.execute_reasoning_step(shared, "A", "system", manager=manager),
-            team_b.execute_reasoning_step(shared, "B", "system", manager=manager),
+        # Concurrent observers coalesce onto the same person and factual scope.
+        same_scope = await asyncio.gather(
+            interact_and_idle(manager, shared, "A", team=team_a),
+            interact_and_idle(manager, shared, "Another input", team=team_a),
         )
+        self.assertEqual({item.team_id for item in same_scope}, {team_a.team_id})
+        await interact_and_idle(manager, shared, "B", team=team_b)
         self.assertEqual(client.maximum, 1)
         self.assertTrue(any(team_a.team_id in text for text in client.system_prompts))
         self.assertTrue(any(team_b.team_id in text for text in client.system_prompts))
@@ -134,7 +141,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             {message["team_id"] for message in generated},
             {team_a.team_id, team_b.team_id},
         )
-        self.assertTrue(all(message.get("discussion_id") for message in generated))
+        self.assertTrue(all(message.get("invocation_id") for message in generated))
 
         tools = get_default_tools({"att_manager": manager}, shared)
         token = manager._active_team.set(team_b)
@@ -228,6 +235,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(no_retry.calls, 1)
     async def test_hard_token_budget_rejects_client_without_cap_api(self):
         class NoCapClient:
+            calls = 0
             async def generate(
                 self,
                 prompt,
@@ -235,24 +243,25 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 temperature=0.3,
                 require_json=False,
             ):
-                return {"text": "ok", "usage": {"total_tokens": 3}}
+                self.calls += 1
+                return "ok"
 
         client = NoCapClient()
         manager = ATTManager(
             Agent("Root", "Architect", client),
             ATTConfig(
                 workspace_root=self.tmpdir,
-                model_token_limits={"default": 10},
+                model_token_limits={"default": 1_000_000},
                 model_max_output_tokens={"default": 6},
             ),
             persistence_mode="volatile",
         )
-        with self.assertRaisesRegex(
-            LLMGenerationError, "max_output_tokens or max_tokens"
-        ):
-            await generate_with_retry(client, "12345678", manager=manager)
-        self.assertEqual(manager.token_budget.available("default"), 10)
-        self.assertNotIn("default", manager.model_token_usage)
+        manager.register_llm_client("default", client)
+        admission = await manager.activate_agent(manager.root_ai.agent_id)
+        with self.assertRaises(ModelUnavailable):
+            await manager.wait_for_activity_checkpoint(admission.admission_id, intent="idle")
+        self.assertEqual(client.calls, 0)
+        self.assertEqual(manager.token_budget.available("default"), 1_000_000)
         await manager.close()
     async def test_hanging_llm_does_not_block_close(self):
         started = asyncio.Event()
@@ -268,11 +277,9 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=self.tmpdir),
             persistence_mode="volatile",
         )
-        team = manager.create_agent_team(manager.root_ai)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
         task = asyncio.create_task(
-            manager.execute_team_discussion(
-                team, "hang", rounds=1, skip_audit=True
-            )
+            manager.execute_agent_interaction(team.members[0], "hang", team=team)
         )
         await started.wait()
         await asyncio.wait_for(manager.close(), timeout=0.5)

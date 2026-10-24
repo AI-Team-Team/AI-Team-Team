@@ -12,6 +12,7 @@ from ai_team_team.core.response import ToolResult
 from ai_team_team.database.persistence.records import freeze
 
 from .controls import ControlMixin
+from .audit import AuditExecutionMixin
 from .dispatch import DispatchMixin
 from .queries import QueryMixin
 from .outcomes import OutcomeMixin
@@ -21,7 +22,7 @@ from .resources import ResourceCoordinator, conflict
 from .values import CallableExecutor, ExecutionContext
 
 
-class ExecutionService(DispatchMixin, ControlMixin, QueryMixin, OutcomeMixin, HealthMixin, EvidenceMixin):
+class ExecutionService(AuditExecutionMixin, DispatchMixin, ControlMixin, QueryMixin, OutcomeMixin, HealthMixin, EvidenceMixin):
     def __init__(self, manager):
         self.manager = manager
         self.jobs = {}
@@ -139,6 +140,8 @@ class ExecutionService(DispatchMixin, ControlMixin, QueryMixin, OutcomeMixin, He
             durability=self.manager.persistence_mode, state_version=row.version)
 
     async def execute(self, session, name, args, kwargs, *, call_id, tools):
+        if session.audit_profile is not None:
+            return await self.execute_audit_profile(session, name, args, kwargs, call_id=call_id, tools=tools)
         tool = tools.get(name)
         if tool is None:
             from ai_team_team.core.tool_runtime import ToolExecutor

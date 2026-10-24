@@ -253,8 +253,8 @@ The following existing cases exercise distinct boundaries:
 - `test_att.test_personal_governance.test_review_regressions.GovernanceReviewTests.test_cancelled_native_submission_keeps_the_next_interaction_usable`: accepted Native ballot submission and cancellation settlement.
 - `test_att.test_policies.TestMigrationPolicies.test_lineage_path_uses_every_explicit_principal`: multi-principal governance and subsequent commits.
 - `test_att.test_state_persistence.test_recovery_and_registry.TestStatePersistence.test_state_persistence_and_recovery`: save, restore, registry reconstruction, and cleanup.
-- `test_att.test_supervision_lifecycle.TestSupervisoryTeamLifecycle.test_parallel_audits_have_distinct_live_team_and_agent_owners`: concurrent short-lived audit teams.
-- `test_att.test_supervision_lifecycle.TestSupervisoryTeamLifecycle.test_parallel_business_discussions_keep_separate_live_audit_contexts`: concurrent business sessions with separate audit lifecycles.
+- `test_att.test_supervision_lifecycle.TestSupervisoryTeamLifecycle.test_parallel_audits_have_separate_live_owners_and_provider_context`: concurrent short-lived audit teams with distinct owners and provider scopes.
+- `test_att.test_supervision_lifecycle.TestSupervisoryTeamLifecycle.test_parallel_personal_activities_and_audits_keep_separate_contexts`: concurrent activities of two distinct ordinary Agents and two audit teams with isolated provider contexts and admitted evidence, including ordinary continuation after audit teardown.
 
 The sample command defaults to the recovery case; replace or extend `targets` with the exact selectors above to measure another workload.
 

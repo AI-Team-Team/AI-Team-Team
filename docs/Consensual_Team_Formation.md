@@ -34,9 +34,9 @@ Agent-facing tools never accept an acting Agent ID. They derive the identity fro
 - `list_agent_inbox(unread_only=True)`
 - `mark_agent_inbox_read(message_ids=None)`
 - `inspect_team_formation(request_id)`
-- `discuss_team_formation_proposal(objective, request_id=None)`
+- `propose_team_formation(proposal, organizational_parent="none")`
+- `prepare_team_formation_draft(objective, candidate, request_id=None, organizational_parent="none")`
 - `inspect_team_formation_draft(draft_id)`
-- `retry_team_formation_draft(draft_id)`
 - `publish_team_formation_draft(draft_id)`
 - `revise_team_formation(request_id, base_revision, changes)`
 - `respond_team_invitation(request_id, proposal_revision, attitude=None)`
@@ -69,35 +69,45 @@ A no-op revision returns `UNCHANGED` without a write, notification, revision inc
 
 Public request, invitation, revision, decision, and draft reads are detached from the authoritative registries. Mutating a returned object cannot mutate live governance state.
 
-## Collaborative Proposal Deliberation
+## Voluntary Design and Optional Candidates
 
-An initiating Agent may ask its invocation-scoped current AgentTeam to shape an initial proposal or a possible next revision. The work is advisory: it runs later as a detached job under the creator AgentTeam's normal serial discussion lock, freezes the participating members, does not consume unrelated inbox work, and never accepts an invitation for another Agent.
+The initiating Agent designs its proposal in its own continuing activity and may seek voluntary advice over authorized channels.
 
-Deliberation uses the available [entity-discovery tools](Agent_and_AgentTeam_Discovery.md) instead of automatically receiving a global candidate directory.
+No compulsory creator-Team drafting process or all-member response barrier precedes publication.
 
-Explicit candidate references in the current proposal or discussion remain valid context, but finding an Agent never supplies its membership consent.
+Discovery supplies public records on demand, not consent or an automatically selected candidate.
 
-The initiating Agent synthesizes a strict complete `TeamFormationDraftCandidate` after the discussion. Failed, incomplete, cancelled, invalid, or membership-changing deliberation produces no publishable proposal revision. A ready draft remains inert until that same Agent explicitly publishes it, and revision publication fails closed when its immutable base revision has become stale.
+`prepare_team_formation_draft` validates a complete initiator-supplied `TeamFormationDraftCandidate` without invoking any model or other person.
 
-`ATTConfig.formation_deliberation_policy` defaults to `"optional"`. Setting it to `"required_when_team_scoped"` requires this draft workflow before a team-scoped initial proposal or revision is published; a standalone Root Agent may still formulate a proposal directly.
+A candidate is immediately `READY`, remains inert until its initiator explicitly publishes it, and records only that initiator as its author.
+
+Draft preparation, publication, and actual creation all validate the configured maximum depth against the intended parent's current position.
+
+Explicit confirmation and automatic creation repeat that check after any consent wait, and the authoritative commit checks it again after any writer wait.
+
+An over-depth proposal remains uncreated rather than bypassing the limit or losing its existing exact-revision consent.
+
+Its provenance can include the initiator's actual invocation, never a detached synthesis job or fabricated discussion identifier.
+
+For a new Host-prepared candidate, `parent=None` means independence even when the initiator currently belongs to a team.
+
+Pass `parent=...` explicitly when preparing an initial Host candidate, or choose `organizational_parent="self"` or `"current_team"` in the tool.
+
+A revision candidate retains its proposal's immutable explicit parent rather than choosing a new one.
 
 ```python
-draft = await manager.discuss_team_formation_proposal(
+draft = await manager.prepare_team_formation_draft(
     actor=initiator,
-    objective="Design an incident investigation team.",
+    objective="Validate my investigation-team design.",
+    candidate=candidate,
+    parent=None,
 )
+published = await manager.publish_team_formation_draft(draft.draft_id, actor=initiator)
 ```
 
-After the initiating Agent receives the `team_formation_draft_completed` notification in its personal inbox, it can inspect the detached result and explicitly publish only a ready candidate:
+A changed exact base makes a revision candidate `STALE`; its retained candidate remains historical evidence but cannot authorize publication.
 
-```python
-ready = manager.get_team_formation_draft(draft.draft_id, actor=initiator)
-if ready.status.value == "ready":
-    published = await manager.publish_team_formation_draft(
-        ready.draft_id,
-        actor=initiator,
-    )
-```
+Candidate preparation, voluntary feedback, and mail read state never accept another person's invitation.
 
 ## Creation and Completion
 
@@ -128,17 +138,35 @@ Late joining changes only the team membership relation. It does not copy, replac
 
 ## Asynchronous Self-Membership
 
-An initiator may explicitly join its proposed AgentTeam. ATT commits formation without synchronously running the first discussion inside the formation tool call, so the call returns and releases the initiating Agent's invocation lock before the new team needs that Agent.
+An initiator may explicitly join its proposed AgentTeam. ATT commits formation without synchronously nesting another invocation inside the formation tool call.
 
-If the proposal includes an initial task, ATT schedules that discussion after creation and later delivers a completion or privacy-safe failure notification to the initiator's Agent inbox. The manager-wide wait-for graph remains the final guard for any other synchronously awaited Agent dependency.
+If the proposal includes initial instructions, ATT retains addressed mail and admits eligible personal activity after creation without waiting for child business work.
+
+Creation references certify only creation, not business completion.
+
+The manager-wide wait-for graph remains the final guard for other synchronous personal observation dependencies.
 
 ## Atomicity and Persistence
 
-Revision, response, explicit creation, automatic creation, abandonment, and late joining are serialized per request. Draft jobs have independent locks, and publication acquires the relevant request lock before it can change consent-bearing state. At most one concurrent path can create the AgentTeam or commit a particular revision.
+Revision, response, explicit creation, automatic creation, abandonment, and late joining are serialized per request. Candidate publication has an independent lock, and publication acquires the relevant request lock before it can change consent-bearing state. At most one concurrent path can create the AgentTeam or commit a particular revision.
 
 Creation stages new Agents, Private DocLibs, the Team DocLib, and initial files outside the live registries. It revalidates under the creation locks, publishes topology and files as one operation, commits the authoritative state before returning `CREATED`, and restores runtime, inbox, formation, and filesystem state if persistence fails.
 
-Persistence schema 12 stores Agent inbox messages, current formation projections, immutable revision snapshots, append-only invitation decisions, detached drafts, timestamps, completion policy, late-join policy, and the resulting team reference.
+Final acceptance rechecks the initiator's current creating-team or intended-parent membership, active founding identities, minimum size, and live depth limit after admission waits.
+
+Draft preparation, formal proposal publication, and revision publication also revalidate the live creator relationship at their acceptance boundary, including an unchanged candidate published without a new revision.
+
+Asynchronous formation changes use operation-local candidate projections and publish only their changed entities after the exact receipt; unrelated proposals and independently accepted inbox arrivals remain intact.
+
+Full saves and independent incremental commits capture accepted formation projections and exclude another operation's pending team, new identities, libraries, relationship facts, and mail.
+
+Rollback withdraws only the exact identities, libraries, initial relationship facts, and newly appended mail owned by that operation; it never restores a manager-wide snapshot or overwrites another operation's accepted messages and read receipts.
+
+Cancelling candidate publication before acceptance leaves the candidate ready and removes its unaccepted request and invitations, while an accepted receipt preserves the published proposal or created team and its automatic-creation or initial-work dispatch even if its observer loses the response.
+
+The same receipt boundary applies to revisions, invitation responses, abandonment, and late joining, so pre-acceptance cancellation does not change the published revision, public attitude, or lifecycle state.
+
+Persistence schema 15 stores Agent inbox messages, current formation projections, immutable revision snapshots, append-only invitation decisions, detached drafts, timestamps, completion policy, late-join policy, and the resulting team reference.
 
 Restore validates complete contiguous revision history, exact fingerprints and material fields, creator provenance, decision-to-revision membership, draft publication provenance, and every related identity reference in detached staging; malformed data raises `StateRestoreError` without changing the current manager or its Agent inboxes and DocLibs.
 

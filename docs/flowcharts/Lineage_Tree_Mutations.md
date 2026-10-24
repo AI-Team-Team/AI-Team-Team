@@ -1,218 +1,120 @@
 # Lineage Tree Mutations Flowcharts
 
-This document consolidates the sequence flows that govern how the AgentTeam topology grows, restructures itself, and authorizes cross-team communication.
+ATT tracks an explicit forest with Agent, AgentTeam, or absent parents.
+
+Creator provenance and membership never manufacture an organizational edge.
 
 ## 1. Dynamic Spawning & Tool Binding
 
-This flowchart separates immediate all-new delegation from persistent formation involving an existing Agent identity:
-
 ```mermaid
 flowchart TD
-    Start["Call create_agent_team, launch_att,<br/>or dispatch_subagent"] --> Existing{"Existing Agent IDs or<br/>initiator_joins?"}
-    Existing -- "No" --> ValidateNew["Validate all-new membership,<br/>models, paths, and topology"]
-    ValidateNew --> Stage["Stage new Agents, Private DocLibs,<br/>Team DocLib, and initial files"]
-    Stage --> Commit["Atomically publish team, files,<br/>and membership relations"]
-    Commit --> Synchronous{"dispatch_subagent?"}
-    Synchronous -- "Yes" --> Discuss["Run child discussion synchronously"]
-    Synchronous -- "No" --> Active["AgentTeam active"]
-    Discuss --> Active
-
-    Existing -- "Yes" --> Deliberate{"Creator-AgentTeam<br/>deliberation selected or required?"}
-    Deliberate -- "Yes" --> DraftJob["Persist detached draft job<br/>run normal serialized discussion"]
-    DraftJob --> Candidate["Initiator synthesizes strict candidate<br/>without granting invitee consent"]
-    Candidate --> PublishDraft["Initiator explicitly publishes<br/>ready non-stale draft"]
-    Deliberate -- "No" --> ValidateProposal["Validate full possible proposal<br/>without creating entities or files"]
-    PublishDraft --> ValidateProposal
-    ValidateProposal --> PersistRequest["Persist TeamFormationRequest,<br/>revision 1, and invitations"]
-    PersistRequest --> IdentityInbox["Notify each stable Agent identity<br/>through its personal inbox"]
-    IdentityInbox --> Attitudes["Invitees publish accepted, declined,<br/>explicitly_ignored, or no_response"]
-    Attitudes --> Change{"Initiator proposes a<br/>material revision?"}
-    Change -- "Yes" --> Revise["Validate exact base revision<br/>append immutable snapshot"]
-    Revise --> Reset["Increment revision once<br/>reset retained consent and notify invitees"]
-    Reset --> IdentityInbox
-    Change -- "No" --> Inspect["Initiator inspects live counts,<br/>eligible membership, and reason"]
-    Inspect --> Eligible{"Accepted membership satisfies<br/>all live creation rules?"}
-    Eligible -- "No" --> Attitudes
-    Eligible -- "Yes" --> Complete{"Explicit create or configured<br/>unanimous auto-create?"}
-    Complete -- "Abandon" --> Abandoned["Persist ABANDONED<br/>notify every invitee"]
-    Complete -- "Create" --> Stage
-    Active --> Late{"Non-founding invitee later<br/>explicitly accepts?"}
-    Late -- "Policy disabled" --> NoJoin["Remain a nonmember"]
-    Late -- "Open" --> Join["Atomically add only<br/>team_id ↔ agent_id"]
-    Late -- "Confirmation required" --> Confirm["Initiator approves or denies<br/>pending late join"]
-    Confirm -- "Approve" --> Join
-    Confirm -- "Deny" --> NoJoin
-    Join --> Active
+    Invoke["create_agent_team, launch_att or dispatch_subagent"] --> Parent["Validate explicit parent, depth, models and documents"]
+    Parent --> Existing{"Existing identities or initiator membership?"}
+    Existing -- "No" --> Stage["Stage fresh identities, Private DocLibs and Team DocLib"]
+    Existing -- "Yes" --> Proposal["Persist exact proposal revision and invitations"]
+    Proposal --> Mail["Address stable people through personal inboxes"]
+    Mail --> Choice["Accepted, declined, explicitly ignored or no response"]
+    Choice --> Revise{"Initiator revises material content?"}
+    Revise -- "Yes" --> Reset["Append revision, reset consent and notify"]
+    Reset --> Mail
+    Revise -- "No" --> Eligible{"Accepted subset satisfies live minimum and rules?"}
+    Eligible -- "Not yet" --> Mail
+    Eligible -- "Yes" --> Create{"Explicit confirmation or configured unanimous auto-create?"}
+    Create -- "Abandon" --> Abandon["Persist abandonment and notify every invitee"]
+    Create -- "Create" --> Stage
+    Stage --> Receipt["Commit staged membership and publication"]
+    Receipt --> Live["AT exists; return reference immediately"]
+    Live --> Initial["Optional initial task becomes addressed personal mail"]
+    Live --> Late{"Explicit late acceptance and live policy permit joining?"}
+    Late -- "Yes, including required confirmation" --> Join["Update relationship only"]
+    Join --> Live
 ```
 
-Formation never synchronously waits for invited Agents or the new team's first discussion, so the invitation itself creates no wait-for dependency. Collaborative proposal deliberation is also detached from the initiating tool invocation so it can later acquire the creator AgentTeam discussion lock and the initiating Agent invocation lock without creating a self-wait. If a committed formation includes an initial task, ATT schedules it after the creating invocation returns and sends the result to the initiator's Agent inbox. The manager-wide wait graph still protects every operation that actually introduces a synchronous Agent wait.
+The initiator may optionally prepare and publish a validated candidate authored in current activity.
+
+There is no compulsory draft discussion, detached synthesis, synchronous wait for invitees, or wait for child business completion.
+
+Failure of later activity does not undo a successfully committed team.
 
 ## 2. Communication Request Routing
 
-Communication policy comes only from `ATTConfig.communication`.
+Communication policy comes only from ATTConfig.
 
-An Agent supplies the action for its invocation-scoped AgentTeam, but that action does not grant the Agent independent institutional authority.
+Permissive endpoints and two independent endpoints deliver without an implicit channel.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Agent as Current Agent
-    participant Sender as Sender AgentTeam
-    participant Broker as NegotiationBroker
-    participant Config as ATTConfig.communication
-    participant Recipient as Recipient AgentTeam
+Approval institutions retain actual path evidence and solicit exact personal-mail cases without a team execution barrier.
 
-    Agent->>Broker: request_peer_communication(recipient_id, rationale)
-    Broker->>Sender: Validate invocation-scoped membership
-    Broker->>Config: Read policy, delivery, and direction
-    alt permissive
-        Broker-->>Agent: APPROVED (Agreement not required)
-    else parent_approval or lineage_approval
-        Broker->>Broker: Resolve ordered explicit ApprovalPrincipals
-        Broker->>Broker: Persist Request, Approvals, policy snapshot, and route fingerprint
-        Broker->>Recipient: Queue or wake each AgentTeam principal
-        Broker-->>Agent: PENDING_APPROVAL
-    end
-```
+See [Autonomous Communication Governance](Autonomous_Communication_Governance.md) for the complete routing algorithm.
 
 ## 3. Autonomous Approval & Agreement Sequence
 
-AgentTeam principals decide through a serialized discussion and full-member ballots, while an explicit Agent principal decides under its own invocation lock.
-
-The Root AI participates as `ApprovalPrincipal(kind="agent")` only when the configured topology path requires it.
-
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant Broker as NegotiationBroker
-    participant Team as AgentTeam Principal
-    participant Members as Frozen Team Members
-    participant Root as Explicit Agent Principal
-    participant Inbox as Personal Agent Inboxes
-    participant DB as Persistence Writer
-
-    Broker->>Team: Queue or wake governance request
-    Team->>Team: Acquire normal discussion_lock
-    Team->>Members: Run governance discussion
-    Team->>DB: Persist identified frozen voting round and personal emails
-    Team->>Team: Release discussion_lock
-    Inbox->>Members: Ordinary notices identify open and submit tools
-    Members->>DB: Voluntarily submit explicit strict boolean choices
-    opt Route includes Root AI Agent
-        Broker->>Inbox: Persist Root's own voting email
-        Inbox->>Root: Ordinary notice with continuing personal memory
-        Root->>DB: Voluntarily submit its own strict boolean choice
-    end
-    alt Any principal denies
-        Broker->>DB: Persist DENIED and cancel unfinished Approvals
-    else Failure, cancellation, tie, or incomplete participation
-        Broker->>DB: Restore affected Approval to PENDING
-    else Every principal approves and route is unchanged
-        Broker->>DB: Atomically persist APPROVED Request and Agreement
-    else Relevant route changed
-        Broker->>DB: Persist STALE Request and successor Request
+    participant Broker
+    participant Cases as Exact Governance Cases
+    participant People as Eligible Continuing Agents
+    participant Writer as Single Writer
+    Broker->>Cases: Capture actual principals and frozen eligibility
+    Cases->>Writer: Commit case and addressed mail
+    Writer-->>People: Present personal notice at checkpoint
+    People->>Writer: Explicit immutable case choices
+    Note over People,Writer: Mail opening and read state are not votes
+    alt Complete valid strict majority for every principal
+        Broker->>Writer: Revalidate path and commit Agreement
+    else Explicit denial
+        Broker->>Writer: Deny Request and cancel unfinished Approvals
+    else Missing, tied, failed or unavailable
+        Broker->>Writer: Preserve pending authority
     end
 ```
 
-The complete communication state machine is documented in [Autonomous Communication Governance](Autonomous_Communication_Governance.md).
+No member order, creator identity, or virtual Root selects a substitute principal.
 
-## 4. Dynamic Lineage Migration (Overview)
-
-This sequence diagram illustrates how an active AgentTeam requests a topology migration under the configured migration policy:
+## 4. Dynamic Lineage Migration
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant T as Migrating AgentTeam
-    participant Manager as ATTManager
-    participant Policy as Migration Policy
-    participant Principals as Explicit Approval Principals
-    participant Old as Old Parent AgentTeam
-    participant New as New Parent AgentTeam
-
-    T->>Manager: request_migration(target_parent_id, rationale)
-    Manager->>Manager: Validate migration limit and cycle constraints
-    Manager->>Policy: Resolve configured explicit approval principals
-    Manager->>Manager: Persist MigrationRequest and captured path
-    Manager-->>T: PENDING with request_id; initiating invocation may finish
-    Policy->>Principals: Detached normal discussions and personal voting emails
-    Principals-->>Manager: Explicit choices form complete principal outcomes
-    Manager->>Manager: Acquire topology lock
-    Manager->>Manager: Revalidate parents, path, cycle, and migration count
-    alt Revalidation fails
-        Manager->>Manager: Persist STALE; keep topology unchanged
-    else Revalidation succeeds
-        Manager->>Old: Remove child pointer
-        Manager->>New: Add child pointer
-        Manager->>T: Replace parent pointer and invalidate descendant depth caches
-        Manager->>Manager: Commit topology and inbox deltas
-        Manager->>Manager: Persist EXECUTED for later progress inspection
+    participant AT as Moving AT
+    participant Manager
+    participant Parent as Actual Target Parent
+    participant Cases as Required Authority Cases
+    participant Writer
+    AT->>Manager: request_migration(explicit parent or null, rationale)
+    Manager->>Manager: Validate availability, cycles and cooldown
+    alt Voluntary detachment allowed
+        Manager->>Writer: Commit own-position change and cooldown
+    else Attachment or migration
+        Manager->>Writer: Persist request and captured real path
+        Manager-->>AT: PENDING with durable request ID
+        Manager->>Parent: Require explicit target acceptance
+        Manager->>Cases: Solicit additional configured path approvals
+        Cases-->>Manager: Receipt-backed explicit outcomes
+        Manager->>Manager: Lock topology and revalidate exact authority
+        Manager->>Writer: Commit position, acceptance, cooldown and one topology event
     end
+    Writer-->>Manager: Exact acknowledgement
+    Manager->>Manager: Publish pointers and invalidate descendant depth caches
+    Manager-->>AT: Retained result and addressed notices
 ```
+
+Successful changes to the team's own position start the confirmed 600-second cooldown.
+
+Denial, failed publication, inherited movement, and forced parent loss do not charge it.
 
 ## 5. Democratic Membership Voting Sequence
 
-This sequence diagram illustrates the lifecycle of a membership proposal from initiation to atomic execution:
+Membership proposals retain identity-validated Agree/Disagree/Abstain ballots under the team's structural lock.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant A1 as Initiating Agent
-    participant T as AgentTeam
-    participant A2 as Other Member
-    participant A3 as Other Member
-    participant Manager as ATTManager
+Eligible execution updates membership intervals and runtime relationships with one receipt rather than waiting for a round boundary.
 
-    A1->>T: initiate_membership_vote(action, target, proposed_details)
-    Note over T: Acquire state_lock<br/>Create proposal<br/>Record initiator ballot
-    T-->>A1: Return proposal ID
-    A2->>T: cast_vote(proposal_id, ballot)
-    Note over T: Under the same state_lock<br/>Validate active identity and reject duplicates
-    A3->>T: cast_vote(proposal_id, ballot)
-    alt Participation and threshold requirements pass
-        T->>Manager: Execute add/remove action at most once
-        Manager-->>T: Register or remove member atomically
-    else Proposal remains incomplete or is rejected
-        T-->>A3: Persist current or terminal proposal state
-    end
-```
+Adding or removing a relationship never resets any existing person's identity, instructions, model, memory, or private workspace.
 
-## 6. Lineage Migration Arbitration (Deep Dive)
+## 6. Parent Loss and Independent Reattachment
 
-The default `ancestor_approval` policy uses only explicit authorities.
+Retiring an Agent parent or dissolving an AgentTeam parent detaches surviving direct children.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant T as Migrating AgentTeam
-    participant Manager as ATTManager
-    participant Policy as AncestorApprovalMigrationPolicy
-    participant Old as Current Parent Principal
-    participant New as Target Parent Principal
-    participant LCA as LCA Principal
+Their descendants remain attached to those surviving children.
 
-    T->>Manager: request_migration(target_parent_id, rationale)
-    Manager->>Manager: Capture current parent, target parent, and LCA
-    Manager->>Policy: Resolve the configured principal path
-    Note over Policy: Ordinary authorities are agent_team principals<br/>Root-level authority is the Root AI agent principal<br/>Duplicate principals are removed
-    Manager->>Manager: Persist durable MigrationRequest
-    Manager-->>T: PENDING with request_id
-    Policy->>Old: Discuss and deliver personal voting emails
-    Old-->>Manager: Outcome from complete explicit choices
-    Policy->>New: Discuss and deliver personal voting emails
-    New-->>Manager: Outcome from complete explicit choices
-    Policy->>LCA: Discuss and deliver personal voting emails
-    LCA-->>Manager: Outcome from complete explicit choices
-    alt Every required principal approves
-        Manager->>Manager: Lock and revalidate the exact authorized topology path
-        Manager->>Manager: Atomically relink pointers and invalidate moved branch depth cache
-        Manager->>Old: Queue migration alert
-        Manager->>New: Queue migration alert
-        Manager->>T: Queue migration confirmation
-        Manager->>Manager: Persist EXECUTED
-    else A principal explicitly denies
-        Manager->>Manager: Persist DENIED and cancel unfinished rounds
-    else Any decision is invalid, unavailable, tied, or incomplete
-        Manager->>Manager: Preserve PENDING without topology mutation
-    end
-```
+No virtual Root adoption or automatic membership change occurs.
+
+An independent AT may later seek a new actual parent, whose explicit acceptance remains required even under permissive migration.

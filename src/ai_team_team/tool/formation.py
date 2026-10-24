@@ -4,8 +4,8 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import Field
 
-from ..core.exceptions import ToolArgumentError, ToolBusinessError, ToolPermissionError
-from ..core.formation import TeamFormationRevisionPatch
+from ..core.exceptions import TeamCreationLimitError, ToolArgumentError, ToolBusinessError, ToolPermissionError
+from ..core.formation import TeamFormationRevisionPatch, TeamFormationDraftCandidate
 from .contract import Tool
 
 
@@ -18,6 +18,38 @@ def build_formation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]
         if current is None:
             raise ToolPermissionError("Team formation requires an active Agent invocation.")
         return current
+
+    async def propose_team_formation(proposal: TeamFormationDraftCandidate,
+            organizational_parent: Literal["none", "self", "current_team"] = "none") -> dict[str, Any]:
+        """Publish your design directly; an optional draft is never a prerequisite."""
+        current = actor()
+        att_manager._formations._require_active_agent(current)
+        if not att_manager.config.enable_dynamic_delegation:
+            raise ToolPermissionError("Model-initiated team creation is disabled.")
+        team = att_manager._active_team.get()
+        if team is not None and current not in team.members:
+            raise ToolPermissionError("The current team scope does not include this Agent.")
+        if organizational_parent == "current_team":
+            if team is None:
+                raise ToolPermissionError("No current AgentTeam was explicitly selected.")
+            if team.depth >= att_manager.config.max_delegation_depth:
+                raise ToolBusinessError("The configured delegation depth would be exceeded.")
+        parent = current if organizational_parent == "self" else team if organizational_parent == "current_team" else None
+        values = proposal.model_dump(mode="python")
+        existing = values.pop("existing_member_ids")
+        values["roles_and_presets"] = [tuple(pair) for pair in values["roles_and_presets"]] if values["roles_and_presets"] is not None else None
+        try:
+            result = att_manager.create_agent_team(creator=team or current, parent=parent,
+                initiating_agent=current, existing_member_ids=existing, **values)
+        except TeamCreationLimitError as error:
+            raise ToolBusinessError(str(error)) from error
+        except (TypeError, ValueError) as error:
+            raise ToolArgumentError(str(error)) from error
+        if hasattr(result, "request_id"):
+            return {"status": "PENDING_RESPONSES", "request": result.model_dump(mode="json"),
+                "summary": att_manager.inspect_team_formation(result.request_id, actor=current).summary.model_dump(mode="json")}
+        return {"status": "CREATED", "team_id": result.team_id,
+            "reason": "Only creation is complete; work and personal activity have not been declared complete."}
 
     async def list_agent_inbox(unread_only: bool = True) -> str:
         """Lists notifications owned by the current Agent identity."""
@@ -49,36 +81,25 @@ def build_formation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]
         except (KeyError, TypeError, ValueError) as exc:
             raise ToolBusinessError(str(exc)) from exc
 
-    async def discuss_team_formation_proposal(
-        objective: str,
-        request_id: Optional[str] = None,
-    ) -> str:
-        """Schedules creator-team deliberation for an initial or revised proposal."""
+    async def prepare_team_formation_draft(objective: str, candidate: TeamFormationDraftCandidate,
+            request_id: Optional[str] = None,
+            organizational_parent: Literal["none", "self", "current_team"] = "none"):
+        """Validate your own candidate; voluntary advice never supplies membership consent."""
         try:
-            if request_id is None:
-                if not att_manager.config.enable_dynamic_delegation:
-                    raise ToolPermissionError("Dynamic Subagent Delegation is disabled.")
-                current_team = att_manager._active_team.get()
-                if (
-                    current_team is not None
-                    and current_team.depth >= att_manager.config.max_delegation_depth
-                ):
-                    raise ToolBusinessError(
-                        f"Max delegation depth ({att_manager.config.max_delegation_depth}) "
-                        "reached; cannot design a child AgentTeam."
-                    )
-            draft = await att_manager.discuss_team_formation_proposal(
-                actor=actor(),
-                objective=objective,
-                request_id=request_id,
-            )
-            return draft.model_dump_json()
-        except (ToolPermissionError, ToolBusinessError):
-            raise
+            current = actor()
+            team = att_manager._active_team.get()
+            if organizational_parent == "current_team" and team is None:
+                raise ToolPermissionError("No current AgentTeam was explicitly selected.")
+            parent = current if organizational_parent == "self" else team if organizational_parent == "current_team" else None
+            result = await att_manager.prepare_team_formation_draft(actor=current, objective=objective,
+                candidate=candidate, request_id=request_id, parent=parent)
+            return result.model_dump(mode="json")
+        except TeamCreationLimitError as exc:
+            raise ToolBusinessError(str(exc)) from exc
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ToolBusinessError(str(exc)) from exc
+        except (TypeError, ValueError, KeyError) as exc:
+            raise ToolArgumentError(str(exc)) from exc
 
     async def inspect_team_formation_draft(draft_id: str) -> str:
         """Returns the current state and candidate for the caller's own draft."""
@@ -92,22 +113,11 @@ def build_formation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]
         except (KeyError, TypeError, ValueError) as exc:
             raise ToolBusinessError(str(exc)) from exc
 
-    async def retry_team_formation_draft(draft_id: str) -> str:
-        """Retries a pending, failed, or cancelled detached deliberation job."""
-        try:
-            draft = await att_manager.retry_team_formation_draft(
-                draft_id,
-                actor=actor(),
-            )
-            return draft.model_dump_json()
-        except PermissionError as exc:
-            raise ToolPermissionError(str(exc)) from exc
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ToolBusinessError(str(exc)) from exc
-
     async def publish_team_formation_draft(draft_id: str) -> str:
         """Explicitly publishes the caller's ready structured proposal draft."""
         try:
+            if not att_manager.config.enable_dynamic_delegation:
+                raise ToolPermissionError("Model-initiated team creation is disabled.")
             result = await att_manager.publish_team_formation_draft(
                 draft_id,
                 actor=actor(),
@@ -145,6 +155,8 @@ def build_formation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]
     ) -> str:
         """Creates an eligible AgentTeam from the currently accepted founding membership."""
         try:
+            if not att_manager.config.enable_dynamic_delegation:
+                raise ToolPermissionError("Model-initiated team creation is disabled.")
             result = await att_manager.create_team_from_formation(
                 request_id,
                 actor=actor(),
@@ -216,6 +228,9 @@ def build_formation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]
             raise ToolBusinessError(str(exc)) from exc
 
     return {
+        "propose_team_formation": Tool("propose_team_formation",
+            "Publish your design without a mandatory draft. Choose no parent, yourself as an Agent parent, or your current AT explicitly. Existing people must consent.",
+            propose_team_formation, prompt_schema_mode="full"),
         "list_agent_inbox": Tool(
             "list_agent_inbox",
             "Lists persistent notifications belonging to the current Agent identity.",
@@ -231,20 +246,13 @@ def build_formation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]
             "Shows accepted, declined, explicitly ignored, and no-response counts plus creation eligibility.",
             inspect_team_formation,
         ),
-        "discuss_team_formation_proposal": Tool(
-            "discuss_team_formation_proposal",
-            "Schedules a detached advisory discussion in the current creator AgentTeam. The returned draft must later be inspected and explicitly published; it never grants invitee consent.",
-            discuss_team_formation_proposal,
-        ),
+        "prepare_team_formation_draft": Tool("prepare_team_formation_draft",
+            "Validate a candidate supplied by your own activity; no other Agent is invoked and consent is unchanged.",
+            prepare_team_formation_draft, prompt_schema_mode="full"),
         "inspect_team_formation_draft": Tool(
             "inspect_team_formation_draft",
             "Inspects the current Agent's own detached formation draft and its validated candidate when ready.",
             inspect_team_formation_draft,
-        ),
-        "retry_team_formation_draft": Tool(
-            "retry_team_formation_draft",
-            "Explicitly retries a pending, failed, or cancelled formation-draft job.",
-            retry_team_formation_draft,
         ),
         "publish_team_formation_draft": Tool(
             "publish_team_formation_draft",

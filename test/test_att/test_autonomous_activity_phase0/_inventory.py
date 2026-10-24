@@ -19,7 +19,7 @@ SELECTORS = {
     "provenance": r"\b(?:_active_round_number|round_number|discussion_id|_active_discussion_id|_active_agent_turn_id|turn_id)\b",
     "governance_cases": r"\bGovernanceRound\w*\b|\b(?:round_id|round_ids|governance_rounds|voter_round)\b",
     "session_state": r"\b(?:discussion_lock|_discussion_lock|migration_count|is_running|suppress_auto_save)\b",
-    "configuration": r"\b(?:subagent_discussion_rounds|emergency_discussion_rounds|max_migrations_per_team_discussion|max_tool_rounds|react_max_steps|max_memory_turns|turn_failure_policy|formation_deliberation_policy|required_when_team_scoped)\b",
+    "configuration": r"\b(?:subagent_discussion_rounds|emergency_discussion_rounds|max_migrations_per_team_discussion|max_tool_rounds|react_max_steps|max_memory_turns|working_context_message_limit|turn_failure_policy|formation_deliberation_policy|required_when_team_scoped)\b",
     "personal_execution": r"\b(?:execute_agent_interaction|execute_reasoning_step|execute_reasoning_step_detailed)\b",
     "publication": r"\btranscripts?\b|\bprevious.round\b|\blast.round\b",
     "callbacks": r"\bon_(?:log_append|status_change|activity_added|emergency_escalation|team_migration|system_event)\b|\b(?:chapter_num|log_append_callback)\b",

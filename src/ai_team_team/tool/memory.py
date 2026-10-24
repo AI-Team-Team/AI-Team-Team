@@ -20,7 +20,7 @@ def build_memory_tools(att_manager: Any) -> Dict[str, Tool]:
         query: Optional[str] = None,
         tags: Optional[List[str]] = None,
         team_id: Optional[str] = None,
-        discussion_id: Optional[str] = None,
+        invocation_id: Optional[str] = None,
         limit: int = 20,
         cursor: Optional[str] = None,
     ) -> Any:
@@ -30,7 +30,7 @@ def build_memory_tools(att_manager: Any) -> Dict[str, Tool]:
                 query=query,
                 tags=tags,
                 team_id=team_id,
-                discussion_id=discussion_id,
+                invocation_id=invocation_id,
                 limit=limit,
                 cursor=cursor,
             )

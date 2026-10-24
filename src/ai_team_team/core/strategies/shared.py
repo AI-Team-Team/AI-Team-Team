@@ -1,4 +1,4 @@
-"""Shared context, privacy, and result helpers for reasoning strategies."""
+"""Privacy-safe context and result helpers for the personal runtime."""
 
 import inspect
 import json
@@ -7,14 +7,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ai_team_team.core.agent import Agent
 from ai_team_team.core.response import (
-    AgentTurnResult,
-    AgentTurnStatus,
-    LLMResponse,
-    ToolFailureSummary,
     ToolResult,
 )
 from ai_team_team.core.text_action import parse_tool_arguments
-from ai_team_team.core.utils import generate_with_retry
 
 _PRIVATE_TOOL_NAMES = {
     "list_private_files",
@@ -100,18 +95,17 @@ def _append_agent_message(
     *,
     capture_content: bool = True,
 ) -> None:
-    """Records a message with its invocation-scoped team and discussion."""
+    """Records personal history with its invocation-scoped team provenance."""
     enriched = dict(message)
     enriched["team_id"] = getattr(team, "team_id", None)
-    discussion_id = (
-        manager._active_discussion_id.get() if manager else None
-    )
-    enriched["discussion_id"] = discussion_id
     chain = manager._agent_invocation_chain.get() if manager else ()
     # The transitional call-chain token is not durable admission evidence.
     invocation_id = chain[-1][1] if chain else None
     activity = getattr(manager, "_activity", None) if manager else None
     active = activity.current.get() if activity is not None else None
+    if active is not None and active.audit_profile is not None:
+        agent.messages.append(dict(message))
+        return
     if active is not None:
         invocation_id = active.invocation_id
     if manager and ("activity_invocations", (invocation_id,)) in manager._records.index:
@@ -149,9 +143,6 @@ def _append_transient_window_message(
     actual = dict(message)
     actual["content"] = f"{marker}\n{actual.get('content', '')}"
     actual["team_id"] = getattr(team, "team_id", None)
-    actual["discussion_id"] = (
-        manager._active_discussion_id.get() if manager else None
-    )
     persisted = dict(actual)
     persisted["content"] = placeholder
     agent.sync_message_history()
@@ -227,181 +218,6 @@ def _redact_private_tool_calls(
     return sanitized
 
 
-async def _prepare_agent_context(team: Any, agent: Agent, prompt: str, manager: Any) -> str:
-    """Prepares the agent context, memory compression, transition notice, and returns the identity header."""
-    if team is not None:
-        team.set_status(agent.name, "Thinking...")
-    if manager:
-        manager._emit_callback("on_status_change", agent.name, "Thinking...")
-
-    max_depth = manager.config.max_delegation_depth if manager else 2
-    min_size = manager.config.min_subagent_team_size if manager else 3
-
-    all_models = {}
-    if manager:
-        for k, v in manager.model_configs.items():
-            all_models[k] = v.get("ai_note", "No description")
-        for k in manager.llm_clients.keys():
-            if k not in all_models:
-                all_models[k] = "No description"
-
-    model_options = "\n".join([f"  - {k}: {note}" for k, note in all_models.items()])
-    role_desc_str = f"- **Role Description**: {agent.role_description}\n" if getattr(agent, "role_description", "") else ""
-    visible_tools = (
-        manager.get_available_tools(team, agent)
-        if manager and hasattr(manager, "get_available_tools")
-        else dict(getattr(team, "tools", {}) or {})
-    )
-    autonomy_lines = ["### AUTONOMY RULES"]
-    discovery_names = [
-        f"`{name}`"
-        for name in ("list_entities", "search_entities", "inspect_entity")
-        if name in visible_tools
-    ]
-    if discovery_names:
-        autonomy_lines.extend(
-            [
-                "- Discover Agents and AgentTeams on demand with " + ", ".join(discovery_names) + ".",
-                "- Discovery is read-only; knowing an entity does not grant membership consent, communication authorization, or document access.",
-            ]
-        )
-    if "dispatch_subagent" in visible_tools:
-        autonomy_lines.append(
-            "- You can dynamically spawn child ATs using the `dispatch_subagent` tool to solve sub-problems."
-        )
-    if "delegate_escalation" in visible_tools:
-        autonomy_lines.append(
-            "- You can use `delegate_escalation` to ask your parent AgentTeam for help."
-        )
-    autonomy_lines.extend(
-        [
-            f"- A valid AT MUST have at least {min_size} members.",
-            "- You may use only the tools shown in the current AVAILABLE TOOLS section.",
-            "- When creating an AT, choose only registered models. Available models:",
-            model_options,
-        ]
-    )
-    autonomy_text = "\n".join(autonomy_lines) + "\n"
-
-    team_context = (
-        f"- **Current AgentTeam**: {team.team_id} (Preset: {team.preset_name})\n"
-        f"- **Team Purpose**: {team.team_purpose}\n"
-        f"- **AT Delegation Depth**: {team.depth} / {max_depth}\n"
-        if team is not None
-        else "- **Current Context**: Personal interaction; no AgentTeam authority.\n"
-    )
-    identity_header = (
-        f"## AGENT IDENTITY PROFILE\n"
-        f"- **Identity Role**: {agent.role}\n"
-        f"{role_desc_str}"
-        f"- **Agent Name**: {agent.name}\n"
-        f"- **Agent ID**: {agent.agent_id}\n"
-        f"{team_context}"
-        f"- **Current Objective**: Continue your work as the same individual.\n"
-        f"{autonomy_text}"
-    )
-    if manager:
-        identity_header += manager._formations.render_agent_inbox(agent.agent_id)
-    if manager and manager.config.episodic_memory.enabled:
-        identity_header += manager._memory.retained_context(agent.agent_id)
-
-    current_context = {
-        "team_id": getattr(team, "team_id", None),
-        "preset_name": getattr(team, "preset_name", None),
-        "team_purpose": getattr(team, "team_purpose", None),
-        "role": agent.role,
-        "role_description": getattr(agent, "role_description", ""),
-        "system_instructions": getattr(agent, "system_instructions", ""),
-        "tools": sorted(visible_tools)
-    }
-    if agent.last_context and agent.last_context.get("team_id") != current_context["team_id"]:
-        notice = (
-            f"*** TRANSITION NOTICE: ACTIVE TEAM UPDATE ***\n"
-            f"Your current activity has changed:\n"
-            f"{team_context}"
-            f"- Your Identity Role: {agent.role}\n"
-            f"Please continue this activity based on your prior memory."
-        )
-        _append_agent_message(
-            agent, {"role": "system", "content": notice}, team, manager
-        )
-    agent.last_context = current_context
-
-    enable_compression = manager.config.enable_memory_compression if manager else True
-    max_turns = manager.config.max_memory_turns if manager else 20
-
-    if enable_compression and len(agent.messages) > max_turns + 2:
-        first_msg = agent.messages[0]
-
-        slice_idx = len(agent.messages) - max_turns
-        while slice_idx > 1 and agent.messages[slice_idx].get("role") in ("tool", "function"):
-            slice_idx -= 1
-
-        intermediate_messages = agent.messages[1 : slice_idx]
-        history_text_parts = []
-        for msg in intermediate_messages:
-            r = msg.get("role", "unknown").upper()
-            c = msg.get("content", "")
-            history_text_parts.append(f"{r}: {c}")
-        history_text = _redact_private_log("\n".join(history_text_parts))
-
-        summary_prompt = (
-            f"Summarize the preceding execution logs and discussions into a single cohesive paragraph of historical facts. "
-            f"Focus on what was completed.\n\n"
-            f"--- EXECUTION LOGS AND DISCUSSIONS BEGIN ---\n"
-            f"{history_text}\n"
-            f"--- EXECUTION LOGS AND DISCUSSIONS END ---\n"
-        )
-
-        summarize_client = agent.llm_client
-        retries = manager.config.llm_max_retries if manager else 3
-        backoff = manager.config.llm_retry_backoff_factor if manager else 1.5
-
-        try:
-            summary_resp = await generate_with_retry(
-                llm_client=summarize_client,
-                prompt=summary_prompt,
-                system_instruction="You are a precise summarization assistant.",
-                temperature=0.3,
-                retries=retries,
-                backoff_factor=backoff,
-                manager=manager
-            )
-            summary_text = (
-                (summary_resp.text or "")
-                if isinstance(summary_resp, LLMResponse)
-                else str(summary_resp)
-            )
-            summary_text = summary_text.strip()
-        except Exception as e:
-            logger = team.logger if team is not None else manager.logger
-            logger.warning(f"Memory compression summarization failed: {e}. Using a generic fallback summary.")
-            summary_text = "Early execution history compressed due to context limits."
-
-        archive_message = {
-            "role": "system",
-            "content": f"*** HISTORICAL SUMMARY ARCHIVE ***\n{summary_text}"
-        }
-        latest_messages = agent.messages[slice_idx :]
-        # Compression is a derived, model-visible Working Context transform. It
-        # must not create a new Journal fact because its source may contain tool
-        # observations whose memory_capture policy is metadata-only. Authorized
-        # source messages already have their own immutable Journal events.
-        _append_agent_message(
-            agent,
-            archive_message,
-            team,
-            manager,
-            capture_content=False,
-        )
-        enriched_archive = agent.messages.pop()
-        agent.messages = [first_msg, enriched_archive] + latest_messages
-
-    _append_agent_message(
-        agent, {"role": "user", "content": prompt}, team, manager
-    )
-    return identity_header
-
 def parse_tool_args(args_str: str) -> Tuple[List[Any], Dict[str, Any]]:
     """Compatibility export for the strict literal argument parser."""
     return parse_tool_arguments(args_str)
@@ -419,47 +235,13 @@ def _extract_final_answer(text: str) -> Optional[str]:
     return text[matches[0].end() :].strip()
 
 
-def _turn_result(
-    team: Any,
-    agent: Agent,
-    manager: Any,
-    *,
-    answer: Optional[str] = None,
-    error_kind: Optional[str] = None,
-    reason: Optional[str] = None,
-    failures: Optional[List[ToolFailureSummary]] = None,
-) -> AgentTurnResult:
-    return AgentTurnResult(
-        agent_id=agent.agent_id,
-        team_id=getattr(team, "team_id", None),
-        turn_id=(manager._active_agent_turn_id.get() if manager else None),
-        discussion_id=(
-            manager._active_discussion_id.get() if manager else None
-        ),
-        round_number=(manager._active_round_number.get() if manager else None),
-        status=(
-            AgentTurnStatus.COMPLETED
-            if error_kind is None
-            else AgentTurnStatus.INCOMPLETE
-        ),
-        answer=answer,
-        error_kind=error_kind,
-        reason=reason,
-        tool_failures=list(failures or []),
-    )
-
-
-def _available_tools(team: Any, agent: Agent, manager: Any) -> Dict[str, Any]:
-    if manager and hasattr(manager, "get_available_tools"):
-        return dict(manager.get_available_tools(team, agent))
-    return dict(getattr(team, "tools", {}) or {})
-
-
 def _record_tool_result(
     manager: Any,
     team: Any,
     agent: Agent,
     result: ToolResult,
+    *,
+    known_tools=None,
 ) -> None:
     """Emits privacy-safe invocation metadata for structured tool failures."""
     if manager is None or not result.failed:
@@ -467,8 +249,7 @@ def _record_tool_result(
     payload = {
         "agent_id": agent.agent_id,
         "team_id": getattr(team, "team_id", None),
-        "discussion_id": manager._active_discussion_id.get(),
-        "tool_name": result.name,
+        "tool_name": result.name if known_tools is None or result.name in known_tools else "<unregistered>",
         "status": result.status.value,
         "error_kind": result.error_kind or result.status.value,
         "attempts": result.attempts,
@@ -481,7 +262,7 @@ def _record_tool_result(
         "Tool invocation failed: agent=%s team=%s tool=%s status=%s attempts=%s",
         agent.agent_id,
         getattr(team, "team_id", None),
-        result.name,
+        payload["tool_name"],
         result.status.value,
         result.attempts,
     )

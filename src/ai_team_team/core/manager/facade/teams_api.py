@@ -32,6 +32,7 @@ class TeamAPI:
         unanimous_acceptance_action: str = "require_confirmation",
         late_join_policy: str = "disabled",
         task: Optional[str] = None,
+        parent: Any = None,
     ) -> Union[AgentTeam, TeamFormationRequest]:
         return self._team_creation.create_agent_team(
             creator=creator,
@@ -51,6 +52,7 @@ class TeamAPI:
             unanimous_acceptance_action=unanimous_acceptance_action,
             late_join_policy=late_join_policy,
             task=task,
+            parent=parent,
         )
 
     def bootstrap_agent_team(self, creator: Any, **kwargs: Any) -> AgentTeam:
@@ -62,12 +64,6 @@ class TeamAPI:
 
     def _resolve_existing_team_members(self, *args: Any, **kwargs: Any) -> Any:
         return self._team_creation._resolve_existing_team_members(*args, **kwargs)
-
-    def _team_creation_snapshot(self) -> Dict[str, Any]:
-        return self._team_creation._team_creation_snapshot()
-
-    def _rollback_team_creation(self, snapshot: Dict[str, Any]) -> None:
-        return self._team_creation._rollback_team_creation(snapshot)
 
     def _create_agent_team(self, *args: Any, **kwargs: Any) -> Any:
         return self._team_creation._create_agent_team(*args, **kwargs)
@@ -86,12 +82,10 @@ class TeamAPI:
         return self._topology.render_tree()
 
     async def negotiate_and_execute_migration(
-        self, team: AgentTeam, target_parent: AgentTeam, rationale: str
+        self, team: AgentTeam, target_parent: Any, rationale: str
     ) -> MigrationOperationResult:
         return await self._migration.negotiate_and_execute_migration(team, target_parent, rationale)
 
     def inspect_migration_request(self, request_id: str) -> MigrationRequest:
-        return self._migration.requests[request_id].model_copy(deep=True)
-
-    async def _apply_deferred_membership_changes(self, team: AgentTeam) -> None:
-        return await self._membership._apply_deferred_membership_changes(team)
+        with self._topology_lock:
+            return self._migration.requests[request_id].model_copy(deep=True)

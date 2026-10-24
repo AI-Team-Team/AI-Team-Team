@@ -39,20 +39,21 @@ class TestMigrationPolicies(unittest.IsolatedAsyncioTestCase):
 
     async def test_permissive_migration(self):
         self.config.migration_policy = "permissive"
-        first = self.manager.create_agent_team(self.root, member_count=3)
-        second = self.manager.create_agent_team(self.root, member_count=3)
-        child = self.manager.create_agent_team(first, member_count=3)
+        first = self.manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        second = self.manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        child = self.manager.create_agent_team(first, parent=first, member_count=3)
 
         result = await self.manager.negotiate_and_execute_migration(
             child, second, "move"
         )
-        self.assertEqual(result.status, "EXECUTED")
+        self.assertEqual(result.status, "PENDING")
+        await self.finish(result.request_id)
         self.assertIs(child.parent_team, second)
 
     async def test_ancestor_approval_uses_agent_teams_and_root_agent(self):
-        first = self.manager.create_agent_team(self.root, member_count=3)
-        second = self.manager.create_agent_team(self.root, member_count=3)
-        child = self.manager.create_agent_team(first, member_count=3)
+        first = self.manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        second = self.manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        child = self.manager.create_agent_team(first, parent=first, member_count=3)
 
         result = await self.manager.negotiate_and_execute_migration(
             child, second, "move"
@@ -63,10 +64,10 @@ class TestMigrationPolicies(unittest.IsolatedAsyncioTestCase):
 
     async def test_lineage_path_uses_every_explicit_principal(self):
         self.config.migration_policy = "lineage_path"
-        first = self.manager.create_agent_team(self.root, member_count=3)
-        second = self.manager.create_agent_team(self.root, member_count=3)
-        target = self.manager.create_agent_team(second, member_count=3)
-        child = self.manager.create_agent_team(first, member_count=3)
+        first = self.manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        second = self.manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        target = self.manager.create_agent_team(second, parent=second, member_count=3)
+        child = self.manager.create_agent_team(first, parent=first, member_count=3)
 
         result = await self.manager.negotiate_and_execute_migration(child, target, "move across branches")
         await self.finish(result.request_id)
@@ -74,9 +75,9 @@ class TestMigrationPolicies(unittest.IsolatedAsyncioTestCase):
             [principal.key for principal in self.manager.inspect_migration_request(result.request_id).principals],
             [
                 f"agent_team:{first.team_id}",
+                f"agent:{self.root.agent_id}",
                 f"agent_team:{target.team_id}",
                 f"agent_team:{second.team_id}",
-                f"agent:{self.root.agent_id}",
             ],
         )
 

@@ -12,8 +12,11 @@ team_topology_events = table("team_topology_events",
     reference("creator_agent_id", "agents.agent_id", nullable=True), reference("creator_team_id", "teams.team_id", nullable=True),
     reference("acceptance_id", "parent_acceptances.acceptance_id", nullable=True),
     reference("case_id", "governance_cases.case_id", nullable=True),
-    choice("transition", "creation attachment migration voluntary_detachment parent_loss"), timestamp("created_at"), append=True,
-    checks=("old_parent_agent_id IS NULL OR old_parent_team_id IS NULL", "new_parent_agent_id IS NULL OR new_parent_team_id IS NULL",
+    choice("transition", "creation attachment migration voluntary_detachment parent_loss"), timestamp("created_at"),
+    integer("position_revision"),
+    document("notice_recipients", nullable=True), append=True,
+    constraints=(UniqueConstraint("team_id", "position_revision"),),
+    checks=("position_revision > 0", "old_parent_agent_id IS NULL OR old_parent_team_id IS NULL", "new_parent_agent_id IS NULL OR new_parent_team_id IS NULL",
             "(creator_agent_id IS NULL) <> (creator_team_id IS NULL)", "transition NOT IN ('voluntary_detachment', 'parent_loss') OR (new_parent_agent_id IS NULL AND new_parent_team_id IS NULL)"))
 parent_acceptances = table("parent_acceptances",
     identifier("acceptance_id", primary=True), reference("attaching_team_id", "teams.team_id"),
@@ -21,19 +24,33 @@ parent_acceptances = table("parent_acceptances",
     reference("case_id", "governance_cases.case_id", nullable=True), reference("decision_agent_id", "agents.agent_id", nullable=True),
     boolean("approved"), identifier("topology_fingerprint"), timestamp("created_at"), append=True,
     checks=("(parent_agent_id IS NULL) <> (parent_team_id IS NULL)", "(case_id IS NULL) <> (decision_agent_id IS NULL)"))
+resource_decisions = table("resource_decisions",
+    identifier("attempt_id", primary=True), reference("agent_id", "agents.agent_id"),
+    reference("decision_case_id", "governance_cases.case_id", nullable=True),
+    reference("scope_team_id", "teams.team_id", nullable=True), identifier("exhausted_alias"),
+    integer("scope_position_revision"),
+    reference("principal_agent_id", "agents.agent_id", nullable=True),
+    reference("principal_team_id", "teams.team_id", nullable=True), document("candidates"),
+    integer("required_tokens"), timestamp("created_at"), timestamp("deadline"),
+    choice("status", "pending applied denied expired cancelled interrupted superseded"),
+    identifier("selected_alias", nullable=True), timestamp("resolved_at", nullable=True),
+    checks=("(principal_agent_id IS NULL) <> (principal_team_id IS NULL)", "scope_position_revision > 0", "required_tokens > 0", "deadline > created_at",
+            "(status = 'pending') = (resolved_at IS NULL)", "(status = 'applied') = (selected_alias IS NOT NULL)"))
 health_incidents = table("health_incidents",
     identifier("incident_id", primary=True), reference("subject_agent_id", "agents.agent_id", nullable=True),
-    reference("subject_team_id", "teams.team_id", nullable=True), identifier("fingerprint"), integer("occurrence_count"),
+    reference("subject_team_id", "teams.team_id", nullable=True), identifier("subject_att_id", nullable=True), identifier("fingerprint"), integer("occurrence_count"),
     timestamp("first_at"), timestamp("latest_at"), document("evidence"), choice("status", "pending claimed acknowledged"),
-    checks=("(subject_agent_id IS NULL) <> (subject_team_id IS NULL)", "occurrence_count > 0", "latest_at >= first_at"),
-    constraints=(UniqueConstraint("subject_agent_id", "fingerprint"), UniqueConstraint("subject_team_id", "fingerprint")))
+    checks=("(subject_agent_id IS NOT NULL) + (subject_team_id IS NOT NULL) + (subject_att_id IS NOT NULL) = 1",
+            "subject_att_id IS NULL OR subject_att_id = 'ATT'", "occurrence_count > 0", "latest_at >= first_at"),
+    constraints=(UniqueConstraint("subject_agent_id", "fingerprint"), UniqueConstraint("subject_team_id", "fingerprint"), UniqueConstraint("subject_att_id", "fingerprint")))
 audit_runs = table("audit_runs",
     identifier("audit_id", primary=True), reference("subject_agent_id", "agents.agent_id", nullable=True),
-    reference("subject_team_id", "teams.team_id", nullable=True), identifier("temporary_team_id"),
+    reference("subject_team_id", "teams.team_id", nullable=True), identifier("subject_att_id", nullable=True), identifier("temporary_team_id"),
     document("template"), document("electorate"), integer("runtime_generation"),
     choice("status", "prepared running completed interrupted unknown"), timestamp("created_at"),
     timestamp("deadline"), integer("token_budget"),
-    checks=("(subject_agent_id IS NULL) <> (subject_team_id IS NULL)", "runtime_generation > 0", "token_budget >= 0", "deadline >= created_at"))
+    checks=("(subject_agent_id IS NOT NULL) + (subject_team_id IS NOT NULL) + (subject_att_id IS NOT NULL) = 1",
+            "subject_att_id IS NULL OR subject_att_id = 'ATT'", "runtime_generation > 0", "token_budget >= 0", "deadline >= created_at"))
 audit_participants = table("audit_participants",
     reference("audit_id", "audit_runs.audit_id", primary=True), identifier("scoped_agent_id", primary=True),
     document("identity_snapshot"), identifier("model_alias"), integer("position"), append=True,
@@ -43,6 +60,34 @@ audit_participants = table("audit_participants",
 def participant_constraint():
     return ForeignKeyConstraint(["audit_id", "scoped_agent_id"],
                                 ["audit_participants.audit_id", "audit_participants.scoped_agent_id"], ondelete="RESTRICT")
+
+
+audit_activity_checkpoints = table("audit_activity_checkpoints",
+    identifier("checkpoint_id", primary=True), identifier("audit_id"), identifier("scoped_agent_id"),
+    identifier("invocation_id"), integer("context_version"), document("working_context"),
+    choice("intent", "continuing idle"), boolean("interrupted"), timestamp("created_at"), append=True,
+    checks=("context_version >= 0",), constraints=(participant_constraint(),))
+audit_findings = table("audit_findings",
+    identifier("audit_id", primary=True), identifier("scoped_agent_id", primary=True),
+    choice("status", "healthy unhealthy unknown"), identifier("reason"),
+    choice("operational_status", "healthy degraded unknown"), identifier("operational_reason"),
+    document("evidence_references"), timestamp("created_at"), append=True,
+    constraints=(participant_constraint(),))
+health_observations = table("health_observations",
+    identifier("observation_id", primary=True), reference("agent_id", "agents.agent_id"),
+    choice("detector", "model_protocol tool_arguments semantic"), identifier("tool_name", nullable=True),
+    identifier("error_kind", nullable=True), boolean("valid"), timestamp("observed_at"),
+    identifier("source_id"), append=True)
+health_detector_states = table("health_detector_states",
+    reference("agent_id", "agents.agent_id", primary=True), identifier("detector", primary=True),
+    identifier("tool_key", primary=True), identifier("error_kind", nullable=True),
+    document("samples"), document("observation_ids"), identifier("last_assessed_id", nullable=True),
+    checks=("detector IN ('model_protocol', 'tool_arguments', 'semantic')",))
+health_incident_events = table("health_incident_events",
+    identifier("event_id", primary=True), reference("incident_id", "health_incidents.incident_id"),
+    choice("event_kind", "occurrence claimed acknowledged released cleared"), integer("occurrence_count"),
+    reference("actor_agent_id", "agents.agent_id", nullable=True), document("details"),
+    timestamp("created_at"), append=True, checks=("occurrence_count > 0",))
 
 
 audit_model_requests = table("audit_model_requests",

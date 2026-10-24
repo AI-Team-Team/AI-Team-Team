@@ -13,11 +13,10 @@ from typing_extensions import NotRequired, TypedDict
 
 from ai_team_team import (
     Agent,
-    AgentTurnStatus,
+    InteractionStatus,
     ATTException,
     ATTConfig,
     ATTManager,
-    DiscussionStatus,
     OperationalStatus,
     RetryableToolError,
     StatePersistenceError,
@@ -72,7 +71,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=self.tmpdir, tool_calling_mode="react"),
             persistence_mode="volatile",
         )
-        self.team = self.manager.create_agent_team(self.manager.root_ai)
+        self.team = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
         self.agent = self.team.members[0]
 
     async def asyncTearDown(self):
@@ -90,7 +89,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "publish failed"):
                 self.manager.create_agent_team(
-                    self.manager.root_ai,
+                    self.manager.root_ai, parent=self.manager.root_ai,
                     initial_docs={"brief.md": "content"},
                 )
         self.assertEqual(self.manager.agents, before_agents)
@@ -134,7 +133,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             "_build_document_library",
             side_effect=fail_during_staging,
         ), self.assertRaisesRegex(RuntimeError, "staging failed"):
-            self.manager.create_agent_team(self.manager.root_ai)
+            self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
         assert_unchanged(before)
 
         before = snapshot()
@@ -143,7 +142,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             "_validate_team_creation_commit",
             side_effect=RuntimeError("commit validation failed"),
         ), self.assertRaisesRegex(RuntimeError, "commit validation failed"):
-            self.manager.create_agent_team(self.manager.root_ai)
+            self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
         assert_unchanged(before)
 
         original_register = self.manager.register_agent
@@ -162,12 +161,12 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             "register_agent",
             side_effect=fail_mid_commit,
         ), self.assertRaisesRegex(RuntimeError, "registration failed"):
-            self.manager.create_agent_team(self.manager.root_ai)
+            self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
         assert_unchanged(before)
     def test_existing_agent_identity_is_unchanged_after_late_commit_failure(self):
         external = Agent("External", "Original", self.client)
         self.manager.register_agent(external)
-        parent = self.manager.create_agent_team(self.manager.root_ai)
+        parent = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
         original_fields = {
             "name": external.name,
             "role": external.role,
@@ -191,7 +190,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             side_effect=RuntimeError("parent update failed"),
         ), self.assertRaisesRegex(RuntimeError, "parent update failed"):
             self.manager.bootstrap_agent_team(
-                parent,
+                parent, parent=parent,
                 member_configs={
                     "Tester": {"model": "default"},
                     "Arbitrator": {"model": "default"},
@@ -220,7 +219,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
         before = set(os.listdir(os.path.join(self.tmpdir, ".att_doc_libs")))
         with self.assertRaisesRegex(ValueError, "at least"):
             self.manager.create_agent_team(
-                self.manager.root_ai,
+                self.manager.root_ai, parent=self.manager.root_ai,
                 member_count=3,
                 roles_and_presets=[("Only", "Specialist")],
             )
@@ -228,8 +227,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             set(os.listdir(os.path.join(self.tmpdir, ".att_doc_libs"))), before
         )
     async def test_created_team_survives_a_later_discussion_failure(self):
-        team = self.manager.create_agent_team(self.manager.root_ai)
-        self.manager.config.turn_failure_policy.llm = "abort"
+        team = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
 
         class DeadClient:
             def supports_native_tool_calling(self):
@@ -239,9 +237,8 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("permanent")
 
         team.members[0].llm_client = DeadClient()
+        self.manager.register_llm_client("dead-client", team.members[0].llm_client)
         with self.assertRaises(Exception):
-            await self.manager.execute_team_discussion(
-                team, "work", rounds=1, skip_audit=True
-            )
+            await self.manager.execute_agent_interaction(team.members[0], "Work.", team=team)
         self.assertIs(self.manager.teams[team.team_id], team)
         self.assertTrue(os.path.isdir(team.doc_library.root_dir))

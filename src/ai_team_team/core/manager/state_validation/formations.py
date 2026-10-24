@@ -118,10 +118,8 @@ def validate_formations(
             raise StateRestoreError(
                 f"Formation {request.request_id!r} has a missing AgentTeam creator."
             )
-        elif request.parent_team_id != request.creator_id:
-            raise StateRestoreError(
-                f"Formation {request.request_id!r} has inconsistent AgentTeam creator provenance."
-            )
+        if request.parent_agent_id is not None and (request.parent_agent_id not in agent_ids or request.parent_team_id is not None):
+            raise StateRestoreError("A formation has an invalid explicit Agent parent.")
         if request.parent_team_id is not None and request.parent_team_id not in team_ids:
             raise StateRestoreError(
                 f"Formation {request.request_id!r} has a missing intended parent."
@@ -453,6 +451,7 @@ def _validate_revision_snapshot(
         or historical.creator_kind != current.creator_kind
         or historical.creator_id != current.creator_id
         or historical.parent_team_id != current.parent_team_id
+        or historical.parent_agent_id != current.parent_agent_id
     ):
         raise StateRestoreError(
             "A formation revision changed immutable creator or initiator provenance."
@@ -521,18 +520,9 @@ def _validate_drafts(
                 raise StateRestoreError("A revision draft references a missing request revision.")
             if request.initiator_agent_id != draft.initiator_agent_id:
                 raise StateRestoreError("A revision draft has a different initiating Agent.")
-            if request.parent_team_id is None:
-                if draft.creator_kind != "agent":
-                    raise StateRestoreError(
-                        "A standalone revision draft has invalid creator provenance."
-                    )
-            elif (
-                draft.creator_kind != "agent_team"
-                or draft.creator_id != request.parent_team_id
-            ):
-                raise StateRestoreError(
-                    "A revision draft does not use the immutable creator AgentTeam."
-                )
+            if (draft.creator_kind, draft.creator_id, draft.parent_team_id, draft.parent_agent_id) != (
+                    request.creator_kind, request.creator_id, request.parent_team_id, request.parent_agent_id):
+                raise StateRestoreError("A revision candidate changed immutable creator or explicit parent provenance.")
             revision = revision_map.get((draft.request_id, draft.base_revision))
             if (
                 revision is None
@@ -544,27 +534,12 @@ def _validate_drafts(
             FormationDraftStatus.PUBLISHED,
         } and draft.candidate is None:
             raise StateRestoreError("A publishable formation draft has no candidate.")
-        if draft.status in {
-            FormationDraftStatus.PENDING,
-            FormationDraftStatus.RUNNING,
-            FormationDraftStatus.FAILED,
-            FormationDraftStatus.CANCELLED,
-        } and draft.candidate is not None:
-            raise StateRestoreError(
-                "An unfinished formation draft unexpectedly contains a candidate."
-            )
-        if draft.creator_team_id is not None and (
-            draft.status in {
-                FormationDraftStatus.READY,
-                FormationDraftStatus.PUBLISHED,
-            }
-            or (
-                draft.status is FormationDraftStatus.STALE
-                and draft.candidate is not None
-            )
-        ):
-            if not draft.source_discussion_id or not draft.participant_agent_ids:
-                raise StateRestoreError("A team-deliberated draft lacks discussion provenance.")
+        if draft.participant_agent_ids != [draft.initiator_agent_id]:
+            raise StateRestoreError("An optional candidate is authored by its initiator, not a compulsory team electorate.")
+        if draft.parent_team_id is not None and draft.parent_team_id not in team_ids:
+            raise StateRestoreError("A candidate's explicit parent is missing.")
+        if draft.parent_agent_id is not None and (draft.parent_agent_id not in agent_ids or draft.parent_team_id is not None):
+            raise StateRestoreError("A candidate's explicit Agent parent is missing or conflicting.")
         if draft.candidate is not None:
             candidate = draft.candidate
             if len(candidate.existing_member_ids) != len(
@@ -623,7 +598,8 @@ def _validate_drafts(
             if (
                 source.proposal_snapshot["creator_kind"] != draft.creator_kind
                 or source.proposal_snapshot["creator_id"] != draft.creator_id
-                or source.proposal_snapshot["parent_team_id"] != draft.creator_team_id
+                or source.proposal_snapshot["parent_team_id"] != draft.parent_team_id
+                or source.proposal_snapshot["parent_agent_id"] != draft.parent_agent_id
             ):
                 raise StateRestoreError(
                     "A published draft has inconsistent creator provenance."
@@ -631,7 +607,7 @@ def _validate_drafts(
             if _candidate_material_content(draft.candidate) != {
                 key: value
                 for key, value in source.proposal_snapshot.items()
-                if key not in {"creator_kind", "creator_id", "parent_team_id"}
+                if key not in {"creator_kind", "creator_id", "parent_team_id", "parent_agent_id"}
             }:
                 raise StateRestoreError(
                     "A published draft candidate does not match its immutable revision."
@@ -656,7 +632,7 @@ def _validate_drafts(
             if base is None or _candidate_material_content(draft.candidate) != {
                 key: value
                 for key, value in base.proposal_snapshot.items()
-                if key not in {"creator_kind", "creator_id", "parent_team_id"}
+                if key not in {"creator_kind", "creator_id", "parent_team_id", "parent_agent_id"}
             }:
                 raise StateRestoreError(
                     "A published revision draft without a successor is not a valid no-op."

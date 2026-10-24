@@ -55,15 +55,14 @@ class TestATTHardening(ATTHardeningTestCase):
             ATTConfig(unknown_setting=True)
         with self.assertRaises(ValueError):
             config.communication.direction = "both"
-        config.communication = {
-            "policy": "lineage_approval",
-            "request_delivery": "wake",
-        }
+        with self.assertRaises(ValueError):
+            config.communication = {"policy": "lineage_approval", "request_delivery": "wake"}
+        config.communication = {"policy": "lineage_approval", "request_delivery": "queue"}
         self.assertEqual(config.communication.policy, "lineage_approval")
         self.assertEqual(config.to_dict(), config.model_dump(mode="json"))
 
     def test_builtin_tools_have_manager_context_immediately(self):
-        team = self.manager.create_agent_team(self.root)
+        team = self.manager.create_agent_team(self.root, parent=self.root)
         self.assertIs(
             self.manager.tools_context["att_manager"], self.manager
         )

@@ -1,56 +1,50 @@
-# Supervision and Emergency Flow
+# Supervision and Incident Flow
+
+Health detection requests inspection rather than deciding that a person is unhealthy.
 
 ```mermaid
 flowchart TD
-    Discussion["Team discussion completes with structured turn results"] --> Framework["Framework derives operational status from completed and incomplete turns"]
-    Framework --> Skip{"skip_audit?"}
-    Skip -- "Yes" --> Return["Return DiscussionResult and transcript"]
-    Skip -- "No" --> Create["Manager creates registered supervisory AgentTeam with fresh auditors"]
-    Create --> Committee["Run two-round supervisory team discussion with skip_audit=True"]
-    Committee --> DecisionMode{"operational status decision mode"}
-    DecisionMode -- "framework" --> Content["Supervisor decides content status; framework operational status is retained"]
-    DecisionMode -- "supervisor" --> Both["Supervisor strictly decides content and operational status"]
-    DecisionMode -- "framework_then_supervisor" --> Review["Supervisor reviews both axes; supervision failure retains framework operational status"]
-    Content --> Audit["AuditResult"]
-    Both --> Audit
-    Review --> Audit
-    Audit --> Evidence["Persist audit evidence and dissolve temporary team"]
-    Evidence --> Result{"content status"}
-    Evidence --> Operational{"operational status"}
-    Result -- "HEALTHY" --> Return
-    Result -- "UNHEALTHY" --> Emergency["Send child_failure_escalation"]
-    Result -- "UNKNOWN" --> Event["Emit audit_unknown system event"]
-    Event --> Unknown["Send audit_unknown_escalation"]
-    Unknown --> Fingerprint["Persist stable fingerprint, count and timestamps"]
-    Fingerprint --> Mode{"unknown mode"}
-    Mode -- "queue" --> Inbox["Keep pending in parent inbox"]
-    Mode -- "wake" --> Dedupe{"Identical wake already active?"}
-    Dedupe -- "Yes" --> Inbox
-    Dedupe -- "No" --> Wake["Emergency discussion with skip_audit=True"]
-    Emergency --> WakeNormal["Emergency discussion"]
-    Operational -- "HEALTHY" --> Return
-    Operational -- "UNKNOWN" --> Event
-    Operational -- "DEGRADED" --> OpMode{"degraded escalation mode"}
-    OpMode -- "none" --> OpEvent
-    OpMode -- "queue" --> OpAlert["Persist deduplicated operational alert in parent inbox"]
-    OpMode -- "wake" --> OpDedupe{"Identical operational wake already active?"}
-    OpDedupe -- "Yes" --> OpAlert
-    OpDedupe -- "No" --> OpWake["Emergency discussion with skip_audit=True"]
-    OpEvent --> Return
-    Inbox --> Processing["Parent discussion marks processing"]
-    Processing --> Success{"Discussion succeeds?"}
-    Success -- "Yes" --> Ack["Acknowledge and remove"]
-    Success -- "No/cancel" --> Inbox
-    OpAlert --> OpProcessing["Parent discussion marks processing"]
-    OpProcessing --> OpSuccess{"Discussion succeeds?"}
-    OpSuccess -- "Yes" --> OpAck["Acknowledge and remove"]
-    OpSuccess -- "No/cancel" --> OpAlert
+    Evidence["Typed observation or explicit Host evidence"] --> Kind{"Evidence kind"}
+    Kind -- "Confirmed permission/integrity fault" --> Protect["Apply deterministic protection immediately"]
+    Protect --> Incident["Persist or merge stable incident"]
+    Kind -- "Protocol failure" --> Protocol["Three consecutive failures in 600 seconds"]
+    Kind -- "Same-tool argument category" --> Tool["Five consecutive failures in 600 seconds"]
+    Kind -- "Semantic suspicion" --> Semantic{"Host enabled detector and authorized evidence?"}
+    Kind -- "Silence, waiting, denial, provider outage" --> NoBlame["No automatic Agent-health accusation"]
+    Semantic -- "No" --> NoBlame
+    Semantic -- "Yes" --> Threshold["Retain authorized detector evidence"]
+    Protocol --> Threshold
+    Tool --> Threshold
+    Threshold --> Incident
+    Threshold --> Admission["Admit fresh real privileged audit AT"]
+    Admission --> Deadline["Total 600-second default deadline includes queueing"]
+    Deadline --> Runtime["Same personal scheduler, provider service, ToolExecutor and quota ledger"]
+    Runtime --> Findings["Each predefined auditor explicitly submits own structured finding"]
+    Findings --> Complete{"All findings valid and timely?"}
+    Complete -- "No, failure, cancellation or deadline" --> Unknown["UNKNOWN"]
+    Complete -- "Yes" --> Majority["Strict majority, with independent operational axis"]
+    Majority --> Result["HEALTHY, UNHEALTHY or UNKNOWN"]
+    Unknown --> Retain
+    Result --> Retain["Commit scoped evidence and dissolve temporary identities"]
+    Retain -- "Attention required" --> Incident
+    Incident --> Delivery{"Configured attention"}
+    Delivery -- "none" --> Event["Metadata-only system event"]
+    Delivery -- "queue" --> Mail["Addressed attention, no forced activation"]
+    Delivery -- "wake" --> Personal["Request ordinary personal activity, no scope or intent override"]
+    Mail --> Claim["Explicit current-authority claim"]
+    Personal --> Claim
+    Claim --> Handled{"Explicit current-generation acknowledgement?"}
+    Handled -- "Yes" --> Ack["Acknowledge attention, retain evidence"]
+    Handled -- "Failure, cancellation or restart" --> Pending["Release claim to pending"]
+    Pending --> Claim
 ```
 
-Content health and operational health are independent, so an unhealthy discussion may also be operationally degraded.
+A valid provider response resets the protocol streak, while a successful call resets the same tool's argument streak.
 
-Root-level escalations use callbacks and structured system events.
+The 600-second observation window never becomes an incident TTL.
 
-Unknown audit and degraded operational wakeups are durably deduplicated and skip one supervisory cycle to prevent recursive audit storms.
+Audit findings grant no implicit repair, membership, file, permission, or model authority.
 
-Alerts have no TTL or hard drop limit; a soft threshold only emits operational events.
+Temporary audit activity does not recursively trigger new assessments.
+
+Parent failover has a separate default 120-second resource deadline.

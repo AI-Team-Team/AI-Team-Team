@@ -13,15 +13,40 @@ async def settle_governance_activity(manager, timeout=DEFAULT_RUNTIME_TIMEOUT):
     async with runtime_watchdog(manager, timeout=timeout, label="Governance activity settlement"):
         while True:
             activity = manager._activity
-            tasks = tuple(manager._emergency_tasks | activity.workers | activity.dispatch_tasks)
+            tasks = tuple(manager._institutional_tasks | activity.workers | activity.dispatch_tasks)
             if tasks:
-                await asyncio.gather(*(asyncio.shield(task) for task in tasks))
+                results = await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
+                for task, result in zip(tasks, results):
+                    if isinstance(result, asyncio.CancelledError) and task.get_name().startswith(("att-resource-deadline:", "att-resource-prepare:", "att-resource-apply:")):
+                        continue
+                    if isinstance(result, BaseException):
+                        raise result
             elif activity.ready.empty():
                 for session in activity.sessions.values():
                     if session.failure is not None:
                         raise session.failure
                 return
             await asyncio.sleep(0)
+
+
+async def submit_case_ballots(manager, case, *, approved=True, model_alias=None):
+    """Submit explicit fixtures as each frozen voter, never infer a team choice."""
+    for owner in case.voter_agent_ids:
+        actor = manager._agents_by_id[owner]
+        token = manager._active_tool_agent.set(actor)
+        try:
+            choice = {"approved": approved} if case.choice_kind == "boolean" else {"model_alias": model_alias or case.candidates[0]}
+            await manager.submit_governance_choice(case.case_id, choice, actor=actor)
+        finally:
+            manager._active_tool_agent.reset(token)
+
+
+async def approve_pending_business(manager, business_id):
+    await settle_governance_activity(manager)
+    for case in tuple(manager._governance.cases.values()):
+        if case.business_id == business_id and case.status == "PENDING":
+            await submit_case_ballots(manager, case)
+    await settle_governance_activity(manager)
 
 
 def governance_action(prompt, *, approved=True, model_alias=None, native=False):
@@ -53,7 +78,7 @@ def governance_action(prompt, *, approved=True, model_alias=None, native=False):
             )
             name, arguments = (
                 "submit_governance_choice",
-                {"round_id": item["round_id"], "choice": choice},
+                {"case_id": item["case_id"], "choice": choice},
             )
     if name is None:
         return None

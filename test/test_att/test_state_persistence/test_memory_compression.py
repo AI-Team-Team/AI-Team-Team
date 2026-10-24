@@ -1,102 +1,60 @@
-from test.test_att.test_state_persistence._support import (
-    ATTConfig,
-    ATTManager,
-    Agent,
-    AgentTeam,
-    AgreementDirection,
-    ApprovalPrincipal,
-    AsyncMock,
-    CommunicationAgreement,
-    CommunicationApproval,
-    CommunicationApprovalStatus,
-    CommunicationRequest,
-    CommunicationRequestStatus,
-    DocumentLibrary,
-    MagicMock,
-    StatePersistenceTestCase,
-    json,
-    os,
-    route_fingerprint,
-    sqlite3,
-    time,
-)
+"""Derived Working Context compaction preserves factual personal history."""
+
+from test.test_att.test_agent_activity._support import ActivityTestCase, idle
 
 
-class TestStatePersistence(StatePersistenceTestCase):
-    async def test_memory_compression_audit(self):
-        """Verify that dialogue is compressed and early turns summarized when exceeding max_turns + 2."""
-        self.manager.config.enable_memory_compression = True
-        self.manager.config.max_memory_turns = 4
-
-        # Mock agent's own client to return the summary text when requested
-        async def mock_agent_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):
-            if "Summarize the preceding execution logs" in str(prompt):
-                return "This is a summary of early task executions."
-            return 'Thought: We are doing the task.\nFinal Answer: Task complete!'
-        self.mock_react_client.generate = mock_agent_generate
-
-        agent = Agent(name="Compressed_Agent", role="Summarizer", llm_client=self.mock_react_client)
-        self.manager.register_agent(agent)
-        
-        team = self.manager.create_agent_team(
-            creator=self.root_ai,
-            preset_name="generic",
-            team_purpose="Testing compression"
-        )
-        team.members.append(agent)
-
-        agent.messages = [
-            {"role": "system", "content": "Initial System Instructions"},
-            {"role": "user", "content": "Turn 1 request"},
-            {"role": "assistant", "content": "Turn 1 answer"},
-            {"role": "user", "content": "Turn 2 request"},
-            {"role": "assistant", "content": "Turn 2 answer"},
-            {"role": "user", "content": "Turn 3 request"},
-            {"role": "assistant", "content": "Turn 3 answer"},
+class TestWorkingContextCompaction(ActivityTestCase):
+    async def test_compaction_uses_references_without_an_extra_summary_model_call(self):
+        self.manager.config.working_context_message_limit = 4
+        original = [
+            {"role": "system", "content": "Initial personal instructions"},
+            {"role": "user", "content": "Earlier request one"},
+            {"role": "assistant", "content": "Earlier answer one"},
+            {"role": "user", "content": "Earlier request two"},
+            {"role": "assistant", "content": "Earlier answer two"},
+            {"role": "user", "content": "Current request"},
+            {"role": "assistant", "content": "Current context"},
         ]
+        for message in original:
+            self.root.append_message(message)
+        self.steps(idle())
+        admission = await self.manager.activate_agent(self.root.agent_id)
+        await self.wait(admission)
+        self.assertEqual(len(self.client.requests), 1)
+        self.assertTrue(any("Working Context was compacted" in message.get("content", "")
+            for message in self.root.messages))
+        self.assertTrue(all(message in self.root.message_history for message in original))
+        self.assertEqual(self.root.messages[0]["content"], "Initial personal instructions")
 
-        await team.execute_react_step(agent, "Turn 4 request", "Sys instructions")
-
-        system_archives = [m for m in agent.messages if "*** HISTORICAL SUMMARY ARCHIVE ***" in m.get("content", "")]
-        self.assertEqual(len(system_archives), 1)
-        self.assertIn("This is a summary of early task executions.", system_archives[0]["content"])
-        self.assertEqual(agent.messages[0]["content"], "Initial System Instructions")
-
-    async def test_memory_compression_prevents_tool_splitting(self):
-        """Verify that memory compression slice does not split tool calls and responses."""
-        self.manager.config.enable_memory_compression = True
-        self.manager.config.max_memory_turns = 4
-
-        async def mock_agent_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):
-            if "Summarize the preceding execution logs" in str(prompt):
-                return "This is a summary of early task executions."
-            return 'Thought: We are doing the task.\nFinal Answer: Task complete!'
-        self.mock_react_client.generate = mock_agent_generate
-
-        agent = Agent(name="Compressed_Agent", role="Summarizer", llm_client=self.mock_react_client)
-        self.manager.register_agent(agent)
-        team = self.manager.create_agent_team(
-            creator=self.root_ai,
-            preset_name="generic",
-            team_purpose="Testing compression"
-        )
-        team.members.append(agent)
-
-        agent.messages = [
-            {"role": "system", "content": "Initial System Instructions"},
-            {"role": "user", "content": "Turn 1 request"},
-            {"role": "assistant", "content": "Turn 1 answer"},
-            {"role": "user", "content": "Turn 2 request"},
-            {"role": "assistant", "content": "Turn 2 answer", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]},
-            {"role": "tool", "tool_call_id": "call_1", "name": "read_file", "content": "File content"},
-            {"role": "assistant", "content": "Turn 3 answer"},
-            {"role": "user", "content": "Turn 4 request"},
-        ]
-
-        await team.execute_react_step(agent, "Turn 5 request", "Sys instructions")
-
-        self.assertEqual(agent.messages[2]["role"], "assistant")
-        self.assertIn("tool_calls", agent.messages[2])
-        self.assertEqual(agent.messages[3]["role"], "tool")
-        self.assertEqual(agent.messages[3]["tool_call_id"], "call_1")
+    async def test_compaction_does_not_split_a_native_tool_exchange(self):
+        self.manager.config.working_context_message_limit = 4
+        for message in [
+            {"role": "system", "content": "Personal instructions"},
+            {"role": "user", "content": "Earlier question"},
+            {"role": "assistant", "content": "Earlier answer"},
+            {"role": "user", "content": "Read a source"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "earlier-call", "type": "function",
+                 "function": {"name": "read_file", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "earlier-call", "content": "Earlier result"},
+            {"role": "assistant", "content": "After reading"},
+            {"role": "user", "content": "Continue"},
+        ]:
+            self.root.append_message(message)
+        self.steps(idle())
+        admission = await self.manager.activate_agent(self.root.agent_id)
+        await self.wait(admission)
+        pending = set()
+        for message in self.client.requests[0].prompt:
+            if message.get("tool_calls"):
+                self.assertFalse(pending)
+                pending = {call["id"] for call in message["tool_calls"]}
+            elif message["role"] == "tool":
+                self.assertIn(message["tool_call_id"], pending)
+                pending.remove(message["tool_call_id"])
+            else:
+                self.assertFalse(pending)
+        self.assertFalse(pending)
+        self.assertTrue(any(message.get("tool_call_id") == "earlier-call"
+            for message in self.root.message_history))
 

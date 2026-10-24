@@ -20,9 +20,11 @@ from .delivery import BrokerDeliveryMixin
 from .lifecycle import BrokerLifecycleMixin
 from .requests import BrokerRequestMixin
 from .routing import BrokerRoutingMixin
+from .state import BrokerStateMixin
 
 
 class NegotiationBroker(
+    BrokerStateMixin,
     BrokerLifecycleMixin,
     BrokerDeliveryMixin,
     BrokerApprovalMixin,
@@ -34,6 +36,7 @@ class NegotiationBroker(
     def __init__(self, manager: Any):
         self.manager = manager
         self.logger = logging.getLogger("ATT.Communication")
+        self.initialize_state()
         self.communication_requests: Dict[str, CommunicationRequest] = {}
         self.communication_approvals: Dict[
             str, CommunicationApproval

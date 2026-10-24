@@ -188,7 +188,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
 
     async def test_unanimous_auto_creation_and_confirmation_abandonment(self):
         auto_request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             existing_members=self.invitees[:3],
             unanimous_acceptance_action="auto_create",
         )
@@ -213,7 +213,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         )
 
         confirmation = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             existing_members=self.invitees[:3],
             unanimous_acceptance_action="require_confirmation",
         )
@@ -305,7 +305,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
     async def test_membership_boolean_controls_are_strict(self):
         with self.assertRaisesRegex(TypeError, "initiator_joins must be a boolean"):
             self.manager.create_agent_team(
-                self.root,
+                self.root, parent=self.root,
                 existing_members=self.invitees[:3],
                 initiator_joins="false",
             )
@@ -592,15 +592,15 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         self.assertIn("None", tool.description)
         self.assertIn("externally indistinguishable", tool.description)
 
-    async def test_shared_agent_launch_uses_the_invocation_team_without_ambiguity(self):
+    async def test_shared_agent_launch_does_not_infer_an_organizational_parent(self):
         shared = self.invitees[0]
         first_parent = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"FirstPeer": {}, "FirstReviewer": {}},
             existing_members=[shared],
         )
         second_parent = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"SecondPeer": {}, "SecondReviewer": {}},
             existing_members=[shared],
         )
@@ -616,8 +616,10 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
             self.manager._active_team.reset(team_token)
             self.manager._active_tool_agent.reset(agent_token)
         self.assertIsInstance(request, TeamFormationRequest)
-        self.assertEqual(request.parent_team_id, second_parent.team_id)
-        self.assertNotEqual(request.parent_team_id, first_parent.team_id)
+        self.assertIsNone(request.parent_team_id)
+        self.assertIsNone(request.parent_agent_id)
+        self.assertNotEqual(first_parent.team_id, second_parent.team_id)
+        self.assertEqual(request.creator_id, shared.agent_id)
 
     async def test_inspection_requires_the_registered_active_agent_instance(self):
         request = self._proposal(existing_members=self.invitees[:1])
@@ -636,7 +638,7 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
 
     async def test_concurrent_finalization_creates_at_most_one_team(self):
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             existing_members=self.invitees[:3],
         )
         for invitee in self.invitees[:3]:
@@ -717,10 +719,10 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.updated_at, original_updated_at)
 
     async def test_commit_revalidates_initiator_membership_after_staging(self):
-        parent = self.manager.create_agent_team(self.root)
+        parent = self.manager.create_agent_team(self.root, parent=self.root)
         initiator = parent.members[0]
         request = self.manager.create_agent_team(
-            parent,
+            parent, parent=parent,
             member_configs={"NewAnalyst": {}, "NewReviewer": {}},
             existing_members=[self.invitees[0]],
             initiating_agent=initiator,
@@ -738,6 +740,8 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         def remove_initiator_after_staging(*args, **kwargs):
             stage = original_staging(*args, **kwargs)
             parent.members.remove(initiator)
+            # Model an accepted competing departure, including its history.
+            self.manager._records.capture_memberships({parent.team_id})
             return stage
 
         self.manager._team_creation._create_agent_team = remove_initiator_after_staging
@@ -751,5 +755,6 @@ class TestConsensualTeamFormation(unittest.IsolatedAsyncioTestCase):
         finally:
             self.manager._team_creation._create_agent_team = original_staging
             parent.members.append(initiator)
+            self.manager._records.capture_memberships({parent.team_id})
         self.assertEqual(set(self.manager.teams), teams_before)
         self.assertEqual(set(self.manager.libraries), libraries_before)

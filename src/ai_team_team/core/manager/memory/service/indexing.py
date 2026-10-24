@@ -206,20 +206,18 @@ class MemoryIndexingMixin:
                 )
             now = time.time()
             with self._lock:
-                memory_id = self._card_id_by_turn.get(segment.turn_id)
+                memory_id = self._card_id_by_invocation.get(segment.invocation_id)
                 prior = self.cards.get(memory_id or "")
                 if memory_id is None:
                     memory_id = f"MEM-{uuid.uuid4().hex}"
                 card = AgentMemoryCard(
                     memory_id=memory_id,
                     agent_id=segment.agent_id,
-                    turn_id=segment.turn_id,
                     invocation_id=segment.invocation_id,
                     title=title,
                     summary=summary,
                     tags=tags,
                     origin_team_id=segment.origin_team_id,
-                    discussion_id=segment.discussion_id,
                     segment_id=segment.segment_id,
                     status=(prior.status if prior else MemoryCardStatus.ACTIVE),
                     version=(prior.version + 1 if prior else 1),
@@ -227,7 +225,7 @@ class MemoryIndexingMixin:
                     updated_at=now,
                 )
                 self.cards[memory_id] = card
-                self._card_id_by_turn[segment.turn_id] = memory_id
+                self._card_id_by_invocation[segment.invocation_id] = memory_id
                 segment.status = MemoryIndexStatus.INDEXED
                 segment.last_error_kind = None
                 segment.updated_at = now
@@ -238,8 +236,7 @@ class MemoryIndexingMixin:
                 "memory_indexed",
                 agent=agent,
                 team=self.manager.teams.get(segment.origin_team_id or ""),
-                discussion_id=segment.discussion_id,
-                turn_id=segment.turn_id,
+                invocation_id=segment.invocation_id,
                 payload={"segment_id": segment_id, "memory_id": memory_id},
             )
         except asyncio.CancelledError:
@@ -268,8 +265,7 @@ class MemoryIndexingMixin:
                 "memory_index_failed",
                 agent=agent,
                 team=self.manager.teams.get(segment.origin_team_id or ""),
-                discussion_id=segment.discussion_id,
-                turn_id=segment.turn_id,
+                invocation_id=segment.invocation_id,
                 payload={
                     "segment_id": segment_id,
                     "error_kind": type(exc).__name__,
@@ -344,10 +340,6 @@ class MemoryIndexingMixin:
         if manager._starting_invocations or manager._active_invocations:
             raise StateRestoreError(
                 "Cannot restore state while Agent invocations are active or starting."
-            )
-        if any(team.is_running for team in manager.teams.values()):
-            raise StateRestoreError(
-                "Cannot restore state while an AgentTeam discussion is active."
             )
         if any(agent._lock is not None and agent._lock.locked() for agent in manager._agents_by_id.values()):
             raise StateRestoreError(

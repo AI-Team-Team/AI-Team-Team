@@ -63,6 +63,7 @@ class CommunicationApproval(BaseModel):
     request_id: str = Field(min_length=1)
     principal: ApprovalPrincipal
     sequence: int
+    case_id: Optional[str] = None
     status: CommunicationApprovalStatus = CommunicationApprovalStatus.PENDING
     reason: str = ""
     created_at: float = Field(default_factory=time.time)
@@ -87,6 +88,7 @@ class CommunicationRequest(BaseModel):
     policy_snapshot: Dict[str, Any]
     approval_principals: List[ApprovalPrincipal]
     route_fingerprint: str
+    route_evidence: Dict[str, Any]
     status: CommunicationRequestStatus = CommunicationRequestStatus.PENDING
     decision_reason: str = ""
     created_at: float = Field(default_factory=time.time)
@@ -185,9 +187,9 @@ class CommunicationOperationResult(BaseModel):
     team_id: Optional[str] = None
 
 
-def route_fingerprint(principals: List[ApprovalPrincipal]) -> str:
+def route_fingerprint(principals: List[ApprovalPrincipal], evidence: Optional[Dict[str, Any]] = None) -> str:
     canonical = json.dumps(
-        [principal.model_dump(mode="json") for principal in principals],
+        {"principals": [principal.model_dump(mode="json") for principal in principals], "evidence": evidence or {}},
         sort_keys=True,
         separators=(",", ":"),
     )

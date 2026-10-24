@@ -6,11 +6,11 @@ from sqlalchemy import select, text, update
 
 from ai_team_team import StateRestoreError
 from ai_team_team.core.communication import ApprovalPrincipal
-from ai_team_team.core.governance import GovernanceBallot, GovernanceRound
+from ai_team_team.core.governance import GovernanceBallot, GovernanceCase
 from ai_team_team.database.models import (
     GovernanceBallotModel,
     GovernanceElectorateModel,
-    GovernanceRoundModel,
+    GovernanceCaseModel,
     MigrationRequestModel,
 )
 from ai_team_team.database.persistence.receipts import CommitReceipt
@@ -23,17 +23,17 @@ from ._support import OWNER, StoreCase
 class GovernanceDependencyTests(StoreCase):
     def setUp(self):
         super().setUp()
-        vote = GovernanceRound(
-            round_id="case", business_kind="migration", business_id="request",
+        vote = GovernanceCase(
+            case_id="case", business_kind="migration", business_id="request",
             principal=ApprovalPrincipal(kind="agent", principal_id=OWNER),
-            round_number=1, choice_kind="boolean", voter_agent_ids=[OWNER],
+            electorate_revision=1, choice_kind="boolean", voter_agent_ids=[OWNER],
             prompt="Decide a synthetic request.", created_at=1.0,
-            ballots=[GovernanceBallot(ballot_id="ballot", round_id="case",
+            ballots=[GovernanceBallot(ballot_id="ballot", case_id="case",
                 voter_agent_id=OWNER, choice={"approved": True}, created_at=2.0)],
         )
         self.store.write({
             "full": False, "state_version": 2, "links": None,
-            "governance_rounds": [vote.model_dump(mode="json")],
+            "governance_cases": [vote.model_dump(mode="json")],
             "_operations": (CommitReceipt("governance-setup", 2, "durable", ()),),
         })
         with self.store.session_factory() as session:
@@ -61,7 +61,7 @@ class GovernanceDependencyTests(StoreCase):
 
     def test_case_only_change_is_rejected_by_both_paths(self):
         self.assert_both_paths_reject(
-            GovernanceRoundModel, {"choice_schema": {}}, "frozen electorate or choice schema"
+            GovernanceCaseModel, {"choice_schema": {}}, "frozen electorate or choice schema"
         )
 
     def test_electorate_only_change_is_rejected_by_both_paths(self):
@@ -76,7 +76,7 @@ class GovernanceDependencyTests(StoreCase):
 
     def test_each_governance_input_table_triggers_reader(self):
         for model, column_name in (
-            (GovernanceRoundModel, "state_version"),
+            (GovernanceCaseModel, "state_version"),
             (GovernanceElectorateModel, "position"),
             (GovernanceBallotModel, "choice"),
             (MigrationRequestModel, "state_version"),
@@ -120,6 +120,6 @@ class GovernanceDependencyTests(StoreCase):
                 self.write(version=3)
         self.assertIsNone(self.store._validation._accepted)
         with self.store.session_factory() as session:
-            self.assertEqual(session.execute(select(GovernanceElectorateModel.eligibility)).scalar_one(), {"frozen": True})
+            self.assertEqual(session.execute(select(GovernanceElectorateModel.eligibility)).scalar_one(), {"agent_id": OWNER})
             self.assertIsNone(read_receipt(session, "operation-3"))
             validate_database(session)

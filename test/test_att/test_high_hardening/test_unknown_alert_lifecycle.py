@@ -1,205 +1,79 @@
+"""Retained incidents have explicit processing generations, never discussion TTLs."""
+
 import asyncio
-import multiprocessing
-import os
-import shutil
-import sqlite3
-import tempfile
-import threading
-import time
-import unittest
-from contextlib import closing
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
-from ai_team_team import (
-    AmbiguousTeamContextError,
-    ATTConfig,
-    ATTException,
-    ATTManager,
-    Agent,
-    AuditResult,
-    AuditStatus,
-    DatabaseOwnershipError,
-    LLMGenerationError,
-    StateRestoreError,
-)
-from ai_team_team.core.utils import generate_with_retry
-from ai_team_team.database.persistence import (
-    DatabaseStore,
-    PersistenceCoordinator,
-)
-from ai_team_team.tool import get_default_tools
+from ai_team_team import ATTConfig, ATTManager, Agent, HealthSubject
+from test.health_client import HealthModelClient
+from test.test_att.test_agent_activity._support import ActivityTestCase
 
 
-class EchoClient:
-    async def generate(self, prompt, system_instruction=None, **kwargs):
-        return "Final Answer: complete"
+class TestHealthIncidentLifecycle(ActivityTestCase):
+    async def test_deduplication_and_outbox_survive_restore(self):
+        service = self.manager.supervisor
+        parent = self.manager.create_agent_team(self.root)
+        child = self.manager.create_agent_team(self.root, parent=parent)
+        subject = HealthSubject(kind="agent_team", subject_id=child.team_id)
+        first = await service.record_incident(subject, "unavailable-audit", {"kind": "host"},
+            occurrence_id="outage-1", delivery_mode="queue")
+        second = await service.record_incident(subject, "unavailable-audit", {"kind": "host"},
+            occurrence_id="outage-2", delivery_mode="queue")
+        self.assertEqual(first.values["incident_id"], second.values["incident_id"])
+        # Crash between incident acceptance and outbox dispatch is recoverable.
+        path = str(Path(self.workspace.name) / "incident.sqlite")
+        await self.manager.save_state(path)
+        await self.manager.close()
+        client = HealthModelClient()
+        restored = ATTManager(Agent("Temporary", "Architect", client),
+            ATTConfig(workspace_root=self.workspace.name), persistence_mode="volatile")
+        restored.register_llm_client("fixture", client)
+        self.addAsyncCleanup(restored.close)
+        await restored.load_state(path)
+        async with asyncio.timeout(10):
+            while restored.supervisor.incident_delivery_tasks:
+                await asyncio.gather(*tuple(restored.supervisor.incident_delivery_tasks.values()))
+                await asyncio.sleep(0)
+        current = restored.inspect_health_incident(first.values["incident_id"])
+        self.assertEqual(current["occurrence_count"], 2)
+        self.assertEqual(current["first_at"], first.values["first_at"])
+        self.assertEqual(current["status"], "pending")
+        self.assertEqual(len([row for row in restored._records.snapshot()
+            if row.table_name == "agent_notifications" and row.values["classification"] == "health"]), 3)
+        self.assertFalse(any(row.table_name == "activity_admissions" for row in restored._records.snapshot()))
+        restored.supervisor.resume_incident_delivery()
+        async with asyncio.timeout(10):
+            while restored.supervisor.incident_delivery_tasks:
+                await asyncio.gather(*tuple(restored.supervisor.incident_delivery_tasks.values()))
+                await asyncio.sleep(0)
+        self.assertEqual(len([row for row in restored._records.snapshot()
+            if row.table_name == "agent_notifications"]), 3)
 
-
-def _write_and_hold(db_path, workspace, ready, release):
-    import warnings
-
-    warnings.filterwarnings("ignore", category=ResourceWarning)
-
-    async def run():
-        client = EchoClient()
-        manager = ATTManager(
-            Agent("ProcessRoot", "Architect", client),
-            ATTConfig(workspace_root=workspace),
-            db_path=db_path,
-            persistence_mode=("durable" if (db_path) else "volatile"),
-        )
-        manager.register_llm_client("process-model", client)
-        team = manager.create_agent_team(manager.root_ai)
-        await manager.save_state()
-        ready.put(team.team_id)
-        release.wait(10)
-
-    asyncio.run(run())
-
-class TestHighHardening(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.tmpdir = tempfile.mkdtemp(prefix="att_high_")
-        self.client = EchoClient()
-
-    async def asyncTearDown(self):
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
-
-    async def test_unknown_alert_dedupe_survives_restore(self):
-        db_path = os.path.join(self.tmpdir, "unknown.db")
-        manager = ATTManager(
-            Agent("Root", "Architect", self.client),
-            ATTConfig(
-                workspace_root=self.tmpdir,
-                audit_unknown_escalation_mode="queue",
-            ),
-            db_path=db_path,
-            persistence_mode=("durable" if (db_path) else "volatile"),
-        )
-        manager.register_llm_client("stable", self.client)
-        parent = manager.create_agent_team(manager.root_ai)
-        child = manager.create_agent_team(parent)
-        result = AuditResult(AuditStatus.UNKNOWN, "offline", "timeout")
-        await manager.supervisor.report_unknown(child, result, manager)
-        await manager.supervisor.report_unknown(child, result, manager)
-        await manager.save_state()
-        await manager.close()
-
-        restored = ATTManager(
-            Agent("Root", "Architect", self.client),
-            ATTConfig(workspace_root=self.tmpdir),
-            persistence_mode="volatile",
-        )
-        restored.register_llm_client("stable", self.client)
-        await restored.load_state(db_path)
-        restored_parent = restored.teams[parent.team_id]
-        self.assertEqual(len(restored_parent.message_inbox), 1)
-        self.assertEqual(
-            restored_parent.message_inbox[0]["occurrence_count"], 2
-        )
-        await restored.close()
-    async def test_unknown_alert_lifecycle_and_manual_clear(self):
-        manager = ATTManager(
-            Agent("Root", "Architect", self.client),
-            ATTConfig(
-                workspace_root=self.tmpdir,
-                audit_unknown_escalation_mode="queue",
-                audit_unknown_soft_threshold=2,
-            ),
-            persistence_mode="volatile",
-        )
-        parent = manager.create_agent_team(manager.root_ai)
-        child = manager.create_agent_team(parent)
-        result = AuditResult(
-            AuditStatus.UNKNOWN, "Audit unavailable.", "TimeoutError"
-        )
-        await manager.supervisor.report_unknown(child, result, manager)
-        await manager.supervisor.report_unknown(child, result, manager)
-        self.assertEqual(len(parent.message_inbox), 1)
-        alert = parent.message_inbox[0]
-        self.assertEqual(alert["occurrence_count"], 2)
-        self.assertEqual(alert["state"], "pending")
-
-        parent.execute_reasoning_step = AsyncMock(return_value="handled")
-        await manager.execute_team_discussion(
-            parent, "normal discussion", rounds=1, skip_audit=True
-        )
-        self.assertEqual(parent.message_inbox, [])
-
-        await manager.supervisor.report_unknown(child, result, manager)
-        repeated = False
-
-        async def receive_repeat(*args, **kwargs):
-            nonlocal repeated
-            if not repeated:
-                repeated = True
-                await manager.supervisor.report_unknown(child, result, manager)
-            return "handled"
-
-        parent.execute_reasoning_step = AsyncMock(side_effect=receive_repeat)
-        await manager.execute_team_discussion(
-            parent, "discussion with a repeated alert", rounds=1,
-            skip_audit=True,
-        )
-        self.assertEqual(len(parent.message_inbox), 1)
-        self.assertEqual(parent.message_inbox[0]["state"], "pending")
-        self.assertEqual(parent.message_inbox[0]["occurrence_count"], 2)
-        self.assertNotIn("processing_count", parent.message_inbox[0])
-        self.assertTrue(
-            manager.acknowledge_unknown_alert(
-                parent.team_id,
-                parent.message_inbox[0]["fingerprint"],
-            )
-        )
-
-        await manager.supervisor.report_unknown(child, result, manager)
-        fingerprint = parent.message_inbox[0]["fingerprint"]
-        parent.execute_reasoning_step = AsyncMock(
-            side_effect=ATTException("discussion failed")
-        )
-        with self.assertRaises(ATTException):
-            await manager.execute_team_discussion(
-                parent, "failing discussion", rounds=1, skip_audit=True
-            )
-        self.assertEqual(parent.message_inbox[0]["state"], "pending")
-        self.assertTrue(manager.acknowledge_unknown_alert(parent.team_id, fingerprint))
-
-        await manager.supervisor.report_unknown(child, result, manager)
-        fingerprint = parent.message_inbox[0]["fingerprint"]
-        reasoning_started = asyncio.Event()
-
-        async def cancelled_reasoning(*args, **kwargs):
-            reasoning_started.set()
-            await asyncio.Event().wait()
-
-        parent.execute_reasoning_step = AsyncMock(
-            side_effect=cancelled_reasoning
-        )
-        cancelled_discussion = asyncio.create_task(
-            manager.execute_team_discussion(
-                parent, "cancelled discussion", rounds=1, skip_audit=True
-            )
-        )
-        await reasoning_started.wait()
-        cancelled_discussion.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await cancelled_discussion
-        self.assertEqual(parent.message_inbox[0]["state"], "pending")
-        self.assertNotIn("processing_count", parent.message_inbox[0])
-        self.assertTrue(
-            manager.acknowledge_unknown_alert(parent.team_id, fingerprint)
-        )
-
-        for index in range(3):
-            parent.receive_message(
-                {
-                    "type": "audit_unknown_escalation",
-                    "from": "Supervisor",
-                    "failed_team_id": child.team_id,
-                    "reason": f"unique-{index}",
-                    "cause": "outage",
-                }
-            )
-        self.assertEqual(len(parent.message_inbox), 3)
-        self.assertEqual(manager.clear_unknown_alerts(parent.team_id), 3)
-        await manager.close()
+    async def test_claim_failure_cancellation_new_generations_and_manual_clear(self):
+        self.manager.register_runtime_clock(self.clock)
+        subject = HealthSubject(kind="att")
+        service = self.manager.supervisor
+        first = await service.record_incident(subject, "stable", {"kind": "host"}, occurrence_id="first")
+        incident_id = first.values["incident_id"]
+        for error in (RuntimeError("Handling failed."), asyncio.CancelledError()):
+            with self.subTest(error=type(error).__name__):
+                with self.assertRaises(type(error)):
+                    async with self.manager.handle_health_incident(incident_id):
+                        raise error
+                self.assertEqual(self.manager.inspect_health_incident(incident_id)["status"], "pending")
+        claim = await self.manager.claim_health_incident(incident_id)
+        await service.record_incident(subject, "stable", {"kind": "host"}, occurrence_id="second")
+        self.assertEqual((await self.manager.acknowledge_health_incident(
+            incident_id, claim["occurrence_count"]))["status"], "STALE")
+        self.manager.config.audit_unknown_soft_threshold = 2
+        identifiers = [incident_id]
+        for index in range(4):
+            row = await service.record_incident(subject, f"unique-{index}", {"kind": "host"},
+                occurrence_id=f"unique-occurrence-{index}")
+            identifiers.append(row.values["incident_id"])
+        self.clock.advance(100_000)
+        self.assertEqual(len(self.records("health_incidents")), 5)
+        self.assertTrue(all(row.values["status"] == "pending" for row in self.records("health_incidents")))
+        cleared = await self.manager.clear_health_incidents(identifiers)
+        self.assertEqual(len(cleared), 5)
+        self.assertTrue(all(item["status"] == "ACKNOWLEDGED" for item in cleared))
+        self.assertEqual(len(self.records("health_incidents")), 5)

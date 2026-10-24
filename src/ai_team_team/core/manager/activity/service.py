@@ -14,6 +14,7 @@ from ai_team_team.core.activity.contracts import (
 from ai_team_team.core.exceptions import StateRestoreError
 
 from .checkpoints import CheckpointMixin
+from .audit import AuditActivityMixin
 from .context import ContextMixin
 from .controls import ControlMixin
 from .dependencies import InteractionDependencyMixin, WorkerResume
@@ -25,7 +26,16 @@ from .sleep import SleepMixin
 from .values import ModelUnavailable, Session, SystemClock, capture, identifier, scope_fields
 
 
+_CLOCK_ANCHORED_TABLES = frozenset({
+    "activity_admissions", "model_requests", "model_availability", "sleep_plans",
+    "executions", "tool_cooldowns", "memory_index_requests", "audit_model_requests",
+    "audit_runs", "resource_decisions", "team_position_cooldowns",
+    "health_observations", "health_detector_states",
+})
+
+
 class PersonalActivityService(
+    AuditActivityMixin,
     CheckpointMixin,
     ContextMixin,
     ControlMixin,
@@ -40,6 +50,7 @@ class PersonalActivityService(
     def __init__(self, manager):
         self.manager = manager
         self.clock = SystemClock()
+        self._clock_frozen = False
         self.current = contextvars.ContextVar(f"att_personal_activity_{id(manager)}", default=None)
         self.lock = asyncio.Lock()
         self.ready = asyncio.Queue()
@@ -74,21 +85,25 @@ class PersonalActivityService(
             or self.manager._restore_in_progress
             or self.recovery_required
         ):
-            raise RuntimeError("Personal activity admission is closed.")
+            from ...exceptions import RuntimeAdmissionClosedError
+            raise RuntimeAdmissionClosedError("Personal activity admission is closed.")
 
     def require_agent(self, agent_id):
         agent = self.manager._agents_by_id.get(agent_id)
-        if agent is None or agent.lifecycle_state != "active":
+        if agent is None or agent.lifecycle_state != "active" or self.manager._topology.is_agent_pending(agent_id):
             raise PermissionError("Personal activity requires an active registered Agent.")
         if self.manager.supervisor.is_supervisory_agent(agent_id):
-            raise PermissionError(
-                "Audit-scoped activity requires its registered audit evidence profile."
-            )
+            self.require_audit_profile(agent_id)
         return agent
 
     def validate_scope(self, agent_id, scope):
         scope = TypeAdapter(OperationScope).validate_python(scope)
         agent = self.require_agent(agent_id)
+        if self.manager.supervisor.is_supervisory_agent(agent_id):
+            profile = self.require_audit_profile(agent_id)
+            if scope.kind != "agent_team" or scope.team_id != profile["temporary_team_id"]:
+                raise PermissionError("An auditor cannot leave its exact restricted audit scope.")
+            return scope
         if scope.kind == "agent_team":
             team = self.manager.teams.get(scope.team_id)
             if (
@@ -108,6 +123,8 @@ class PersonalActivityService(
         if self.closing or self.manager._closing or session.generation != self.generation:
             raise asyncio.CancelledError("The personal runtime generation is no longer active.")
         self.validate_scope(session.agent_id, session.scope)
+        if session.audit_profile is not None and self.clock.wall_time() >= session.audit_profile["deadline"]:
+            raise TimeoutError("The total health-assessment deadline elapsed.")
 
     def team_for(self, session):
         return (
@@ -117,12 +134,21 @@ class PersonalActivityService(
         )
 
     def register_clock(self, clock):
-        if self.sessions or self.workers or self.timers or self.models.tasks or self.manager._executions.jobs:
+        if self.manager._active_tool_agent.get() is not None or self.current.get() is not None:
+            raise PermissionError("Only the Host may bind the runtime clock.")
+        if self.manager._closing or self.manager._restore_in_progress:
+            raise RuntimeError("The runtime clock cannot change during shutdown or restore.")
+        if self._clock_frozen or self.sessions or self.workers or self.timers or self.models.tasks or self.manager._executions.jobs:
             raise RuntimeError("Bind the runtime clock before activity or timers are admitted.")
         for name in ("monotonic", "wall_time", "sleep"):
             if not callable(getattr(clock, name, None)):
                 raise TypeError("A runtime clock must implement monotonic, wall_time, and sleep.")
         self.clock = clock
+
+    def bind_clock_records(self, records, *, pending_factory=False):
+        """Runtime time anchors outlive disposable tasks and scoped audit people."""
+        if pending_factory or any(record.table_name in _CLOCK_ANCHORED_TABLES for record in records):
+            self._clock_frozen = True
 
     async def activate(self, agent_id, *, scope=None):
         async with self.lock:
@@ -131,8 +157,11 @@ class PersonalActivityService(
     async def _activate_locked(self, agent_id, *, scope=None):
         """Admission and arrival eligibility share the same mutation lock."""
         self.check_open()
+        if self.manager.supervisor.is_supervisory_agent(agent_id):
+            raise PermissionError("Public activity admission cannot select an audit profile.")
         agent = self.require_agent(agent_id)
         scope = self.validate_scope(agent_id, scope if scope is not None else PersonalScope())
+        await self.reconcile_mail(agent_id)
         previous = self.sessions.get(agent_id)
         if previous is not None and previous.active:
             return ActivityAdmission(
@@ -141,7 +170,7 @@ class PersonalActivityService(
                 status="COALESCED",
                 durability=self.manager.persistence_mode,
             )
-        alias = self.manager.resolve_model_alias(agent.llm_client)
+        alias = self.manager.resolve_runtime_model_alias(agent.llm_client)
         unavailable = self.manager._records.index.get(("model_availability", (agent_id, alias)))
         if unavailable is not None and unavailable.values["status"] != "available":
             values = unavailable.values
@@ -225,6 +254,8 @@ class PersonalActivityService(
         )
 
     def inspect(self, agent_id):
+        if self.manager.supervisor.is_supervisory_agent(agent_id):
+            raise PermissionError("Temporary audit activity is not an ordinary personal profile.")
         self.require_agent(agent_id)
         session = self.sessions.get(agent_id)
         if session is None:
@@ -251,7 +282,7 @@ class PersonalActivityService(
         async with self.lock:
             self.check_open()
             agent = self.require_agent(agent_id)
-            alias = self.manager.resolve_model_alias(agent.llm_client)
+            alias = self.manager.resolve_runtime_model_alias(agent.llm_client)
             live = self.models.live.get(agent_id)
             if live is not None and not live.done():
                 raise ModelUnavailable(
@@ -322,7 +353,7 @@ class PersonalActivityService(
             return await self._interact(agent, prompt, scope=scope)
 
     async def _interact(self, agent, prompt, *, scope=None):
-        from ai_team_team.core.response import AgentTurnResult, AgentTurnStatus
+        from ai_team_team.core.response import InteractionResult, InteractionStatus
 
         if self.require_agent(agent.agent_id) is not agent or not isinstance(prompt, str):
             raise PermissionError(
@@ -372,11 +403,12 @@ class PersonalActivityService(
                 schedule=False,
                 _on_commit=accepted,
             )
-            answer, answer_team_id = await future
-            return AgentTurnResult(
+            answer, answer_team_id, invocation_id = await future
+            return InteractionResult(
                 agent_id=agent.agent_id,
                 team_id=answer_team_id,
-                status=AgentTurnStatus.COMPLETED,
+                invocation_id=invocation_id,
+                status=InteractionStatus.COMPLETED,
                 answer=answer,
             )
         finally:
@@ -431,6 +463,12 @@ class PersonalActivityService(
         if not task.cancelled():
             error = task.exception()
             if error is not None:
+                from ai_team_team.core.exceptions import RuntimeAdmissionClosedError
+
+                if isinstance(error, RuntimeAdmissionClosedError):
+                    self.manager._emit_callback("on_system_event", "activity_admission_closed",
+                        {"error_type": type(error).__name__})
+                    return
                 self.manager.logger.error(
                     "Personal activity worker failed (%s).", type(error).__name__
                 )

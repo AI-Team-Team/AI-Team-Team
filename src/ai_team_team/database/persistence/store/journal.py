@@ -1,4 +1,4 @@
-"""Canonical immutable Journal values and read-only restore compatibility."""
+"""Canonical immutable Journal values and strict restore validation."""
 
 import json
 
@@ -18,7 +18,6 @@ def event_values(event):
         "invocation_id": event.get("invocation_id"),
         "source_chat_message_id": event.get("source_chat_message_id"),
         "source_execution_id": event.get("source_execution_id"),
-        "checkpoint_context": {key: event.get(key) for key in ("discussion_id", "turn_id")},
         "role": event.get("role"),
         "payload": event.get("payload", {}),
         "redacted": int(event.get("redacted", False)),
@@ -30,7 +29,7 @@ def event_matches(existing, values):
     """Compare JSON contents without Python's boolean/number equality aliases."""
     for key, value in values.items():
         current = getattr(existing, key)
-        if key in {"payload", "checkpoint_context"}:
+        if key in {"payload"}:
             # Object order is insignificant, but array order and JSON values are not.
             if json.dumps(current, sort_keys=True) != json.dumps(value, sort_keys=True):
                 return False

@@ -238,7 +238,7 @@ class TestNotificationAndExecutionContracts(unittest.IsolatedAsyncioTestCase):
             )
 
     def test_schema_target_is_reserved_without_live_objects_or_round_fields(self):
-        self.assertEqual(TARGET_STATE_SCHEMA_VERSION, "14")
+        self.assertEqual(TARGET_STATE_SCHEMA_VERSION, "15")
         schemas = [
             InvocationScope,
             SleepIntent,

@@ -36,11 +36,11 @@ class TestRelationshipIdentitySnapshots(unittest.IsolatedAsyncioTestCase):
         self.manager.libraries[self.person.private_doc_library_id].write_file(
             "notes.txt", "private"
         )
-        self.parent = self.manager.create_agent_team(self.root)
+        self.parent = self.manager.create_agent_team(self.root, parent=self.root)
 
     def make_team(self, prefix):
         return self.manager.bootstrap_agent_team(
-            self.parent,
+            self.parent, parent=self.parent,
             member_configs={f"{prefix}{number}": {"model": "fixture"} for number in range(3)},
             existing_member_ids=[self.person.agent_id],
         )

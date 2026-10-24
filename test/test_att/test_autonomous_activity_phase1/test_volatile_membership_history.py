@@ -30,7 +30,7 @@ class VolatileMembershipTests(unittest.IsolatedAsyncioTestCase):
             pass
 
     def create_team(self, manager, creator=None, *, size=4):
-        return manager.bootstrap_agent_team(creator or manager.root_ai, member_configs={
+        return manager.bootstrap_agent_team(creator or manager.root_ai, parent=creator or manager.root_ai, member_configs={
             f"Member-{index}": {"model": "fixture"} for index in range(size)
         })
 
@@ -131,7 +131,7 @@ class VolatileMembershipTests(unittest.IsolatedAsyncioTestCase):
         manager, _, client = make_manager(self, volatile=True)
         manager.config.model_token_limits["fixture"] = 0
         invitees = [manager.register_agent(Agent(f"Invitee-{index}", "Researcher", client)) for index in range(4)]
-        request = manager.create_agent_team(manager.root_ai, existing_members=invitees, late_join_policy="open")
+        request = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, existing_members=invitees, late_join_policy="open")
         for person in invitees[:3]:
             await manager.respond_team_invitation(request.request_id, proposal_revision=request.proposal_revision, actor=person, attitude="accepted")
         created = await manager.create_team_from_formation(request.request_id, proposal_revision=request.proposal_revision, actor=manager.root_ai)
@@ -199,15 +199,16 @@ class VolatileMembershipTests(unittest.IsolatedAsyncioTestCase):
                 manager, _, client = make_manager(self, volatile=True)
                 manager.config.model_token_limits["fixture"] = 0
                 invitees = [manager.register_agent(Agent(f"Founder-{index}", "Researcher", client)) for index in range(3)]
-                request = manager.create_agent_team(manager.root_ai, existing_members=invitees)
+                request = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, existing_members=invitees)
                 for person in invitees:
                     await manager.respond_team_invitation(request.request_id, proposal_revision=1, actor=person, attitude="accepted")
                 await self.settle_resource_blocked_mail(manager)
                 before = manager._records.snapshot()
                 graph = invocation_graph(manager.root_ai.agent_id)
-                async def fail_commit(dirty):
+                async def fail_commit(dirty, *, operation_id=None, authority_check=None):
                     self.assertTrue(dirty["_provisional"])
                     self.assertTrue(dirty["teams"])
+                    self.assertEqual(operation_id, f"FORMATION-CREATE-{request.request_id}")
                     self.assertEqual(manager._records.snapshot(), before)
                     if independent_commit:
                         await manager._records.commit(graph, operation_id="independent-operation")

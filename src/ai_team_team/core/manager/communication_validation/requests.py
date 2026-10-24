@@ -9,6 +9,7 @@ from ...communication import (
 )
 from ...exceptions import StateRestoreError
 from ...config import _parse_communication_config
+from ...organization import validate_route_evidence
 
 
 def validate_requests_and_approvals(
@@ -50,12 +51,16 @@ def validate_requests_and_approvals(
                 "does not match its policy snapshot."
             )
         principal_keys = [principal.key for principal in request.approval_principals]
-        if not principal_keys or len(principal_keys) != len(set(principal_keys)):
+        if len(principal_keys) != len(set(principal_keys)):
             raise StateRestoreError(
                 f"Communication request {request.request_id!r} has an "
                 "empty or duplicated approval route."
             )
-        if route_fingerprint(request.approval_principals) != request.route_fingerprint:
+        try:
+            validate_route_evidence(request, agent_ids, team_ids)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise StateRestoreError(f"Invalid captured communication route: {exc}") from exc
+        if route_fingerprint(request.approval_principals, request.route_evidence) != request.route_fingerprint:
             raise StateRestoreError(
                 f"Communication request {request.request_id!r} has an invalid route fingerprint."
             )
@@ -64,7 +69,7 @@ def validate_requests_and_approvals(
                 raise StateRestoreError(
                     f"Communication request {request.request_id!r} references a missing approval AgentTeam."
                 )
-            if principal.kind == "agent" and principal.principal_id != root_agent_id:
+            if principal.kind == "agent" and principal.principal_id not in agent_ids:
                 raise StateRestoreError(
                     f"Communication request {request.request_id!r} references an unauthorized approval Agent."
                 )
@@ -95,14 +100,19 @@ def validate_requests_and_approvals(
                 f"Communication request {request.request_id!r} has an invalid approval order."
             )
         statuses = {approval.status for approval in request_approvals}
-        if request.status in {
-            CommunicationRequestStatus.APPROVED,
-            CommunicationRequestStatus.STALE,
-        } and statuses != {CommunicationApprovalStatus.APPROVED}:
+        exempt = (not request.approval_principals and request.supersedes_request_id is not None
+            and request.status is CommunicationRequestStatus.APPROVED
+            and all(endpoint["authority"] == "EXEMPT" for endpoint in request.route_evidence["endpoints"]))
+        if not request.approval_principals and not exempt:
+            raise StateRestoreError("Only an explicitly exempt successor may have no approval principals.")
+        if request.status is CommunicationRequestStatus.APPROVED and not exempt and statuses != {CommunicationApprovalStatus.APPROVED}:
             raise StateRestoreError(
                 f"Terminal communication request {request.request_id!r} "
                 "lacks unanimous principal approval."
             )
+        if request.status is CommunicationRequestStatus.STALE and statuses & {
+                CommunicationApprovalStatus.PENDING, CommunicationApprovalStatus.PROCESSING}:
+            raise StateRestoreError("Stale requests cannot retain unfinished approval authority.")
         if request.status is CommunicationRequestStatus.DENIED and (
             CommunicationApprovalStatus.DENIED not in statuses
             or statuses

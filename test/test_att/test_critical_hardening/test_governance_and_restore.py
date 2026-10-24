@@ -71,7 +71,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
             persistence_mode=("durable" if (db_path) else "volatile"),
         )
         source.register_llm_client("test", self.client)
-        persisted_team = source.create_agent_team(source.root_ai)
+        persisted_team = source.create_agent_team(source.root_ai, parent=source.root_ai)
         persisted_team.doc_library.write_file("persisted.txt", "new state")
         await source.save_state()
         await source.close()
@@ -82,7 +82,7 @@ class TestCriticalHardening(CriticalHardeningTestCase):
             )
             connection.commit()
 
-        original_team = self.manager.create_agent_team(self.root)
+        original_team = self.manager.create_agent_team(self.root, parent=self.root)
         original_team.doc_library.write_file("original.txt", "live state")
         old_config = self.manager.config
         old_root = self.manager.root_ai
@@ -113,8 +113,8 @@ class TestCriticalHardening(CriticalHardeningTestCase):
             persistence_mode=("durable" if (db_path) else "volatile"),
         )
         source.register_llm_client("test", self.client)
-        parent = source.create_agent_team(source.root_ai)
-        child = source.create_agent_team(parent)
+        parent = source.create_agent_team(source.root_ai, parent=source.root_ai)
+        child = source.create_agent_team(parent, parent=parent)
         await source.save_state()
         await source.close()
         with closing(sqlite3.connect(db_path)) as connection:

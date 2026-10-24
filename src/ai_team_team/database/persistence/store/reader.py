@@ -187,6 +187,7 @@ class StoreReadMixin:
                     {
                         "team_id": row.team_id,
                         "parent_agent_id": row.parent_agent_id,
+                        "position_revision": row.position_revision,
                         "lifecycle_state": row.lifecycle_state,
                         "state_version": row.state_version,
                         "team_kind": row.team_kind,
@@ -196,7 +197,6 @@ class StoreReadMixin:
                         "depth": None,
                         "chapter_num": row.chapter_num,
                         "parent_team_id": row.parent_team_id,
-                        "migration_count": 0,
                         "creator_type": ("agent" if row.creator_agent_id else "team"),
                         "creator_id": (row.creator_agent_id or row.creator_team_id),
                         "status_map": row.status_map,
@@ -251,6 +251,7 @@ class StoreReadMixin:
                     "policy_snapshot": row.policy_snapshot,
                     "approval_principals": row.approval_principals,
                     "route_fingerprint": row.route_fingerprint,
+                    "route_evidence": row.route_evidence,
                     "status": row.status,
                     "decision_reason": row.decision_reason,
                     "created_at": row.created_at,
@@ -268,6 +269,7 @@ class StoreReadMixin:
                     "creator_id": row.creator_agent_id or row.creator_team_id,
                     "parent_team_id": row.parent_team_id,
                     "task": row.task,
+                    "parent_agent_id": row.parent_agent_id,
                     "member_count": row.member_count,
                     "roles_and_presets": row.roles_and_presets,
                     "preset_name": row.preset_name,
@@ -338,14 +340,15 @@ class StoreReadMixin:
                     "initiator_agent_id": row.initiator_agent_id,
                     "creator_kind": row.creator_kind,
                     "creator_id": row.creator_agent_id or row.creator_team_id,
-                    "creator_team_id": row.deliberation_team_id,
+                    "creator_team_id": row.creator_team_id,
+                    "parent_team_id": row.parent_team_id,
+                    "parent_agent_id": row.parent_agent_id,
                     "request_id": row.request_id,
                     "base_revision": row.base_revision,
                     "base_revision_fingerprint": row.base_revision_fingerprint,
                     "objective": row.objective,
                     "status": row.status,
                     "participant_agent_ids": row.participant_agent_ids,
-                    "source_discussion_id": row.checkpoint_context.get("source_discussion_id"),
                     "source_message_id": row.source_message_id,
                     "initiator_invocation_id": row.initiator_invocation_id,
                     "candidate": row.candidate,
@@ -358,6 +361,7 @@ class StoreReadMixin:
             communication_approvals = [
                 {
                     "request_id": row.request_id,
+                    "case_id": row.case_id,
                     "principal": {
                         "kind": row.principal_kind,
                         "principal_id": row.principal_id,
@@ -412,8 +416,6 @@ class StoreReadMixin:
                     "agent_id": row.agent_id,
                     "agent_name_snapshot": row.agent_name_snapshot,
                     "team_id": row.team_id,
-                    "discussion_id": row.checkpoint_context.get("discussion_id"),
-                    "turn_id": row.checkpoint_context.get("turn_id"),
                     "invocation_id": row.invocation_id,
                     "source_chat_message_id": row.source_chat_message_id,
                     "source_execution_id": row.source_execution_id,
@@ -441,10 +443,8 @@ class StoreReadMixin:
                     {
                         "segment_id": row.segment_id,
                         "agent_id": row.agent_id,
-                        "turn_id": row.checkpoint_context.get("turn_id"),
                         "invocation_id": row.invocation_id,
                         "origin_team_id": row.origin_team_id,
-                        "discussion_id": row.checkpoint_context.get("discussion_id"),
                         "source_event_ids": source_event_ids,
                         "recall_content": row.recall_content,
                         "content_sha256": row.content_sha256,
@@ -468,13 +468,11 @@ class StoreReadMixin:
                     {
                         "memory_id": row.memory_id,
                         "agent_id": row.agent_id,
-                        "turn_id": row.checkpoint_context.get("turn_id"),
                         "invocation_id": row.invocation_id,
                         "title": row.title,
                         "summary": row.summary,
                         "tags": tags,
                         "origin_team_id": row.origin_team_id,
-                        "discussion_id": row.checkpoint_context.get("discussion_id"),
                         "segment_id": row.segment_id,
                         "status": row.status,
                         "version": row.version,
@@ -493,23 +491,18 @@ class StoreReadMixin:
                 for row in session.query(RetainedMemoryReferenceModel).all()
             ]
 
-            governance_rounds, migration_requests = read_governance_state(session)
-            latest_cases = {}
-            for case in governance_rounds:
-                principal = case["principal"]
-                key = case["business_kind"], case["business_id"], principal["kind"], principal["principal_id"]
-                if key not in latest_cases or case["round_number"] > latest_cases[key]["round_number"]:
-                    latest_cases[key] = case
+            governance_cases, migration_requests = read_governance_state(session)
+            decided_cases = {approval["case_id"] for approval in communication_approvals if approval["case_id"] is not None}
             communication_ballots = [
                 {"request_id": case["business_id"], "principal": case["principal"],
                  "voter_agent_id": ballot["voter_agent_id"], "approved": ballot["choice"]["approved"],
                  "reason": ballot["choice"].get("reason", ""), "created_at": ballot["created_at"]}
-                for case in latest_cases.values() if case["business_kind"] == "communication" and case["principal"]["kind"] == "agent_team" and case["status"] in {"APPROVED", "DENIED"}
+                for case in governance_cases if case["case_id"] in decided_cases and case["business_kind"] == "communication" and case["principal"]["kind"] == "agent_team" and case["status"] in {"APPROVED", "DENIED"}
                 for ballot in case["ballots"]
             ]
             return {
                 "records": read_records(session),
-                "governance_rounds": governance_rounds,
+                "governance_cases": governance_cases,
                 "migration_requests": migration_requests,
                 "configs": config_map,
                 "agents": agents,

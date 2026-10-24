@@ -9,7 +9,7 @@ from ai_team_team.core.exceptions import StateRestoreError
 from ai_team_team.database.models import (
     GovernanceBallotModel,
     GovernanceElectorateModel,
-    GovernanceRoundModel,
+    GovernanceCaseModel,
     MigrationRequestModel,
     commit_receipts,
 )
@@ -19,7 +19,7 @@ from .tracking import MutationTracker
 
 
 _GOVERNANCE_TABLES = frozenset(model.__table__.name for model in (
-    GovernanceRoundModel, GovernanceElectorateModel, GovernanceBallotModel, MigrationRequestModel,
+    GovernanceCaseModel, GovernanceElectorateModel, GovernanceBallotModel, MigrationRequestModel,
 ))
 
 

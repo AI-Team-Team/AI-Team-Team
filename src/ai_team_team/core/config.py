@@ -26,7 +26,7 @@ class ParentApprovalCommunicationConfig(_StrictCommunicationConfig):
     """Requires both endpoint parent principals to approve a channel."""
 
     policy: Literal["parent_approval"] = "parent_approval"
-    request_delivery: Literal["queue", "wake"] = "queue"
+    request_delivery: Literal["queue"] = "queue"
     direction: Literal["one_way", "bidirectional"] = "bidirectional"
 
 
@@ -34,22 +34,8 @@ class LineageApprovalCommunicationConfig(_StrictCommunicationConfig):
     """Requires every principal on the sender-to-recipient route to approve."""
 
     policy: Literal["lineage_approval"] = "lineage_approval"
-    request_delivery: Literal["queue", "wake"] = "queue"
+    request_delivery: Literal["queue"] = "queue"
     direction: Literal["one_way", "bidirectional"] = "bidirectional"
-
-
-class TurnFailurePolicyConfig(BaseModel):
-    """Controls whether member-scoped failures abort a whole discussion."""
-
-    model_config = ConfigDict(
-        extra="forbid",
-        validate_assignment=True,
-        strict=True,
-        validate_default=True,
-    )
-
-    tool: Literal["isolate", "abort"] = "isolate"
-    llm: Literal["isolate", "abort"] = "isolate"
 
 
 class FileReadConfig(BaseModel):
@@ -77,9 +63,9 @@ class EpisodicMemoryConfig(BaseModel):
     )
 
     enabled: bool = False
-    segment_boundary: Literal["agent_turn"] = "agent_turn"
+    segment_boundary: Literal["activity_invocation"] = "activity_invocation"
     index_max_retries: Annotated[int, Field(ge=0)] = 2
-    index_retry_backoff_factor: Annotated[float, Field(ge=0)] = 0.5
+    index_retry_backoff_factor: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.5
     index_worker_count: Annotated[int, Field(ge=1)] = 2
     max_search_results: Annotated[int, Field(ge=1)] = 20
     max_recall_lines: Annotated[int, Field(ge=1)] = 100
@@ -233,6 +219,17 @@ class ConversationConfig(BaseModel):
     direct_details: bool = True
 
 
+class HealthSupervisionConfig(BaseModel):
+    """Evidence thresholds request assessment; they never authorize intervention."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, validate_assignment=True, validate_default=True)
+    protocol_failure_threshold: Annotated[int, Field(ge=1)] = 3
+    tool_argument_failure_threshold: Annotated[int, Field(ge=1)] = 5
+    observation_window_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 600.0
+    audit_timeout_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 600.0
+    semantic_detection_enabled: bool = False
+
+
 class ATTConfig(BaseModel):
     """Strict, assignment-validated runtime configuration for ATT."""
 
@@ -246,44 +243,31 @@ class ATTConfig(BaseModel):
     enable_dynamic_delegation: bool = True
     max_delegation_depth: Annotated[int, Field(ge=1)] = 2
     min_subagent_team_size: Annotated[int, Field(ge=3)] = 3
-    subagent_discussion_rounds: Annotated[int, Field(ge=1)] = 2
-    react_max_steps: Annotated[int, Field(ge=1)] = 5
-    inbox_summarize_threshold_chars: Annotated[int, Field(ge=1)] = 1500
     model_registry: Dict[str, str] = Field(default_factory=dict)
-    max_migrations_per_team_discussion: Annotated[int, Field(ge=0)] = 1
     enable_membership_voting: bool = False
-    llm_max_retries: Annotated[int, Field(ge=0)] = 3
-    llm_retry_backoff_factor: Annotated[float, Field(ge=0)] = 1.5
     enable_memory_compression: bool = True
     workspace_root: str = "."
-    max_memory_turns: Annotated[int, Field(ge=1)] = 20
+    working_context_message_limit: Annotated[int, Field(ge=1)] = 20
     communication: CommunicationConfig = Field(
         default_factory=PermissiveCommunicationConfig
     )
     migration_policy: Literal[
         "permissive", "ancestor_approval", "lineage_path"
     ] = "ancestor_approval"
-    enable_emergency_wakeup: bool = True
-    emergency_discussion_rounds: Annotated[int, Field(ge=1)] = 1
     tool_calling_mode: Literal[
         "auto", "native", "react", "text_react"
     ] = "auto"
-    max_tool_rounds: Annotated[int, Field(ge=1)] = 5
-    max_tool_argument_retries: Annotated[int, Field(ge=0)] = 3
     max_tool_execution_retries: Annotated[int, Field(ge=0)] = 2
     tool_execution_retry_policy: Literal[
         "never", "retry_safe", "typed_transient"
     ] = "never"
     tool_execution_retry_backoff_factor: Annotated[
-        float, Field(ge=0)
+        float, Field(ge=0, allow_inf_nan=False)
     ] = 0.5
     text_tool_schema_mode: Literal[
         "compact", "full", "compact_with_examples"
     ] = "compact"
     tool_prompt_modes: Dict[str, str] = Field(default_factory=dict)
-    turn_failure_policy: TurnFailurePolicyConfig = Field(
-        default_factory=TurnFailurePolicyConfig
-    )
     operational_status_decision_mode: Literal[
         "framework", "supervisor", "framework_then_supervisor"
     ] = "framework"
@@ -295,15 +279,12 @@ class ATTConfig(BaseModel):
     default_max_output_tokens: Annotated[int, Field(ge=1)] = 1024
     model_tokenizer_configs: Dict[str, str] = Field(default_factory=dict)
     failover_policy: Literal["auto", "parent", "none"] = "auto"
-    parent_failover_timeout_seconds: Annotated[float, Field(gt=0)] = 120.0
+    parent_failover_timeout_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 120.0
     audit_unknown_escalation_mode: Literal["wake", "queue"] = "wake"
     audit_unknown_soft_threshold: Annotated[int, Field(ge=1)] = 100
     agent_private_data_policy: Literal[
         "retain", "archive", "delete"
     ] = "archive"
-    formation_deliberation_policy: Literal[
-        "optional", "required_when_team_scoped"
-    ] = "optional"
     file_read: FileReadConfig = Field(default_factory=FileReadConfig)
     episodic_memory: EpisodicMemoryConfig = Field(
         default_factory=EpisodicMemoryConfig
@@ -311,6 +292,10 @@ class ATTConfig(BaseModel):
     activity: PersonalActivityConfig = Field(default_factory=PersonalActivityConfig)
     conversations: ConversationConfig = Field(default_factory=ConversationConfig)
     executions: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    health: HealthSupervisionConfig = Field(default_factory=HealthSupervisionConfig)
+    allow_unilateral_detachment: bool = True
+    enable_migration: bool = True
+    migration_cooldown_downtime: Literal["include", "exclude"] = "include"
 
     _MAPPING_VALIDATORS: ClassVar[Dict[str, str]] = {
         "model_registry": "_validate_string_mapping",
@@ -326,21 +311,6 @@ class ATTConfig(BaseModel):
         if value is None:
             return PermissiveCommunicationConfig()
         return _parse_communication_config(value)
-
-    @field_validator("turn_failure_policy", mode="before")
-    @classmethod
-    def _validate_turn_failure_policy(
-        cls, value: Any
-    ) -> TurnFailurePolicyConfig:
-        if value is None:
-            return TurnFailurePolicyConfig()
-        if isinstance(value, TurnFailurePolicyConfig):
-            return value
-        if isinstance(value, Mapping):
-            return TurnFailurePolicyConfig.model_validate(dict(value))
-        raise ValueError(
-            "turn_failure_policy must be a TurnFailurePolicyConfig or mapping."
-        )
 
     @field_validator("file_read", mode="before")
     @classmethod

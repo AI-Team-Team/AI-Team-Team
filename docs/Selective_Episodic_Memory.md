@@ -1,10 +1,10 @@
 # Selective Episodic Memory
 
-Selective Episodic Memory is an optional Agent-owned catalog for finding and temporarily recalling prior Agent turns.
+Selective Episodic Memory is an optional Agent-owned catalog for finding and temporarily recalling prior personal invocation segments.
 
 It does not replace the append-only System Memory Journal, the bounded Working Context, or the deliberate artifacts stored in a Private Agent DocLib.
 
-The feature is disabled by default because every indexed terminal turn normally adds an isolated model call, bounded failure retries, and durable catalog records.
+The feature is disabled by default because every indexed personal invocation normally adds an isolated model call, bounded failure retries, and durable catalog records.
 
 ## Identity and Membership Boundary
 
@@ -12,7 +12,7 @@ A Memory Card belongs to one immutable `agent_id`, never to an AgentTeam members
 
 Adding or removing an Agent from an AgentTeam changes only the `team_id ↔ agent_id` relation and does not copy, clear, relabel, or otherwise mutate the Agent's Journal, catalog, Working Context, retained references, model binding, identity fields, invocation lock, lifecycle, or Private DocLib.
 
-A shared Agent can search its own catalog across AgentTeams, while each result retains its original `origin_team_id` and `discussion_id` provenance.
+A shared Agent can search its own catalog across AgentTeams, while each result retains its original `origin_team_id` and `invocation_id` provenance.
 
 Team ACLs and communication agreements cannot grant another Agent access to an Agent's catalog.
 
@@ -20,7 +20,7 @@ Team ACLs and communication agreements cannot grant another Agent access to an A
 
 ### System Memory Journal
 
-The System Memory Journal is an append-only host-visible event stream containing sanitized user, assistant, system, and tool-message records together with turn, team, discussion, lifecycle, indexing, search, recall, retention, and forget metadata.
+The System Memory Journal is an append-only host-visible event stream containing sanitized user, assistant, system, and tool-message records together with personal invocation, selected team, lifecycle, indexing, search, recall, retention, and forget metadata.
 
 Journal events retain an Agent name snapshot and may survive confirmed permanent Agent deletion, but they are never exposed through Agent tools.
 
@@ -30,17 +30,17 @@ The Journal does not capture or infer hidden model reasoning.
 
 ### AI-visible Memory Catalog
 
-When the optional mode is enabled, each completed or incomplete business Agent turn produces one deterministic sanitized `AgentMemorySegment` after the turn ends.
+When the optional mode is enabled, each committed personal invocation boundary produces one deterministic sanitized `AgentMemorySegment` when it contains eligible new events.
 
-Cancelled turns and turns terminated by framework consistency failures remain visible in the Journal but do not create segments or cards.
+Cancelled invocations and invocations terminated by framework consistency failures remain visible in the Journal but do not create segments or cards.
 
 The segment's `recall_content` is rendered deterministically from its immutable sanitized source events, and its SHA-256 digest is verified during recall and restore.
 
 An isolated background call to the same Agent model generates only the card title, summary, and normalized tags.
 
-The indexing call uses the Agent invocation lock, receives a detached temporary prompt, does not use tools, does not enter `agent.messages`, and cannot recursively create another memory turn.
+The indexing call uses the Agent invocation lock, receives a detached temporary prompt, does not use tools, does not enter `agent.messages`, and cannot recursively create another personal memory segment.
 
-Indexing failure never changes the business turn result and leaves a retryable or failed segment visible to trusted host APIs.
+Indexing failure never changes the personal invocation result and leaves a retryable or failed segment visible to trusted host APIs.
 
 ### Working Context
 
@@ -83,9 +83,9 @@ Enabling the feature requires SQLite FTS5, and ATT fails clearly when the local 
 
 The following tools appear in the invocation-scoped tool view only while the feature is enabled:
 
-- `search_memories(query=None, tags=None, team_id=None, discussion_id=None, limit=20, cursor=None)` returns only Agent-owned card metadata and provenance.
+- `search_memories(query=None, tags=None, team_id=None, invocation_id=None, limit=20, cursor=None)` returns only Agent-owned card metadata and provenance.
 - `recall_memory(memory_id, start_line=1, end_line=None, start_character=1, character_count=None, expected_segment_version=None)` returns a bounded historical-data observation from one active Agent-owned card.
-- `keep_memory_in_context(memory_id, note=None)` retains only a compact reference after the same card was recalled earlier in the current Agent turn.
+- `keep_memory_in_context(memory_id, note=None)` retains only a compact reference after the same card was recalled earlier in the current personal invocation.
 - `forget_memory(memory_id, reason=None)` hides the card and removes its retained references without modifying Journal events or source records.
 
 Recall content is prefixed as historical reference data rather than instructions.
@@ -96,7 +96,7 @@ A partial result returns `next_line`, `next_character`, and the immutable Segmen
 
 The recalled body is available only to the current invocation and is replaced in Working Context with `[Historical memory recalled: <memory_id>]` when that invocation ends.
 
-A normal assistant answer derived from a recall remains part of the new business turn because it is new Agent output.
+A normal assistant answer derived from a recall remains part of the new personal invocation because it is new Agent output.
 
 Precise long-term material should be deliberately rewritten into the Agent's Private DocLib with `write_private_file` rather than retained as a large Working Context block.
 
@@ -110,17 +110,17 @@ Private DocLib and episodic-memory tools are always metadata-only, and their tra
 
 ## Persistence and Restore
 
-Schema 11 stores Working Context, Journal events, source-linked segments, Memory Cards, normalized tags, retained references, and the FTS5 search index in separate structures.
+Schema 15 stores Working Context, Journal events, source-linked segments, Memory Cards, normalized tags, retained references, and the FTS5 search index in separate structures.
 
 Full saves never delete Journal rows, while incremental journal updates are insert-only and reject attempts to modify an existing event ID.
 
-Each incremental catalog update includes its referenced cards, segments, and sanitized source Journal events, rather than relying on a discussion's task-local batch to have already submitted those records.
+Each incremental catalog update includes its referenced cards, segments, and sanitized source Journal events, rather than relying on the originating personal checkpoint to have already submitted those records.
 
-Indexing can therefore commit safely while other members are still running, including after restore or during a new team's first discussion, without replacing an existing Agent's identity or Working Context.
+Indexing can therefore commit safely while other members are still running, including after restore or during newly admitted personal activity, without replacing an existing Agent's identity or Working Context.
 
 Missing source or owner dependencies fail explicitly, and persistence errors remain observable through `save_state()`, `flush_state()`, and `close()`.
 
-Restore validates event and sequence uniqueness, Agent ownership, source-event existence and ordering, turn boundaries, deterministic content and digest, normalized tags, card-to-segment provenance, retained-reference ownership, and FTS5 availability when enabled.
+Restore validates event and sequence uniqueness, Agent ownership, source-event existence and ordering, personal invocation boundaries, deterministic content and digest, normalized tags, card-to-segment provenance, retained-reference ownership, and FTS5 availability when enabled.
 
 Persisted `processing` index jobs return to `pending` after restore, and `await manager.flush_memory_indexing()` waits for every currently runnable background job.
 

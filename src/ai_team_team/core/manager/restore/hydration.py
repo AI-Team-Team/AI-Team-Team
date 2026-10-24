@@ -130,11 +130,11 @@ class RestoreHydrationMixin:
             )
             team.team_id = row["team_id"]
             team._parent_agent_id = row.get("parent_agent_id")
+            team._position_revision = row["position_revision"]
             team._lifecycle_state = row.get("lifecycle_state", "active")
             team.logger = logging.getLogger(f"AgentTeam:{team.team_id}")
             team.team_progress = row["team_progress"]
             team.chapter_num = row["chapter_num"]
-            team.migration_count = row["migration_count"] or 0
             team.status_map = json.loads(row["status_map"] or "{}")
             team.system_instructions = row["system_instructions"] or ""
             team._cached_depth = None
@@ -207,7 +207,7 @@ class RestoreHydrationMixin:
             state.get("memory_references", []),
         )
         manager._migration.restore(state["migration_requests"])
-        manager._governance.restore(state["governance_rounds"], interrupted=False)
+        manager._governance.restore(state["governance_cases"], interrupted=False)
         for agent in manager._agents_by_id.values():
             agent.message_history = [
                 dict(event.payload)

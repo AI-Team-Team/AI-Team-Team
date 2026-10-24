@@ -11,18 +11,18 @@ from ._support import BackgroundTestCase
 class InvocationResourceBoundaryTests(BackgroundTestCase):
     async def test_source_free_control_preserves_nested_institutional_tool_execution(self):
         client = ScriptedModelClient(ModelStep(call("write_private_file", {
-            "path": "notes.txt", "content": "NESTED_PERSONAL_ARTIFACT"})), ModelStep("Final Answer: Written."))
+            "path": "notes.txt", "content": "NESTED_PERSONAL_ARTIFACT"})), ModelStep("Final Answer: Written."), ModelStep(idle()))
         self.manager.register_llm_client("nested", client)
         other = Agent("Nested", "Researcher", client)
         self.manager.register_agent(other)
-        team = self.manager.bootstrap_agent_team(self.root, existing_members=[other],
+        team = self.manager.bootstrap_agent_team(self.root, parent=self.root, existing_members=[other],
             member_configs={f"Helper{i}": {"model": "fixture"} for i in range(2)})
         observed = []
 
         async def coordinate() -> str:
             session = self.manager._activity.current.get()
             job = self.manager._executions.resource_job.get()
-            answer = await team.execute_reasoning_step(other, "Write your own artifact.", "Use the requested tool.", manager=self.manager)
+            answer = (await self.manager.execute_agent_interaction(other, "Write your own artifact.", team=team)).answer
             observed.append((self.manager._activity.current.get() is session,
                 self.manager._executions.resource_job.get() is job))
             return answer
@@ -32,10 +32,11 @@ class InvocationResourceBoundaryTests(BackgroundTestCase):
         self.steps(call("coordinate"), idle())
         admitted = await self.manager.activate_agent(self.root.agent_id)
         await self.wait(admitted)
+        await self.settle()
         library = self.manager.libraries[other.private_doc_library_id]
         self.assertEqual(library.read_text("notes.txt"), "NESTED_PERSONAL_ARTIFACT")
         self.assertEqual(observed, [(True, True)])
-        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(len(client.requests), 3)
         self.assertFalse(self.manager._agent_wait_edge_counts)
 
     async def test_shared_reservation_cannot_enter_a_direct_model_invocation(self):

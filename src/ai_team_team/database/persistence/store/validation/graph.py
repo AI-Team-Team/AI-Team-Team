@@ -12,19 +12,23 @@ from ai_team_team.database.models import ACTIVITY_TABLES, Base
 from ai_team_team.database.persistence.records import valid_request_outcome
 from .chat_operations import validate_chat_operations
 from .executions import validate_executions
+from .health import validate_health
+from .institutions import validate_institutions
 
 
 SOURCE_COLUMNS = {
-    "agents": ("agent_id",),
+    "agents": ("agent_id", "lifecycle_state"),
     "libraries": ("lib_id", "library_kind", "owner_team_id", "owner_agent_id"),
-    "teams": ("team_id", "lifecycle_state", "parent_team_id", "parent_agent_id"),
+    "teams": ("team_id", "lifecycle_state", "parent_team_id", "parent_agent_id", "position_revision"),
     "team_members": ("team_id", "agent_id", "interval_id"),
     "agent_messages": ("agent_id", "invocation_id", "source_execution_id", "source_chat_message_id"),
     "agent_memory_segments": ("segment_id", "agent_id", "invocation_id"),
     "agent_memory_cards": ("agent_id", "invocation_id", "segment_id"),
     "agent_inbox": ("message_id", "agent_id"),
-    "system_memory_events": ("event_id", "agent_id"),
-    "governance_cases": ("case_id", "principal_agent_id", "principal_team_id"),
+    "system_memory_events": ("event_id", "agent_id", "event_type", "payload"),
+    "governance_cases": ("case_id", "principal_agent_id", "principal_team_id", "data"),
+    "governance_ballots": ("ballot_id", "case_id", "voter_agent_id", "choice", "created_at"),
+    "migration_requests": ("request_id", "data"),
 }
 
 
@@ -361,6 +365,8 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
     for row in rows["audit_execution_evidence"]:
         require(row["runtime_generation"] == get("audit_runs", row["audit_id"])["runtime_generation"], "audit execution generation mismatch")
         require(row["status"] not in {"completed", "failed", "cancelled"} or row["outcome_unconfirmed"] == 0, "audit terminal outcome cannot be uncertain")
+    validate_health(rows, sources, get, source, require)
+    validate_institutions(rows, sources, get, source, require, allow_unreferenced_sources=partial_memberships)
     for row in rows["publication_manifests"]:
         require((row["status"] == "prepared") == (row["resolved_at"] is None), "publication decision timestamp mismatch")
         require(type(row["staged_files"]) is list and all(type(entry) is dict for entry in row["staged_files"]), "publication staging evidence type")

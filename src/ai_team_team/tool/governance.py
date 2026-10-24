@@ -31,18 +31,18 @@ def build_governance_tools(manager: Any) -> Dict[str, Tool]:
             raise ToolArgumentError("The personal email reference is invalid.") from exc
 
     async def submit_governance_choice(
-        round_id: str, choice: Union[BooleanGovernanceChoice, ModelGovernanceChoice]
+        case_id: str, choice: Union[BooleanGovernanceChoice, ModelGovernanceChoice]
     ):
-        """Explicitly submits your immutable choice for one round, independently of email read state."""
+        """Explicitly submits your immutable choice for one case, independently of email read state."""
         try:
             return await manager.submit_governance_choice(
-                round_id, choice.model_dump(mode="json"), actor=actor()
+                case_id, choice.model_dump(mode="json"), actor=actor()
             )
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
 
     async def list_governance_requests(pending_only: bool = True) -> str:
-        """Lists your own governance rounds, including unanswered requests whose emails are already read."""
+        """Lists your own governance cases, including unanswered requests whose emails are already read."""
         return json.dumps(
             manager.list_governance_requests(actor=actor(), pending_only=pending_only),
             sort_keys=True,

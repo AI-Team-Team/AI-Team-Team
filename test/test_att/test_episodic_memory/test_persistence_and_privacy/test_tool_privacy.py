@@ -1,3 +1,4 @@
+from test.personal_activity import interact_and_idle
 import os
 import sqlite3
 from copy import deepcopy
@@ -34,12 +35,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
             "summary": "A private file operation completed without copied body text.",
             "tags": ["private-work"],
         }
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Store a private note.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Store a private note.", team=self.team)
         await self.manager.flush_memory_indexing()
         self.assertNotIn(secret, repr(self.manager._memory.snapshot()))
         self.assertNotIn(secret, repr(self.agent.messages))
@@ -71,7 +67,9 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
                         require_json=True,
                         **kwargs,
                     )
-                return self.native_responses.pop(0)
+                if self.native_responses:
+                    return self.native_responses.pop(0)
+                return LLMResponse(tool_calls=[ToolCall(call_id="native-idle", name="set_activity_intent", arguments={"intent": {"kind": "idle"}})])
 
             def supports_native_tool_calling(self):
                 return True
@@ -80,7 +78,10 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
         self.manager.register_llm_client("native-private", client)
         agent = Agent("NativePrivate", "Researcher", client)
         self.manager.register_agent(agent)
-        self.team.members.append(agent)
+        self.team = self.manager.bootstrap_agent_team(
+            self.manager.root_ai, existing_members=[agent],
+            member_configs={"NativeHelperA": {"model": "memory-model"}, "NativeHelperB": {"model": "memory-model"}},
+        )
         agent_token = self.manager._active_tool_agent.set(agent)
         team_token = self.manager._active_team.set(self.team)
         try:
@@ -90,12 +91,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
             self.manager._active_tool_agent.reset(agent_token)
         self.manager.config.tool_calling_mode = "native"
 
-        result = await self.team.execute_reasoning_step_detailed(
-            agent,
-            "Read the private note.",
-            "System.",
-            manager=self.manager,
-        )
+        result = await interact_and_idle(self.manager, agent, "Read the private note.", team=self.team)
         await self.manager.flush_memory_indexing()
 
         self.assertEqual(result.answer, secret)
@@ -118,17 +114,12 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
             "Action: metadata_tool()",
             "Final Answer: metadata tool completed",
         ]
-        metadata_result = await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Run the metadata-only tool.",
-            "System.",
-            manager=self.manager,
-        )
+        metadata_result = await interact_and_idle(self.manager, self.agent, "Run the metadata-only tool.", team=self.team)
         await self.manager.flush_memory_indexing()
         metadata_segment = next(
             item
             for item in self.manager._memory.segments.values()
-            if item.turn_id == metadata_result.turn_id
+            if item.invocation_id == metadata_result.invocation_id
         )
         self.assertNotIn(metadata_only_body, metadata_segment.recall_content)
 
@@ -142,17 +133,12 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
             "Action: captured_tool()",
             "Final Answer: captured tool completed",
         ]
-        captured_result = await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Run the explicitly captured tool.",
-            "System.",
-            manager=self.manager,
-        )
+        captured_result = await interact_and_idle(self.manager, self.agent, "Run the explicitly captured tool.", team=self.team)
         await self.manager.flush_memory_indexing()
         captured_segment = next(
             item
             for item in self.manager._memory.segments.values()
-            if item.turn_id == captured_result.turn_id
+            if item.invocation_id == captured_result.invocation_id
         )
         self.assertIn(captured_body, captured_segment.recall_content)
 
@@ -185,7 +171,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
 
         self.client.generate = generate
         self.manager.config.enable_memory_compression = True
-        self.manager.config.max_memory_turns = 2
+        self.manager.config.working_context_message_limit = 2
 
         def metadata_lookup():
             return marker
@@ -199,23 +185,13 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
             "Action: metadata_lookup()",
             "Final Answer: lookup completed",
         ]
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Look up the record.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Look up the record.", team=self.team)
         for prompt in ("Continue with another task.", "Continue again."):
-            await self.team.execute_reasoning_step_detailed(
-                self.agent,
-                prompt,
-                "System.",
-                manager=self.manager,
-            )
+            await interact_and_idle(self.manager, self.agent, prompt, team=self.team)
         await self.manager.flush_memory_indexing()
 
-        self.assertTrue(summary_inputs)
-        self.assertTrue(any(marker in item for item in summary_inputs))
+        self.assertFalse(summary_inputs)
+        self.assertTrue(any("Working Context was compacted" in message.get("content", "") for message in self.agent.messages))
         self.assertFalse(
             any(
                 marker in str(event.payload)

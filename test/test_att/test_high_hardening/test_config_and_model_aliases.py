@@ -50,7 +50,7 @@ def _write_and_hold(db_path, workspace, ready, release):
             persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("process-model", client)
-        team = manager.create_agent_team(manager.root_ai)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
         await manager.save_state()
         ready.put(team.team_id)
         release.wait(10)
@@ -66,48 +66,27 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_numeric_config_validation_applies_to_mutation(self):
-        positive_fields = {
-            "subagent_discussion_rounds",
-            "react_max_steps",
-            "max_memory_turns",
-            "inbox_summarize_threshold_chars",
-            "emergency_discussion_rounds",
-            "max_tool_rounds",
-        }
-        for field in positive_fields:
-            with self.subTest(field=field):
-                with self.assertRaises(ValueError):
-                    ATTConfig(**{field: 0})
-
-        config = ATTConfig(
-            max_migrations_per_team_discussion=0,
-            llm_max_retries=0,
-            max_tool_argument_retries=0,
-            max_tool_execution_retries=0,
-            llm_retry_backoff_factor=0,
-            model_token_limits={"disabled": 0},
-        )
+        for field in ("working_context_message_limit", "max_delegation_depth", "parent_failover_timeout_seconds"):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                ATTConfig(**{field: 0})
+        config = ATTConfig(max_tool_execution_retries=0, tool_execution_retry_backoff_factor=0,
+                           model_token_limits={"disabled": 0}, activity={"llm": {"max_retries": 0, "backoff_base_seconds": 0}})
         with self.assertRaises(ValueError):
-            config.react_max_steps = 0
+            config.working_context_message_limit = 0
         with self.assertRaises(ValueError):
             config.model_token_limits["bad"] = -1
         with self.assertRaises(ValueError):
             config.model_max_output_tokens.update({"bad": 0})
         self.assertFalse(hasattr(config, "strict_state_persistence"))
+
     async def test_runtime_execution_scales_are_validated(self):
-        manager = ATTManager(
-            Agent("Root", "Architect", self.client),
-            ATTConfig(workspace_root=self.tmpdir),
-            persistence_mode="volatile",
-        )
-        team = manager.create_agent_team(manager.root_ai)
-        with self.assertRaisesRegex(ValueError, "max_steps"):
-            await team.execute_reasoning_step(
-                team.members[0], "prompt", "system", max_steps=0
-            )
-        with self.assertRaisesRegex(ValueError, "rounds"):
-            await manager.execute_team_discussion(team, "prompt", rounds=0)
-        await manager.close()
+        config = ATTConfig(workspace_root=self.tmpdir)
+        for field in ("model_requests_per_invocation", "tool_batches_per_invocation", "notification_frame_limit"):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                setattr(config.activity, field, 0)
+        self.assertFalse(hasattr(config, "subagent_discussion_rounds"))
+        self.assertFalse(hasattr(config, "turn_failure_policy"))
+
     async def test_save_lists_every_agent_without_stable_alias(self):
         root_client = EchoClient()
         manager = ATTManager(
@@ -115,7 +94,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=self.tmpdir),
             persistence_mode="volatile",
         )
-        team = manager.create_agent_team(manager.root_ai)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
         team.members[0].llm_client = EchoClient()
         path = os.path.join(self.tmpdir, "aliases.db")
         with self.assertRaisesRegex(ValueError, "Root") as raised:

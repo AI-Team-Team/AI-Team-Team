@@ -29,6 +29,8 @@ class ControlMixin:
         def set_activity_intent(intent: ActivityIntent):
             """Choose idle or finite sleep; ordinary answers otherwise continue activity."""
             current()
+            if session.audit_profile is not None and intent.kind != "idle":
+                raise ToolPermissionError("A bounded audit may choose idle but cannot sleep.")
             if isinstance(intent, SleepIntent):
                 config = self.manager.config.activity
                 try:
@@ -78,7 +80,7 @@ class ControlMixin:
             required_scope="personal",
             mutation_safety="managed_lease",
         )
-        return {
+        tools = {
             name: Tool(name=name, func=func, execution_contract=contract,
                        resource_resolver=lambda scope, arguments: ())
             for name, func in (
@@ -86,3 +88,6 @@ class ControlMixin:
                 ("set_operation_scope", set_operation_scope),
             )
         }
+        if session.audit_profile is not None:
+            tools.pop("set_operation_scope")
+        return tools

@@ -34,9 +34,8 @@ class MemoryService(
         self.segments: Dict[str, AgentMemorySegment] = {}
         self.cards: Dict[str, AgentMemoryCard] = {}
         self.references: Dict[str, RetainedMemoryReference] = {}
-        self._event_ids_by_turn: Dict[str, List[str]] = {}
-        self._card_id_by_turn: Dict[str, str] = {}
-        self._recalled_by_turn: Dict[str, set[str]] = {}
+        self._card_id_by_invocation: Dict[str, str] = {}
+        self._recalled_by_invocation: Dict[str, set[str]] = {}
         self._sequence = 0
         self._lock = threading.RLock()
         self._queue: Optional[asyncio.Queue[str]] = None

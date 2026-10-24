@@ -80,6 +80,7 @@ class DiscoveryService:
                     if agent is not None
                     and agent.lifecycle_state == "active"
                     and agent.agent_id not in audit_ids
+                    and not self.manager._topology.is_agent_pending(agent.agent_id)
                 ]
                 if entity_type != "agent_team"
                 else []

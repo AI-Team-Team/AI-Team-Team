@@ -13,10 +13,13 @@ from ._support import invocation_graph, make_manager, model_request, record
 def audit_records(owner):
     return (
         record("audit_runs", audit_id="audit", subject_agent_id=owner, temporary_team_id="audit-team",
-               template={"name": "Health"}, electorate=["scoped-auditor"], runtime_generation=1,
+               template={"preset": "supervisor_audit", "subject": {"kind": "agent", "subject_id": owner},
+                   "fingerprint": "fixture", "operational_mode": "framework", "quota_policy": "shared_model_ledger",
+                   "evidence": {"kind": "host", "facts": [], "observation_ids": []}},
+               electorate=["scoped-auditor"], runtime_generation=1,
                status="running", created_at=1.0, deadline=121.0, token_budget=1000),
         record("audit_participants", audit_id="audit", scoped_agent_id="scoped-auditor",
-               identity_snapshot={"name": "Auditor"}, model_alias="fixture", position=0),
+               identity_snapshot={"agent_id": "scoped-auditor", "name": "Auditor"}, model_alias="fixture", position=0),
     )
 
 

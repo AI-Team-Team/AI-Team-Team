@@ -1,4 +1,4 @@
-"""Durable personal-mail governance rounds and explicit choices."""
+"""Durable personal-mail governance cases and explicit choices."""
 
 import time
 import uuid
@@ -26,27 +26,27 @@ class GovernanceBallot(BaseModel):
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True, allow_inf_nan=False)
     ballot_id: str = Field(default_factory=lambda: f"GB-{uuid.uuid4().hex}")
-    round_id: str
+    case_id: str
     voter_agent_id: str
     choice: Dict[str, Any]
     created_at: float = Field(default_factory=time.time)
 
 
-class GovernanceRound(BaseModel):
+class GovernanceCase(BaseModel):
     """One frozen electorate and schema for an exact governance activity."""
 
     model_config = ConfigDict(
         strict=True, extra="forbid", validate_assignment=True, allow_inf_nan=False
     )
-    round_id: str = Field(default_factory=lambda: f"GR-{uuid.uuid4().hex}")
+    case_id: str = Field(default_factory=lambda: f"GC-{uuid.uuid4().hex}")
     business_kind: Literal["communication", "migration", "failover"]
     business_id: str
     principal: ApprovalPrincipal
-    round_number: int = Field(ge=1)
+    electorate_revision: int = Field(ge=1)
     choice_kind: Literal["boolean", "model"]
     voter_agent_ids: List[str] = Field(min_length=1)
+    electorate_bindings: Dict[str, str] = Field(default_factory=dict)
     prompt: str
-    transcript: str = ""
     candidates: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     status: Literal[
@@ -62,8 +62,8 @@ class GovernanceRound(BaseModel):
 class GovernanceSubmissionResult(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
     status: Literal["SUBMITTED", "ALREADY_SUBMITTED", "CLOSED"]
-    round_id: str
-    round_status: str
+    case_id: str
+    case_status: str
     reason: str = ""
     choice: Optional[Dict[str, Any]] = None
 
@@ -74,8 +74,14 @@ class MigrationRequest(BaseModel):
     )
     request_id: str = Field(default_factory=lambda: f"MIG-{uuid.uuid4().hex}")
     team_id: str
-    target_parent_id: str
+    target_parent_id: Optional[str] = None
+    target_parent_agent_id: Optional[str] = None
     original_parent_id: Optional[str]
+    original_parent_agent_id: Optional[str] = None
+    operation: Literal["migration", "reattachment", "voluntary_detachment", "parent_loss"] = "migration"
+    acceptance_id: Optional[str] = None
+    detachment_kind: Optional[Literal["voluntary_departure", "parent_loss"]] = None
+    path_evidence: Dict[str, Any] = Field(default_factory=dict)
     policy_name: Literal["permissive", "ancestor_approval", "lineage_path"]
     principals: List[ApprovalPrincipal]
     rationale: str

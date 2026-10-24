@@ -2,18 +2,18 @@
 
 ```mermaid
 flowchart TD
-    Turn["Registered Agent business turn"] --> Journal["Append sanitized events to immutable Journal"]
-    Turn --> Terminal{"Terminal status?"}
-    Terminal -->|completed or incomplete| Enabled{"episodic_memory.enabled?"}
-    Terminal -->|cancelled or framework failure| Stop["Journal only; no segment or card"]
+    Turn["Committed personal invocation boundary"] --> Journal["Append sanitized events to immutable Journal"]
+    Turn --> Terminal{"Boundary accepted?"}
+    Terminal -->|yes, eligible events| Enabled{"episodic_memory.enabled?"}
+    Terminal -->|interrupted or framework failure| Stop["Journal only; no segment or card"]
     Enabled -->|no| Stop
-    Enabled -->|yes| Segment["Render deterministic Agent-turn segment and SHA-256 digest"]
+    Enabled -->|yes| Segment["Render deterministic personal invocation segment and SHA-256 digest"]
     Segment --> Queue["Bounded background index queue"]
     Queue --> AgentLock["Acquire the same Agent invocation lock"]
     AgentLock --> Labels["Isolated strict JSON call for title, summary, and tags"]
     Labels -->|valid| Card["Persist Agent-owned Memory Card and FTS5 row"]
     Labels -->|temporary failure| Retry["Return segment to pending with bounded retry"]
-    Labels -->|retry exhausted| Failed["Mark segment failed without changing business result"]
+    Labels -->|retry exhausted| Failed["Mark segment failed without changing personal activity outcome"]
     Card --> Search["Owner-only metadata search or browse"]
     Search --> Recall["Token-bounded recall_content observation marked as historical data"]
     Recall --> Complete{"Requested range complete?"}

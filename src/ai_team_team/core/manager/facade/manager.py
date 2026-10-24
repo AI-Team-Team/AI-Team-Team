@@ -17,10 +17,8 @@ from ...token_budget import TokenBudgetLedger
 from ..agents import AgentRegistry
 from ..activity import PersonalActivityService
 from ..executions import ExecutionService
-from ..alerts import AlertService
 from ..callbacks import CallbackDispatcher
 from ..communication_validation import CommunicationStateValidator
-from ..discussions import DiscussionCoordinator
 from ..discovery import DiscoveryService
 from ..durable_records import DurableRecordService
 from ..failover import FailoverService
@@ -29,8 +27,8 @@ from ..governance import GovernanceService
 from ..inbox import PersonalInboxService
 from ..libraries import LibraryService
 from ..lifecycle import LifecycleService
-from ..membership import MembershipService
 from ..messaging import MessagingService
+from ..memberships import MembershipService
 from ..migration import MigrationService
 from ..memory import MemoryService
 from ..restore import RestoreService
@@ -45,10 +43,10 @@ from ..topology import TopologyService
 from .agents_api import AgentAPI
 from .activity_api import ActivityAPI
 from .executions_api import ExecutionAPI
-from .discussions_api import DiscussionAPI
 from .discovery_api import DiscoveryAPI
 from .formations_api import FormationAPI
 from .governance_api import GovernanceAPI
+from .health_api import HealthAPI
 from .libraries_api import LibraryAPI
 from .memory_api import MemoryAPI
 from .messaging_api import MessagingAPI
@@ -63,10 +61,10 @@ class ATTManager(
     RuntimeAPI,
     TeamAPI,
     LibraryAPI,
-    DiscussionAPI,
     MemoryAPI,
     FormationAPI,
     GovernanceAPI,
+    HealthAPI,
     DiscoveryAPI,
     ActivityAPI,
     MessagingAPI,
@@ -118,7 +116,6 @@ class ATTManager(
         self._library_files: Dict[str, Dict[str, str]] = {}
         self._library_service = LibraryService(self)
         self._lifecycle = LifecycleService(self)
-        self._discussion = DiscussionCoordinator(self)
         self._failover = FailoverService(self)
         self._membership = MembershipService(self)
         self._migration = MigrationService(self)
@@ -164,17 +161,8 @@ class ATTManager(
         self._active_team: contextvars.ContextVar[Optional[AgentTeam]] = contextvars.ContextVar(
             f"att_active_team_{id(self)}", default=None
         )
-        self._active_discussion_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-            f"att_active_discussion_{id(self)}", default=None
-        )
         self._active_tool_invocation_id: contextvars.ContextVar[Optional[str]] = (
             contextvars.ContextVar(f"att_active_tool_invocation_{id(self)}", default=None)
-        )
-        self._active_agent_turn_id: contextvars.ContextVar[Optional[str]] = (
-            contextvars.ContextVar(f"att_active_agent_turn_{id(self)}", default=None)
-        )
-        self._active_round_number: contextvars.ContextVar[Optional[int]] = (
-            contextvars.ContextVar(f"att_active_round_{id(self)}", default=None)
         )
         self._agent_invocation_chain: contextvars.ContextVar[
             Tuple[Tuple[str, str], ...]
@@ -187,10 +175,7 @@ class ATTManager(
             contextvars.ContextVar(f"att_memory_internal_{id(self)}", default=False)
         )
         self._memory = MemoryService(self)
-        self._alerts = AlertService(self)
-        self._unknown_audit_wakeups = self._alerts.active_wakeups
-        self._emergency_tasks = self._alerts.emergency_tasks
-        self.deferred_emergency_tasks = self._alerts.deferred_emergency_tasks
+        self._institutional_tasks: set[asyncio.Task[Any]] = set()
         self._llm_tasks: set[asyncio.Task[Any]] = set()
         self._closing = False
         self._closed = False
@@ -201,11 +186,6 @@ class ATTManager(
         self.tool_auditors: Dict[str, Callable[..., Tuple[bool, str]]] = {}
 
         # Event callbacks
-        self.on_status_change: Optional[Callable[[str, str], None]] = None
-        self.on_activity_added: Optional[Callable[[str, str, str], None]] = None
-        self.on_log_append: Optional[Callable[[str, str, str, Optional[int]], None]] = None
-        self.on_team_migration: Optional[Callable[[str, Optional[str], str], None]] = None
-        self.on_emergency_escalation: Optional[Callable[[str, str, str], None]] = None
         self.on_system_event: Optional[Callable[[str, Dict[str, Any]], None]] = None
 
         # Base preset configurations

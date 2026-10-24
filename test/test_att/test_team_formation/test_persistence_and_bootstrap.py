@@ -8,6 +8,9 @@ import sqlite3
 import tempfile
 import unittest
 
+from test.governance_client import approve_pending_business, settle_governance_activity
+from test.personal_activity import probe_in_activity
+
 from ai_team_team import (
     ATTConfig,
     ATTManager,
@@ -19,6 +22,8 @@ from ai_team_team import (
 
 class EchoClient:
     async def generate(self, prompt, require_json=False, **kwargs):
+        if getattr(self, "responses", None):
+            return self.responses.pop(0)
         if require_json:
             return '{"is_healthy":true,"reason":"Synthetic audit."}'
         if "Activity continues by default." in (kwargs.get("system_instruction") or ""):
@@ -54,7 +59,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         self.manager.register_agent(first)
         self.manager.register_agent(second)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"NewMember": {"model": "echo"}},
             existing_members=[first, second],
             late_join_policy="open",
@@ -114,7 +119,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             existing_members=invitees,
             member_configs={},
             roles_and_models={},
@@ -146,7 +151,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"NewMember": {"model": "echo"}},
             existing_members=invitees,
             team_purpose="Initial purpose",
@@ -201,7 +206,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={
                 "NewAnalyst": {"model": "echo"},
                 "NewReviewer": {"model": "echo"},
@@ -236,7 +241,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"NewAnalyst": {"model": "echo"}},
             existing_members=invitees,
         )
@@ -270,7 +275,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"NewMember": {"model": "echo"}},
             existing_members=invitees,
             team_purpose="Initial purpose",
@@ -348,7 +353,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"NewMember": {"model": "echo"}},
             existing_members=invitees,
         )
@@ -390,7 +395,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"NewMember": {"model": "echo"}},
             existing_members=invitees,
             team_purpose="Initial purpose",
@@ -457,7 +462,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             existing_members=invitees,
         )
         await self.manager.save_state()
@@ -494,7 +499,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             existing_members=invitees,
         )
         await self.manager.save_state()
@@ -531,7 +536,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
             member.lifecycle_state,
         )
         team = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"PeerOne": {}, "PeerTwo": {}},
             existing_members=[member],
         )
@@ -564,7 +569,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             existing_members=invitees,
         )
         for invitee in invitees:
@@ -609,7 +614,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             existing_members=invitees,
         )
         for invitee in invitees:
@@ -627,7 +632,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         directories_before = set(os.listdir(managed_root))
         original_commit = self.manager._commit_dirty_state
 
-        async def fail_commit(_dirty):
+        async def fail_commit(_dirty, **_commit_options):
             raise OSError("Injected authoritative formation failure.")
 
         self.manager._commit_dirty_state = fail_commit
@@ -657,7 +662,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             existing_members=invitees,
         )
         for invitee in invitees:
@@ -703,8 +708,8 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
             await restored.close()
 
     async def test_migration_after_formation_does_not_rewrite_formation_provenance(self):
-        original_parent = self.manager.create_agent_team(self.root)
-        target_parent = self.manager.create_agent_team(self.root)
+        original_parent = self.manager.create_agent_team(self.root, parent=self.root)
+        target_parent = self.manager.create_agent_team(self.root, parent=self.root)
         invitees = [
             Agent(f"Migrant{index}", "Researcher", self.client)
             for index in range(3)
@@ -712,7 +717,7 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         for invitee in invitees:
             self.manager.register_agent(invitee)
         request = self.manager.create_agent_team(
-            original_parent,
+            original_parent, parent=original_parent,
             existing_members=invitees,
             initiating_agent=original_parent.members[0],
         )
@@ -735,7 +740,9 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
             target_parent,
             "Move the established AgentTeam.",
         )
-        self.assertEqual(result.status, "EXECUTED", result.reason)
+        self.assertEqual(result.status, "PENDING", result.reason)
+        await approve_pending_business(self.manager, result.request_id)
+        self.assertEqual(self.manager.inspect_migration_request(result.request_id).status, "EXECUTED")
         self.assertIs(formed_team.parent_team, target_parent)
         self.assertEqual(request.parent_team_id, original_parent.team_id)
         await self.manager.save_state()
@@ -756,50 +763,42 @@ class TestFormationPersistenceAndBootstrap(unittest.IsolatedAsyncioTestCase):
         finally:
             await restored.close()
 
-    async def test_self_membership_returns_before_deferred_discussion_needs_the_agent(self):
-        parent = self.manager.create_agent_team(self.root)
+    async def test_self_membership_returns_without_reentering_the_initiator(self):
+        parent = self.manager.create_agent_team(self.root, parent=self.root)
         initiator = parent.members[0]
         request = self.manager.create_agent_team(
-            parent,
+            parent, parent=parent,
             member_configs={"PeerOne": {}, "PeerTwo": {}},
             initiating_agent=initiator,
             initiator_joins=True,
             task="Complete deferred work.",
         )
-        lock_attempted = asyncio.Event()
-        original_acquire = initiator.lock.acquire
+        await self.manager.save_state()
 
-        async def observed_acquire():
-            lock_attempted.set()
-            return await original_acquire()
-
-        async with self.manager.agent_invocation(initiator):
-            initiator.lock.acquire = observed_acquire
-            self.addCleanup(setattr, initiator.lock, "acquire", original_acquire)
-            result = await asyncio.wait_for(
-                self.manager.create_team_from_formation(
-                    request.request_id,
-                    proposal_revision=request.proposal_revision,
-                    actor=initiator,
-                ),
-                timeout=10,
+        async def create_from_current_activity():
+            self.assertTrue(initiator.lock.locked())
+            invocation_id = self.manager._activity.current.get().invocation_id
+            result = await self.manager.create_team_from_formation(
+                request.request_id, proposal_revision=request.proposal_revision, actor=initiator,
             )
             self.assertEqual(result.status, "CREATED")
             self.assertIn(initiator, self.manager.teams[result.team_id].members)
-            await asyncio.wait_for(lock_attempted.wait(), timeout=10)
-            self.assertTrue(self.manager._formations.tasks)
-            self.assertTrue(all(not task.done() for task in self.manager._formations.tasks))
+            self.assertEqual(self.manager._activity.current.get().invocation_id, invocation_id)
+            return result
+
+        result = await probe_in_activity(self.manager, initiator, create_from_current_activity, team=parent)
         if self.manager._formations.tasks:
-            await asyncio.wait_for(
-                asyncio.gather(*tuple(self.manager._formations.tasks)),
-                timeout=60,
-            )
+            await asyncio.gather(*tuple(self.manager._formations.tasks))
+        await settle_governance_activity(self.manager)
+        notices = [mail for mail in initiator.agent_inbox
+            if mail["message_type"] == "team_initial_instruction" and mail["payload"]["team_id"] == result.team_id]
+        self.assertEqual(len(notices), 1)
 
     async def test_failed_restore_rolls_back_the_original_agent_inbox(self):
         invitee = Agent("PersistedInvitee", "Researcher", self.client)
         self.manager.register_agent(invitee)
         self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"PeerOne": {}, "PeerTwo": {}},
             existing_members=[invitee],
         )

@@ -5,7 +5,8 @@ import tempfile
 import unittest
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
+from test.personal_activity import interact_and_idle
 
 from ai_team_team import (
     ATTConfig,
@@ -21,7 +22,7 @@ class EchoClient:
     async def generate(self, **kwargs):
         if kwargs.get("require_json"):
             return json.dumps({"is_healthy": True, "reason": "Synthetic audit."})
-        return "Final Answer: done"
+        return "Action: set_activity_intent(intent={'kind': 'idle'})"
 
     def supports_native_tool_calling(self):
         return False
@@ -54,11 +55,11 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
         self.client = EchoClient()
         self.manager = ATTManager(
             Agent("Root", "Architect", self.client),
-            ATTConfig(workspace_root=self.tmpdir, subagent_discussion_rounds=1),
+            ATTConfig(workspace_root=self.tmpdir),
             persistence_mode="volatile",
         )
         self.manager.register_llm_client("echo", self.client)
-        self.parent = self.manager.create_agent_team(self.manager.root_ai)
+        self.parent = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
         self.caller = self.parent.members[0]
         self.ancestor = self.parent.members[1]
         self.third = self.parent.members[2]
@@ -89,8 +90,8 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
         async with self.manager.agent_invocation(self.caller):
             result = await self._dispatch_with_existing(self.caller.agent_id)
 
-        self.assertIs(result.status, ToolResultStatus.BUSINESS_ERROR)
-        self.assertEqual(result.error_kind, "business_error")
+        self.assertIs(result.status, ToolResultStatus.INVALID_ARGUMENTS)
+        self.assertEqual(result.error_kind, "argument_validation")
         self.assertIn("cannot invite itself", result.content)
         self.assertEqual(set(self.manager.teams), teams_before)
         self.assertEqual(set(self.manager.libraries), libraries_before)
@@ -108,7 +109,7 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertIs(result.status, ToolResultStatus.SUCCESS)
-        self.assertIn('"status":"PENDING_RESPONSES"', result.content)
+        self.assertEqual(json.loads(result.content)["status"], "PENDING_RESPONSES")
         self.assertEqual(set(self.manager.teams), teams_before)
         self.assertEqual(set(self.manager.libraries), libraries_before)
         self.assertEqual(set(self.manager._agents_by_id), agents_before)
@@ -136,19 +137,12 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
     async def test_idle_agent_receives_an_asynchronous_invitation(self):
         peer = Agent("IdlePeer", "Reviewer", self.client)
         self.manager.register_agent(peer)
-        discussion = AsyncMock(return_value="completed")
-
         async with self.manager.agent_invocation(self.caller):
-            with patch.object(
-                self.manager,
-                "execute_team_discussion",
-                discussion,
-            ):
-                result = await self._dispatch_with_existing(peer.agent_id)
+            result = await self._dispatch_with_existing(peer.agent_id)
 
         self.assertIs(result.status, ToolResultStatus.SUCCESS)
-        self.assertIn('"status":"PENDING_RESPONSES"', result.content)
-        discussion.assert_not_awaited()
+        self.assertEqual(json.loads(result.content)["status"], "PENDING_RESPONSES")
+        self.assertFalse(self.manager._agent_wait_edge_counts)
         self.assertTrue(
             any(
                 message.message_type == "team_formation_invitation"
@@ -366,7 +360,7 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
         alice_client.target_agent_id = bob.agent_id
         bob_client.target_agent_id = alice.agent_id
         team = self.manager.bootstrap_agent_team(
-            self.manager.root_ai,
+            self.manager.root_ai, parent=self.manager.root_ai,
             existing_members=[alice, bob],
             member_configs={"Observer": {}},
         )
@@ -376,17 +370,11 @@ class TestDelegationDependencies(unittest.IsolatedAsyncioTestCase):
         managed_root = Path(self.tmpdir) / ".att_doc_libs"
         directories_before = {path.name for path in managed_root.iterdir()}
 
-        result = await asyncio.wait_for(
-            self.manager.execute_team_discussion_detailed(
-                team,
-                "Delegate a review and report back.",
-                rounds=1,
-                skip_audit=True,
-            ),
-            timeout=5,
-        )
+        await asyncio.wait_for(asyncio.gather(
+            interact_and_idle(self.manager, alice, "Delegate a review.", team=team),
+            interact_and_idle(self.manager, bob, "Delegate a review.", team=team),
+        ), timeout=10)
 
-        self.assertEqual(result.status.value, "completed")
         self.assertEqual(len(team.child_teams), 0)
         self.assertEqual(set(self.manager.teams), teams_before)
         self.assertEqual(set(self.manager._agents_by_id), agents_before)

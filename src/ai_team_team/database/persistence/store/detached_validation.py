@@ -77,8 +77,10 @@ def validate_detached_records(state, *, partial=False):
                 for mail in inbox
             },
             "governance_cases": {
-                row["round_id"]: row for row in state.get("governance_rounds", ())
+                row["case_id"]: row for row in state.get("governance_cases", ())
             },
+            "governance_ballots": {ballot["ballot_id"]: ballot for row in state.get("governance_cases", ()) for ballot in row["ballots"]},
+            "migration_requests": {row["request_id"]: row for row in state.get("migration_requests", ())},
         }
         for record in records:
             for constraint in ACTIVITY_TABLES[record.table_name].foreign_key_constraints:
@@ -125,6 +127,8 @@ def validate_detached_records(state, *, partial=False):
                             if principal["kind"] == "agent_team"
                             else None,
                         )
+                    if name == "migration_requests":
+                        values["data"] = source
                     if name == "teams":
                         values.update(
                             creator_agent_id=source["creator_id"]

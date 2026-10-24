@@ -90,20 +90,20 @@ class CommunicationTestCase(unittest.IsolatedAsyncioTestCase):
         self.fail(f"No active communication fixture owns request {request_id}.")
 
     def _request_tasks(self, manager, request_id):
-        round_ids = {
-            item.round_id
-            for item in manager._governance.rounds.values()
+        case_ids = {
+            item.case_id
+            for item in manager._governance.cases.values()
             if item.business_kind == "communication" and item.business_id == request_id
         }
         tasks = {}
         for registry in (manager.broker._approval_tasks, manager._governance.tasks):
             for generation, (key, task) in enumerate(registry.history, start=1):
                 if key.startswith(f"{request_id}:") or any(
-                    key == f"resolve:{round_id}" or key.startswith(f"mail:{round_id}:")
-                    for round_id in round_ids
+                    key == f"resolve:{case_id}" or key.startswith(f"mail:{case_id}:")
+                    for case_id in case_ids
                 ):
                     tasks[f"{key}#{generation}"] = task
-        voters = {owner for item in manager._governance.rounds.values() if item.round_id in round_ids
+        voters = {owner for item in manager._governance.cases.values() if item.case_id in case_ids
                   for owner in item.voter_agent_ids}
         for generation, task in enumerate(manager._activity.workers.history, start=1):
             if task.get_name() in {f"att-person-{owner}" for owner in voters}:
@@ -158,12 +158,12 @@ class CommunicationTestCase(unittest.IsolatedAsyncioTestCase):
                 ],
                 "rounds": [
                     {
-                        "round_id": item.round_id,
+                        "case_id": item.case_id,
                         "status": item.status,
                         "votes": len(item.ballots),
                         "voters": len(item.voter_agent_ids),
                     }
-                    for item in manager._governance.rounds.values()
+                    for item in manager._governance.cases.values()
                     if item.business_kind == "communication" and item.business_id == request_id
                 ],
                 "tasks": tasks,

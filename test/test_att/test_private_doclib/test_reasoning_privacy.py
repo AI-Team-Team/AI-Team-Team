@@ -10,6 +10,7 @@ from test.test_att.test_private_doclib._support import (
     os,
     sqlite3,
 )
+from test.personal_activity import interact_and_idle
 
 
 class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
@@ -25,7 +26,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         writer = Agent("ReActWriter", "Writer", client)
         self.manager.register_agent(writer)
         team = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={
                 "PeerC": {"model": "default"},
                 "PeerD": {"model": "default"},
@@ -33,17 +34,11 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
             existing_members=[writer],
         )
         callbacks = []
-        self.manager.on_activity_added = lambda *args: callbacks.append(args)
-        self.manager.on_log_append = lambda *args: callbacks.append(args)
-        result = await team.execute_reasoning_step(
-            writer,
-            "Save the note.",
-            "Use the private workspace.",
-            max_steps=2,
-            manager=self.manager,
-        )
+        self.manager.on_system_event = lambda *args: callbacks.append(args)
+        self.manager.register_llm_client("writer", client)
+        result = await interact_and_idle(self.manager, writer, "Save the note.", team=team)
         await self.manager.flush_callbacks()
-        self.assertEqual(result, "note saved")
+        self.assertEqual(result.answer, "note saved")
         self.assertNotIn(secret, repr(callbacks))
         self.assertNotIn(secret, repr(writer.message_history))
         private = self.manager.libraries[writer.private_doc_library_id]
@@ -61,7 +56,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         reader = Agent("ReActReader", "Reader", client)
         self.manager.register_agent(reader)
         team = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={
                 "PeerR1": {"model": "default"},
                 "PeerR2": {"model": "default"},
@@ -72,19 +67,13 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
             "note.txt", secret
         )
         callbacks = []
-        self.manager.on_activity_added = lambda *args: callbacks.append(args)
-        self.manager.on_log_append = lambda *args: callbacks.append(args)
+        self.manager.on_system_event = lambda *args: callbacks.append(args)
+        self.manager.register_llm_client("reader", client)
 
-        result = await team.execute_reasoning_step(
-            reader,
-            "Consult your private note.",
-            "Use the private workspace only when needed.",
-            max_steps=2,
-            manager=self.manager,
-        )
+        result = await interact_and_idle(self.manager, reader, "Consult your private note.", team=team)
         await self.manager.flush_callbacks()
 
-        self.assertEqual(result, secret)
+        self.assertEqual(result.answer, secret)
         self.assertIn(secret, client.prompt_snapshots[1])
         self.assertNotIn(secret, repr(callbacks))
         self.assertNotIn(secret, repr(reader.message_history))

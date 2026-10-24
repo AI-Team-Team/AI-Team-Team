@@ -19,7 +19,7 @@ class TeamLifecycleMixin:
         async with manager._runtime_gate:
             if manager.teams.get(team.team_id) is not team or team.team_kind != "supervisory":
                 raise ValueError("Only a registered supervisory AgentTeam can be dissolved.")
-            if team.is_running or team.discussion_lock.locked() or team.child_teams:
+            if team.child_teams or any(member.agent_id in manager._activity.sessions for member in team.members):
                 raise RuntimeError("The supervisory AgentTeam is still active.")
             if team.message_inbox or team.proposals:
                 raise RuntimeError("The supervisory AgentTeam has unresolved business state.")

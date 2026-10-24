@@ -16,7 +16,7 @@ from ai_team_team import (
     ExecutionConfig,
     FileReadConfig,
     PermissiveCommunicationConfig,
-    TurnFailurePolicyConfig,
+    HealthSupervisionConfig,
 )
 
 config = ATTConfig(
@@ -25,7 +25,7 @@ config = ATTConfig(
     conversations=ConversationConfig(),
     episodic_memory=EpisodicMemoryConfig(enabled=False),
     executions=ExecutionConfig(),
-    turn_failure_policy=TurnFailurePolicyConfig(),
+    health=HealthSupervisionConfig(),
     model_tokenizer_configs={
         "analysis": "bert-base-uncased",
         "default": "/absolute/path/to/tokenizer.json",
@@ -40,30 +40,19 @@ config = ATTConfig(
 | `enable_dynamic_delegation` | `bool` | `True` | Exposes dynamic child-AgentTeam delegation when the current depth also permits it. |
 | `max_delegation_depth` | `int` | `2` | Maximum recursive AgentTeam depth; must be at least `1`. |
 | `min_subagent_team_size` | `int` | `3` | Minimum final member count for a dynamically formed AgentTeam; must be at least `3`. |
-| `subagent_discussion_rounds` | `int` | `2` | Discussion rounds used for dynamic child-AgentTeam work; must be positive. |
-| `react_max_steps` | `int` | `5` | Maximum Text ReAct reasoning steps per Agent turn; must be positive. |
-| `inbox_summarize_threshold_chars` | `int` | `1500` | Character threshold above which unread AgentTeam inbox material is summarized; must be positive. |
 | `model_registry` | `Dict[str, str]` | `{}` | Persisted, validated host metadata mapping with non-empty string keys and values; register operational model metadata and client bindings through `ATTManager.register_model()` and `register_llm_client()`. |
-| `max_migrations_per_team_discussion` | `int` | `1` | Maximum successful topology migrations during one AgentTeam discussion; `0` disables migration for that session. |
 | `enable_membership_voting` | `bool` | `False` | Enables optional membership proposal voting. |
-| `llm_max_retries` | `int` | `3` | Additional LLM attempts after the initial request; `0` performs one attempt without retrying. |
-| `llm_retry_backoff_factor` | `float` | `1.5` | Initial exponential delay for retryable provider failures; `0` retries immediately. |
 | `enable_memory_compression` | `bool` | `True` | Enables bounded high-fidelity message windows and compression of older conversation material. |
 | `workspace_root` | `str` | `"."` | Non-empty host workspace used as the root for ATT-managed DocLib storage; `~` is expanded. |
-| `max_memory_turns` | `int` | `20` | Maximum recent high-fidelity messages retained before older material is compressed; must be positive. |
+| `working_context_message_limit` | `int` | `20` | Positive recent-message target for derived context compaction; the sanitized personal Journal remains complete. |
 | `communication` | `CommunicationConfig` | `PermissiveCommunicationConfig()` | Selects the one communication institution followed by every AgentTeam. |
 | `migration_policy` | `Literal` | `"ancestor_approval"` | Migration authorization: `"permissive"`, `"ancestor_approval"`, or `"lineage_path"`. |
-| `enable_emergency_wakeup` | `bool` | `True` | Enables active parent wake-up discussions for high-priority child anomalies. |
-| `emergency_discussion_rounds` | `int` | `1` | Discussion rounds used for emergency wake-ups; must be positive. |
 | `tool_calling_mode` | `Literal` | `"auto"` | Tool strategy: `"auto"`, `"native"`, `"text_react"`, or the `"react"` alias. |
-| `max_tool_rounds` | `int` | `5` | Maximum Native Strategy tool-call rounds in one reasoning step; must be positive. |
-| `max_tool_argument_retries` | `int` | `3` | Model correction opportunities after the first unknown-tool, parse, signature, or schema failure; may be `0`. |
 | `max_tool_execution_retries` | `int` | `2` | Additional execution attempts for eligible typed transient failures; may be `0`. |
 | `tool_execution_retry_policy` | `Literal` | `"never"` | Replay policy: `"never"`, `"retry_safe"`, or `"typed_transient"`. |
 | `tool_execution_retry_backoff_factor` | `float` | `0.5` | Initial exponential delay for eligible execution retries; `0` retries immediately. |
 | `text_tool_schema_mode` | `Literal` | `"compact"` | Text prompt schema rendering: `"compact"`, `"full"`, or `"compact_with_examples"`. |
 | `tool_prompt_modes` | `Dict[str, str]` | `{}` | Per-tool schema rendering overrides using the same three modes. |
-| `turn_failure_policy` | `TurnFailurePolicyConfig` | `tool="isolate", llm="isolate"` | Independently controls whether member-scoped tool and LLM failures isolate that turn or abort the discussion. |
 | `operational_status_decision_mode` | `Literal` | `"framework"` | Runtime-health authority: `"framework"`, `"supervisor"`, or `"framework_then_supervisor"`. |
 | `operational_degraded_escalation_mode` | `Literal` | `"none"` | Degraded runtime alert routing: `"none"`, `"queue"`, or `"wake"`. |
 | `model_token_limits` | `Dict[str, int]` | `{}` | Per-model hard quotas used by the atomic token ledger; values are non-negative and `0` disables that model. |
@@ -72,15 +61,18 @@ config = ATTConfig(
 | `model_tokenizer_configs` | `Dict[str, str]` | `{}` | Maps model aliases to a `tokenizers` pretrained identifier or tokenizer JSON path for prompt accounting and model-facing file reads. |
 | `failover_policy` | `Literal` | `"auto"` | Token-exhaustion behavior: `"auto"`, `"parent"`, or `"none"`. |
 | `parent_failover_timeout_seconds` | `float` | `120.0` | Positive timeout for parent AgentTeam or Root Agent model selection; parent-governed failure does not fall back to auto selection. |
-| `audit_unknown_escalation_mode` | `Literal` | `"wake"` | Routes indeterminate content audits by immediately waking the parent or using `"queue"`. |
+| `audit_unknown_escalation_mode` | `Literal` | `"wake"` | Routes UNKNOWN health attention through protected personal notifications, with `"queue"` retaining attention without forced activation. |
 | `audit_unknown_soft_threshold` | `int` | `100` | Positive soft warning threshold for unique UNKNOWN alerts; alerts are not dropped or expired automatically. |
 | `agent_private_data_policy` | `Literal` | `"archive"` | Default Agent retirement data handling: `"retain"`, `"archive"`, or confirmed `"delete"`. |
-| `formation_deliberation_policy` | `Literal` | `"optional"` | Uses `"optional"` proposal drafting or requires detached creator-AgentTeam deliberation with `"required_when_team_scoped"`. |
 | `file_read` | `FileReadConfig` | `FileReadConfig()` | Controls decoded content-token limits and missing-counter behavior for model-facing team and private file reads. |
 | `episodic_memory` | `EpisodicMemoryConfig` | `EpisodicMemoryConfig()` | Configures the optional Agent-owned episodic-memory catalog, which is disabled by default. |
 | `activity` | `PersonalActivityConfig` | `PersonalActivityConfig()` | Continuing-person scheduling, notification frames, finite sleep, cooldown accounting, and bounded model requests. |
 | `conversations` | `ConversationConfig` | `ConversationConfig()` | Title and preview bounds, withdrawal window, and default personal team/direct detail settings. |
 | `executions` | `ExecutionConfig` | `ExecutionConfig()` | Independent executor capacity, background detachment, bounded stop-hook waiting, and retained-result access. |
+| `health` | `HealthSupervisionConfig` | `HealthSupervisionConfig()` | Typed health-evidence thresholds, rolling observation window, assessment deadline, and optional semantic detection. |
+| `allow_unilateral_detachment` | `bool` | `True` | Allows a team to leave its current parent without that parent's approval, subject to live authority and cooldown. |
+| `enable_migration` | `bool` | `True` | Enables ordinary parent-to-parent position changes separately from voluntary detachment. |
+| `migration_cooldown_downtime` | `Literal` | `"include"` | Counts real offline elapsed time in the ten-minute own-position cooldown; `"exclude"` preserves remaining time instead. |
 
 ### `ExecutionConfig`
 
@@ -120,7 +112,7 @@ Eligible execution faults use `tool_cooldown_seconds=600.0` and `cooldown_downti
 
 Provider earliest-retry instructions can exceed the jitter cap but cannot force a request beyond the remaining whole-sequence budget.
 
-The older `llm_max_retries`, round limits, argument-correction limits, and `turn_failure_policy` still describe transitional institutional discussion APIs, not a second mode of the personal runtime.
+No second team-discussion engine, numbered round API, or argument-correction turn limit remains.
 
 ### Communication Configuration
 
@@ -129,16 +121,32 @@ The older `llm_max_retries`, round limits, argument-correction limits, and `turn
 | Configuration Type | Policy | Additional Fields | Meaning |
 | :--- | :--- | :--- | :--- |
 | `PermissiveCommunicationConfig` | `"permissive"` | None | Authenticated AgentTeams communicate directly without an Agreement. |
-| `ParentApprovalCommunicationConfig` | `"parent_approval"` | `request_delivery="queue"`, `direction="bidirectional"` | Both endpoint parent principals must approve a persistent channel. |
-| `LineageApprovalCommunicationConfig` | `"lineage_approval"` | `request_delivery="queue"`, `direction="bidirectional"` | The recipient and required sender-to-recipient lineage principals must approve a persistent channel. |
+| `ParentApprovalCommunicationConfig` | `"parent_approval"` | `request_delivery="queue"`, `direction="bidirectional"` | The actual parent principals of non-independent endpoints approve, deduplicated. |
+| `LineageApprovalCommunicationConfig` | `"lineage_approval"` | `request_delivery="queue"`, `direction="bidirectional"` | The non-exempt recipient and required real lineage principals approve without a virtual Root. |
 
-Approval configurations accept `request_delivery="queue" | "wake"` and `direction="one_way" | "bidirectional"`.
+Approval configurations accept only `request_delivery="queue"` and either channel direction.
 
-### Turn Failure Configuration
+Communication `wake` is explicitly rejected while its separate safeguards remain deferred.
 
-`TurnFailurePolicyConfig` contains `tool` and `llm`, each defaulting to `"isolate"` and accepting either `"isolate"` or `"abort"`.
+Independent endpoints are exempt from their own parent/ancestor authority; two independent endpoints communicate directly without Requests or Agreements.
 
-An isolated failure ends only the affected Agent's current turn, while strict governance discussions still fail closed when any required member result is incomplete.
+### `HealthSupervisionConfig`
+
+The strict defaults are `protocol_failure_threshold=3`, `tool_argument_failure_threshold=5`, `observation_window_seconds=600.0`, `audit_timeout_seconds=600.0`, and `semantic_detection_enabled=False`.
+
+Counts belong to one immutable Agent identity, with tool failures additionally grouped by tool and argument-error category.
+
+A valid model response resets its protocol streak, and success on a tool resets that tool's argument streak.
+
+Provider availability, silence, normal waiting, permission denial, and business refusal do not become personal health findings.
+
+Thresholds request assessment, not intervention.
+
+Confirmed integrity faults require immediate deterministic protection and a retained incident without awaiting assessment.
+
+The rolling observation window expires detector samples, not incidents.
+
+The total assessment deadline starts at durable admission, includes queueing, and is independent of the 120-second parent-resource attempt.
 
 ### Tokenizer Configuration and Hard-Quota Accounting
 
@@ -168,7 +176,7 @@ Advanced episodic memory is optional and disabled by default; disabled mode perf
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `enabled` | `bool` | `False` | Enables the Agent-owned episodic-memory catalog. |
-| `segment_boundary` | `Literal["agent_turn"]` | `"agent_turn"` | Uses terminal Agent turns as immutable indexing segments. |
+| `segment_boundary` | `Literal["activity_invocation"]` | `"activity_invocation"` | Uses committed personal invocation boundaries as immutable indexing segments. |
 | `index_max_retries` | `int` | `2` | Additional indexing attempts after the first failure; may be `0`. |
 | `index_retry_backoff_factor` | `float` | `0.5` | Initial exponential retry delay; may be `0`. |
 | `index_worker_count` | `int` | `2` | Positive number of background indexing workers. |
@@ -200,11 +208,11 @@ agent = Agent(name: str, role: str, llm_client: Optional[Any] = None, role_descr
 ### Methods
 
 * **`launch_att(...) -> AgentTeam | TeamFormationRequest`**
-  Launches an all-new child AgentTeam immediately, or opens a persistent consent workflow when the proposal names existing Agents or explicitly includes the initiator. Existing identities are not added until they accept; see [Consensual Existing-Agent Team Formation](../Consensual_Team_Formation.md).
+  Launches an all-new AgentTeam with explicit optional `parent=` immediately, or opens a persistent consent workflow when the proposal names existing Agents or explicitly includes the initiator. Existing identities are not added until they accept; see [Consensual Existing-Agent Team Formation](../Consensual_Team_Formation.md).
 
 ## 👥 `AgentTeam`
 
-Represents a dynamic team of agents executing discussions and tasks in a parent-child lineage. External users obtain an `AgentTeam` instance when calling `ATTManager.create_agent_team` or `Agent.launch_att`.
+Represents an organization with explicit membership, optional Agent/AgentTeam parent, shared conversation, documents, and governance. External users obtain an `AgentTeam` instance when calling `ATTManager.create_agent_team` or `Agent.launch_att`.
 
 ### Properties
 
@@ -214,7 +222,9 @@ Represents a dynamic team of agents executing discussions and tasks in a parent-
 * **`depth`**: `int` - The depth level of the team in the lineage hierarchy (e.g., Level 1, Level 2).
 * **`members`**: `List[Agent]` - The list of `Agent` instances assigned to this team.
 * **`doc_library`**: `Optional[DocumentLibrary]` - Resolves the built-in document library for the team.
-* **`parent_team`**: `Optional[AgentTeam]` - Resolves the parent team in the lineage hierarchy.
+* **`parent_team`**: `Optional[AgentTeam]` - The actual AT parent, if one exists.
+* **`organizational_parent`**: `ApprovalPrincipal | None` - The explicit Agent/AT parent, or independence; creator provenance never selects it.
+* **`is_independent`**: `bool` - Whether the team has no organizational parent.
 * **`child_teams`**: `List[AgentTeam]` - The list of active child teams spawned by this team.
 * **`proposals`**: `Dict[str, Dict[str, Any]]` - Active membership voting proposals mapped by ID.
 * **`status_map`**: `Dict[str, str]` - Dictionary mapping member names to their current statuses (e.g. `"Thinking..."`, `"Idle"`).
@@ -223,11 +233,6 @@ Represents a dynamic team of agents executing discussions and tasks in a parent-
 
 * **`launch_att(...) -> AgentTeam | TeamFormationRequest`**
   Launches an all-new child AgentTeam immediately, or returns a formation request when existing Agents must consent. The initiating member is never added implicitly.
-* **`await execute_reasoning_step(...) -> str`**
-  Returns the completed answer, or a stable `[Turn incomplete: ...]` placeholder when the configured isolate policy contains a member-scoped failure.
-* **`await execute_reasoning_step_detailed(...) -> AgentTurnResult`**
-  Returns Agent/team/discussion provenance, completion status, answer or privacy-safe failure metadata, and structured tool failure summaries.
-
 ## 🏛️ `ATTManager`
 
 The master controller managing the overall agent team topology, tool registrations, presets, and callback events.
@@ -260,6 +265,10 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
   Host-only acknowledgement after resource remediation, without resetting quota, switching the model, or bypassing live-request and provider waiting boundaries.
 * **`register_runtime_clock(clock: RuntimeClock) -> None`**
   Binds a Host clock before activity, requests, or timers are admitted; ordinary applications use the built-in clock.
+
+  Institutional admission also freezes the binding before a commit wait, including audits, parent resource attempts, migration cooldowns, and health-detection windows.
+
+  Completed audit teardown does not unfreeze the clock, and restored institutional anchors retain the same protection.
 * **`await send_team_message(team_id, markdown, *, actor, operation_key=None, reply_to=None) -> SourceDeliveryReceipt`**
   Deliberately publishes to a current ordinary AgentTeam and commits recipient views and notices before acknowledging delivery.
 * **`await send_direct_message(agent_id, markdown, *, actor, operation_key=None, reply_to=None) -> SourceDeliveryReceipt`**
@@ -291,7 +300,7 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
 * **`await control_direct_relationship(agent_id, command, *, actor, operation_key=None) -> ChatOperationResult`**
   Supports `block_agent`, `unblock_agent`, `remove_friendship`, or `lift_direct_refusal` without changing another person's owned controls.
 * **`await close_team_conversation(team_id)`**
-  Host-only finalization closes an ordinary leaf's current memberships and preserves personal archives; unresolved live children are rejected rather than assigned an inferred parent.
+  Host-only finalization closes current memberships and preserves personal archives; surviving direct children become independent while their descendants retain their own immediate parents.
 * **`register_tool(name, description=None, func=None, schema=None, *, memory_capture="metadata_only", execution_contract=None, executor="callable", resource_resolver=None, retry_safe=False, result_storage="protected")`**
   Registers a custom utility tool globally and requires explicit `memory_capture="content"` before its observation body may enter episodic recall content.
   Background execution requires an affirmative execution contract, while executor and resource-resolver bindings remain Host-only runtime objects.
@@ -324,12 +333,12 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
   Performs explicitly trusted host topology initialization without interactive consent and emits a `trusted_team_bootstrap` audit event. This administrative API is never available to Agent tools and should not replace ordinary formation.
 * **`inspect_team_formation(request_id, *, actor) -> TeamFormationInspection`**
   Returns a detached proposal, four public attitude counts, live eligible membership, `can_create`, and an eligibility reason.
-* **`await discuss_team_formation_proposal(*, actor, objective, request_id=None) -> TeamFormationDraft`**
-  Persists and schedules detached advisory proposal design in the invocation-scoped creator AgentTeam, or standalone formulation by the Root Agent. Supplying `request_id` designs a possible next revision without mutating the current request.
+* **`await prepare_team_formation_draft(*, actor, objective, candidate, request_id=None, parent=None) -> TeamFormationDraft`**
+  Immediately validates the initiator's optional candidate without another model call or participant barrier; initial parents are explicit and revision candidates retain their exact base.
 * **`get_team_formation_draft(draft_id, *, actor) -> TeamFormationDraft`** / **`list_team_formation_drafts(*, actor) -> list[TeamFormationDraft]`**
   Returns detached draft views owned by the initiating Agent.
-* **`await retry_team_formation_draft(draft_id, *, actor) -> TeamFormationDraft`** / **`await publish_team_formation_draft(draft_id, *, actor) -> FormationOperationResult`**
-  Explicitly retries failed detached work or publishes a ready validated candidate. Publication never grants invitee consent and fails closed when a revision draft has a stale base.
+* **`await publish_team_formation_draft(draft_id, *, actor) -> FormationOperationResult`**
+  Explicitly publishes a ready validated candidate. Publication never grants invitee consent and fails closed when a revision draft has a stale base.
 * **`await revise_team_formation(request_id, *, actor, base_revision, changes) -> FormationOperationResult`**
   Commits one validated material revision, preserves immutable history, and resets every retained invitee to `no_response`. A normalized no-op returns `UNCHANGED` without persistence or notifications.
 * **`list_team_formation_revisions(request_id) -> list[TeamFormationRevision]`** / **`list_team_formation_decisions(request_id) -> list[TeamFormationInvitationDecision]`**
@@ -347,16 +356,15 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
 * **`open_agent_mail(message_id: str, *, actor: Agent) -> dict`**
   Inspects an email addressed to that Agent, including its public governance request, without marking it read or supplying a choice.
 * **`list_governance_requests(*, actor: Agent, pending_only: bool = True) -> list[dict]`**
-  Lists that Agent's rounds and unanswered eligible requests independently of email read state.
-* **`await submit_governance_choice(round_id: str, choice: dict, *, actor: Agent) -> GovernanceSubmissionResult`**
-  Requires the actor's current tool-invocation context and records one immutable strict boolean or eligible model-alias choice for the exact round.
-* **`await execute_agent_interaction(agent: Agent, prompt: str, *, team: Optional[AgentTeam] = None) -> AgentTurnResult`**
-  Runs an ordinary serialized personal turn with continuing instructions and memory; `team=None` grants no AgentTeam authority and creates no artificial team.
+  Lists that Agent's cases and unanswered eligible requests independently of email read state.
+* **`await submit_governance_choice(case_id: str, choice: dict, *, actor: Agent) -> GovernanceSubmissionResult`**
+  Requires the actor's current tool-invocation context and records one immutable strict boolean or eligible model-alias choice for the exact frozen case.
+* **`await execute_agent_interaction(agent: Agent, prompt: str, *, team: Optional[AgentTeam] = None) -> InteractionResult`**
+  Observes an answer from the same continuing person with actual invocation and team provenance; it neither stops activity nor publishes a shared message.
+  `team=None` supplies personal scope, and a concurrent input coalesces without replacing an already active scope.
+* **`await request_model_resource(agent: Agent, team: AgentTeam | None, error: TokenLimitExceededError) -> ResourceDecisionResult`**
+  Returns `APPLIED`, `PENDING` with an independently bounded attempt ID, or `UNAVAILABLE`; it never nests a parent model call inside the requester.
 
-* **`await execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`**
-  Executes a multi-agent debate session inside the AT, automatically injecting unresolved inbox alerts, and running supervisory transcript audits. Sessions for the same team, including emergency sessions, wait on one serial lock; different teams may run concurrently.
-* **`await execute_team_discussion_detailed(team: AgentTeam, prompt: str, rounds: int = 2, skip_audit: bool = False) -> DiscussionResult`**
-  Returns the structured discussion ID, `COMPLETED` or `PARTIAL` status, transcript, per-round `AgentTurnResult` values, and dual-axis `AuditResult`.
 * **`render_topology_tree() -> str`**
   Renders the ordinary AgentTeam lineage as a trusted-host ASCII diagnostic, not an automatically injected Agent context.
 * **`list_entities(entity_type: Literal["agent", "agent_team", "all"] = "all", start_index: int = 1, end_index: Optional[int] = None) -> EntityDiscoveryResult`**
@@ -365,7 +373,7 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
   Filters public directory fields by case-insensitive OR substrings before ordering and selecting the requested positions.
 * **`inspect_entity(entity_type: Literal["agent", "agent_team"], entity_id: str) -> AgentDirectoryRecord | AgentTeamDirectoryRecord`**
   Returns the latest eligible public record by stable ID without granting membership, communication, or file permissions.
-* **`await negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> MigrationOperationResult`**
+* **`await negotiate_and_execute_migration(team: AgentTeam, target_parent: Agent | AgentTeam | ApprovalPrincipal | None, rationale: str) -> MigrationOperationResult`**
   Returns a durable request ID with `PENDING` while explicit principals deliberate and submit personal-email choices, or a terminal `EXECUTED`, `DENIED`, or `STALE` result after topology revalidation.
 * **`inspect_migration_request(request_id: str) -> MigrationRequest`**
   Returns a detached copy of a durable migration request for trusted-host inspection.
@@ -386,13 +394,25 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
 * **`list_agent_history(agent_id: str)`**
   Returns the ordered host-only System Memory Journal view for one historical Agent identity.
 * **`await close()`**
-  Rejects new work, cancels outstanding external LLM waits and emergency tasks, flushes all accepted persistence changes without a timeout, and releases the exclusive database writer lease. `ATTManager` also supports `async with`.
+  Rejects new work, cancels outstanding external LLM waits and local admission work, flushes all accepted persistence changes without a timeout, and releases the exclusive database writer lease. `ATTManager` also supports `async with`.
 * **`await flush_callbacks()`**
   Waits for observational callbacks accepted so far, including worker-thread events awaiting transfer to the dispatcher.
-* **`acknowledge_unknown_alert(team_id: str, fingerprint: str) -> bool`**
-  Explicitly acknowledges and removes one durable UNKNOWN alert.
-* **`clear_unknown_alerts(team_id: str, fingerprints: Optional[set[str]] = None) -> int`**
-  Explicitly removes selected or all UNKNOWN alerts for one team.
+* **`await request_health_assessment(subject: HealthSubject, evidence: Mapping) -> HealthAssessmentAdmission`**
+  Host-only durable admission of explicitly permitted evidence; duplicate live assessment generations coalesce.
+* **`await wait_for_health_assessment(audit_id) -> AuditResult`** / **`await cancel_health_assessment(audit_id)`**
+  Observe or explicitly cancel one bounded assessment; cancelling its observer does not cancel it.
+* **`register_semantic_health_detector(detector, *, evidence_provider)`**
+  Host-only binding of a runtime detector and explicit authorized evidence producer; also requires `health.semantic_detection_enabled=True`.
+* **`await report_integrity_fault(subject, fault_code, *, protect)`**
+  Executes an immediate synchronous trusted guard and records an incident; a failed guard is recorded with its exception type and then propagated, without storing the exception body.
+* **`inspect_health_incident(incident_id, *, actor=None)`** / **`await claim_health_incident(incident_id, *, actor=None)`**
+  Inspect or claim under live Host or actual-parent authority, independently of notification presentation and mail read state.
+* **`await acknowledge_health_incident(incident_id, occurrence_count, *, actor=None, claim_token=None)`**
+  Acknowledges only the exact occurrence generation; an Agent handler must present its exact claim token.
+* **`async with manager.handle_health_incident(incident_id, actor=...)`**
+  Releases a claim on handling failure or cancellation; successful block exit does not implicitly acknowledge it.
+* **`await clear_health_incidents(incident_ids)`**
+  Host-only explicit acknowledgement of selected incidents without deleting retained evidence.
 
 The discovery models are exported from `ai_team_team`.
 
@@ -402,7 +422,7 @@ See [Agent and AgentTeam Discovery](../Agent_and_AgentTeam_Discovery.md) for exa
 
 ### Callbacks
 
-Callbacks may be synchronous or asynchronous. ATT dispatches them in order on a background channel; slow callbacks do not block discussions, and callback exceptions are logged without changing core outcomes.
+Callbacks may be synchronous or asynchronous. ATT dispatches them in order on a background channel; slow callbacks do not block personal activity, and callback exceptions are logged without changing core outcomes.
 
 Thread emissions wake the owning event loop and preserve the same acceptance order as event-loop emissions.
 
@@ -414,16 +434,8 @@ Each observation runs in its own task, so callback self-cancellation is logged w
 
 Closing the manager cancels observation dispatch without waiting indefinitely for a callback that suppresses cancellation; shutdown does not promise to deliver the remaining queued observations.
 
-* **`on_status_change: Optional[Callable[[str, str], None]]`**
-  Invoked when an agent changes state (e.g. `"Thinking..."`, `"Executing Tool..."`, `"Idle"`).
-* **`on_activity_added: Optional[Callable[[str, str, str], None]]`**
-  Invoked when an agent records a ReAct event. Formatted as: `(agent_name, activity_type, content)`.
-* **`on_log_append: Optional[Callable[[str, str, str, Optional[int]], None]]`**
-  Invoked when detailed transcripts or execution logs are appended. Formatted as: `(team_id, title, content, chapter_num)`.
-* **`on_team_migration: Optional[Callable[[str, Optional[str], str], None]]`**
-  Invoked when a team successfully migrates to a new parent in the hierarchy. Formatted as: `(team_id, old_parent_id, new_parent_id)`.
-* **`on_emergency_escalation: Optional[Callable[[str, str, str], None]]`**
-  Invoked when a team receives a high-priority emergency alert (e.g. child failure or escalation). Formatted as: `(team_id, alert_type, alert_reason)`.
+* **`on_system_event: Callable[[str, dict], None | Awaitable[None]] | None`**
+  Receives ordered metadata-only runtime, governance, resource, lifecycle, and health observations without private bodies or invocation authority.
 
 ## 🛠️ `Tool`
 
@@ -524,17 +536,17 @@ lib = DocumentLibrary(
 
 ## 🔍 Supervisory AgentTeams
 
-After an ordinary discussion, `ATTManager` creates a short-lived, registered AgentTeam with fresh Integrity, Continuity, and Deadlock auditors, plus additional auditors if required by `min_subagent_team_size`.
+Health assessments create fresh real managed privileged ATs through common staged team creation and personal activity.
 
-The supervisory team uses the normal discussion lock and Agent invocation machinery but cannot use ordinary team tools.
+They receive a fixed restricted tool profile rather than ordinary discovery, private-file, delegation, membership, chat, or background authority.
 
-`manager.supervisor` coordinates the audit; there is no separate public `SupervisoryTeam` class.
+Every predefined auditor must submit a valid finding before a strict majority forms a conclusion; missing findings, ties, failure, or total deadline expiry produce `UNKNOWN`.
 
-A completed audit leaves durable system-memory evidence and dissolves its temporary team, Agents, and DocLibs.
+`AuditResult.status` and `operational_status` remain independent and cannot authorize business repair or model/permission changes.
 
-Auditors use the manager's default generator handler when configured, or the Root AI's default client.
+Completed or interrupted assessments retain evidence and historical identity snapshots, not reusable audit people or active teams.
 
-* Audits separate content health (`AuditStatus.HEALTHY`, `UNHEALTHY`, or `UNKNOWN`) from runtime health (`OperationalStatus.HEALTHY`, `DEGRADED`, or `UNKNOWN`). Confirmed content anomalies preserve emergency escalation. UNKNOWN audits use `audit_unknown_escalation_mode`; degraded runtime alerts emit structured events and optionally queue or wake through `operational_degraded_escalation_mode`.
+See [Health Supervision](../Supervisory_Team.md) for thresholds, evidence privacy, deadlines, and explicit incident acknowledgement.
 
 ## 🔌 `LLMClientProto`
 
@@ -606,18 +618,20 @@ Neither the global directory nor the full topology is automatically injected int
 ### Spawning & Communication
 
 * **`dispatch_subagent(task: str, team_purpose: str, member_configs: Optional[dict] = None, existing_member_ids: Optional[List[str]] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: Optional[dict] = None, initiator_joins: bool = False, unanimous_acceptance_action: str = "require_confirmation", late_join_policy: str = "disabled") -> str`**
-  Creates and synchronously discusses an all-new child AgentTeam when no existing identity participates. If existing Agent IDs or initiator self-membership are requested, it returns `PENDING_RESPONSES` with a persistent formation request instead; no team or DocLib is created and the first discussion is deferred until after a successful formation commit.
+  Returns creation references immediately for an all-new child, or `PENDING_RESPONSES` with an exact-consent request for existing identities; initial instructions are addressed mail, not synchronously awaited child work or a completion certificate.
 * **`list_agent_inbox(unread_only: bool = True) -> str`** / **`mark_agent_inbox_read(message_ids: Optional[List[str]] = None) -> str`**
   Lists or acknowledges persistent notifications for the current invocation-scoped Agent identity.
 * **`open_agent_mail(message_id: str) -> JSON`**
-  Opens only the current Agent's own email and expands its governance round without changing its read receipt or voting.
-* **`submit_governance_choice(round_id: str, choice: BooleanGovernanceChoice | ModelGovernanceChoice) -> JSON`**
+  Opens only the current Agent's own email and expands its governance case without changing its read receipt or voting.
+* **`submit_governance_choice(case_id: str, choice: BooleanGovernanceChoice | ModelGovernanceChoice) -> JSON`**
   Submits `{"approved": true | false, "reason": "..."}` for communication or migration, or `{"model_alias": "eligible-alias", "reason": "..."}` for parent failover.
-  Only explicit strictly validated choices count; repeated identical submissions return `ALREADY_SUBMITTED`, changed accepted ballots are rejected, and obsolete rounds return `CLOSED`.
+  Only explicit strictly validated choices count; repeated identical submissions return `ALREADY_SUBMITTED`, changed accepted ballots are rejected, and obsolete cases return `CLOSED`.
 * **`list_governance_requests(pending_only: bool = True) -> JSON`**
-  Lists the current Agent's eligible rounds, including outstanding requests whose emails have already been marked read.
-* **`discuss_team_formation_proposal(objective: str, request_id: Optional[str] = None) -> str`** / **`inspect_team_formation_draft(draft_id: str) -> str`** / **`retry_team_formation_draft(draft_id: str) -> str`** / **`publish_team_formation_draft(draft_id: str) -> str`**
-  Lets the current Agent schedule, inspect, retry, and explicitly publish its own detached advisory formation draft.
+  Lists the current Agent's eligible cases, including outstanding requests whose emails have already been marked read.
+* **`propose_team_formation(proposal, organizational_parent="none") -> JSON`**
+  Publishes the initiator's validated design directly without a mandatory draft.
+* **`prepare_team_formation_draft(objective, candidate, request_id=None, organizational_parent="none") -> JSON`** / **`inspect_team_formation_draft(draft_id) -> JSON`** / **`publish_team_formation_draft(draft_id) -> JSON`**
+  Validate, inspect, and explicitly publish the current person's own optional artifact; parent choices are `none`, `self`, or `current_team`.
 * **`inspect_team_formation(request_id: str) -> str`** / **`revise_team_formation(request_id: str, base_revision: int, changes: TeamFormationRevisionPatch) -> str`**
   Lets the current Agent inspect a proposal or, when it is the initiator, commit an exact material revision that renews consent.
 * **`respond_team_invitation(request_id: str, proposal_revision: int, attitude: Optional[str] = None) -> str`**
@@ -638,6 +652,17 @@ Neither the global directory nor the full topology is automatically injected int
   Lists requests involving the current endpoint or approval AgentTeam.
 * **`list_peer_agreements(active_only: bool = True) -> str`**
   Lists Agreements whose endpoints include the current AgentTeam.
+* **`list_peer_messages() -> JSON`** / **`read_peer_message(message_id: str) -> JSON`**
+  Lists endpoint-authorized references or explicitly reads a message after a live membership check; mail presentation alone never injects its body.
+
+### Technical Health Attention
+
+* **`list_health_incidents(pending_only: bool = True) -> JSON`** / **`inspect_health_incident(incident_id: str) -> JSON`**
+  Lists permitted incident references or inspects their retained technical evidence, without intervention authority.
+* **`claim_health_incident(incident_id: str) -> JSON`**
+  Explicitly claims the current occurrence generation for authorized handling.
+* **`acknowledge_health_incident(incident_id: str, occurrence_count: int, claim_token: str) -> JSON`**
+  Acknowledges only the claimed generation; newer evidence remains pending and mail read state is independent.
 
 ### Team Status & Membership
 
@@ -661,7 +686,7 @@ Neither the global directory nor the full topology is automatically injected int
 
 ### Reorganization
 
-* **`request_migration(target_parent_id: str, rationale: str) -> JSON`**
+* **`request_migration(target_parent: ApprovalPrincipal | None, rationale: str) -> JSON`**
   Requests to migrate the current invocation-scoped team under the configured policy and returns a durable `request_id` with `PENDING` instead of synchronously waiting for another Agent's approval.
 * **`inspect_migration_request(request_id: str) -> JSON`**
   Lets the moving, target, or original-parent AgentTeam inspect its request without deciding for another approval principal.
@@ -670,12 +695,12 @@ Neither the global directory nor the full topology is automatically injected int
 
 These tools are visible only when `episodic_memory.enabled=True` and are always scoped to the current active Agent identity.
 
-* **`search_memories(query: Optional[str] = None, tags: Optional[List[str]] = None, team_id: Optional[str] = None, discussion_id: Optional[str] = None, limit: int = 20, cursor: Optional[str] = None) -> MemorySearchResult`**
+* **`search_memories(query: Optional[str] = None, tags: Optional[List[str]] = None, team_id: Optional[str] = None, invocation_id: Optional[str] = None, limit: int = 20, cursor: Optional[str] = None) -> MemorySearchResult`**
   Searches only the current Agent's active Memory Cards.
 * **`recall_memory(memory_id: str, start_line: int = 1, end_line: Optional[int] = None, start_character: int = 1, character_count: Optional[int] = None, expected_segment_version: Optional[str] = None) -> MemoryRecallResult`**
   Returns a token-bounded historical observation. Partial results expose `next_line`, `next_character`, and `segment_version`; pass them into the next call to continue without gaps or duplication.
 * **`keep_memory_in_context(memory_id: str, note: Optional[str] = None) -> MemoryOperationResult`**
-  Retains a compact reference only after the card was recalled in the same Agent turn.
+  Retains a compact reference only after the card was recalled in the same personal invocation.
 * **`forget_memory(memory_id: str, reason: Optional[str] = None) -> MemoryOperationResult`**
   Hides the Agent-owned card without modifying the immutable Journal or source Segment.
 

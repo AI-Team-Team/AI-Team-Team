@@ -14,29 +14,73 @@ class PersonalInboxService:
     def __init__(self, manager: Any) -> None:
         self.manager = manager
         self._read_lock = asyncio.Lock()
+        self._staged_mail_ids: set[str] = set()
+        self._staged_mail_owners = {}
 
-    def notify(self, agent_id: str, message_type: str, payload: Dict[str, Any]) -> str:
+    def notify(self, agent_id: str, message_type: str, payload: Dict[str, Any], *, message_id: Optional[str] = None, staged: bool = False) -> str:
         self.manager._resources.check_authority()
         agent = self.manager._agents_by_id.get(agent_id)
         if agent is None:
             raise ValueError(f"Cannot notify missing Agent {agent_id!r}.")
         message = AgentInboxMessage(
-            message_id=f"AIN-{uuid.uuid4().hex}",
+            message_id=message_id or f"AIN-{uuid.uuid4().hex}",
             agent_id=agent_id,
             message_type=message_type,
             payload=dict(payload),
-            created_at=time.time(),
+            created_at=self.manager._activity.clock.wall_time(),
         ).model_dump(mode="json")
+        batch = self.manager._persistence_batch.get()
+        provisional = batch is not None and batch.get("_provisional", False)
         with agent.inbox_lock:
+            previous = next((item for item in agent.agent_inbox if item["message_id"] == message["message_id"]), None)
+            if previous is not None:
+                if previous["message_type"] != message_type or previous["payload"] != message["payload"]:
+                    raise ValueError("A personal mail identity cannot be reused for different content.")
+                return previous["message_id"]
             agent.agent_inbox.append(message)
+            if provisional:
+                batch.setdefault("_mail_ids", {}).setdefault(agent_id, set()).add(message["message_id"])
+            if staged or provisional:
+                self._staged_mail_ids.add(message["message_id"])
+                self._staged_mail_owners[message["message_id"]] = self._current_task()
         return message["message_id"]
 
-    def list(self, agent_id: str, *, unread_only: bool = True) -> List[AgentInboxMessage]:
+    @staticmethod
+    def _current_task():
+        try:
+            return asyncio.current_task()
+        except RuntimeError:
+            return None
+
+    def is_capturable(self, message_id):
+        """Another operation's staged mail is not an arrival or snapshot source."""
+        return self.is_published(message_id) or self._staged_mail_owners.get(message_id) is self._current_task()
+
+    def is_published(self, message_id):
+        return message_id not in self._staged_mail_ids or ("agent_notifications", (f"NOTICE-{message_id}",)) in self.manager._records.index
+
+    def finish_staged(self, message_ids):
+        for message_id in tuple(message_ids):
+            self._staged_mail_ids.discard(message_id)
+            self._staged_mail_owners.pop(message_id, None)
+
+    def finish_provisional(self, dirty, *, accepted):
+        """Finish exactly this provisional operation's newly appended mail."""
+        for owner, identifiers in dirty.get("_mail_ids", {}).items():
+            agent = self.manager._agents_by_id.get(owner)
+            if not accepted and agent is not None:
+                with agent.inbox_lock:
+                    agent.agent_inbox[:] = [mail for mail in agent.agent_inbox if mail["message_id"] not in identifiers
+                        or ("agent_notifications", (f"NOTICE-{mail['message_id']}",)) in self.manager._records.index]
+            self.finish_staged(identifiers)
+
+    def list(self, agent_id: str, *, unread_only: bool = True, include_staged: bool = False) -> List[AgentInboxMessage]:
         agent = self.manager._agents_by_id.get(agent_id)
         if agent is None:
             raise KeyError(f"Unknown Agent ID {agent_id!r}.")
         with agent.inbox_lock:
-            rows = [dict(item) for item in agent.agent_inbox]
+            rows = [dict(item) for item in agent.agent_inbox
+                if self.is_published(item["message_id"]) or include_staged and self.is_capturable(item["message_id"])]
         messages = [AgentInboxMessage.model_validate(row, strict=False) for row in rows]
         return [item for item in messages if item.read_at is None] if unread_only else messages
 
@@ -56,10 +100,10 @@ class PersonalInboxService:
             previous = {item["message_id"]: item.get("read_at") for item in agent.agent_inbox}
             changed = 0
             for item in agent.agent_inbox:
-                if item.get("read_at") is None and (
+                if self.is_published(item["message_id"]) and item.get("read_at") is None and (
                     selected is None or item["message_id"] in selected
                 ):
-                    item["read_at"] = time.time()
+                    item["read_at"] = self.manager._activity.clock.wall_time()
                     changed += 1
         if changed:
             dirty = self.manager._new_dirty_state()
@@ -94,7 +138,7 @@ class PersonalInboxService:
         result = message.model_dump(mode="json")
         if message.message_type == "governance_choice_request":
             result["governance"] = self.manager._governance.inspect(
-                agent, message.payload["round_id"]
+                agent, message.payload["case_id"]
             )
         return result
 
@@ -106,7 +150,7 @@ class PersonalInboxService:
             outstanding = (
                 message.message_type == "governance_choice_request"
                 and self.manager._governance.is_outstanding(
-                    agent_id, message.payload.get("round_id")
+                    agent_id, message.payload.get("case_id")
                 )
             )
             if message.read_at is None or outstanding:
@@ -120,7 +164,7 @@ class PersonalInboxService:
         for message in visible[-limit:]:
             if message.message_type == "governance_choice_request":
                 lines.append(
-                    f"- You received a governance voting email `{message.message_id}` for round `{message.payload['round_id']}`. You may use `open_agent_mail` to inspect it and independently decide whether to use `submit_governance_choice`. Reading is not voting."
+                    f"- You received a governance voting email `{message.message_id}` for case `{message.payload['case_id']}`. You may use `open_agent_mail` to inspect it and independently decide whether to use `submit_governance_choice`. Reading is not voting."
                 )
             else:
                 lines.append(

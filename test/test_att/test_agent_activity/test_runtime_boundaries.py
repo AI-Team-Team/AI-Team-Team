@@ -378,7 +378,7 @@ class RuntimeBoundaryTests(ActivityTestCase):
         self.assertEqual(self.manager.inspect_agent_activity(self.root.agent_id).intent, "idle")
 
     async def test_working_window_is_bounded_without_erasing_history_or_cutting_a_batch(self):
-        self.manager.config.max_memory_turns = 3
+        self.manager.config.working_context_message_limit = 3
         self.steps(
             *(LLMResponse(text=f"Personal observation {index}") for index in range(9)), idle()
         )

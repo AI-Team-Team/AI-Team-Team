@@ -10,32 +10,20 @@ Its ordinary tool failures remain observations, and technical budgets yield fair
 
 Native batches keep one captured scope and apply explicit idle, sleep, or scope controls only after every required observation is complete.
 
-The numbered strategy and member-turn descriptions below remain transitional institutional producers until Phase 5, not a fallback mode for `activate_agent()`.
+Governance, formation, and restricted temporary audits now use this same runtime; no institutional discussion engine remains.
 
 Foreground execution evidence now commits before each real attempt, including opted-in retries; undeclared custom tools still cannot detach into background work.
 
 The [Phase 4 execution service](dev/autonomous_activity/Phase_4.md) owns explicitly background and automatically detached operations independently of the foreground observer, with canonical resource exclusion and factual cancellation.
 
-To make reasoning execution vendor-independent and model-agnostic, the ATT framework decouples the reasoning loop from individual LLM clients. It implements a Strategy Pattern to govern how agent turns are executed.
+Provider-neutral request and tool contracts keep the common personal runtime independent of concrete model SDKs.
 
-```plaintext
-                   ┌──────────────────────────┐
-                   │    Agent / AgentTeam     │
-                   └────────────┬─────────────┘
-                                │ Calls execute_reasoning_step()
-                                ▼
-                   ┌──────────────────────────┐
-                   │   Reasoning Strategy     │
-                   │    Selection Route       │
-                   └──────┬────────────┬──────┘
-                          │            │
-          If Native Mode  │            │ If Text ReAct Mode
-          or Auto capable │            │ or Auto fallback
-                          ▼            ▼
-             ┌────────────────┐    ┌────────────────┐
-             │ Native Strategy│    │ ReAct Strategy │
-             │   (Parallel)   │    │  (Sequential)  │
-             └────────────────┘    └────────────────┘
+```text
+Personal admission -> one continuing Agent -> bounded provider request
+                  -> Text Action or Native ToolCall
+                  -> common validation, authorization and ToolExecutor
+                  -> committed observation and checkpoint
+                  -> continue, explicit idle or finite sleep
 ```
 
 The system supports two core execution modes:
@@ -43,45 +31,29 @@ The system supports two core execution modes:
 1. **Text ReAct Mode (`"text_react"`)**: A bounded step-by-step loop alternating between Thought, Action, and Observation. A balanced character scanner recognizes nested delimiters, quotes, triple quotes, escapes, multiline values, Markdown fences, and Unicode before the literal-only AST parser validates arguments.
 2. **Native Tool Calling Mode (`"native"`)**: Executes structured tool invocations directly using LLM function calling schemas, running multiple tool calls concurrently in parallel.
 
-## 2. Pluggable Reasoning Strategies
+## 2. One Runtime with Two Provider Protocols
 
-Reasoning strategies are encapsulated as pluggable classes inheriting from `BaseReasoningStrategy`.
+The common personal runner supports Text ReAct and Native tool calling without separate business, governance, or audit inference engines.
 
-Every business-turn strategy receives the same composed identity contract: invocation-scoped AgentTeam instructions, the persistent Agent's own `system_instructions`, the current identity and AgentTeam header, and only then the mode-specific tool protocol.
+Every ordinary request composes the person's own instructions, factual selected scope, currently available tools, and the bounded Working Context.
 
-Switching between Text ReAct, Native, and auto-selected Native execution therefore cannot remove the Agent's individual mission.
+Native adapters receive `Optional[List[Tool]]`, normalize responses to `LLMResponse`, and translate Tool schemas into the provider's wire format.
 
-### Class Hierarchy
+Text mode uses the balanced Action scanner and literal-only parser before the same executor.
 
-* **`BaseReasoningStrategy`**: Abstract class declaring the `execute(...)` interface.
-* **`TextReactReasoningStrategy`**: Implements the XML-tag and `Action: tool_name(...)` ReAct loop through the strict balanced parser.
-* **`NativeReasoningStrategy`**: Implements native tool-calling loop:
-  1. Requests active native `Tool` objects from the registry.
-  2. Submits prompt messages and native `Tool` objects to the LLM client adapter (Thorough Abstraction).
-  3. Receives structured `tool_calls` inside the unified `LLMResponse`.
-  4. Spawns parallel executions for all `tool_calls` concurrently through the shared `ToolExecutor`.
-  5. Feeds classified `ToolResult` messages back to the history buffer and repeats.
+A model answer alone is not a publication, ballot, completion declaration, or stop request.
 
-### Strategy Auto-Routing
+`activity.model_requests_per_invocation` and `activity.tool_batches_per_invocation` bound one scheduling quantum, not an all-member round.
 
-During execution, if the `tool_calling_mode` in `ATTConfig` is set to `"auto"`, the team queries the agent's LLM client:
+The safe auto probe accepts only a synchronous literal boolean `True`.
 
-```python
-if manager.probe_native_tool_capability(agent.llm_client, agent=agent, team=team):
-    strategy = NativeReasoningStrategy()
-else:
-    strategy = TextReactReasoningStrategy()
-```
-
-The safe probe accepts only a synchronous literal boolean `True`.
-
-Exceptions, awaitables, and non-boolean values emit a privacy-safe system event and fall back to Text ReAct; forced `"native"` mode does not probe.
+Exceptions, awaitables, and other return types emit a sanitized event and fall back to Text ReAct; forced native mode does not probe.
 
 ## 3. Tool Contract, Schema Generation, and Validation
 
-The framework operates under a **Thorough Abstraction Paradigm**. Instead of eagerly converting tools into JSON schemas at the reasoning layer and passing weak `Dict` structures to clients, the strategies fetch and pass native `Tool` objects natively down the stack.
+The framework operates under a **Thorough Abstraction Paradigm**. Instead of eagerly converting tools into JSON schemas at the reasoning layer and passing weak `Dict` structures to clients, the personal runtime passes `Tool` objects to the provider adapter.
 
-Strategies and adapters use one provider-neutral contract: `tools: Optional[List[Tool]]`.
+The personal runner and adapters use one provider-neutral contract: `tools: Optional[List[Tool]]`.
 
 Provider adapters convert each `Tool.json_schema` to their SDK's wire format.
 
@@ -123,7 +95,7 @@ results = await asyncio.gather(*[
 ])
 ```
 
-Text and Native strategies share the same executor for invocation-scoped Agent/AgentTeam context, auditing, validation, retry, callback metadata, and result conversion.
+Text and Native protocols share the same executor for invocation-scoped Agent/AgentTeam context, auditing, validation, retry, callback metadata, and result conversion.
 
 `ToolResult.status` is one of `success`, `invalid_arguments`, `denied`, `business_error`, `transient_error`, `internal_error`, or `unknown_tool`; failures also carry `error_kind` and `attempts`.
 
@@ -131,13 +103,13 @@ Framework classification never depends on a returned string prefix, so a custom 
 
 Built-in and custom tools can raise `ToolArgumentError`, `ToolPermissionError`, `ToolBusinessError`, or `RetryableToolError`.
 
-Permission and business outcomes are never replayed and do not consume argument-correction opportunities.
+Permission and business outcomes are never replayed automatically and do not become personal health failures.
 
 Execution replay is disabled by default; `retry_safe` requires both `Tool(retry_safe=True)` and `RetryableToolError`, while `typed_transient` replays any `RetryableToolError` and makes the host responsible for idempotency.
 
-`max_tool_argument_retries` counts model correction opportunities after the first invalid call.
+Invalid arguments return typed observations for voluntary correction without terminating a team or consuming a legacy turn-correction allowance.
 
-A Native parallel batch consumes at most one correction opportunity regardless of how many calls are invalid.
+Repeated same-category invalid calls feed the configured health detector, whose threshold requests assessment rather than intervention.
 
 `max_tool_execution_retries` counts extra eligible execution attempts and uses `tool_execution_retry_backoff_factor` for exponential delay.
 
@@ -213,30 +185,31 @@ def audit_query_database(sql_query: str, context: dict) -> tuple[bool, str]:
 manager.register_tool_auditor("query_database", audit_query_database)
 ```
 
-If the auditor returns `False`, the execution is blocked, and the error reason is returned to the LLM agent as an observation.
+If the auditor returns `False`, execution is blocked and the classified denial returns as an observation; ordinary denial is not evidence of poor Agent health.
 
-## 8. Network Resilience & Memory Compression
+## 8. Provider Availability and Context Compaction
 
-* **Typed Transient API Recovery**: `generate_with_retry` retries only explicit timeout, connection, rate-limit, retryable service, or provider-status failures. Authentication, validation, programming, and other unclassified errors fail immediately. `llm_max_retries=0` performs one request without a retry, and `llm_retry_backoff_factor=0` retries without waiting.
-* **Prompt Injection Guarantee**: During pruning, the active user `prompt` is forcefully appended to the message queue strictly *after* the memory compression block finishes, guaranteeing it is never swallowed.
+`activity.llm` controls typed provider retry, total sequence deadlines, and recovery boundaries.
 
-## 9. Structured Turns and Member Failure Isolation
+Timeouts, rate limits, recoverable service failures, and connection faults are resource-availability evidence rather than automatic Agent-health accusations.
 
-`execute_reasoning_step_detailed()` returns `AgentTurnResult`, while the text-compatible `execute_reasoning_step()` returns either the completed answer or `[Turn incomplete: ...]`.
+Authentication, validation, and programming errors are not retried through string matching.
 
-`execute_team_discussion_detailed()` returns `DiscussionResult` with per-round turns, transcript, audit, and `COMPLETED` or `PARTIAL` status; `execute_team_discussion()` continues to return only the transcript.
+Derived context compaction preserves complete tool-call/result boundaries and source references while the sanitized Journal remains retained.
 
-The default `TurnFailurePolicyConfig(tool="isolate", llm="isolate")` ends only the affected member's current round when tool correction is exhausted or an LLM invocation fails.
+It does not invoke a separate summarizer that changes personal identity or silently replaces one team's memory with another's.
 
-Other members finish the round, the incomplete placeholder enters the transcript and next-round context, and the member starts the next round with a fresh correction budget.
+## 9. Continuing Activity and Failure Boundaries
 
-Set either field to `"abort"` to stop the discussion instead.
+`activate_agent()` admits one continuing person, while `execute_agent_interaction()` observes an answer with its actual invocation provenance.
 
-Cancellation, manager shutdown, persistence failures, and framework state-integrity exceptions always propagate.
+The Agent explicitly chooses idle or finite sleep through `set_activity_intent`.
 
-Strict governance discussions require every member turn to complete.
+Classified ordinary tool failures become personal observations, and a failed provider may enter a resource-unavailable state without terminating other people.
 
-Any incomplete communication, migration, full-member ballot, or parent-failover discussion fails closed and leaves its request or approval pending instead of authorizing from a partial transcript.
+Cancellation, shutdown, persistence failures, and integrity faults retain their distinct propagation and settlement boundaries.
+
+Governance authority requires complete exact-case explicit ballots, never a transcript or merely successful model output.
 
 ### Entity Discovery Tools
 
@@ -256,7 +229,7 @@ Governance emails are announced through the eligible Agent's ordinary interactio
 
 `open_agent_mail(message_id)` opens only that Agent's own email and public request without changing the read receipt or supplying a vote.
 
-`submit_governance_choice(round_id, choice)` records an explicit immutable strict boolean or eligible model-alias choice, independently of mailbox state.
+`submit_governance_choice(case_id, choice)` records an explicit immutable strict boolean or eligible model-alias choice, independently of mailbox state.
 
 `list_governance_requests(pending_only=True)` includes unanswered eligible requests even when their emails are already read.
 
@@ -284,7 +257,7 @@ Direct send tools accept the recipient's Agent ID, while all personal controls d
 
 Chat previews and mail presentation do not mark messages read, cast votes, accept friendship, or publish model answers.
 
-These tools are not an additional team-discussion mode and are not exposed by legacy institutional discussion strategies.
+Chat tools use the common continuing runtime and do not introduce a team-discussion engine.
 
 `list_chat_reminders(message_id=None, limit=50, cursor=None)` inspects owner-authorized captured unread previews separately from current source retrieval, including after withdrawal.
 

@@ -12,7 +12,7 @@ from ai_team_team import (
 from test.governance_client import PersonalGovernanceClient, settle_governance_activity
 
 
-class GovernanceRoundTests(unittest.IsolatedAsyncioTestCase):
+class GovernanceCaseTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.workspace = tempfile.TemporaryDirectory(prefix="att-governance-rounds-")
         self.addCleanup(self.workspace.cleanup)
@@ -33,35 +33,32 @@ class GovernanceRoundTests(unittest.IsolatedAsyncioTestCase):
     async def settle(self):
         await settle_governance_activity(self.manager)
 
-    async def setup_round(self):
-        parent = self.manager.create_agent_team(self.root)
-        sender = self.manager.create_agent_team(parent)
-        recipient = self.manager.create_agent_team(parent)
+    async def setup_case(self, *, parent_size=3):
+        parent = self.manager.create_agent_team(self.root, parent=self.root, member_count=parent_size)
+        sender = self.manager.create_agent_team(parent, parent=parent)
+        recipient = self.manager.create_agent_team(parent, parent=parent)
         result = await self.manager.broker.request_peer_communication(
             sender, recipient, sender.members[0].agent_id, "Public request."
-        )
-        await self.manager.execute_team_discussion(
-            parent, "Discuss the public request.", rounds=1, skip_audit=True
         )
         await self.settle()
         return (
             parent,
             self.manager.broker.communication_requests[result.request_id],
-            next(iter(self.manager._governance.rounds.values())),
+            next(iter(self.manager._governance.cases.values())),
         )
 
     async def choose(self, actor, item, approved):
         token = self.manager._active_tool_agent.set(actor)
         try:
             return await self.manager.submit_governance_choice(
-                item.round_id, {"approved": approved, "reason": actor.name}, actor=actor
+                item.case_id, {"approved": approved, "reason": actor.name}, actor=actor
             )
         finally:
             self.manager._active_tool_agent.reset(token)
 
     async def test_complete_electorate_required_and_session_released(self):
-        team, request, item = await self.setup_round()
-        self.assertFalse(team.discussion_lock.locked())
+        team, request, item = await self.setup_case()
+        self.assertFalse(hasattr(team, "discussion_lock"))
         for actor in team.members[:2]:
             await self.choose(actor, item, True)
         await self.settle()
@@ -71,57 +68,54 @@ class GovernanceRoundTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item.status, "PENDING")
         await self.choose(team.members[2], item, False)
         await self.settle()
-        self.assertEqual(item.status, "APPROVED")
-        self.assertEqual(request.status.value, "APPROVED")
+        self.assertEqual(self.manager._governance.cases[item.case_id].status, "APPROVED")
+        self.assertEqual(self.manager.broker.communication_requests[request.request_id].status.value, "APPROVED")
         self.assertTrue(all(len(actor.agent_inbox) == 1 for actor in team.members))
 
     async def test_membership_changes_supersede_instead_of_reusing_votes(self):
-        team, request, item = await self.setup_round()
+        team, request, item = await self.setup_case()
         await self.choose(team.members[0], item, True)
         removed = team.members[-1]
         replacement = Agent("Replacement", "Same person", self.client)
         self.manager.register_agent(replacement)
-        async with team.state_lock:
-            team.members[-1] = replacement
+        async with self.manager._messaging.membership_transaction(team) as change:
+            change.members[-1] = replacement
+        await self.settle()
         result = await self.choose(team.members[1], item, True)
         self.assertEqual(result.status, "CLOSED")
-        self.assertEqual(item.status, "SUPERSEDED")
-        await self.manager.execute_team_discussion(
-            team, "Renewed deliberation.", rounds=1, skip_audit=True
-        )
+        self.assertEqual(self.manager._governance.cases[item.case_id].status, "SUPERSEDED")
         await self.settle()
         current = self.manager._governance.latest(
             "communication", request.request_id, item.principal
         )
-        self.assertEqual(current.round_number, 2)
-        self.assertEqual(len(item.ballots), 1)
+        self.assertEqual(current.electorate_revision, 2)
+        self.assertEqual(len(self.manager._governance.cases[item.case_id].ballots), 1)
         self.assertNotIn(removed.agent_id, current.voter_agent_ids)
         self.assertFalse(current.ballots)
 
     async def test_tie_creates_new_round_without_deleting_history(self):
-        team, request, item = await self.setup_round()
-        async with team.state_lock:
-            team.members.pop()
-        # Changing the frozen electorate starts another explicit round.
-        await self.manager.execute_team_discussion(
-            team, "Two-person decision.", rounds=1, skip_audit=True
-        )
+        team, request, item = await self.setup_case(parent_size=5)
+        async with self.manager._messaging.membership_transaction(team) as change:
+            change.members.pop()
         await self.settle()
         current = self.manager._governance.latest(
             "communication", request.request_id, item.principal
         )
         await self.choose(team.members[0], current, True)
         await self.choose(team.members[1], current, False)
+        await self.choose(team.members[2], current, True)
+        await self.choose(team.members[3], current, False)
+        current = self.manager._governance.cases[current.case_id]
         self.assertEqual(current.status, "TIED")
-        await self.manager.execute_team_discussion(
-            team, "Another public deliberation.", rounds=1, skip_audit=True
-        )
+        await self.manager.broker.request_peer_communication(
+            self.manager.teams[request.sender_team_id], self.manager.teams[request.recipient_team_id],
+            request.initiated_by_agent_id, "Explicit renewed consideration after a tie.")
         await self.settle()
         renewed = self.manager._governance.latest(
             "communication", request.request_id, item.principal
         )
-        self.assertEqual(renewed.round_number, current.round_number + 1)
-        self.assertEqual(len(current.ballots), 2)
+        self.assertEqual(renewed.electorate_revision, current.electorate_revision + 1)
+        self.assertEqual(len(current.ballots), 4)
         self.assertFalse(renewed.ballots)
         self.assertEqual(request.status.value, "PENDING")
 
@@ -129,13 +123,13 @@ class GovernanceRoundTests(unittest.IsolatedAsyncioTestCase):
         shared = Agent("Shared", "Independent", self.client, system_instructions="My own mission.")
         self.manager.register_agent(shared)
         first = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_count=3,
             existing_members=[shared],
             roles_and_presets=[("One", "one"), ("Two", "two")],
         )
         second = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_count=3,
             existing_members=[shared],
             roles_and_presets=[("Three", "three"), ("Four", "four")],
@@ -150,13 +144,14 @@ class GovernanceRoundTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("My own mission.", system_instruction)
             await asyncio.sleep(0.02)
             active -= 1
-            return "Final Answer: My deliberate public reply."
+            return "Action: set_activity_intent(intent={\'kind\': \'idle\'})"
 
         self.client.generate = generate
         await asyncio.gather(
             self.manager.execute_agent_interaction(shared, "First team's activity.", team=first),
             self.manager.execute_agent_interaction(shared, "Second team's activity.", team=second),
         )
+        await self.settle()
         self.assertEqual(maximum, 1)
         self.assertEqual(shared.system_instructions, "My own mission.")
         self.assertIn("First team's activity.", str(shared.message_history))

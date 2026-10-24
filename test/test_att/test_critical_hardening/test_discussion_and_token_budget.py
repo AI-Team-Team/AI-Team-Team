@@ -1,354 +1,90 @@
-from test.test_att.test_critical_hardening._support import (
-    ATTConfig,
-    ATTManager,
-    Agent,
-    CriticalHardeningTestCase,
-    HandlerClientAdapter,
-    LLMResponse,
-    StateRestoreError,
-    TokenLimitExceededError,
-    asyncio,
-    closing,
-    generate_with_retry,
-    get_default_tools,
-    os,
-    parse_governance_decision,
-    patch,
-    sqlite3,
-)
-from ai_team_team.core.manager.discussions.cleanup import (
-    finalize_discussion_session,
-)
-from ai_team_team import Tool
+"""Atomic shared-model quotas at the actual personal provider boundary."""
+
+import asyncio
+from unittest.mock import patch
+
+from ai_team_team import Agent, LLMResponse, Tool
+from ai_team_team.core.adapters import HandlerClientAdapter
+from ai_team_team.core.manager.activity.values import ModelUnavailable
+from ai_team_team.core.utils import _count_request_input_tokens, generate_with_retry
+from test.test_att.test_agent_activity._support import ActivityTestCase, idle
+from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep
 
 
-class TestCriticalHardening(CriticalHardeningTestCase):
-    async def test_discussion_cleanup_always_releases_session_state(self):
-        team = self.manager.create_agent_team(self.root)
-        team.is_running = True
-        discussion_token = self.manager._active_discussion_id.set(
-            "DISC-cleanup"
-        )
-
-        class AutoSaveContext:
-            exited = False
-
-            async def __aexit__(self, exc_type, exc, tb):
-                self.exited = True
-
-        auto_save_context = AutoSaveContext()
-        with patch.object(
-            self.manager,
-            "_finish_durable_alert_processing",
-            side_effect=RuntimeError("cleanup failure"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "cleanup failure"):
-                await finalize_discussion_session(
-                    self.manager,
-                    team,
-                    set(),
-                    set(),
-                    {"operational-alert"},
-                    False,
-                    auto_save_context,
-                    discussion_token,
-                )
-
-        self.assertTrue(auto_save_context.exited)
-        self.assertFalse(team.is_running)
-        self.assertIsNone(self.manager._active_discussion_id.get())
-
-    async def test_discussions_serialize_per_team_but_not_across_teams(self):
-        await self._assert_discussion_serialization()
-
-    async def test_discussion_serialization_fixture_detects_a_bypassed_lock(self):
-        with self.assertRaisesRegex(AssertionError, "True is not false"):
-            await self._assert_discussion_serialization(bypass_session_lock=True)
-
-    async def _assert_discussion_serialization(self, *, bypass_session_lock=False):
-        team_a = self.manager.create_agent_team(self.root)
-        team_b = self.manager.create_agent_team(self.root)
-        first_a_started = asyncio.Event()
-        release_first_a = asyncio.Event()
-        second_a_attempted = asyncio.Event()
-        second_a_started = asyncio.Event()
-        b_started = asyncio.Event()
-        execution_order = []
-        a_calls = 0
-
-        class ObservedSessionLock:
-            def __init__(self, real_lock):
-                self.real_lock = real_lock
-                self.attempts = 0
-                self.owners = {}
-
-            async def __aenter__(self):
-                self.attempts += 1
-                attempt = self.attempts
-                if attempt == 2:
-                    execution_order.append("A2-attempt")
-                    second_a_attempted.set()
-                # No suspension between notifying the test and trying the real lock.
-                if not bypass_session_lock:
-                    await self.real_lock.acquire()
-                self.owners[asyncio.current_task()] = attempt
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                attempt = self.owners.pop(asyncio.current_task())
-                if not bypass_session_lock:
-                    self.real_lock.release()
-                execution_order.append(f"A{attempt}-released")
-
-            def locked(self):
-                return self.real_lock.locked()
-
-        async def fake_session(team, prompt, rounds=2, skip_audit=False):
-            nonlocal a_calls
-            if team is team_a:
-                a_calls += 1
-                execution_order.append(f"A{a_calls}-start")
-                if a_calls == 1:
-                    first_a_started.set()
-                    await release_first_a.wait()
-                else:
-                    second_a_started.set()
-            else:
-                execution_order.append("B-start")
-                b_started.set()
-            return prompt
-
-        observed_lock = ObservedSessionLock(team_a.discussion_lock)
-        tasks = []
-        with (
-            patch.object(team_a, "_discussion_lock", observed_lock),
-            patch.object(self.manager, "_execute_team_discussion_session", fake_session),
-        ):
+class TestCriticalPersonalBudgets(ActivityTestCase):
+    async def test_concurrent_people_cannot_reserve_the_same_remaining_allowance(self):
+        barrier = AsyncBarrier()
+        response = idle()
+        response.usage = {"input_tokens": 2, "output_tokens": 1}
+        self.client.steps.append(ModelStep(response, barrier))
+        other = self.manager.register_agent(Agent("Other", "Researcher", self.client))
+        self.manager.config.model_token_limits["fixture"] = 10
+        self.manager.config.model_max_output_tokens["fixture"] = 6
+        with patch("ai_team_team.core.manager.activity.models._count_request_input_tokens", return_value=2):
+            first = await self.manager.activate_agent(self.root.agent_id)
             try:
-                first = asyncio.create_task(
-                    self.manager.execute_team_discussion(team_a, "ordinary")
-                )
-                tasks.append(first)
-                await asyncio.wait_for(first_a_started.wait(), timeout=10)
-                emergency = asyncio.create_task(
-                    self.manager.execute_emergency_discussion(
-                        team_a, {"reason": "urgent"}, skip_audit=True
-                    )
-                )
-                other_team = asyncio.create_task(
-                    self.manager.execute_team_discussion(team_b, "parallel")
-                )
-                tasks.extend((emergency, other_team))
-                await asyncio.wait_for(second_a_attempted.wait(), timeout=10)
-                await asyncio.wait_for(b_started.wait(), timeout=10)
-                self.assertFalse(second_a_started.is_set(), execution_order)
-
-                release_first_a.set()
-                await asyncio.wait_for(asyncio.gather(first, emergency, other_team), timeout=10)
-                self.assertLess(
-                    execution_order.index("A1-start"), execution_order.index("B-start")
-                )
-                self.assertLess(
-                    execution_order.index("B-start"), execution_order.index("A1-released")
-                )
-                self.assertLess(
-                    execution_order.index("A1-released"), execution_order.index("A2-start")
-                )
-                self.assertEqual(a_calls, 2)
-                self.assertFalse(observed_lock.locked())
-                self.assertFalse(team_a.is_running)
-                self.assertFalse(team_b.is_running)
+                await barrier.wait_entered()
+                self.assertEqual(self.manager.token_budget.available("fixture"), 2)
+                second = await self.manager.activate_agent(other.agent_id)
+                with self.assertRaises(ModelUnavailable):
+                    await self.wait(second)
+                self.assertEqual(len(self.client.requests), 1)
             finally:
-                release_first_a.set()
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-                await asyncio.wait_for(
-                    asyncio.gather(*tasks, return_exceptions=True), timeout=10
-                )
+                barrier.release()
+            await self.wait(first)
+        self.assertEqual(self.manager.token_budget.available("fixture"), 7)
+        self.assertEqual(self.records("model_token_claims")[0].values["actual_usage"], 3)
 
-    async def test_token_budget_reservation_is_atomic_and_refunds_unused(self):
-        started = asyncio.Event()
-        release = asyncio.Event()
+    async def test_estimator_includes_system_instructions_and_full_tool_definitions(self):
+        self.manager.count_tokens = lambda text, alias: len(str(text))
+        tool = Tool("large_tool", "Definition metadata", lambda: "ok")
+        plain = _count_request_input_tokens(self.manager, "fixture", "prompt", None, None)
+        system = _count_request_input_tokens(self.manager, "fixture", "prompt", "SYSTEM_CONTENT", None)
+        schema = _count_request_input_tokens(self.manager, "fixture", "prompt", None, [tool])
+        self.assertEqual(system - plain, len("SYSTEM_CONTENT"))
+        self.assertGreater(schema, plain + len(tool.description))
+        self.manager.config.model_token_limits["fixture"] = 100
+        admission = await self.manager.activate_agent(self.root.agent_id)
+        with self.assertRaises(ModelUnavailable):
+            await self.wait(admission)
+        self.assertFalse(self.client.requests)
+        self.assertFalse(self.records("model_token_claims"))
 
-        class BlockingClient:
-            def supports_output_token_limit(self):
-                return "max_output_tokens"
+    async def test_cancellation_keeps_unknown_sent_reservation_without_inventing_usage(self):
+        barrier = AsyncBarrier()
+        self.client.steps.append(ModelStep(idle(), barrier))
+        self.manager.config.model_token_limits["fixture"] = 20
+        self.manager.config.model_max_output_tokens["fixture"] = 5
+        with patch("ai_team_team.core.manager.activity.models._count_request_input_tokens", return_value=2):
+            await self.manager.activate_agent(self.root.agent_id)
+            await barrier.wait_entered()
+            worker = self.manager._activity.sessions[self.root.agent_id].worker
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+        barrier.release()
+        claim = self.records("model_token_claims")[0]
+        self.assertEqual(claim.values["settlement"], "unknown_sent")
+        self.assertIsNone(claim.values["actual_usage"])
+        self.assertEqual(self.manager.token_budget.available("fixture"), 13)
 
-            async def generate(self, prompt, max_output_tokens=None, **kwargs):
-                started.set()
-                await release.wait()
-                return LLMResponse(
-                    "ok",
-                    usage={"input_tokens": 2, "output_tokens": 1},
-                )
-
-        manager = ATTManager(
-            Agent("BudgetRoot", "Architect", BlockingClient()),
-            ATTConfig(
-                workspace_root=self.tmpdir,
-                model_token_limits={"default": 10},
-                model_max_output_tokens={"default": 6},
-            ),
-            persistence_mode="volatile",
-        )
-        first = asyncio.create_task(
-            generate_with_retry(
-                manager.root_ai.llm_client,
-                "12345678",
-                manager=manager,
-                retries=1,
-            )
-        )
-        await started.wait()
-        self.assertEqual(manager.token_budget.available("default"), 2)
-        with self.assertRaises(TokenLimitExceededError):
-            await generate_with_retry(
-                manager.root_ai.llm_client,
-                "12345678",
-                manager=manager,
-                retries=1,
-            )
-        release.set()
-        await first
-        self.assertEqual(manager.model_token_usage["default"], 3)
-        self.assertEqual(manager.token_budget.available("default"), 7)
-        await manager.close()
-
-    async def test_hard_budget_reserves_system_and_transmitted_tool_inputs(self):
-        for component in ("system_instruction", "tools"):
-            with self.subTest(component=component):
-                calls = []
-
-                class CountingClient:
-                    def supports_output_token_limit(self):
-                        return "max_output_tokens"
-
-                    async def generate(
-                        self,
-                        prompt,
-                        system_instruction=None,
-                        tools=None,
-                        max_output_tokens=None,
-                        **kwargs,
-                    ):
-                        calls.append(
-                            {
-                                "system_instruction": system_instruction,
-                                "tools": tools,
-                            }
-                        )
-                        return LLMResponse("ok")
-
-                client = CountingClient()
-                manager = ATTManager(
-                    Agent(f"BudgetRoot-{component}", "Architect", client),
-                    ATTConfig(
-                        workspace_root=self.tmpdir,
-                        model_token_limits={"default": 10},
-                        model_max_output_tokens={"default": 2},
-                    ),
-                    persistence_mode="volatile",
-                )
-                manager.count_tokens = (
-                    lambda text, model_alias=None: len(str(text).split())
-                )
-                system_instruction = (
-                    "large " * 20
-                    if component == "system_instruction"
-                    else None
-                )
-                tools = (
-                    [
-                        Tool(
-                            "large_tool",
-                            "large " * 20,
-                            lambda: "ok",
-                        )
-                    ]
-                    if component == "tools"
-                    else None
-                )
-
-                with self.assertRaises(TokenLimitExceededError):
-                    await generate_with_retry(
-                        client,
-                        "small",
-                        system_instruction=system_instruction,
-                        tools=tools,
-                        manager=manager,
-                        retries=0,
-                    )
-
-                self.assertEqual(calls, [])
-                self.assertEqual(
-                    manager.model_token_usage.get("default", 0), 0
-                )
-                await manager.close()
-
-    async def test_cancelled_sent_request_charges_prompt_and_releases_output(self):
-        started = asyncio.Event()
-
-        class HangingClient:
-            def supports_output_token_limit(self):
-                return "max_output_tokens"
-
-            async def generate(self, prompt, **kwargs):
-                started.set()
-                await asyncio.Event().wait()
-
-        manager = ATTManager(
-            Agent("CancelRoot", "Architect", HangingClient()),
-            ATTConfig(
-                workspace_root=self.tmpdir,
-                model_token_limits={"default": 20},
-                model_max_output_tokens={"default": 5},
-            ),
-            persistence_mode="volatile",
-        )
-        task = asyncio.create_task(
-            generate_with_retry(
-                manager.root_ai.llm_client,
-                "12345678",
-                manager=manager,
-                retries=1,
-            )
-        )
-        await started.wait()
-        task.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await task
-        self.assertEqual(manager.model_token_usage["default"], 2)
-        self.assertEqual(manager.token_budget.available("default"), 18)
-        await manager.close()
-
-    async def test_handler_max_tokens_cap_is_forwarded(self):
+    async def test_handler_output_cap_reaches_the_actual_common_model_request(self):
         observed = []
 
-        async def handler(
-            model_name,
-            prompt,
-            max_tokens,
-            system_instruction=None,
-            temperature=0.3,
-            require_json=False,
-        ):
+        async def handler(model_name, prompt, max_tokens, system_instruction=None, temperature=0.3, require_json=False):
             observed.append((model_name, max_tokens))
-            return "ok"
+            return "Action: set_activity_intent(intent={'kind': 'idle'})"
 
         client = HandlerClientAdapter("bounded", handler)
-        manager = ATTManager(
-            Agent("HandlerRoot", "Architect", client),
-            ATTConfig(
-                workspace_root=self.tmpdir,
-                model_token_limits={"bounded": 20},
-                model_max_output_tokens={"bounded": 4},
-            ),
-            persistence_mode="volatile",
-        )
-        manager.register_llm_client("bounded", client)
-        await generate_with_retry(
-            client, "12345678", manager=manager, retries=1
-        )
+        self.manager.register_llm_client("bounded", client)
+        self.root.llm_client = client
+        self.manager.config.tool_calling_mode = "text_react"
+        self.manager.config.model_token_limits["bounded"] = 1_000_000
+        self.manager.config.model_max_output_tokens["bounded"] = 4
+        admission = await self.manager.activate_agent(self.root.agent_id)
+        await self.wait(admission)
         self.assertEqual(observed, [("bounded", 4)])
-        await manager.close()
+
+    async def test_manager_inference_utility_cannot_start_a_second_execution_engine(self):
+        with self.assertRaisesRegex(RuntimeError, "current personal activity"):
+            await generate_with_retry(self.client, "Do not bypass admission.", manager=self.manager)
+        self.assertFalse(self.client.requests)

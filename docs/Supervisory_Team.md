@@ -1,106 +1,156 @@
 # Supervisory Team
 
-For each completed ordinary AgentTeam discussion, `ATTManager` creates a real, registered, privileged supervisory AgentTeam through the same staged team-creation mechanism used for other teams.
+Health supervision is event-driven and does not grade ordinary business output, progress, quality, or completion.
 
-It has fresh Integrity, Continuity, and Deadlock auditors (and additional Review auditors if the configured minimum team size is larger than three), its own team identity and discussion lock, and no ordinary business tools.
+Each admitted assessment creates a real, fresh, privileged AgentTeam through Manager's staged team creation.
 
-Its two-round discussion runs with `skip_audit=True`, so supervision does not recursively audit itself.
+The temporary people use the same personal scheduler, provider-request service, invocation locks, ToolExecutor, quota ledger, and writer as ordinary people.
 
-Each audit has new Agent identities and private working contexts.
+There is no separate audit reasoning engine, discussion round, whole-team session lock, or reused auditor memory.
 
-Concurrent audits can run in separate supervisory teams without sharing auditor messages.
+## Triggering an assessment
 
-Supervisory identities are not advertised as ordinary membership candidates or included in the ordinary topology view.
+The strict defaults in `ATTConfig.health` are:
 
-The temporary team, Agent identities, and DocLibs are excluded from persistence snapshots so an interrupted process cannot restore an abandoned audit as an active team.
+| Evidence | Default behavior |
+| --- | --- |
+| Confirmed permission-execution or state-integrity fault | Apply the trusted deterministic protection immediately and retain an incident; do not wait for an audit. |
+| Model protocol corruption | Three consecutive structurally classified failures for one Agent within 600 seconds request assessment; a valid response resets that streak. |
+| Invalid tool arguments | Five consecutive errors of the same category for one Agent and tool within 600 seconds request assessment; a successful call to that tool resets its streak. |
+| Semantic suspicion | Disabled unless the Host enables a detector and explicitly supplies its authorized evidence provider. |
+| Silence, normal waiting, permission or business denial | Do not automatically trigger health assessment. |
 
-After the audit, ATT durably records its input transcript, committee debate, result, and audit identity as system-memory evidence, then dissolves the supervisory team and removes its temporary auditors and DocLibs from active state.
+Provider timeouts, disconnections, and availability faults belong to resource availability, not automatic Agent blame.
 
-Restoring a completed audit restores the evidence, not its auditors.
+Reaching a threshold means that inspection is warranted, not that the Agent is unhealthy or an intervention is authorized.
 
-The old shared `SupervisoryTeam` runtime object no longer exists; `manager.supervisor` is an orchestration service for these managed lifecycle operations.
+The observation window ages detection samples only; it never expires a retained incident.
+
+The Host can explicitly request an assessment:
+
+```python
+from ai_team_team import HealthSubject
+
+admission = await manager.request_health_assessment(
+    HealthSubject(kind="agent", subject_id=agent.agent_id),
+    {"kind": "host", "facts": ["An explicitly authorized technical observation."]},
+)
+result = await manager.wait_for_health_assessment(admission.audit_id)
+```
+
+Equivalent active assessments coalesce by subject and stable evidence fingerprint.
+
+A temporary inability to provision auditors retains the threshold evidence and incident without converting it into a personal activity failure.
+
+This includes temporary filesystem failures while staging audit workspaces; incomplete staging leaves no registered auditors or private directories behind.
+
+Persistence and integrity failures remain explicit failures.
+
+## Fresh managed lifecycle
+
+Each assessment creates new auditor identities, private working contexts, and a genuine temporary AgentTeam.
+
+The predefined electorate is retained before auditor execution begins.
+
+The total deadline defaults to `health.audit_timeout_seconds=600`, starts at admission, and includes scheduler queueing, provider waits, tool work, and communication.
+
+It is independent of the 120-second parent-failover deadline.
+
+Late provider responses or finding tools cannot acquire authority after that deadline.
+
+Durable settlement and cleanup may finish after the model-execution deadline.
+
+Auditors can explicitly read only admitted evidence, share permitted findings in their restricted team, inspect that conversation, submit their own structured finding, and choose idle.
+
+Their tool view excludes ordinary private files, business tools, recruitment, topology changes, model selection, and peer communication.
+
+Every predefined auditor must submit a valid finding before a strict majority can form a health conclusion.
+
+Text answers and discussion summaries are not findings, and no chosen member compiles an authoritative consensus on behalf of the others.
+
+A missing finding, failure, cancellation, tie, or deadline produces `UNKNOWN`.
+
+Audit activity does not recursively trigger more audits.
+
+## Evidence and privacy
+
+Assessment admission accepts a small immutable evidence object and explicitly authorized observation references.
+
+It does not sweep personal windows, private libraries, direct chat, background-task results, or hidden model reasoning.
+
+Scoped model requests, sanitized execution observations, explicit shared findings, individual structured findings, identities, deadlines, and the final result remain retained in audit-specific records.
+
+Audit prompts and transient observations do not join ordinary Agent Journal or episodic-memory ownership.
+
+Temporary teams, auditors, and DocLibs are omitted from ordinary topology, discovery, and state snapshots.
+
+Completion or failure removes the temporary runtime identities after accepted evidence has settled.
+
+Restore retains the evidence and marks interrupted assessments unknown; it never restores or reuses the temporary people or automatically replays the audit.
 
 ## Result model
 
-`audit_team_dialog()` returns an `AuditResult`:
+`AuditResult` has independent health and operational axes:
 
 ```python
 AuditResult(
     status=AuditStatus.HEALTHY,
-    reason="The committee reached a valid conclusion.",
+    reason="Every predefined auditor supplied a valid finding.",
     cause=None,
     operational_status=OperationalStatus.HEALTHY,
-    operational_reason="All member turns completed.",
+    operational_reason="Independent operational evidence was assessed.",
 )
 ```
 
-Content status is one of:
+Health status is `HEALTHY`, `UNHEALTHY`, or `UNKNOWN`.
 
-- `HEALTHY`: the committee explicitly confirmed a healthy discussion.
-- `UNHEALTHY`: the committee explicitly confirmed an anomaly.
-- `UNKNOWN`: the LLM call, token budget, incomplete committee discussion, response conversion, or JSON validation prevented a trustworthy result.
+Operational status is `HEALTHY`, `DEGRADED`, or `UNKNOWN`.
 
-Operational status is independent:
+A subject can be unhealthy and operationally degraded at the same time.
 
-- `HEALTHY`: every member turn completed and the selected authority found no runtime degradation.
-- `DEGRADED`: at least one member turn was incomplete or the selected supervisor authority explicitly found degraded execution.
-- `UNKNOWN`: supervisor-owned runtime evaluation could not form a valid result.
+`operational_status_decision_mode="framework"` preserves the admitted framework operational evidence while auditors assess health.
 
-A discussion can be content `UNHEALTHY` and operationally `DEGRADED` at the same time.
+`"supervisor"` requires the structured auditor findings to decide both axes.
 
-The supervisor receives the complete transcript, incomplete placeholders, and privacy-safe failure metadata without tool arguments, private bodies, or sensitive observations.
+`"framework_then_supervisor"` allows review and preserves the framework operational result when no trustworthy operational majority exists.
 
-`operational_status_decision_mode="framework"` lets structured turn results determine runtime health while the committee evaluates content.
+## Incident lifecycle
 
-`"supervisor"` requires strict JSON for both axes and produces operational `UNKNOWN` if supervision fails.
+Non-healthy assessment results and configured operational degradation create or merge durable incidents.
 
-`"framework_then_supervisor"` allows committee review but preserves the framework runtime result if supervision fails.
+A stable fingerprint retains occurrence count, first time, latest time, and technical references without message or private-file bodies.
 
-## Escalation behavior
+There is no incident TTL and no hard limit that drops unique alerts.
 
-`UNHEALTHY` preserves the emergency path: the supervisor sends a `child_failure_escalation` to the direct parent.
+`audit_unknown_escalation_mode` accepts `"queue"` or `"wake"`, while `operational_degraded_escalation_mode` additionally accepts the default `"none"`.
 
-An idle parent is woken for an emergency discussion when emergency wakeups are enabled.
+Attention follows the subject's actual current organizational authority rather than an implicit Root or a stale notification recipient.
 
-`UNKNOWN` emits an `audit_unknown` system event and sends an `audit_unknown_escalation` to the parent. Configure its delivery with:
+Incident claims and acknowledgements revalidate that authority at their commit boundary, so waiting behind a topology change cannot preserve a former parent's authority.
 
-```python
-ATTConfig(audit_unknown_escalation_mode="wake")   # default
-ATTConfig(audit_unknown_escalation_mode="queue")
-```
+Queue mode records an addressed notice without forcing activation.
 
-`wake` immediately schedules an emergency parent discussion. That discussion skips its own supervisory review for the current wakeup.
+Wake mode may request ordinary personal activity, but cannot switch another person's scope, override intent, or force a group discussion.
 
-Identical alerts use a stable persisted fingerprint and merge their occurrence count, first-seen time, and last-seen time. These guards prevent an audit service outage from creating an escalation storm.
-
-`queue` stores the same durable alert record in the parent inbox for its next normal discussion. An injected alert moves from `pending` to `processing`.
-
-It is removed only after the parent discussion succeeds; failure or cancellation returns it to `pending`.
-
-Alerts have no TTL and no hard count limit.
-
-The optional `audit_unknown_soft_threshold` emits operational warnings without rejecting or deleting unique alerts.
-
-Hosts may explicitly acknowledge or clear records:
+Incident handling is explicit:
 
 ```python
-manager.acknowledge_unknown_alert(team_id, fingerprint)
-manager.clear_unknown_alerts(team_id)                 # all UNKNOWN alerts
-manager.clear_unknown_alerts(team_id, {fingerprint}) # selected alerts
+incident = manager.inspect_health_incident(incident_id)
+async with manager.handle_health_incident(incident_id) as claim:
+    # Perform authorized technical handling.
+    await manager.acknowledge_health_incident(
+        incident_id,
+        incident["occurrence_count"],
+        claim_token=claim.get("token"),
+    )
 ```
 
-At the root, both confirmed and unknown failures propagate through `on_system_event` and `on_emergency_escalation`; the library does not print alerts directly.
+Reading an email does not claim or acknowledge an incident.
 
-Operational `DEGRADED` always emits a structured `operational_degraded` system event.
+A new occurrence invalidates acknowledgement of an older generation.
 
-`operational_degraded_escalation_mode="none"` is the default and does not notify a parent; `"queue"` creates a durable parent inbox alert; `"wake"` additionally schedules a serialized emergency discussion.
+Failure, cancellation, and restart release active claims to pending, and explicit Host clearing acknowledges attention without deleting retained evidence.
 
-Operational alerts use the same stable fingerprint, occurrence count, first/last timestamps, processing state, success acknowledgement, failure requeue, and wake deduplication rules as UNKNOWN alerts.
+Whole-ATT and root-level attention uses ordered metadata-only `on_system_event` callbacks.
 
-A wake caused by either alert type skips that emergency discussion's audit cycle to prevent recursive supervision storms.
-
-## Transcript compression
-
-Large transcripts are summarized before committee debate.
-
-If compression fails, the entire audit result is `UNKNOWN`, with the exception type and message retained in `AuditResult.cause`.
+Neither a health finding nor an incident implicitly grants business-repair, file, membership, permission, or model authority.

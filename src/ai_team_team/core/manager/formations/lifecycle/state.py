@@ -131,7 +131,7 @@ class FormationStateMixin:
                 raise ValueError(
                     "The initiating Agent is no longer a member of the creator AgentTeam."
                 )
-            if isinstance(creator, Agent) and parent is not None and all(
+            if isinstance(creator, Agent) and isinstance(parent, AgentTeam) and all(
                 member.agent_id != creator.agent_id for member in parent.members
             ):
                 raise ValueError(
@@ -255,21 +255,24 @@ class FormationStateMixin:
     def _emit_event(self, event_type: str, payload: Dict[str, Any]) -> None:
         self.manager._emit_callback("on_system_event", event_type, payload)
 
-    @staticmethod
-    def _copy_inboxes(agents: Iterable[Agent]) -> Dict[str, list[dict[str, Any]]]:
-        copies = {}
-        for agent in agents:
-            with agent.inbox_lock:
-                copies[agent.agent_id] = [dict(message) for message in agent.agent_inbox]
-        return copies
-
-    @staticmethod
-    def _restore_inboxes(agents: Iterable[Agent], copies: Dict[str, list[dict[str, Any]]]) -> None:
-        for agent in agents:
-            if agent.agent_id not in copies:
-                continue
-            with agent.inbox_lock:
-                agent.agent_inbox = [dict(message) for message in copies[agent.agent_id]]
+    def _require_proposal_authority(self, proposal) -> None:
+        """Creation and publication both require the current creator relationship."""
+        initiator = self.manager._agents_by_id.get(proposal.initiator_agent_id)
+        if initiator is None:
+            raise PermissionError("The formation initiator no longer exists.")
+        self._require_active_agent(initiator)
+        creator = self._resolve_request_creator(proposal)
+        parent = self._resolve_request_parent(proposal)
+        if isinstance(creator, AgentTeam):
+            self.manager._topology.require_available(creator)
+            if initiator not in creator.members:
+                raise PermissionError("The initiating Agent is no longer a member of the creator AgentTeam.")
+        else:
+            self._require_active_agent(creator)
+            if creator is not initiator:
+                raise PermissionError("An Agent creator must be the formation initiator.")
+            if isinstance(parent, AgentTeam) and initiator not in parent.members:
+                raise PermissionError("The initiating Agent is no longer a member of the intended parent AgentTeam.")
 
     def _require_active_agent(self, actor: Agent) -> None:
         self.manager._resources.check_authority()
@@ -277,5 +280,6 @@ class FormationStateMixin:
             self.manager._agents_by_id.get(actor.agent_id) is not actor
             or self.manager.agents.get(actor.name) is not actor
             or actor.lifecycle_state != "active"
+            or self.manager._topology.is_agent_pending(actor.agent_id)
         ):
             raise PermissionError("The acting Agent must be active and registered.")

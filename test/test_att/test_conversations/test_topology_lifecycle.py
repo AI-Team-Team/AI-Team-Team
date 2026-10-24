@@ -8,12 +8,13 @@ from unittest.mock import AsyncMock, patch
 
 from ai_team_team import StateRestoreError
 from test.test_att.test_autonomous_activity_phase1._support import make_manager
+from test.governance_client import settle_governance_activity, submit_case_ballots
 from ._support import ChatTestCase
 
 
 class TopologyLifecycleTests(ChatTestCase):
     def new_team(self, creator=None):
-        return self.manager.create_agent_team(creator or self.root, member_configs={
+        return self.manager.create_agent_team(creator or self.root, parent=creator, member_configs={
             role: {"model": "fixture"} for role in ("Research", "Review", "Integrate")
         })
 
@@ -93,7 +94,8 @@ class TopologyLifecycleTests(ChatTestCase):
         for volatile in (False, True):
             with self.subTest(volatile=volatile):
                 manager, _, _ = make_manager(self, volatile=volatile)
-                team = manager.create_agent_team(manager.root_ai)
+                manager.config.max_delegation_depth = 3
+                team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
                 records = manager._records.snapshot()
                 with patch.object(manager._records, "commit", side_effect=RuntimeError("Injected archive failure")):
                     with self.assertRaisesRegex(RuntimeError, "archive failure"):
@@ -101,10 +103,13 @@ class TopologyLifecycleTests(ChatTestCase):
                 self.assertFalse(manager._topology.transition_pending)
                 self.assertEqual(manager._records.snapshot(), records)
                 self.assertEqual(getattr(team, "_lifecycle_state", "active"), "active")
-                child = manager.create_agent_team(team)
+                child = manager.create_agent_team(team, parent=team)
                 self.assertIs(child.parent_team, team)
-                with self.assertRaisesRegex(ValueError, "live child-parent"):
-                    await manager.close_team_conversation(team.team_id)
+                grandchild = manager.create_agent_team(child, parent=child)
+                await manager.close_team_conversation(team.team_id)
+                self.assertIsNone(child.organizational_parent)
+                self.assertIs(grandchild.parent_team, child)
+                self.assertNotIn(("team_position_cooldowns", (child.team_id,)), manager._records.index)
                 self.assertFalse(manager._topology.transition_pending)
 
     async def test_cancelled_archive_retains_its_reservation_through_receipt_settlement(self):
@@ -142,8 +147,8 @@ class TopologyLifecycleTests(ChatTestCase):
             with self.subTest(volatile=volatile):
                 manager, path, _ = make_manager(self, volatile=volatile)
                 manager.config.migration_policy = "permissive"
-                moving = manager.create_agent_team(manager.root_ai)
-                target = manager.create_agent_team(manager.root_ai)
+                moving = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
+                target = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
                 target._publication_pending = True
                 denied = await manager.negotiate_and_execute_migration(moving, target, "Provisional target")
                 self.assertEqual(denied.status, "DENIED")
@@ -168,11 +173,17 @@ class TopologyLifecycleTests(ChatTestCase):
         self.assertEqual(self.manager._migration.requests[pending.request_id].status, "STALE")
         self.assertIsNone(moving.parent_team)
 
-    async def test_migration_receipt_precedes_archive_child_validation(self):
+    async def test_archive_waits_for_migration_receipt_then_detaches_the_child(self):
         self.manager.config.migration_policy = "permissive"
         moving, target = self.new_team(), self.new_team()
+        result = await self.manager.negotiate_and_execute_migration(moving, target, "Attach first")
+        await settle_governance_activity(self.manager)
+        with patch.object(self.manager._governance, "schedule_resolution"):
+            for case in tuple(self.manager._governance.cases.values()):
+                if case.business_id == result.request_id:
+                    await submit_case_ballots(self.manager, case)
         entered, release, archive_waiting = asyncio.Event(), asyncio.Event(), asyncio.Event()
-        original = self.manager._commit_dirty_state
+        original = self.manager._records.commit
 
         class ObservedLock(asyncio.Lock):
             async def acquire(self):
@@ -182,27 +193,34 @@ class TopologyLifecycleTests(ChatTestCase):
 
         self.manager._topology.transition_lock = ObservedLock()
 
-        async def paused_commit(dirty):
-            if dirty["teams"]:
+        async def paused_commit(*args, **kwargs):
+            if str(kwargs.get("operation_id", "")).startswith("TOPOLOGY-"):
                 entered.set()
                 await release.wait()
-            return await original(dirty)
+            return await original(*args, **kwargs)
 
-        with patch.object(self.manager, "_commit_dirty_state", paused_commit):
-            migrating = asyncio.create_task(self.manager.negotiate_and_execute_migration(moving, target, "Attach first"))
+        with patch.object(self.manager._records, "commit", paused_commit):
+            migrating = asyncio.create_task(self.manager._migration.complete_request(result.request_id))
             closing = None
             try:
                 await asyncio.wait_for(entered.wait(), 5)
+                self.assertIsNone(moving.organizational_parent)
                 closing = asyncio.create_task(self.manager.close_team_conversation(target.team_id))
                 await asyncio.wait_for(archive_waiting.wait(), 5)
                 self.assertFalse(closing.done())
             finally:
                 release.set()
-            self.assertEqual((await migrating).status, "EXECUTED")
-            with self.assertRaisesRegex(ValueError, "live child-parent"):
-                await closing
-        self.assertIs(moving.parent_team, target)
-        self.assertEqual(getattr(target, "_lifecycle_state", "active"), "active")
+                await migrating
+                if closing is not None:
+                    await closing
+        self.assertEqual(self.manager.inspect_migration_request(result.request_id).status, "EXECUTED")
+        self.assertIsNone(moving.organizational_parent)
+        self.assertEqual(target._lifecycle_state, "dissolved")
+        cooldown = self.manager._records.index[("team_position_cooldowns", (moving.team_id,))]
+        events = [row for row in self.manager._records.snapshot()
+            if row.table_name == "team_topology_events" and row.values["team_id"] == moving.team_id]
+        self.assertEqual([row.values["transition"] for row in events], ["creation", "attachment", "parent_loss"])
+        self.assertEqual(cooldown.values["event_id"], events[-2].values["event_id"])
         await self.manager.save_state()
         await self.manager.load_state(self.path)
 
@@ -216,7 +234,7 @@ class TopologyLifecycleTests(ChatTestCase):
         snapshot["teams"] = [{**row, "parent_team_id": target.team_id, "parent_agent_id": None,
                               "state_version": row["state_version"] + 1} for row in snapshot["teams"]]
         store = self.manager._persistence._store(self.path)
-        with self.assertRaisesRegex(StateRestoreError, "parent cannot be dissolved"):
+        with self.assertRaisesRegex((ValueError, StateRestoreError), "organizational edge|parent cannot be dissolved"):
             await asyncio.to_thread(store.write, snapshot)
         self.assertIsNone(moving.parent_team)
         with closing(sqlite3.connect(self.path)) as database:

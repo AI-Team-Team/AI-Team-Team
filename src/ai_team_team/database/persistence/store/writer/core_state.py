@@ -122,6 +122,12 @@ class CoreStateWriteMixin:
             previous = session.get(TeamModel, team["team_id"])
             if previous is not None and previous.state_version > team.get("state_version", 1):
                 continue
+            if previous is not None and previous.position_revision > team.get("position_revision", 1):
+                team = {**team, "position_revision": previous.position_revision,
+                    "parent_team_id": previous.parent_team_id, "parent_agent_id": previous.parent_agent_id}
+            elif previous is not None and previous.position_revision == team.get("position_revision", 1) and (
+                    previous.parent_team_id, previous.parent_agent_id) != (team.get("parent_team_id"), team.get("parent_agent_id")):
+                raise ValueError("An organizational edge cannot change without a new accepted position revision.")
             accepted.append(team)
             session.merge(
                 TeamModel(
@@ -134,6 +140,7 @@ class CoreStateWriteMixin:
                     parent_team_id=None,
                     state_version=team.get("state_version", 1),
                     parent_agent_id=team.get("parent_agent_id"),
+                    position_revision=team.get("position_revision", 1),
                     lifecycle_state=team.get("lifecycle_state", "active"),
                     creator_agent_id=(
                         team["creator_id"] if team["creator_type"] == "agent" else None
@@ -153,6 +160,30 @@ class CoreStateWriteMixin:
                 synchronize_session=False,
             )
         session.flush()
+
+    @staticmethod
+    def _sync_current_topology(session: Any, records, teams) -> None:
+        """Position facts outrank later metadata captured before their receipt."""
+        events = ACTIVITY_TABLES["team_topology_events"]
+        declared = {team["team_id"]: team for team in teams}
+        identifiers = set(declared) | {row.values["team_id"] for row in records if row.table_name == "team_topology_events"}
+        for team_id in sorted(identifiers):
+            latest = session.execute(select(events).where(events.c.team_id == team_id)
+                .order_by(events.c.position_revision.desc())).mappings().first()
+            supplied = declared.get(team_id)
+            if latest is None:
+                if supplied is not None and supplied.get("position_revision", 1) != 1:
+                    raise ValueError("A noninitial organizational position requires its accepted event.")
+                continue
+            if supplied is not None and supplied.get("position_revision", 1) == latest["position_revision"] and (
+                    supplied.get("parent_agent_id"), supplied.get("parent_team_id")) != (
+                    latest["new_parent_agent_id"], latest["new_parent_team_id"]):
+                raise ValueError("A position revision cannot describe a different parent than its accepted event.")
+            if supplied is not None and supplied.get("position_revision", 1) > latest["position_revision"]:
+                raise ValueError("An organizational projection is ahead of its factual position history.")
+            session.query(TeamModel).filter_by(team_id=team_id).update({
+                "parent_agent_id": latest["new_parent_agent_id"], "parent_team_id": latest["new_parent_team_id"],
+                "position_revision": latest["position_revision"]}, synchronize_session=False)
 
     @staticmethod
     def _sync_current_memberships(session: Any, records, teams) -> None:

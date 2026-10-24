@@ -1,3 +1,4 @@
+from test.governance_client import settle_governance_activity, submit_case_ballots, approve_pending_business
 from ai_team_team import ParentApprovalCommunicationConfig
 from ai_team_team.core.decision import DecisionOutcome
 
@@ -10,9 +11,9 @@ class TestAutonomousCommunication(CommunicationTestCase):
         manager = self.manager(
             ParentApprovalCommunicationConfig(direction="one_way")
         )
-        sender = manager.create_agent_team(self.root, member_count=3)
-        recipient = manager.create_agent_team(self.root, member_count=3)
-        outsider = manager.create_agent_team(self.root, member_count=3)
+        sender = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        recipient = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        outsider = manager.create_agent_team(self.root, parent=self.root, member_count=3)
         request_result = await manager.broker.request_peer_communication(
             sender, recipient, sender.members[0].agent_id, "one way"
         )
@@ -68,31 +69,30 @@ class TestAutonomousCommunication(CommunicationTestCase):
         self.assertEqual(reverse.status, "NO_AGREEMENT")
         self.assertEqual(forbidden.status, "FORBIDDEN")
         self.assertEqual(revoked.status, "REVOKED")
-        self.assertFalse(agreement.active)
+        self.assertFalse(manager.broker.agreements[agreement.agreement_id].active)
         await manager.close()
     async def test_relevant_topology_change_creates_stale_successor(self):
+        self.client.respond = False
         manager = self.manager(ParentApprovalCommunicationConfig())
-        parent_a = manager.create_agent_team(self.root, member_count=3)
-        parent_b = manager.create_agent_team(self.root, member_count=3)
-        parent_c = manager.create_agent_team(self.root, member_count=3)
-        sender = manager.create_agent_team(parent_a, member_count=3)
-        recipient = manager.create_agent_team(parent_b, member_count=3)
+        parent_a = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        parent_b = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        parent_c = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        sender = manager.create_agent_team(parent_a, parent=parent_a, member_count=3)
+        recipient = manager.create_agent_team(parent_b, parent=parent_b, member_count=3)
 
         result = await manager.broker.request_peer_communication(
             sender, recipient, sender.members[0].agent_id, "route changes"
         )
         request = manager.broker.communication_requests[result.request_id]
-        await manager.execute_team_discussion(parent_a, "first approval", rounds=1)
-
-        with manager._topology_lock:
-            parent_b.child_teams.remove(recipient)
-            parent_c.child_teams.append(recipient)
-            recipient._parent_team = parent_c
-            manager._team_parent_map[recipient.team_id] = parent_c.team_id
-            recipient.invalidate_depth_cache()
-
-        await manager.execute_team_discussion(parent_b, "old route", rounds=1)
-        await self.wait_for_status(request, "STALE")
+        await settle_governance_activity(manager)
+        case = manager._governance.latest("communication", request.request_id, request.approval_principals[0])
+        await submit_case_ballots(manager, case)
+        await settle_governance_activity(manager)
+        manager.config.migration_policy = "permissive"
+        migration = await manager.negotiate_and_execute_migration(recipient, parent_c, "Accepted route change.")
+        await approve_pending_business(manager, migration.request_id)
+        self.assertEqual(manager.inspect_migration_request(migration.request_id).status, "EXECUTED")
+        request = await self.wait_for_status(request, "STALE")
 
         self.assertEqual(request.status.value, "STALE")
         self.assertIsNotNone(request.superseded_by_request_id)
@@ -107,19 +107,21 @@ class TestAutonomousCommunication(CommunicationTestCase):
         self.assertEqual(len(manager.broker.agreements), 0)
         await manager.close()
     async def test_denial_cannot_be_overwritten_by_late_approval(self):
+        self.client.respond = False
         manager = self.manager(ParentApprovalCommunicationConfig())
-        parent_a = manager.create_agent_team(self.root, member_count=3)
-        parent_b = manager.create_agent_team(self.root, member_count=3)
-        sender = manager.create_agent_team(parent_a, member_count=3)
-        recipient = manager.create_agent_team(parent_b, member_count=3)
+        parent_a = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        parent_b = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        sender = manager.create_agent_team(parent_a, parent=parent_a, member_count=3)
+        recipient = manager.create_agent_team(parent_b, parent=parent_b, member_count=3)
         result = await manager.broker.request_peer_communication(
             sender, recipient, sender.members[0].agent_id, "concurrent"
         )
         request = manager.broker.communication_requests[result.request_id]
         first, second = manager.broker.approvals_for_request(request.request_id)
-        self.client.approved = False
-        await manager.execute_team_discussion(parent_a, "deny", rounds=1)
-        await self.wait_for_status(request, "DENIED")
+        await settle_governance_activity(manager)
+        case = manager._governance.latest("communication", request.request_id, first.principal)
+        await submit_case_ballots(manager, case, approved=False)
+        request = await self.wait_for_status(request, "DENIED")
         await manager.broker._complete_approval(
             request.request_id,
             second.principal,
@@ -127,15 +129,15 @@ class TestAutonomousCommunication(CommunicationTestCase):
         )
 
         self.assertEqual(request.status.value, "DENIED")
-        self.assertEqual(second.status.value, "CANCELLED")
+        self.assertEqual(manager.broker.communication_approvals[second.key].status.value, "CANCELLED")
         self.assertEqual(len(manager.broker.agreements), 0)
         await manager.close()
     async def test_bidirectional_request_supersedes_one_way_channel(self):
         manager = self.manager(
             ParentApprovalCommunicationConfig(direction="one_way")
         )
-        sender = manager.create_agent_team(self.root, member_count=3)
-        recipient = manager.create_agent_team(self.root, member_count=3)
+        sender = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        recipient = manager.create_agent_team(self.root, parent=self.root, member_count=3)
         first_result = await manager.broker.request_peer_communication(
             sender, recipient, sender.members[0].agent_id, "one way first"
         )
@@ -164,6 +166,7 @@ class TestAutonomousCommunication(CommunicationTestCase):
         ]
         self.assertEqual(len(active), 1)
         self.assertEqual(active[0].direction.value, "bidirectional")
+        old_agreement = manager.broker.agreements[old_agreement.agreement_id]
         self.assertFalse(old_agreement.active)
         self.assertEqual(
             old_agreement.superseded_by_agreement_id,

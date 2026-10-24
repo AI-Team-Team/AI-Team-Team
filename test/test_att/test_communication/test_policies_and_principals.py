@@ -10,8 +10,8 @@ class TestAutonomousCommunication(CommunicationTestCase):
 
     async def test_permissive_delivery_needs_no_agreement(self):
         manager = self.manager()
-        first = manager.create_agent_team(self.root, member_count=3)
-        second = manager.create_agent_team(self.root, member_count=3)
+        first = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        second = manager.create_agent_team(self.root, parent=self.root, member_count=3)
 
         result = await manager.broker.send_peer_message(
             first,
@@ -27,8 +27,8 @@ class TestAutonomousCommunication(CommunicationTestCase):
         await manager.close()
     async def test_broker_rejects_forged_initiating_agent(self):
         manager = self.manager()
-        first = manager.create_agent_team(self.root, member_count=3)
-        second = manager.create_agent_team(self.root, member_count=3)
+        first = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        second = manager.create_agent_team(self.root, parent=self.root, member_count=3)
 
         with self.assertRaisesRegex(PermissionError, "not an active sender"):
             await manager.broker.send_peer_message(
@@ -50,17 +50,16 @@ class TestAutonomousCommunication(CommunicationTestCase):
     async def test_governance_rejection_cancels_remaining_approvals(self):
         self.client.approved = False
         manager = self.manager(ParentApprovalCommunicationConfig())
-        parent_a = manager.create_agent_team(self.root, member_count=3)
-        parent_b = manager.create_agent_team(self.root, member_count=3)
-        sender = manager.create_agent_team(parent_a, member_count=3)
-        recipient = manager.create_agent_team(parent_b, member_count=3)
+        parent_a = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        parent_b = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        sender = manager.create_agent_team(parent_a, parent=parent_a, member_count=3)
+        recipient = manager.create_agent_team(parent_b, parent=parent_b, member_count=3)
 
         result = await manager.broker.request_peer_communication(
             sender, recipient, sender.members[0].agent_id, "reject this"
         )
         request = manager.broker.communication_requests[result.request_id]
-        await manager.execute_team_discussion(parent_a, "normal work", rounds=1)
-        await self.wait_for_status(request, "DENIED")
+        request = await self.wait_for_status(request, "DENIED")
         self.assertEqual(request.status.value, "DENIED")
         self.assertEqual(len(manager.broker.agreements), 0)
         statuses = {
@@ -76,8 +75,8 @@ class TestAutonomousCommunication(CommunicationTestCase):
         manager = self.manager(ParentApprovalCommunicationConfig())
         events = []
         manager.on_system_event = lambda name, payload: events.append((name, payload))
-        first = manager.create_agent_team(self.root, member_count=3)
-        second = manager.create_agent_team(self.root, member_count=3)
+        first = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        second = manager.create_agent_team(self.root, parent=self.root, member_count=3)
 
         result = await manager.broker.request_peer_communication(
             first, second, first.members[0].agent_id, "strict decision"
@@ -111,8 +110,8 @@ class TestAutonomousCommunication(CommunicationTestCase):
         await manager.close()
     async def test_top_level_parent_approval_is_root_agent(self):
         manager = self.manager(ParentApprovalCommunicationConfig())
-        first = manager.create_agent_team(self.root, member_count=3)
-        second = manager.create_agent_team(self.root, member_count=3)
+        first = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        second = manager.create_agent_team(self.root, parent=self.root, member_count=3)
 
         result = await manager.broker.request_peer_communication(
             first, second, first.members[0].agent_id, "coordinate"
@@ -127,17 +126,17 @@ class TestAutonomousCommunication(CommunicationTestCase):
             self.root.agent_id,
         )
 
-        await self.wait_for_status(request, "APPROVED")
+        request = await self.wait_for_status(request, "APPROVED")
         self.assertEqual(request.status.value, "APPROVED")
         agreement = next(iter(manager.broker.agreements.values()))
         self.assertEqual(agreement.direction.value, "bidirectional")
         await manager.close()
     async def test_parent_approval_queue_uses_both_agent_teams(self):
         manager = self.manager(ParentApprovalCommunicationConfig())
-        parent_a = manager.create_agent_team(self.root, member_count=3)
-        parent_b = manager.create_agent_team(self.root, member_count=3)
-        sender = manager.create_agent_team(parent_a, member_count=3)
-        recipient = manager.create_agent_team(parent_b, member_count=3)
+        parent_a = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        parent_b = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        sender = manager.create_agent_team(parent_a, parent=parent_a, member_count=3)
+        recipient = manager.create_agent_team(parent_b, parent=parent_b, member_count=3)
 
         result = await manager.broker.request_peer_communication(
             sender, recipient, sender.members[0].agent_id, "coordinate"
@@ -149,19 +148,17 @@ class TestAutonomousCommunication(CommunicationTestCase):
         )
         self.assertEqual(request.status.value, "PENDING")
 
-        await manager.execute_team_discussion(parent_a, "normal work", rounds=1)
         self.assertEqual(request.status.value, "PENDING")
-        await manager.execute_team_discussion(parent_b, "normal work", rounds=1)
-        await self.wait_for_status(request, "APPROVED")
+        request = await self.wait_for_status(request, "APPROVED")
         self.assertEqual(request.status.value, "APPROVED")
         self.assertEqual(len(manager.broker.agreements), 1)
         await manager.close()
     async def test_lineage_path_excludes_sender_and_includes_root(self):
         manager = self.manager(LineageApprovalCommunicationConfig())
-        branch_a = manager.create_agent_team(self.root, member_count=3)
-        branch_b = manager.create_agent_team(self.root, member_count=3)
-        sender = manager.create_agent_team(branch_a, member_count=3)
-        recipient = manager.create_agent_team(branch_b, member_count=3)
+        branch_a = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        branch_b = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        sender = manager.create_agent_team(branch_a, parent=branch_a, member_count=3)
+        recipient = manager.create_agent_team(branch_b, parent=branch_b, member_count=3)
 
         path = manager.broker.approval_path(
             sender, recipient, manager.config.communication

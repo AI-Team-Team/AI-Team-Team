@@ -86,7 +86,43 @@ These tests distinguish rejected preparation from a successful receipt followed 
 
 Run `./venv/bin/mypy typecheck/activity_contract.py` alongside the existing public consumer contract when editing the frozen value records.
 
-Do not interpret the current round-based regression suite passing as acceptance of the replacement runtime, and promote completed specifications into ordinary discovery in their implementing phase.
+The Phase 5 gate additionally requires absence of a production discussion engine, exact voluntary case ballots, actual-parent topology and acceptance, bounded resource attempts, and fresh restricted audits on the common runtime.
+
+Use `test/test_att/test_institutional_runtime/` for the focused route, receipt-publication, candidate-source, cooldown, and health-deadline regressions.
+
+Queue incident claims and acknowledgements behind a real parent transition, and verify rejected former-parent operations change neither volatile nor durable attention state.
+
+Exercise optional-draft and automatic formation paths after depth-limit or parent-position changes, including a lower limit while the authoritative creation commit waits.
+
+Queue a legitimate creator-membership removal ahead of formation acceptance, and reject the former member without leaving identities, directories, accepted initial mail, or a ghost notification.
+
+Commit an unrelated team, document, or personal mail while another creation is waiting, then reject the waiting creation and require every independently accepted object and file to survive in both volatile and durable modes.
+
+Cancel candidate publication before each admission gate and after its exact receipt, preserving only accepted proposals, automatic creation, and initial-work dispatch, including cleanup after captured tool authority has been revoked.
+
+Queue a full save ahead of another task's pending publication, team creation, or revision, cancel the unaccepted operation, and restore the saved database to verify that no cancelled state or private directory is resurrected.
+
+Cancel revisions, invitation responses, and abandonment before their receipts in both persistence modes; reject a revision after an independent mail delivery and require the accepted message and its notice to survive together.
+
+Publish unrelated proposal changes concurrently and create a new proposal during another candidate's wait, checking that per-entity publication preserves both accepted results.
+
+Queue a draft behind a competing proposal revision and require `STALE_REVISION` with current immutable history rather than a publication conflict or a resurrected candidate.
+
+Remove the initiator's creator-team or intended-parent membership while initial, revision, unchanged-draft, or candidate-preparation commits are waiting, and require final authority checks to reject them.
+
+Change live Host detachment permission during runtime or record-lock waits, and advance the logical clock beyond 600 seconds before admission to verify a fresh position event and full cooldown rather than an expired interval at publication.
+
+Block record-digest preparation or detached graph validation before migration acceptance, advance the logical clock beyond 600 seconds, and verify the complete cooldown, matching position timestamp, exact receipt digest, and persisted evidence.
+
+Repeat that delay inside SQLite materialization and graph validation, and coalesce the pending transition with unrelated state deltas to verify that its receipt and clock binding survive bounded writer queueing.
+
+Cancel the observer after writer submission, reject a final clock reading, and delay observation after SQL commit; require accepted transitions to survive cancellation, rejected transactions to leave no position, and online elapsed time to count from the actual commit anchor.
+
+Inject temporary filesystem failure partway through audit staging and require continued ordinary activity, retained incident evidence, and complete cleanup without suppressing writer failures.
+
+Freeze runtime clock binding at institutional admission before any worker starts, retain that binding after scoped auditor teardown, and distinguish expected admission closure from actual governance errors in logs.
+
+Passing a lexical inventory alone does not establish those runtime authority boundaries.
 
 Run the same quality checks locally with:
 
@@ -270,7 +306,7 @@ The `test/test_att/test_state_persistence/test_topology_index.py` module covers 
 
 Successful LLM mocks must accept the arguments used by their selected mode; a mock is native-capable only when `supports_native_tool_calling()` returns the literal boolean `True`.
 
-Retry tests must use typed transient failures such as `ConnectionError` or an exception with `retryable=True`; arbitrary `RuntimeError` instances intentionally do not retry.
+Provider retry tests use explicit classified transient errors; tool replay tests use `RetryableToolError` and the selected execution policy rather than an error-looking string.
 
 ### Callback Dispatch
 
@@ -299,10 +335,10 @@ Callback tests must include:
 
 Tool execution tests should separately cover argument correction and execution replay.
 
-- Use malformed syntax, unknown tools, strict type mismatches, or JSON Schema violations for `max_tool_argument_retries`; assert that the callable was never invoked.
+- Use malformed syntax, unknown tools, strict type mismatches, or JSON Schema violations; assert that the callable was never invoked and a typed observation is retained without terminating other people.
 - Use `RetryableToolError` for `max_tool_execution_retries`, select the intended `tool_execution_retry_policy`, and opt into `Tool(retry_safe=True)` when testing the `retry_safe` policy.
 - A custom result string beginning with `Error:` is a successful ordinary string unless the callable raises a typed exception.
-- Native parallel invalid-call tests must assert that the batch consumes one correction opportunity rather than one per failed call.
+- Native parallel invalid-call tests must preserve one result per call and classify failures without a removed turn-correction allowance.
 
 With the team, Agent, and imports supplied by the fixture, an error-looking string is still a successful result:
 
@@ -320,44 +356,44 @@ Text parser tests must include:
 - Nested containers, parentheses inside strings, escaped and triple quotes, multiline content.
 - Markdown fences, Unicode, truncation, duplicate keywords, expanded arguments, and multiple actions.
 
-### Discussions and Operational Audits
+### Institutional Activity and Health Assessment
 
-Discussion tests should use `execute_reasoning_step_detailed()` and `execute_team_discussion_detailed()` when asserting failure semantics.
+Institutional tests use actual continuing personal activity and explicit tools, never a discussion adapter or synthetic standalone ballot response.
 
-- Default isolate policies produce `AgentTurnStatus.INCOMPLETE` and `DiscussionStatus.PARTIAL`, preserve peer results, and let the failed member rejoin the next round with a reset correction budget.
-- Abort-policy tests should assert `AgentTurnIncompleteError`.
-- Strict governance tests must prove that any incomplete turn leaves requests and approvals pending.
+- Governance cases require every frozen voter before strict-majority authority.
+- Mail opening, read receipts, model output, and observer cancellation cannot supply a missing vote.
+- Accepted ballots remain authoritative after a later personal activity failure.
+- Missing or tied choices leave business authority pending, and explicit renewed solicitation preserves the preceding case.
+- A denied or failed attachment cannot charge a cooldown or publish a position.
 
-When the mock gives the first member malformed tool syntax, inspect the detailed discussion result:
+Health tests cover all three operational authority modes, separate health/runtime axes, and none/queue/wake attention.
 
-```python
-result = await self.manager.execute_team_discussion_detailed(
-    self.team, "work", rounds=2, skip_audit=True
-)
-self.assertIs(result.status, DiscussionStatus.PARTIAL)
-self.assertIs(result.rounds[0].turns[0].status, AgentTurnStatus.INCOMPLETE)
-```
-
-Operational audit tests must cover framework, supervisor, and framework-then-supervisor authority; content and runtime status combinations; and none/queue/wake degraded escalation.
-
-- Durable operational alerts must be tested for stable fingerprint merging, occurrence timestamps/counts, active-wake deduplication, success removal, and failure/cancellation requeue without private tool arguments or bodies.
+- Three protocol failures and five same-tool same-category argument failures use a 600-second observation window, with valid-response/success resets.
+- Silence, waiting, ordinary denial, and provider unavailability must not become automatic personal-health accusations.
+- Semantic detection is disabled without explicit Host enablement and an authorized evidence source.
+- Temporary assessment unavailability retains technical evidence without stopping the person, while writer failures still propagate.
 
 ### Supervisory Lifecycle
 
-Supervisory lifecycle tests must verify that direct audits and ordinary discussions:
+Each assessment must use fresh registered people in a real managed temporary AT on the common scheduler, provider service, ToolExecutor, quota ledger, and writer.
 
-- Use distinct registered teams and Agent identities under concurrency.
-- Preserve each active audit context.
-- Hide temporary auditors from ordinary recruitment.
-- Keep completed evidence after database restore and dissolve the team on completion, cancellation, or shutdown.
+Test concurrent audits, protected active contexts, restricted tool views, explicit complete findings, and cleanup after success, failure, cancellation, and shutdown.
 
-A full save taken during an audit must not persist its temporary team, auditor identities, or DocLibs; restoring that snapshot must not recreate an abandoned audit.
+The default 600-second total deadline includes scheduler queueing and provider waits; late responses cannot submit authority.
+
+A full save during assessment excludes temporary identities and DocLibs but retains scoped evidence.
+
+Restore must not replay an interrupted assessment or re-create its people.
+
+Incidents retain stable fingerprints, occurrence generations, first/latest times, explicit claims, and acknowledgement history with no TTL or hard dropping limit.
+
+Failure, cancellation, and restart release claims without acknowledging or deleting evidence.
 
 ### Team Creation and Shared Membership
 
 Team creation fault-injection tests should fail before validation, during Agent/DocLib staging, and during final publication, then compare the complete Agent, team, library, parent/child, private-library, dirty-state, and filesystem snapshots.
 
-A successfully committed team must remain registered if its first later discussion fails.
+A successfully committed team must remain registered if later personal activity fails.
 
 Shared-membership tests must use the consensual formation workflow for ordinary APIs or `bootstrap_agent_team()` only in fixtures that explicitly provision topology.
 
@@ -386,9 +422,9 @@ Formation tests must cover:
 
 - All four public invitation attitudes, explicit `None` as externally indistinguishable no-response.
 - Exact-revision authorization, material and no-op revisions, renewed consent.
-- Detached collaborative drafts, explicit publication, accepted-subset eligibility.
+- Optional supplied candidates, exact source invocation, explicit publication, accepted-subset eligibility.
 - Zero-invitee automatic creation, confirmed completion, abandonment notifications.
-- Optional late joining, initiator self-membership with deferred discussion.
+- Optional late joining, initiator self-membership with addressed initial work.
 - Per-request concurrency, trusted bootstrap auditing/tool exclusion, Agent inbox persistence, schema corruption, and restore rollback after inbox publication.
 
 ### Private Agent DocLib
@@ -407,7 +443,7 @@ The `test/test_att/test_private_doclib/` package contains the baseline end-to-en
 
 Selective episodic-memory tests must cover:
 
-- Disabled-mode zero indexing/tool exposure, one card per completed or incomplete turn, cancelled-turn exclusion.
+- Disabled-mode zero indexing/tool exposure, one card per eligible committed personal invocation, interrupted-boundary exclusion.
 - Isolated label calls, owner-only search and recall.
 - Character- and token-bounded continuation that reconstructs long single lines and Unicode without gaps or duplication, Segment-version mismatch rejection.
 - Ephemeral recall cleanup, explicit compact retention, Journal immutability, private/tool-body redaction.
@@ -417,7 +453,7 @@ The suite's `test/test_att/test_episodic_memory/` package contains the baseline 
 
 ### Incremental Memory Persistence
 
-Incremental memory tests use real SQLite and independently gated member/indexer responses to verify commits before a discussion's auto-save batch exits, both with constructor-bound persistence and after restore.
+Incremental memory tests use real SQLite and independently gated member/indexer responses to verify commits before the originating personal activity finishes, both with constructor-bound persistence and after restore.
 
 Cover:
 
@@ -425,11 +461,13 @@ Cover:
 - Index failure and cancellation, actual recovery of processing index jobs.
 - Distinct parent/creator dependencies after migration, immutable source replay, and insert-only dependencies that leave existing Agent, team, and DocLib rows and files unchanged.
 
-### Agent Instructions and Synchronous Delegation
+### Agent Instructions and Nonblocking Delegation
 
-Reasoning-strategy tests must assert that persistent Agent `system_instructions` reach Text ReAct, Native, auto-selected Native, and no-tool business turns together with the invocation-scoped AgentTeam instructions.
+Personal-runtime tests must assert that persistent Agent `system_instructions` reach Text ReAct, Native, auto-selected Native, and no-tool provider requests together with the invocation-scoped AgentTeam instructions.
 
-Synchronous delegation tests must reject direct self-inclusion and inherited ancestor invocation dependencies before creating any Agent, AgentTeam, or DocLib, while retaining a passing idle-Agent delegation control.
+Delegation returns creation or consent references without awaiting child business activity; an explicit initial task becomes addressed mail.
+
+Only operations that actually wait for another model introduce wait-graph edges, and those tests must cover arbitrary transitive cycles and one-slot acyclic progress.
 
 Detached tasks that inherit a completed ContextVar chain must not be treated as active dependencies.
 
@@ -451,12 +489,12 @@ The suite's `test/test_att/test_file_reading/` package contains the model-contex
 Communication changes must cover:
 
 - Strict tool context, all three institutions, explicit Root Agent principals, parent deduplication, lineage routes.
-- Full-member strict ballots, queue/wake delivery, stale successors, directionality, endpoint revocation.
+- Complete exact-case strict ballots, queue delivery and rejection of unsupported wake, stale successors, directionality, endpoint revocation.
 - Idempotent delivery, rollback, restart recovery, and malformed request/approval/agreement combinations.
 
 Use bounded, condition-based waits for detached personal voting and authoritative commits rather than short sleeps or a one-second completion budget.
 
-A discussion returning does not mean its subsequent personal ballots have finished, and a staged terminal status is not ready until the communication transaction completes.
+An ordinary answer returning does not mean a personal ballot has been submitted, and a candidate terminal status is not public until its exact transaction is acknowledged.
 
 Timeout diagnostics should show request and approval states, vote counts, and worker locations without exposing rationale, message bodies, or tool arguments.
 
@@ -488,16 +526,16 @@ Use normal Text ReAct or Native clients that explicitly invoke `open_agent_mail`
 Cover:
 
 - Continuing personal instructions and history, no automatic private-file injection, read-receipt independence, voluntary unanswered mail.
-- Strict choice schemas, immutable idempotent votes, complete participation, ties and new rounds.
-- Shared-Agent serialization and session-lock release while answers remain pending.
+- Strict choice schemas, immutable idempotent votes, complete participation, ties and explicit new cases.
+- Shared-Agent serialization, absence of whole-team barriers, and continuing activity while cases remain pending.
 
 Preserve all four formation attitudes and prove that `None` and `no_response` remain domain semantics rather than email states.
 
 Cover:
 
 - Failover timeout and caller cancellation, late-choice rejection, durable migration progress.
-- Submission rollback, schema corruption, exact mailbox-to-round ownership, append-only ballots, and authoritative commits made inside an outer auto-save suppression batch.
-- Reject unrecognized decision statuses and derive authoritative communication ballot projections from the accepted round rather than independently supplied summaries.
+- Submission rollback, schema corruption, exact mailbox-to-case ownership, append-only ballots, and authoritative commits made inside an outer auto-save suppression batch.
+- Reject unrecognized decision statuses and derive authoritative communication ballot projections from the accepted case rather than independently supplied summaries.
 - Cover interrupted Native submissions and their next ordinary interaction, fatal parallel-tool cleanup before invocation-lock release, and admission checks after waiting for a lock during shutdown or restore.
 - Verify multi-principal `PROCESSING` consistency, exact sibling-order rollback after failed migration commits, and rejection of non-finite governance timestamps without changing the live manager.
 

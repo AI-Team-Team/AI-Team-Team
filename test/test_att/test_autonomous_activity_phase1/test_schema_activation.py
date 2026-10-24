@@ -59,6 +59,12 @@ REQUIRED_TABLES = {
     "audit_execution_evidence",
     "audit_chat_evidence",
     "audit_evidence",
+    "audit_activity_checkpoints",
+    "audit_findings",
+    "health_observations",
+    "health_detector_states",
+    "health_incident_events",
+    "resource_decisions",
     "recovery_incidents",
     "publication_manifests",
 }

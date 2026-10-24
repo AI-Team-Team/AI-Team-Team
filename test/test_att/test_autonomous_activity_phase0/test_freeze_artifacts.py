@@ -36,6 +36,8 @@ class TestFreezeArtifacts(unittest.IsolatedAsyncioTestCase):
         documented = set(re.findall(r"^\| `([^`]+)` \|", new_groups, flags=re.MULTILINE))
         extension = (ARTIFACTS / "Schema_13.md").read_text(encoding="utf-8")
         documented.update(re.findall(r"^\| `([^`]+)` \|", extension, flags=re.MULTILINE))
+        institutional = (ARTIFACTS / "Schema_15.md").read_text(encoding="utf-8")
+        documented.update(re.findall(r"^\| `([^`]+)` \|", institutional, flags=re.MULTILINE))
         self.assertEqual(REQUIRED_TABLES, documented)
 
     async def test_schema_fixture_reads_committed_physical_metadata_without_llm_calls(self):
@@ -127,6 +129,7 @@ class TestFreezeArtifacts(unittest.IsolatedAsyncioTestCase):
                 contracts[name] = ToolExecutionContract.model_validate_json(
                     json.dumps(record["contract"])
                 )
+                self.assertEqual(contracts[name], tools[name].execution_contract)
                 self.assertIn(record["disposition"], {"retain", "replace"})
         self.assertTrue(contracts["write_private_file"].background_allowed)
         self.assertFalse(contracts["keep_memory_in_context"].background_allowed)

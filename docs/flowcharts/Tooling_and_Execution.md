@@ -8,7 +8,7 @@ This sequence diagram details how `ManagerDefaultClientAdapter` wraps the global
 
 ```mermaid
 sequenceDiagram
-    participant Agent as Agent / Strategy
+    participant Agent as Personal Runtime
     participant Adapter as ManagerDefaultClientAdapter
     participant Handler as HandlerClientAdapter
     participant Provider as External LLM Provider (e.g., OpenAI)
@@ -48,7 +48,7 @@ This sequence diagram maps the exact lifecycle of a Python function as it is reg
 sequenceDiagram
     participant Dev as Developer
     participant Manager as ATTManager
-    participant Strategy as Strategy (Native/ReAct)
+    participant Strategy as Personal Runner (Native/Text)
     participant LLM as LLM Provider Adapter
     participant Executor as Shared ToolExecutor
     participant Validator as Signature / Pydantic / JSON Schema
@@ -63,7 +63,7 @@ sequenceDiagram
     Manager->>Manager: Binds auditor hook to `Tool` object
     
     %% Phase 2: Generation
-    Note over Manager,LLM: Phase 2: Native Execution Strategy Generation
+    Note over Manager,LLM: Phase 2: Provider Request Preparation
     Strategy->>LLM: generate(prompt, tools=List[Tool])
     
     Note over LLM: Adapter converts List[Tool]<br/>into Provider-specific JSON Schema
@@ -94,115 +94,42 @@ sequenceDiagram
     end
 ```
 
-## 3. Master Discussion Loop (`execute_team_discussion`)
-
-This flowchart sequences the multi-round cooperative debate process executed when a team is tasked with resolving a prompt.
+## 3. Continuing Personal Activity
 
 ```mermaid
 flowchart TD
-    Start["Call manager.execute_team_discussion(team, prompt, rounds)"] --> SessionLock["Wait for team.discussion_lock\n(normal and emergency sessions)"]
-    SessionLock --> Init["Create discussion ID and structured round collection"]
-    
-    Init --> SuppressIOGate["async with manager.suppress_auto_save():\n(Task-local dirty-delta batching)"]
-    SuppressIOGate --> LoopRounds{"round <= total_rounds?"}
-    
-    LoopRounds -- "Yes" --> MemberIteration["Freeze current members and run their detailed turns concurrently"]
-    MemberIteration --> CollectTurns["Collect AgentTurnResult values and preserve incomplete placeholders"]
-    CollectTurns --> GovernanceGate{"Strict governance requires complete turns?"}
-    GovernanceGate -- "Yes, any incomplete" --> Pending["Fail closed; request or approval remains PENDING"]
-    GovernanceGate -- "No" --> IncrementRound["Apply deferred membership changes and continue"]
-    
-    IncrementRound --> LoopRounds
-    
-    LoopRounds -- "No" --> SupervisoryAudit["Audit complete transcript plus privacy-safe failure metadata"]
-    SupervisoryAudit --> AuditResult["Produce independent AuditStatus and OperationalStatus"]
-    AuditResult --> Escalation["Route configured content, UNKNOWN, or degraded alerts"]
-    Escalation --> FinalizeState["Submit incremental dirty delta and structured callbacks"]
-    FinalizeState --> End["Return DiscussionResult or transcript wrapper"]
+    Admission["Explicit activation or eligible addressed notice"] --> Person["One continuing Agent and invocation lock"]
+    Person --> Scope["Validate selected personal or AgentTeam scope"]
+    Scope --> Context["Compose own instructions, bounded context and actual available tools"]
+    Context --> Request["Persist provider request and reserve shared quota"]
+    Request --> Provider["Bounded provider call"]
+    Provider --> Mode{"Response protocol"}
+    Mode -- "Text" --> Parse["Balanced Action and literal-only argument parser"]
+    Mode -- "Native" --> Calls["Validated unique structured calls"]
+    Parse --> Execute["Common resource admission, auditor and ToolExecutor"]
+    Calls --> Execute
+    Execute --> Observation["Typed observations and factual execution receipts"]
+    Observation --> Checkpoint["Commit sanitized window, Journal sources and notice claims"]
+    Mode -- "Ordinary answer" --> Answer["Observe answer, no implicit publication or stop"]
+    Answer --> Checkpoint
+    Checkpoint --> Intent{"Explicit intent or fairness boundary?"}
+    Intent -- "Continue" --> Person
+    Intent -- "Idle" --> Idle["Wait for eligible personal attention"]
+    Intent -- "Finite sleep" --> Sleep["Persist bounded countdown and source rules"]
 ```
 
-## 4. Granular Agent Turn (`execute_reasoning_step`)
+Ordinary tool errors produce observations without terminating an AT or resetting another person's activity.
 
-This flowchart outlines prompt compilation, invocation-time tool visibility, strategy routing, strict parsing and validation, classified retries, and structured member failure isolation during one Agent turn.
+Typed provider failures enter resource availability handling, not a generic LLM-blame or health decision.
 
-```mermaid
-flowchart TD
-    StartStep["Call execute_reasoning_step(agent, team, prompt)"] --> TransitionCheck{"agent.last_context.get('team_id') != team.team_id?"}
-    
-    TransitionCheck -- "Yes" --> InjectTransition["Record Current AgentTeam Context\n(Preserves the Agent's own identity and memory)"]
-    TransitionCheck -- "No" --> BuildContext["Compile Prompt Context:\n1. Own Identity and Current AgentTeam\n2. Applicable Rules and Available Discovery Tools\n3. Active Proposals and Inbox Work\n4. Bounded Personal Working Context"]
-    
-    InjectTransition --> BuildContext
-    BuildContext --> InboxAlerts["Check unread inbox alerts"]
-    InboxAlerts --> InboxThreshold{"Inbox size > 1500 chars?"}
-    
-    InboxThreshold -- "Yes" --> SummarizeInbox["Use LLM client to summarize inbox\nInject summary into prompt"]
-    InboxThreshold -- "No" --> InjectInbox["Inject raw inbox alerts into prompt"]
-    
-    SummarizeInbox --> RouteStrategy{"Check Config Mode & supports_native_tool_calling()"}
-    InjectInbox --> RouteStrategy
-    
-    RouteStrategy -- "Text ReAct Mode" --> InitReAct["Initialize ReAct step counter = 1"]
-    RouteStrategy -- "Native Mode" --> InitNative["Initialize Native round counter = 1"]
-    
-    %% --- Text ReAct Strategy Flow ---
-    InitReAct --> ReActLoop{"step <= react_max_steps?"}
-    ReActLoop -- "Yes" --> LLMCall["Invoke Agent.llm_client.generate()\n(Wrapped in generate_with_retry backoff)"]
-    
-    LLMCall --> CatchFailover{"TokenLimitError Thrown?"}
-    CatchFailover -- "Yes" --> FailoverPop["agent.messages.pop()\n(Purge duplicated massive user prompt to free tokens)"]
-    FailoverPop --> ModelSwap["Hot-swap client via Failover Policy\n(e.g., query parent for lightweight fallback model)"]
-    ModelSwap --> LLMCall
-    
-    CatchFailover -- "No" --> ParseAction["Balanced scan of XML or Action: tool_name(...) syntax"]
-    ParseAction --> ActionType{"Action found?"}
-    ActionType -- "No (Final Answer)" --> SetFinalAnswer["Append Final Answer to Working Context\nBreak Loop"]
-    ActionType -- "Yes (Tool Call)" --> SafeASTParse["Parse literal positional and keyword arguments; reject expansion and ambiguity"]
-    SafeASTParse --> ASTCheck{"Parse, signature, and strict schema valid?"}
-    ASTCheck -- "No" --> InvalidArgs["Append invalid_arguments observation and consume one correction opportunity"]
-    ASTCheck -- "Yes" --> ToolAuditor{"Tool Auditor registered for tool?"}
-    
-    ToolAuditor -- "Yes" --> RunAuditor["Invoke pre-execution auditor callback"]
-    RunAuditor --> AuditorApprove{"Auditor approved?"}
-    AuditorApprove -- "No" --> BlockTool["Append denied ToolResult; do not retry"]
-    AuditorApprove -- "Yes" --> RunTool["Execute through shared ToolExecutor and typed retry policy"]
-    ToolAuditor -- "No" --> RunTool
-    RunTool --> SaveObservation["Append Thought, Action, and Observation to Working Context\nJournal body follows Tool.memory_capture"]
-    BlockTool --> NextReActStep["Increment step by 1"]
-    InvalidArgs --> ArgumentBudget{"Correction budget exhausted?"}
-    ArgumentBudget -- "No" --> NextReActStep
-    ArgumentBudget -- "Yes" --> Incomplete["Return INCOMPLETE member turn"]
-    SaveObservation --> NextReActStep
-    NextReActStep --> ReActLoop
-    ReActLoop -- "No" --> CheckMemory
-    
-    %% --- Native Strategy Flow ---
-    InitNative --> NativeLoop{"round <= max_tool_rounds?"}
-    NativeLoop -- "Yes" --> FetchTools["Thorough Abstraction:\nFetch native Tool objects"]
-    FetchTools --> LLMNativeCall["Invoke Agent.llm_client.generate(tools=native_tools)"]
-    
-    LLMNativeCall --> CatchNativeFailover{"TokenLimitError Thrown?"}
-    CatchNativeFailover -- "Yes" --> FailoverNativePop["messages.pop()\nPurge duplicated user prompt"]
-    FailoverNativePop --> ModelNativeSwap["Hot-swap client via Failover Policy"]
-    ModelNativeSwap --> LLMNativeCall
-    
-    CatchNativeFailover -- "No" --> NativeResponse{"tool_calls returned?"}
-    
-    NativeResponse -- "Yes (Structured calls)" --> SaveToolCall["Save Assistant message with tool_calls (JSON) to DB"]
-    SaveToolCall --> ParallelExecute["Execute all tool calls concurrently via asyncio.gather()"]
-    ParallelExecute --> SaveToolResults["Classify through shared ToolExecutor; an invalid batch consumes at most one correction opportunity"]
-    SaveToolResults --> NativeLoop
-    
-    NativeResponse -- "No (Text response)" --> SaveTextResponse["Save Assistant final text to Working Context\nBreak Loop"]
-    NativeLoop -- "No" --> CheckMemory
-    
-    %% --- Post Execution Flow ---
-    SetFinalAnswer --> CheckMemory
-    SaveTextResponse --> CheckMemory
-    
-    CheckMemory["Prune or summarize bounded Working Context"] --> EndStep["Return terminal AgentTurnResult and append Journal boundary"]
-    EndStep --> MemoryGate{"Optional episodic memory enabled?"}
-    MemoryGate -- "No" --> Persist["Submit incremental state delta"]
-    MemoryGate -- "Yes" --> Index["Queue isolated Agent-turn metadata indexing"]
-    Index --> Persist
-```
+Fatal persistence and state-integrity failures propagate while accepted effects finish local settlement.
+
+## 4. Institutional Work on the Same Runtime
+
+Exact governance cases deliver voluntary personal voting mail without acquiring a whole-team discussion lock.
+
+Temporary audit people use the same scheduler and executor with an immutable restricted evidence/tool profile and total deadline.
+
+Registered long-running tools use the [background execution service](Background_Tasks.md), retaining one execution and one original call result or task handle.
+
+Optional memory indexing consumes committed personal invocation segments and never copies membership-specific identities.

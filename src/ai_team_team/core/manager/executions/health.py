@@ -74,6 +74,7 @@ class HealthMixin:
         job.health_task.add_done_callback(self.worker_finished)
 
     async def monitor_health(self, job):
+        reported_deadlines = {}
         while not job.finished.is_set() and not self.closing:
             async with self.manager._activity.lock:
                 if job.finished.is_set() or self.closing or self.sealed:
@@ -87,7 +88,12 @@ class HealthMixin:
                 waiting = []
                 for signal, deadline in deadlines:
                     if deadline <= self.clock.monotonic():
-                        await self.report_health_locked(job, "stalled", signal, {})
+                        # Another signal's observation is not recovery of this
+                        # signal. One accepted timeout per sample deadline
+                        # prevents cross-signal repeats after a slow receipt.
+                        if reported_deadlines.get(signal) != deadline:
+                            await self.report_health_locked(job, "stalled", signal, {})
+                            reported_deadlines[signal] = deadline
                     else:
                         # A later awaited observation may cross this deadline;
                         # keep it so the next iteration wakes immediately.

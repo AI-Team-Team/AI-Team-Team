@@ -9,7 +9,15 @@ from .values import Session, capture, identifier
 
 
 class NotificationMixin:
-    async def deliver_system_event(self, event):
+    async def reconcile_mail(self, agent_id):
+        """Complete a synchronous creation's addressed-source outbox before inference."""
+        records, notice_ids = self.mail_records({agent_id})
+        if records:
+            dirty = self.manager._new_dirty_state()
+            dirty["agent_inboxes"].add(agent_id)
+            await self.manager._records.commit(records, dirty=dirty, notifications=notice_ids)
+
+    async def deliver_system_event(self, event, *, schedule=True):
         """Trusted framework ingress; ordinary mail cannot choose this profile."""
         classifications = {
             "membership_changed": "membership",
@@ -52,9 +60,9 @@ class NotificationMixin:
                         notifications=(notice_id,),
                     )
                 finally:
-                    if ("agent_notifications", (notice_id,)) in self.manager._records.index:
+                    if schedule and ("agent_notifications", (notice_id,)) in self.manager._records.index:
                         self.schedule_notice(notice_id)
-            else:
+            elif schedule:
                 self.schedule_notice(notice_id)
             return notice_id
 
@@ -81,6 +89,13 @@ class NotificationMixin:
         )
 
     def notice_pending(self, notice, *, presented=None):
+        if notice.values["mail_id"]:
+            owner = self.manager._agents_by_id.get(notice.values["agent_id"])
+            mail = next((item for item in owner.agent_inbox if item["message_id"] == notice.values["mail_id"]), None) if owner else None
+            if mail is not None and mail["message_type"] == "governance_choice_request":
+                case_id = mail["payload"].get("case_id")
+                if not self.manager._governance.is_outstanding(notice.values["agent_id"], case_id):
+                    return False
         if presented is None:
             presented = {
                 row.values["notification_id"]
@@ -93,6 +108,10 @@ class NotificationMixin:
     def notice_can_wake(self, notice):
         if not self.notice_pending(notice):
             return False
+        if notice.values["system_event_id"]:
+            event = self.manager._memory.events.get(notice.values["system_event_id"])
+            if event is not None and event.event_type == "health_incident" and event.payload.get("delivery_mode") == "queue":
+                return False
         session = self.sessions.get(notice.values["agent_id"])
         return session is None or session.intent != "sleep" or self.matches_sleep(session, notice)
 
@@ -135,7 +154,7 @@ class NotificationMixin:
             return "execution", notice.values["execution_id"]
         return "agent", None
 
-    def mail_records(self, agent_ids):
+    def mail_records(self, agent_ids, *, staged_agent_ids=()):
         records, identifiers = [], []
         manager = self.manager
         known = {
@@ -144,10 +163,15 @@ class NotificationMixin:
             if row.table_name == "agent_notifications"
         }
         for agent_id in sorted(agent_ids):
-            agent = self.require_agent(agent_id)
+            if agent_id in staged_agent_ids:
+                agent = manager._agents_by_id.get(agent_id)
+                if agent is None or agent.lifecycle_state != "active" or manager.supervisor.is_supervisory_agent(agent_id):
+                    raise PermissionError("Staged mail requires its exact active ordinary identity.")
+            else:
+                agent = self.require_agent(agent_id)
             previous = manager._records.index.get(("agent_activities", (agent_id,)))
             generation = previous.values["arrival_generation"] if previous else 0
-            for mail in manager._inbox.list(agent_id, unread_only=False):
+            for mail in manager._inbox.list(agent_id, unread_only=False, include_staged=True):
                 if mail.message_id in known:
                     continue
                 generation += 1
@@ -174,10 +198,14 @@ class NotificationMixin:
                 records.append(self.marker(session, arrival_generation=generation))
         return records, tuple(identifiers)
 
-    async def commit_inbox_delta(self, dirty):
+    async def commit_inbox_delta(self, dirty, *, operation_id=None, authority_check=None):
         """Internal domain producers commit mail and notice in the same receipt."""
         async with self.lock:
-            records, notice_ids = self.mail_records(dirty["agent_inboxes"])
+            staged_agent_ids = {owner for team_id in dirty["teams"]
+                if (team := self.manager.teams.get(team_id)) is not None
+                and getattr(team, "_publication_pending", False)
+                for owner in getattr(team, "_provisional_agent_ids", ())}
+            records, notice_ids = self.mail_records(dirty["agent_inboxes"], staged_agent_ids=staged_agent_ids)
             team_ids = {
                 team_id
                 for team_id in dirty["teams"]
@@ -190,8 +218,21 @@ class NotificationMixin:
                     *records,
                 ]
                 dirty["_relationships_supplied"] = True
+            pending_teams = tuple(self.manager.teams[team_id] for team_id in team_ids
+                if getattr(self.manager.teams[team_id], "_publication_pending", False))
+            dirty["_creation_teams"] = {team.team_id for team in pending_teams}
+
+            def validate_authority():
+                for team in pending_teams:
+                    if self.manager.teams.get(team.team_id) is not team:
+                        raise ValueError("The provisional AgentTeam changed before creation acceptance.")
+                    team._creation_publication.validate()
+                if authority_check is not None:
+                    authority_check()
+
             try:
-                await self.manager._records.commit(records, dirty=dirty, notifications=notice_ids)
+                await self.manager._records.commit(records, dirty=dirty, notifications=notice_ids, operation_id=operation_id,
+                    authority_check=validate_authority if pending_teams or authority_check is not None else None)
             finally:
                 committed = [
                     notice_id
@@ -205,6 +246,8 @@ class NotificationMixin:
         notice = self.manager._records.index[("agent_notifications", (notice_id,))]
         agent_id = notice.values["agent_id"]
         if self.closing or self.manager._restore_in_progress:
+            return
+        if self.manager._topology.is_agent_pending(agent_id):
             return
         if not self.notice_can_wake(notice):
             return
@@ -253,11 +296,15 @@ class NotificationMixin:
         self.dispatch_tasks.add(task)
         task.add_done_callback(self.dispatch_tasks.discard)
 
-    async def deliver_mail(self, agent_id, *, message_type, payload, schedule=True, _on_commit=None):
+    async def deliver_mail(self, agent_id, *, message_type, payload, schedule=True, _on_commit=None, _message_id=None, _classification=None):
         from ai_team_team.core.formation import AgentInboxMessage
         from ai_team_team.database.persistence.records import freeze, thaw
 
         self.require_agent(agent_id)
+        if (_message_id is not None or _classification is not None) and self.manager._active_tool_agent.get() is not None:
+            raise PermissionError("Only trusted framework ingress may choose protected mail identities.")
+        if self.manager.supervisor.is_supervisory_agent(agent_id):
+            raise PermissionError("Ordinary personal mail cannot select an audit identity.")
         # Validate the entire wire value before touching the recipient's inbox.
         safe_payload = thaw(freeze(payload))
         AgentInboxMessage(
@@ -274,23 +321,29 @@ class NotificationMixin:
             agent = self.require_agent(agent_id)
             operation_id = identifier("MAIL-COMMIT")
             mail_id = None
+            prior_mail_ids = {mail["message_id"] for mail in agent.agent_inbox}
             notice_ids = ()
             try:
-                mail_id = self.manager._inbox.notify(agent_id, message_type, safe_payload)
+                mail_id = self.manager._inbox.notify(agent_id, message_type, safe_payload, message_id=_message_id, staged=True)
                 dirty = self.manager._new_dirty_state()
                 dirty["agent_inboxes"].add(agent_id)
                 records, notice_ids = self.mail_records({agent_id})
+                if _classification is not None:
+                    records = [capture(self.manager, row.table_name, **{**dict(row.values), "classification": _classification})
+                        if row.table_name == "agent_notifications" and row.values["mail_id"] == mail_id else row for row in records]
                 receipt = await self.manager._records.commit(
                     records, dirty=dirty, notifications=notice_ids, operation_id=operation_id
                 )
             except BaseException:
-                if operation_id not in self.manager._records.receipts and mail_id is not None:
+                if operation_id not in self.manager._records.receipts and mail_id is not None and mail_id not in prior_mail_ids:
                     with agent.inbox_lock:
                         agent.agent_inbox[:] = [
                             item for item in agent.agent_inbox if item["message_id"] != mail_id
                         ]
                 raise
             finally:
+                if mail_id is not None:
+                    self.manager._inbox.finish_staged((mail_id,))
                 accepted = self.manager._records.receipts.get(operation_id)
                 if accepted is not None and _on_commit is not None:
                     # Internal local dispatch, not an observer callback. A lost
@@ -316,7 +369,10 @@ class NotificationMixin:
             )
 
     async def prepare_frame(self, session):
+        if session.audit_profile is not None:
+            return await self.prepare_audit_frame(session)
         async with self.lock:
+            await self.reconcile_mail(session.agent_id)
             self.bound_window(session)
             agent = self.require_agent(session.agent_id)
             if (
@@ -382,6 +438,16 @@ class NotificationMixin:
                         lines.append(f"Execution {item['source_id']}: last confirmed {execution.values['status']}; "
                             f"outcome unconfirmed: {bool(execution.values['outcome_unconfirmed'])}. "
                             "Use task inspection and result tools deliberately; presentation is not acknowledgement.")
+                    elif item["source_kind"] == "system_event":
+                        event = self.manager._memory.events.get(item["source_id"])
+                        if event is not None and event.event_type == "health_incident":
+                            lines.append(f"Technical health incident {event.payload['incident_id']} requires explicit handling. "
+                                "Use inspect_health_incident, then claim and acknowledge the exact generation if authorized. "
+                                "Reading, ordinary output, and activity termination never acknowledge it.")
+                            handler = event.payload.get("handler")
+                            if handler is not None and handler["kind"] == "agent_team":
+                                lines.append(f"The designated handling AgentTeam is {handler['principal_id']}. "
+                                    "Select that current-member team scope before exercising its incident authority; personal mail itself grants no team authority.")
                 self.append(session, {"role": "user", "content": "\n".join(lines)})
             summaries, chat_references = self.manager._messaging.frame_summaries(agent, include_references=True)
             if summaries:
@@ -403,6 +469,8 @@ class NotificationMixin:
             await self.checkpoint(session, extra=(record,))
 
     def claim_records(self, session, request_id, status):
+        if session.audit_profile is not None:
+            return ()
         return tuple(
             capture(
                 self.manager,

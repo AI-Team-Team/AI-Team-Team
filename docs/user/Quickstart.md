@@ -1,6 +1,6 @@
 # Quickstart Guide
 
-Welcome to **AI-Team-Team (ATT)**! This guide will help you integrate ATT into your project, define custom tools, configure LLM client adapters, and run hierarchical multi-agent debates.
+Welcome to **AI-Team-Team (ATT)**! This guide will help you integrate ATT into your project, define custom tools, configure LLM client adapters, and run continuing personal activity within explicit organizations.
 
 ## 📦 1. Installation
 
@@ -36,12 +36,10 @@ config = ATTConfig(
     enable_dynamic_delegation=True,
     max_delegation_depth=2,
     min_subagent_team_size=3,
-    subagent_discussion_rounds=2,
-    react_max_steps=5,
+    working_context_message_limit=20,
     enable_memory_compression=True,
     episodic_memory=EpisodicMemoryConfig(enabled=False),  # Optional advanced mode
     failover_policy="auto",
-    enable_emergency_wakeup=True,
     tool_calling_mode="auto",
     audit_unknown_escalation_mode="wake",  # Or "queue"
     agent_private_data_policy="archive",  # Or "retain" / "delete"
@@ -100,15 +98,15 @@ class MyLLMClient:
         require_json: bool = False,
     ) -> LLMResponse:
         """
-        Generates a text completion or returns structured tool calls.
+        Generates text or provider-neutral structured tool calls.
         
         Args:
-            prompt: The user query or discussion history as text or message dictionaries.
+            prompt: The current person's prepared context as text or message dictionaries.
             system_instruction: Guidelines and context injected for the agent.
             tools: Optional provider-neutral `Tool` instances to convert into the provider's schema.
             max_output_tokens: Required provider output ceiling when a hard token quota is configured.
             temperature: Sampling temperature.
-            require_json: If True, you MUST return a valid JSON string for governance, supervision, or optional episodic-memory indexing.
+            require_json: If True, return valid JSON for explicitly requested structured maintenance.
         """
         response_text = await call_provider_sdk(...)
         return LLMResponse(text=response_text)
@@ -122,7 +120,9 @@ class MyLLMClient:
         return "max_output_tokens"
 ```
 
-When `require_json=True`, the response text must be valid JSON because governance, supervision, and optional memory indexing use strict structured results.
+When `require_json=True`, return valid JSON for that maintenance contract, such as optional memory indexing.
+
+Governance ballots and audit findings use explicit tools in the person's runtime; an ordinary JSON answer is not a public choice.
 
 ## 🛠️ 4. Register Custom Tools and Presets
 
@@ -150,7 +150,7 @@ async def my_generator_handler(
     require_json: bool = False
 ) -> str:
     # Perform actual SDK completion call here
-    return "Final Answer: Done"
+    return "Action: set_activity_intent(intent={'kind': 'idle'})"
 
 manager.register_generator_handler(my_generator_handler)
 
@@ -215,100 +215,86 @@ manager.register_preset(
 )
 ```
 
-## 🚀 5. Spawn Teams and Execute Discussions
+## 🚀 5. Create Organizations and Address a Person
 
-Once tools and presets are registered, you can spawn your Level 1 agent team and start a discussion loop:
+Creation provenance and organizational parent are separate.
+
+The default `parent=None` creates an independent AgentTeam; pass an Agent or AgentTeam explicitly when that parent is intended.
 
 ```python
-# Spawn Level 1 team using the 'reviewers' preset
 team = manager.create_agent_team(
     creator=root_agent,
+    parent=None,
     member_count=3,
     preset_name="reviewers",
-    team_purpose="Perform security and logic audits on the database schema."
+    team_purpose="Review the database schema.",
 )
 
-# Execute debate discussion (rounds=2 means each member speaks twice)
-transcript = await manager.execute_team_discussion(
+# The Host explicitly selects this person, not a framework-appointed leader.
+reviewer = team.members[0]
+result = await manager.execute_agent_interaction(
+    reviewer,
+    "Review file_schema.sql and deliberately publish relevant findings if appropriate.",
     team=team,
-    prompt="Audit the schema details provided in file_schema.sql.",
-    rounds=2
 )
-
-print("Debate Transcript:\n", transcript)
-
-# Use the detailed API when the host needs per-turn failure and audit metadata.
-detailed = await manager.execute_team_discussion_detailed(
-    team=team,
-    prompt="Audit the schema details provided in file_schema.sql.",
-    rounds=2,
-)
-print(detailed.status, detailed.rounds, detailed.audit)
+print(result.answer)
+print(result.agent_id, result.team_id, result.invocation_id)
 ```
 
-## 📊 6. Connect Status Displays and Custom Logs
+The result observes that person's answer, not a team transcript or a task-completion certificate.
 
-ATT decouples implementation logic from user interfaces and file loggers. Use event callbacks to stream activity updates and build terminal dashboards:
+An ordinary answer does not stop activity or send a message.
+
+Agents deliberately use `send_team_message`, `send_direct_message`, or `send_peer_message` to publish content, and `set_activity_intent` to choose idle or finite sleep.
+
+Use `await manager.activate_agent(agent_id, scope=...)` when only admission is needed; its receipt is distinct from a later `wait_for_activity_checkpoint(..., intent="idle")` observation.
+
+Concurrent inputs for the same active person coalesce, and changing a requested Host scope does not silently replace that person's current active scope.
+
+## 📊 6. Observe Metadata Events
+
+Synchronous and asynchronous observers run on an ordered background dispatcher.
+
+Private bodies, raw model context, and tool arguments are not included in system-event metadata.
 
 ```python
-# Update agent thinking state on terminal dashboard
-def status_callback(agent_name: str, status: str):
-    print(f"[STATUS] {agent_name} -> {status}")
+def system_event(event_name: str, details: dict):
+    print(event_name, details)
 
-manager.on_status_change = status_callback
-
-# Record specific action activities (Thoughts, Tool Actions, Observations)
-def activity_callback(agent_name: str, activity_type: str, content: str):
-    print(f"[{activity_type}] {agent_name}: {content}")
-
-manager.on_activity_added = activity_callback
-
-# Append detailed logs or transcripts to database/files
-def log_append_callback(team_id: str, title: str, content: str, chapter_num: Optional[int]):
-    with open(f"att_{team_id}.log", "a") as f:
-        f.write(f"\n=== {title} ===\n{content}\n")
-
-manager.on_log_append = log_append_callback
-
-# Callbacks run on an ordered background dispatcher.
-# Await this observation boundary when the host must know that all queued callbacks completed.
+manager.on_system_event = system_event
 await manager.flush_callbacks()
 ```
 
-## 🔗 7. Dynamic Team Migration and Topology Tree
+Observer delay or failure cannot become authority or interrupt core activity.
 
-ATT supports dynamic organizational restructuring at runtime. A team can request to migrate itself under a different parent team in the active hierarchy using the `request_migration` tool.
+## 🔗 7. Explicit Organization Changes
 
-### Topology Tree Rendering
-
-You can print the current active lineage hierarchy as an indented ASCII tree:
+The Host can inspect the current forest without inserting a global directory into model prompts:
 
 ```python
-tree_representation = manager.render_topology_tree()
-print(tree_representation)
-# Outputs:
-# - [Root AI: Root_AI] (Level 0)
-#   ├── AT-abc123 (Purpose: Spec Review) [Level 1]
-#   │    └── AT-def456 (Purpose: Security Check) [Level 2]
-#   └── AT-xyz789 (Purpose: Docs Generation) [Level 1]
+print(manager.render_topology_tree())
+# Organizational forest
+# - Independent AgentTeams
+#   - AT-abc123 (Purpose: Review | Progress: Not started) [Depth 1]
 ```
 
-### Hooking up Migration Callbacks
+An AgentTeam may request an explicit Agent or AgentTeam parent, or voluntary independence.
 
-Register a callback on `ATTManager` to catch approved hierarchy migrations (e.g., to update a visual graph layout):
+New attachment requires the prospective parent's explicit acceptance even under permissive migration policy.
 
 ```python
-def migration_callback(team_id: str, old_parent_id: Optional[str], new_parent_id: str):
-    print(f"[MIGRATION] Team {team_id} moved from {old_parent_id} to {new_parent_id}")
-
-manager.on_team_migration = migration_callback
-
-# Register a callback to catch high-priority emergency alerts or parent escalations
-def emergency_callback(team_id: str, alert_type: str, alert_reason: str):
-    print(f"[EMERGENCY] Team {team_id} received {alert_type}: {alert_reason}")
-
-manager.on_emergency_escalation = emergency_callback
+request = await manager.negotiate_and_execute_migration(
+    team, intended_parent, "Coordinate under this explicitly chosen parent.",
+)
+print(request.status, request.request_id)
+# Inspect the retained request later; PENDING is not a completed migration.
 ```
+
+Successful own-position changes have a persisted ten-minute cooldown.
+
+Forced detachment after an actual parent retires or dissolves preserves direct surviving children and does not count as their own migration.
+
+Observe `migration_request_resolved` and related metadata through `on_system_event`, not a separate migration or emergency callback.
 
 ## 🔗 8. Configure AgentTeam Communication
 
@@ -327,7 +313,11 @@ config = ATTConfig(
 )
 ```
 
-Use `LineageApprovalCommunicationConfig(request_delivery="wake", direction="one_way")` instead when the recipient and the required topology lineage must approve a one-way channel.
+Use `LineageApprovalCommunicationConfig(request_delivery="queue", direction="one_way")` when the recipient and applicable real lineage must approve a one-way channel.
+
+Communication approval supports voluntary queue delivery only; `wake` is rejected pending a separate design.
+
+Independent-to-independent communication is permissive without a Request or Agreement, while mixed pairs retain the attached endpoint's required authority.
 
 The invoking Agent must be an active member of its current invocation-scoped AgentTeam, and communication tools never accept overrides for the sender, policy, direction, or approval principals.
 
@@ -338,7 +328,7 @@ The invoking Agent must be an active member of its current invocation-scoped Age
 
 Under an approval policy, `send_peer_message` requires an active Agreement; under the permissive policy, it delivers directly without creating an implicit Agreement.
 
-Parent escalations enter the parent AgentTeam's inbox and are summarized during its next active discussion.
+Escalation to an actual parent AgentTeam uses the same configured peer-communication gate; it cannot bypass an absent Agreement or create a nested parent execution.
 
 ## 🧰 9. Select Native or Text ReAct Tool Calling
 
@@ -489,7 +479,9 @@ assert next(member for member in team_a.members if member.agent_id == alice.agen
 assert next(member for member in team_b.members if member.agent_id == alice.agent_id) is alice
 ```
 
-Consent always belongs to an exact proposal revision. If the initiator materially revises an open proposal with `await manager.revise_team_formation(..., base_revision=formation.proposal_revision, changes=TeamFormationRevisionPatch(...))`, every retained invitee returns to `no_response` and must review the new revision. For creator-Team collaboration before publication, use `discuss_team_formation_proposal()`, wait for the Agent inbox completion notification, inspect the detached draft, and explicitly call `publish_team_formation_draft()`; the advisory discussion never supplies invitee consent.
+Consent always belongs to an exact proposal revision. If the initiator materially revises an open proposal with `await manager.revise_team_formation(..., base_revision=formation.proposal_revision, changes=TeamFormationRevisionPatch(...))`, every retained invitee returns to `no_response` and must review the new revision. The initiator may publish its design directly or call optional `prepare_team_formation_draft(objective, candidate, request_id=None)` and then explicitly publish the ready artifact.
+
+Candidate preparation invokes no other person, imposes no all-member barrier, and never supplies invitee consent.
 
 ## 📂 11. Collaborative Document Library (DocLib)
 
@@ -559,7 +551,7 @@ Every AI registered with the manager also receives one persistent private DocLib
 
 A shared AI keeps the same private workspace in every AT, but no team, other AI, public listing, ACL grant, or managed link can access it.
 
-Private files are not automatically included in model prompts or transcripts.
+Private files are not automatically included in model prompts or shared conversations.
 
 The current AI can deliberately use:
 

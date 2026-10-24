@@ -4,14 +4,14 @@ This directory contains technical flowcharts and Mermaid sequence diagrams for t
 
 ## Flowchart Index
 
-1. **[ATT System Architecture](System_Architecture.md)**: Shows the complete system map across host integration, identity, topology, discussions, Agent execution, governance, knowledge, supervision, persistence, and recovery.
+1. **[ATT System Architecture](System_Architecture.md)**: Shows the complete system map across host integration, identity, topology, personal activity, governance, knowledge, supervision, persistence, and recovery.
 2. **[Autonomous Communication Governance](Autonomous_Communication_Governance.md)**: Shows configuration-owned communication policy, explicit governance principals, request lifecycle, agreements, revocation, and durable peer delivery.
 3. **[Lineage Tree Mutations](Lineage_Tree_Mutations.md)**: Shows dynamic AgentTeam spawning, tool binding, membership voting, explicit-principal migration governance, and atomic topology mutation.
 4. **[Token-Based File Reading](Gated_Reading.md)**: Shows effective-model counter resolution, token-safe range continuation, and DocLib authorization.
-5. **[Tooling & Execution Engines](Tooling_and_Execution.md)**: Shows tool auditing, multi-round ReAct execution, native tool calling, and parallel tool execution.
+5. **[Tooling & Execution Engines](Tooling_and_Execution.md)**: Shows tool auditing, bounded personal invocations, native tool calling, and parallel tool execution.
 6. **[State Persistence & Recovery](State_Persistence.md)**: Shows task-local batching, the coalescing single-writer queue, incremental commits, and validated atomic restore.
-7. **[Selective Episodic Memory](Selective_Episodic_Memory.md)**: Shows the optional turn-segmentation, isolated indexing, owner-only search, ephemeral recall, retention, forget, and Journal boundaries.
-8. **[Supervision & Emergencies](Supervision_and_Emergencies.md)**: Shows supervisory audits, UNKNOWN alert lifecycle, parent escalation, and emergency wakeups.
+7. **[Selective Episodic Memory](Selective_Episodic_Memory.md)**: Shows the optional personal-invocation segmentation, isolated indexing, owner-only search, ephemeral recall, retention, forget, and Journal boundaries.
+8. **[Supervision & Emergencies](Supervision_and_Emergencies.md)**: Shows supervisory audits, typed thresholds, fresh temporary audit ATs, and explicit incident handling.
 9. **[Registered Execution & Background Tasks](Background_Tasks.md)**: Shows admission, same-execution detachment, owner-only results, notifications, and cancellation evidence.
 
 ## Unified High-Level Flow Overview
@@ -20,7 +20,7 @@ The ATT suite coordinates these systems through invocation-scoped authority, ser
 
 ```mermaid
 flowchart TD
-    Task["Run AgentTeam discussion or reasoning task"] --> Root["Instantiate Root AI Agent"]
+    Task["Admit personal activity or explicitly create an organization"] --> Root["Instantiate Root AI Agent"]
     Root --> Spawn{"Spawn dynamic AgentTeam?"}
     Spawn -- "Yes" --> Identity["Create AgentTeam<br/>Register stable Agent identities<br/>Create team and private DocLibs<br/>Bind manager-owned tools"]
     Identity --> ToolCall{"Agent invokes a tool?"}
@@ -32,27 +32,24 @@ flowchart TD
     Owner --> Persist
     Context --> Peer{"Peer communication?"}
     Peer --> CommPolicy{"ATTConfig.communication policy"}
-    CommPolicy -- "permissive" --> Delivery["Durable direct delivery"]
+    CommPolicy -- "permissive or independent pair" --> Delivery["Durable direct delivery"]
     CommPolicy -- "parent or lineage approval" --> Request["Persist Request and explicit principals"]
-    Request --> Decision["AgentTeam ballots or explicit Agent decision"]
+    Request --> Decision["Complete exact-case ballots from eligible people"]
     Decision --> Agreement["Create directional Agreement"]
     Agreement --> Delivery
     Delivery --> Persist
     Context --> Migration["Migration policy"]
-    Migration --> Governance["Explicit AgentTeam or Root Agent decisions"]
+    Migration --> Governance["Exact actual-principal cases and voluntary personal ballots"]
     Governance --> Topology["Lock, revalidate, and atomically mutate topology"]
     Topology --> Persist
     ToolCall --> Strategy{"Native tools or Text ReAct?"}
     Strategy --> Executor["Shared parser, schema validator, auditor, and classified ToolExecutor"]
-    Executor --> Turn["AgentTurnResult: completed or incomplete"]
-    Turn --> Journal["Append sanitized Agent-owned Journal events"]
-    Journal --> MemoryGate{"Optional episodic memory enabled?"}
-    MemoryGate -- "yes" --> Catalog["Background card indexing and owner-only recall"]
-    MemoryGate -- "no" --> Discussion
-    Catalog --> Discussion
-    Turn --> Discussion["Serialized AgentTeam discussion with concurrent member turns"]
-    Discussion --> Detailed["DiscussionResult: completed or partial"]
-    Detailed --> Audit["Independent content and operational health"]
-    Audit -- "healthy" --> Done["Return structured result or transcript wrapper"]
-    Audit -- "content anomaly, unknown, or configured degradation" --> Escalate["Persist, deduplicate, and route parent/root event"]
+    Executor --> Checkpoint["Committed personal checkpoint and sanitized Journal"]
+    Checkpoint --> MemoryGate{"Optional episodic memory enabled?"}
+    MemoryGate -- "yes" --> Catalog["Background invocation-segment indexing and owner-only recall"]
+    Checkpoint --> Continue["Continue, explicit idle or finite sleep"]
+    Checkpoint --> Evidence["Typed structural health observations"]
+    Evidence -- "Configured threshold" --> Audit["Fresh restricted AT on the same runtime"]
+    Audit --> Findings["Complete explicit findings and strict majority"]
+    Findings --> Incidents["Retained incidents and explicit handling, not business intervention"]
 ```

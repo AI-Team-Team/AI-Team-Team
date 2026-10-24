@@ -4,7 +4,7 @@ from ai_team_team.core.exceptions import StateRestoreError
 from ai_team_team.database.models import (
     GovernanceBallotModel,
     GovernanceElectorateModel,
-    GovernanceRoundModel,
+    GovernanceCaseModel,
     MigrationRequestModel,
 )
 from ai_team_team.database.persistence.governance_schema import choice_schema
@@ -12,12 +12,12 @@ from jsonschema import Draft202012Validator
 
 
 def read_governance_state(session):
-    rounds = {}
-    for row in session.query(GovernanceRoundModel):
+    cases = {}
+    for row in session.query(GovernanceCaseModel):
         if (row.principal_team_id is None) == (row.principal_agent_id is None):
-            raise StateRestoreError("A governance round must have exactly one principal.")
+            raise StateRestoreError("A governance case must have exactly one principal.")
         identity = {
-            "round_id": row.round_id,
+            "case_id": row.case_id,
             "principal": {
                 "kind": "agent_team" if row.principal_team_id is not None else "agent",
                 "principal_id": row.principal_team_id or row.principal_agent_id,
@@ -28,28 +28,30 @@ def read_governance_state(session):
             or any(row.data.get(key) != value for key, value in identity.items())
             or "ballots" in row.data
         ):
-            raise StateRestoreError("A governance round's stored identity is inconsistent.")
-        electorate = session.query(GovernanceElectorateModel).filter_by(case_id=row.round_id).order_by(GovernanceElectorateModel.position).all()
-        if (row.electorate_revision != row.data.get("round_number")
+            raise StateRestoreError("A governance case's stored identity is inconsistent.")
+        electorate = session.query(GovernanceElectorateModel).filter_by(case_id=row.case_id).order_by(GovernanceElectorateModel.position).all()
+        if (row.electorate_revision != row.data.get("electorate_revision")
                 or [voter.position for voter in electorate] != list(range(len(electorate)))
                 or [voter.voter_agent_id for voter in electorate] != row.data.get("voter_agent_ids")
-                or any(voter.created_version < 1 or voter.eligibility != {"frozen": True} for voter in electorate)
+                or any(voter.created_version < 1 or voter.membership_interval_id != row.data.get("electorate_bindings", {}).get(voter.voter_agent_id)
+                    or voter.eligibility != ({"membership_interval_id": voter.membership_interval_id}
+                        if voter.membership_interval_id else {"agent_id": voter.voter_agent_id}) for voter in electorate)
                 or row.choice_schema != choice_schema(row.data.get("choice_kind"), row.data.get("candidates", []))):
             raise StateRestoreError("A governance case's frozen electorate or choice schema is inconsistent.")
-        rounds[row.round_id] = {**row.data, "ballots": []}
+        cases[row.case_id] = {**row.data, "ballots": []}
     for ballot in session.query(GovernanceBallotModel).order_by(
         GovernanceBallotModel.created_at, GovernanceBallotModel.ballot_id
     ):
-        if ballot.round_id not in rounds:
-            raise StateRestoreError("An explicit governance ballot has no originating round.")
-        source = rounds[ballot.round_id]
+        if ballot.case_id not in cases:
+            raise StateRestoreError("An explicit governance ballot has no originating case.")
+        source = cases[ballot.case_id]
         schema = choice_schema(source["choice_kind"], source["candidates"])
         if ballot.created_version < 1 or not Draft202012Validator(schema).is_valid(ballot.choice):
             raise StateRestoreError("An explicit ballot violates its immutable choice schema.")
-        rounds[ballot.round_id]["ballots"].append(
+        cases[ballot.case_id]["ballots"].append(
             {
                 "ballot_id": ballot.ballot_id,
-                "round_id": ballot.round_id,
+                "case_id": ballot.case_id,
                 "voter_agent_id": ballot.voter_agent_id,
                 "choice": ballot.choice,
                 "created_at": ballot.created_at,
@@ -75,4 +77,4 @@ def read_governance_state(session):
         ):
             raise StateRestoreError("A migration request's stored references are inconsistent.")
         migrations.append(dict(row.data))
-    return list(rounds.values()), migrations
+    return list(cases.values()), migrations

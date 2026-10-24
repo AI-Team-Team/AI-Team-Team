@@ -1,4 +1,5 @@
 import asyncio
+from test.personal_activity import interact_and_idle
 
 from ai_team_team import ParentApprovalCommunicationConfig
 from test.governance_client import governance_action, settle_governance_activity
@@ -40,12 +41,12 @@ class TestStatePersistence(StatePersistenceTestCase):
         captured_sys_instruction = []
         async def mock_generate(prompt, system_instruction=None, temperature=0.3, require_json=False):
             captured_sys_instruction.append(system_instruction)
-            return 'Final Answer: Done'
+            return 'Final Answer: Done' if len(captured_sys_instruction) % 2 else "Action: set_activity_intent(intent={'kind': 'idle'})"
         
         self.mock_react_client.generate = mock_generate
         
         team = self.manager.bootstrap_agent_team(
-            creator=self.root_ai,
+            parent=self.root_ai, creator=self.root_ai,
             preset_name="generic",
             team_purpose="Testing expert discovery",
             member_configs={
@@ -55,7 +56,7 @@ class TestStatePersistence(StatePersistenceTestCase):
             existing_members=[self.root_ai],
         )
         
-        await team.execute_react_step(self.root_ai, "List experts", "System base instructions")
+        await interact_and_idle(self.manager, self.root_ai, "List experts", team=team)
         
         self.assertTrue(len(captured_sys_instruction) > 0)
         sys_inst = captured_sys_instruction[0]
@@ -77,13 +78,13 @@ class TestStatePersistence(StatePersistenceTestCase):
         self.manager.config.file_read.tokenizer_fallback = "strict"
         # 1. Create a deep lineage structure
         team_parent = self.manager.create_agent_team(
-            creator=self.root_ai,
+            parent=self.root_ai, creator=self.root_ai,
             team_purpose="Parent Team Goal",
             preset_name="generic"
         )
         
         team_child = self.manager.create_agent_team(
-            creator=team_parent,
+            parent=team_parent, creator=team_parent,
             team_purpose="Child Team Goal",
             preset_name="generic"
         )
@@ -105,7 +106,6 @@ class TestStatePersistence(StatePersistenceTestCase):
         result = await self.manager.broker.request_peer_communication(
             team_parent, team_child, team_parent.members[0].agent_id, "Persist a governed channel"
         )
-        await self.manager.execute_team_discussion(team_parent, "Consider the channel.", rounds=1, skip_audit=True)
         await settle_governance_activity(self.manager)
         self.assertEqual(self.manager.broker.communication_requests[result.request_id].status.value, "APPROVED")
         agreement = next(iter(self.manager.broker.agreements.values()))
@@ -194,12 +194,9 @@ class TestStatePersistence(StatePersistenceTestCase):
         
         self.assertEqual(restored_parent.team_progress, "In progress")
         
-        # Verify we can still run a debate on recovered manager
-        debate_result = await new_manager.execute_team_discussion(restored_parent, "Continue debate topic", rounds=1)
-        self.assertTrue(
-            "Task complete!" in debate_result or "Arbitration approved." in debate_result,
-            f"Debate result: {debate_result} did not contain expected mock outputs."
-        )
+        # Recovery resumes a person, not a mandatory team discussion.
+        result = await interact_and_idle(new_manager, restored_parent.members[0], "Continue work.", team=restored_parent)
+        self.assertEqual(result.answer, "Task complete!")
         await new_manager.close()
 
     async def test_supervision_service_uses_restored_manager_root(self):

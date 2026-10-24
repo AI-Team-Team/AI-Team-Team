@@ -31,6 +31,7 @@ class PersistenceCoordinator:
         self._lock = threading.RLock()
         self._closed = False
         self._prepared_paths = set()
+        self._acceptance_clocks = {}
         if db_path:
             try:
                 self.claim(db_path)
@@ -68,7 +69,7 @@ class PersistenceCoordinator:
             reconcile_publication(self._store(resolved))
             self._prepared_paths.add(resolved)
 
-    def submit(self, db_path: str, snapshot: Dict[str, Any]) -> Future[Any]:
+    def submit(self, db_path: str, snapshot: Dict[str, Any], *, acceptance_clock=None) -> Future[Any]:
         snapshot = dict(snapshot)
         if "_operations" not in snapshot and "_capture_error" not in snapshot:
             snapshot["_operations"] = (CommitReceipt(
@@ -79,20 +80,36 @@ class PersistenceCoordinator:
             if self._closed:
                 raise RuntimeError("Persistence coordinator is closed.")
             self.claim(db_path)
+            bindings = tuple(snapshot.get("_acceptance_times", ()))
+            owners = {binding.operation_id for binding in bindings}
+            if len(owners) != len(bindings) or owners.intersection(self._acceptance_clocks):
+                raise ValueError("A timed operation already owns its acceptance clock.")
+            if snapshot.get("_acceptance_times"):
+                if acceptance_clock is None:
+                    raise ValueError("Timed publication requires its registered runtime clock.")
+                from .acceptance_time import AcceptanceClockSource
+                source = AcceptanceClockSource(asyncio.get_running_loop(), acceptance_clock)
+                for binding in snapshot["_acceptance_times"]:
+                    self._acceptance_clocks[binding.operation_id] = source
             resolved = str(Path(db_path).resolve())
-            if self._active_task is None:
-                completion: Future[Any] = Future()
-                self._start_locked(resolved, snapshot, completion)
-                return completion
-            if self._pending_snapshot is None:
-                self._pending_path = resolved
-                self._pending_snapshot = snapshot
-                self._pending_completion = Future()
-            else:
-                if self._pending_path != resolved:
-                    raise RuntimeError("Cannot queue deltas for different databases before flush.")
-                self._pending_snapshot = self._merge_snapshots(self._pending_snapshot, snapshot)
-            return cast(Future[Any], self._pending_completion)
+            try:
+                if self._active_task is None:
+                    completion: Future[Any] = Future()
+                    self._start_locked(resolved, snapshot, completion)
+                    return completion
+                if self._pending_snapshot is None:
+                    self._pending_path = resolved
+                    self._pending_snapshot = snapshot
+                    self._pending_completion = Future()
+                else:
+                    if self._pending_path != resolved:
+                        raise RuntimeError("Cannot queue deltas for different databases before flush.")
+                    self._pending_snapshot = self._merge_snapshots(self._pending_snapshot, snapshot)
+                return cast(Future[Any], self._pending_completion)
+            except BaseException:
+                for owner in owners:
+                    self._acceptance_clocks.pop(owner, None)
+                raise
 
     async def read(self, db_path: str, *, reconcile: bool = True) -> Dict[str, Any]:
         self.claim(db_path)
@@ -202,12 +219,24 @@ class PersistenceCoordinator:
             return store
 
     def _write(self, db_path: str, snapshot: Dict[str, Any]):
-        capture_error = snapshot.get("_capture_error")
-        if capture_error is not None:
-            raise capture_error
-        if not snapshot.get("_publication_operation"):
-            self._prepare(db_path)
-        return self._store(db_path).write(snapshot)
+        try:
+            capture_error = snapshot.get("_capture_error")
+            if capture_error is not None:
+                raise capture_error
+            if not snapshot.get("_publication_operation"):
+                self._prepare(db_path)
+            if snapshot.get("_acceptance_times"):
+                return self._store(db_path).write(snapshot, acceptance_reader=self._acceptance_time)
+            return self._store(db_path).write(snapshot)
+        finally:
+            with self._lock:
+                for binding in snapshot.get("_acceptance_times", ()):
+                    self._acceptance_clocks.pop(binding.operation_id, None)
+
+    def _acceptance_time(self, operation_id):
+        with self._lock:
+            source = self._acceptance_clocks[operation_id]
+        return source.read()
 
     def _read(self, db_path: str, reconcile: bool = True) -> Dict[str, Any]:
         # A reader must never initialize or repair an empty source checkpoint.
@@ -260,15 +289,17 @@ class PersistenceCoordinator:
         """Coalesce immutable deltas in state-version order, not arrival order."""
         if earlier.get("_publication_operation") or later.get("_publication_operation"):
             raise RuntimeError("A publication decision cannot coalesce with another authority operation.")
+        acceptance_times = tuple(earlier.get("_acceptance_times", ())) + tuple(later.get("_acceptance_times", ()))
         if later.get("_capture_error") is not None:
-            return later
+            return {**later, "_acceptance_times": acceptance_times}
         if earlier.get("_capture_error") is not None:
-            return earlier
+            return {**earlier, "_acceptance_times": acceptance_times}
         if earlier.get("state_version", 1) > later.get("state_version", 1):
             earlier, later = later, earlier
         read_compensations = tuple(earlier.get("_read_compensations", ())) + tuple(later.get("_read_compensations", ()))
         if later.get("full"):
             merged = dict(later)
+            merged["_acceptance_times"] = acceptance_times
             merged["records"] = merge_records(earlier.get("records", ()), later.get("records", ()), read_compensations=read_compensations)
             merged["_read_compensations"] = read_compensations
             merged["_operations"] = tuple(earlier.get("_operations", ())) + tuple(later.get("_operations", ()))
@@ -276,6 +307,7 @@ class PersistenceCoordinator:
                 merged[key] = tuple(set(earlier.get(key, ())) | set(later.get(key, ())))
             return merged
         merged = dict(earlier)
+        merged["_acceptance_times"] = acceptance_times
         merged["full"] = bool(earlier.get("full"))
         merged["state_version"] = max(later.get("state_version", 1), earlier.get("state_version", 1))
         merged["records"] = merge_records(earlier.get("records", ()), later.get("records", ()), read_compensations=read_compensations)
@@ -298,8 +330,9 @@ class PersistenceCoordinator:
             ("formation_revisions", "revision_id"),
             ("formation_decisions", "decision_id"),
             ("formation_drafts", "draft_id"),
-            ("governance_rounds", "round_id"),
+            ("governance_cases", "case_id"),
             ("migration_requests", "request_id"),
+            ("agent_inbox_dependencies", "message_id"),
             ("memory_events", "event_id"),
             ("memory_segments", "segment_id"),
             ("memory_cards", "memory_id"),
@@ -422,6 +455,8 @@ class PersistenceCoordinator:
             for agent_id, inbox in merged.get("agent_inboxes", {}).items()
             if agent_id not in deleted_agents
         }
+        merged["agent_inbox_dependencies"] = [record for record in merged.get("agent_inbox_dependencies", ())
+            if record["agent_id"] not in deleted_agents]
         for key in ("inboxes", "proposals"):
             merged[key] = {
                 team_id: value

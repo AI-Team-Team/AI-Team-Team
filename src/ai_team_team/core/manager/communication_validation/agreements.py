@@ -56,7 +56,8 @@ def validate_agreements(
     for request in requests:
         source_agreements = agreements_by_request.get(request.request_id, [])
         if request.status is CommunicationRequestStatus.APPROVED:
-            if len(source_agreements) != 1:
+            expected_count = 1 if request.approval_principals else 0
+            if len(source_agreements) != expected_count:
                 raise StateRestoreError(
                     f"Approved communication request {request.request_id!r} "
                     "must create exactly one agreement."

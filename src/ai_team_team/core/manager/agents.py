@@ -151,6 +151,7 @@ class AgentRegistry:
             registered is not agent
             or agent.lifecycle_state != "active"
             or self.active_by_name.get(agent.name) is not agent
+            or manager._topology.is_agent_pending(agent.agent_id)
         ):
             raise PermissionError("The active agent identity is not active.")
         lib_id = agent.private_doc_library_id
@@ -172,12 +173,9 @@ class AgentRegistry:
         agent = self.by_id.get(agent_id)
         if agent is None:
             raise KeyError(f"Unknown agent ID {agent_id!r}.")
-        async with agent.lifecycle_lock:
-            await self.retire_locked(
-                agent_id,
-                policy=policy,
-                confirm_delete=confirm_delete,
-            )
+        async with agent.lifecycle_lock, self.manager._topology.transition_lock, self.manager._activity.lock:
+            with self.manager._topology.reserve_agent_parent(agent):
+                await self.retire_locked(agent_id, policy=policy, confirm_delete=confirm_delete)
 
     async def retire_locked(
         self,
@@ -214,6 +212,10 @@ class AgentRegistry:
         if any(row.table_name == "executions" and row.values["agent_id"] == agent_id
                and row.values["status"] in {"queued", "running"} for row in manager._records.snapshot()):
             raise ValueError("Agent owns live or unconfirmed executions; resolve them before retirement.")
+        if selected == "delete" and any(team.organizational_parent is not None
+                and team.organizational_parent.kind == "agent" and team.organizational_parent.principal_id == agent_id
+                and getattr(team, "_lifecycle_state", "active") == "active" for team in manager.teams.values()):
+            raise ValueError("Retain or archive an organizational parent before permanently deleting its historical identity.")
         if selected == "delete":
             history_refs = [
                 row.receipt_key
@@ -232,8 +234,8 @@ class AgentRegistry:
                 or agent_id in proposal.get("votes", {})
             ]
             governance_refs.extend(
-                f"governance-round:{item.round_id}"
-                for item in manager._governance.rounds.values()
+                f"governance-case:{item.case_id}"
+                for item in manager._governance.cases.values()
                 if agent_id in item.voter_agent_ids
             )
             governance_refs.extend(
@@ -305,13 +307,17 @@ class AgentRegistry:
                     persist=False,
                     inherit_context=False,
                 )
-                manager._auto_save(
-                    agents={agent_id},
-                    libraries={lib_id},
-                    memory_events={lifecycle_event.event_id},
-                )
-                await manager.flush_state()
-            except Exception:
+                parent_loss, parent_changes = manager._topology.parent_loss_records(agent, lifecycle_event.event_id)
+                dirty = manager._new_dirty_state()
+                dirty["agents"].add(agent_id)
+                dirty["libraries"].add(lib_id)
+                dirty["memory_events"].add(lifecycle_event.event_id)
+                dirty["teams"].update(parent_changes)
+                await manager._records.commit(parent_loss, dirty=dirty,
+                    operation_id=f"RETIRE-{lifecycle_event.event_id}", team_parents=parent_changes)
+            except BaseException:
+                if lifecycle_event is not None and f"RETIRE-{lifecycle_event.event_id}" in manager._records.receipts:
+                    raise
                 if lifecycle_event is not None:
                     manager._memory.discard_unpersisted_event(
                         lifecycle_event.event_id
@@ -495,4 +501,5 @@ class AgentRegistry:
             },
         )
         manager._memory.resume_pending()
+        manager._topology.schedule_notices()
         return agent

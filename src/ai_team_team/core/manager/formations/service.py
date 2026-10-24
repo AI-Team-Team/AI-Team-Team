@@ -1,16 +1,19 @@
 """Composed formation service."""
 
 from typing import TYPE_CHECKING
+from contextlib import asynccontextmanager
 
 from .lifecycle import FormationLifecycleMixin
 from .notifications import FormationNotificationMixin
 from .proposals import FormationProposalMixin
+from .publication import FormationPublicationMixin
 
 if TYPE_CHECKING:
     from ..facade import ATTManager
 
 
 class FormationService(
+    FormationPublicationMixin,
     FormationProposalMixin,
     FormationLifecycleMixin,
     FormationNotificationMixin,
@@ -22,31 +25,33 @@ class FormationService(
         import threading
 
         self.manager = manager
-        self.requests = {}
-        self.invitations = {}
-        self.revisions = {}
-        self.decisions = {}
-        self.drafts = {}
+        self._initialize_publication()
         self._state_lock = threading.RLock()
         self._request_locks = {}
         self._draft_locks = {}
         self.tasks: set[asyncio.Task[object]] = set()
 
-    def request_lock(self, request_id: str):
+    @asynccontextmanager
+    async def request_lock(self, request_id: str):
         import asyncio
 
         with self._state_lock:
             if request_id not in self.requests:
                 raise KeyError(f"Unknown team formation request {request_id!r}.")
-            return self._request_locks.setdefault(request_id, asyncio.Lock())
+            lock = self._request_locks.setdefault(request_id, asyncio.Lock())
+        async with lock, self.stage(request_id=request_id):
+            yield
 
-    def draft_lock(self, draft_id: str):
+    @asynccontextmanager
+    async def draft_lock(self, draft_id: str):
         import asyncio
 
         with self._state_lock:
             if draft_id not in self.drafts:
                 raise KeyError(f"Unknown team formation draft {draft_id!r}.")
-            return self._draft_locks.setdefault(draft_id, asyncio.Lock())
+            lock = self._draft_locks.setdefault(draft_id, asyncio.Lock())
+        async with lock, self.stage(draft_id=draft_id):
+            yield
 
     def restore(
         self,
@@ -118,13 +123,6 @@ class FormationService(
                 )
             }
         )
-        for draft in self.drafts.values():
-            if draft.status is FormationDraftStatus.RUNNING:
-                draft.status = FormationDraftStatus.PENDING
-                draft.reason = (
-                    "The previous process stopped while this detached draft was running; "
-                    "retry is required."
-                )
         for agent in self.manager._agents_by_id.values():
             restored = []
             for row in agent_inboxes.get(agent.agent_id, []):

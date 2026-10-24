@@ -35,8 +35,8 @@ class PersonalGovernanceTests(unittest.IsolatedAsyncioTestCase):
         await settle_governance_activity(self.manager)
 
     async def request(self):
-        first = self.manager.create_agent_team(self.root)
-        second = self.manager.create_agent_team(self.root)
+        first = self.manager.create_agent_team(self.root, parent=self.root)
+        second = self.manager.create_agent_team(self.root, parent=self.root)
         result = await self.manager.broker.request_peer_communication(
             first, second, first.members[0].agent_id, "Keep communication autonomous."
         )
@@ -61,10 +61,10 @@ class PersonalGovernanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_unanswered_read_email_never_becomes_a_vote(self):
         self.client.respond = False
         request = await self.request()
-        item = next(iter(self.manager._governance.rounds.values()))
+        item = next(iter(self.manager._governance.cases.values()))
         email = self.root.agent_inbox[0]
         opened = self.manager.open_agent_mail(email["message_id"], actor=self.root)
-        self.assertEqual(opened["governance"]["round_id"], item.round_id)
+        self.assertEqual(opened["governance"]["case_id"], item.case_id)
         self.assertIsNone(email["read_at"])
         await self.manager.mark_agent_inbox_read(self.root.agent_id)
         self.assertEqual(request.status.value, "PENDING")
@@ -113,29 +113,29 @@ class PersonalGovernanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_strict_immutable_choice_and_cross_identity_rejection(self):
         self.client.respond = False
         await self.request()
-        item = next(iter(self.manager._governance.rounds.values()))
+        item = next(iter(self.manager._governance.cases.values()))
         token = self.manager._active_tool_agent.set(self.root)
         try:
             for invalid in ("true", 1, None):
                 with self.assertRaises(ToolArgumentError):
                     await self.manager.submit_governance_choice(
-                        item.round_id, {"approved": invalid}, actor=self.root
+                        item.case_id, {"approved": invalid}, actor=self.root
                     )
             first = await self.manager.submit_governance_choice(
-                item.round_id, {"approved": True}, actor=self.root
+                item.case_id, {"approved": True}, actor=self.root
             )
             same = await self.manager.submit_governance_choice(
-                item.round_id, {"approved": True}, actor=self.root
+                item.case_id, {"approved": True}, actor=self.root
             )
             self.assertEqual(first.status, "SUBMITTED")
             self.assertEqual(same.status, "ALREADY_SUBMITTED")
             with self.assertRaises(ToolBusinessError):
                 await self.manager.submit_governance_choice(
-                    item.round_id, {"approved": False}, actor=self.root
+                    item.case_id, {"approved": False}, actor=self.root
                 )
         finally:
             self.manager._active_tool_agent.reset(token)
-        other = self.manager.create_agent_team(self.root).members[0]
+        other = self.manager.create_agent_team(self.root, parent=self.root).members[0]
         with self.assertRaises(PermissionError):
             self.manager.open_agent_mail(self.root.agent_inbox[0]["message_id"], actor=other)
         await self.settle()

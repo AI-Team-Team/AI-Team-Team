@@ -61,6 +61,8 @@ class CommunicationValidationMixin:
         agent_ids: set[str],
         root_agent_id: str,
         inboxes: Dict[str, List[Dict[str, Any]]],
+        *,
+        inactive_team_ids=frozenset(),
     ) -> None:
         requests, approvals, ballots, agreements, messages = _parse_communication_rows(
             request_rows,
@@ -84,6 +86,7 @@ class CommunicationValidationMixin:
             approvals,
             request_by_id,
             agent_ids,
+            inactive_team_ids=inactive_team_ids,
         )
         agreement_by_id = validate_agreements(
             requests,

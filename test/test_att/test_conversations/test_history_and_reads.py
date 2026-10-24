@@ -140,9 +140,10 @@ class HistoryAndReadTests(ChatTestCase):
         with self.assertRaises(PermissionError):
             await self.manager.send_team_message(team.team_id, "Cannot publish", actor=self.root)
         with self.assertRaises(ValueError):
-            self.manager.create_agent_team(team, member_configs={"A": {"model": "fixture"}, "B": {"model": "fixture"}, "C": {"model": "fixture"}})
-        with self.assertRaises(ValueError):
-            await self.manager.execute_team_discussion(team, "Cannot run a dissolved team", skip_audit=True)
+            self.manager.create_agent_team(team, parent=team, member_configs={"A": {"model": "fixture"}, "B": {"model": "fixture"}, "C": {"model": "fixture"}})
+        from ai_team_team.core.activity.contracts import AgentTeamScope
+        with self.assertRaises(PermissionError):
+            await self.manager.activate_agent(self.other.agent_id, scope=AgentTeamScope(team_id=team.team_id))
         await self.manager.save_state()
         await self.manager.load_state(self.path)
         owner = self.manager._agents_by_id[self.other.agent_id]

@@ -9,7 +9,7 @@ from ai_team_team import ATTConfig, ATTManager, Agent, LLMResponse
 
 class ScriptedMemoryClient:
     def __init__(self, responses=None, labels=None):
-        self.responses = list(responses or ["Final Answer: complete"])
+        self.responses = list(responses or ["Final Answer: complete", "Action: set_activity_intent(intent={'kind': 'idle'})"])
         self.labels = labels or {
             "title": "Completed work",
             "summary": "The Agent completed one recorded task.",
@@ -37,7 +37,7 @@ class ScriptedMemoryClient:
             return LLMResponse(text=json.dumps(self.labels))
         if self.responses:
             return LLMResponse(text=self.responses.pop(0))
-        return LLMResponse(text="Final Answer: complete")
+        return LLMResponse(text="Action: set_activity_intent(intent={'kind': 'idle'})")
 
     def supports_native_tool_calling(self):
         return False

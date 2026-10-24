@@ -11,6 +11,9 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from ai_team_team import ATTManager, Agent, ATTConfig
+from test.personal_activity import interact_and_idle
+from test.governance_client import settle_governance_activity
+import json
 
 class TestATTRouting(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -25,6 +28,7 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
         self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Dialogue approved."}')
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
         self.manager = ATTManager(root_ai=self.root_ai, persistence_mode="volatile")
+        self.addAsyncCleanup(self.manager.close)
 
     def test_heterogeneous_registry_mode1(self):
         """Verify Mode 1 (Dependency Injection) client registration and routing."""
@@ -38,7 +42,7 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
         # Spawn team and specify roles_and_models
         preset = self.manager.get_preset("generic")
         team = self.manager.create_agent_team(
-            creator=self.root_ai,
+            parent=self.root_ai, creator=self.root_ai,
             member_count=3,
             roles_and_presets=preset["roles"],
             roles_and_models={"Specialist_A": "my-custom"}
@@ -72,14 +76,14 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
             })
             if require_json:
                 return '{"is_healthy": true, "reason": "Approved"}'
-            return "Final Answer: Handler Output"
+            return "Final Answer: Handler Output" if len(generated_requests) == 1 else "Action: set_activity_intent(intent={'kind': 'idle'})"
 
         self.manager.register_generator_handler(my_handler)
 
         # 3. Spawn team and assign role to the model
         preset = self.manager.get_preset("generic")
         team = self.manager.create_agent_team(
-            creator=self.root_ai,
+            parent=self.root_ai, creator=self.root_ai,
             member_count=3,
             roles_and_presets=preset["roles"],
             roles_and_models={"Specialist_A": "gemini"}
@@ -88,22 +92,14 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
         specialist_a = [m for m in team.members if m.name == "Specialist_A"][0]
         
         # 4. Trigger debate step
-        res = await team.execute_react_step(specialist_a, "Test Task", "System instructions", max_steps=1, manager=self.manager)
-        self.assertEqual(res, "Handler Output")
-        self.assertEqual(len(generated_requests), 1)
+        res = await interact_and_idle(self.manager, specialist_a, "Test Task", team=team)
+        self.assertEqual(res.answer, "Handler Output")
+        self.assertEqual(len(generated_requests), 2)
         self.assertEqual(generated_requests[0]["model"], "gemini")
         # Ensure model's ai_note is present in system instructions passed to prompt builder
         self.assertIn("gemini-3.5-flash - A very impressive large model", generated_requests[0]["system"])
 
-        # 5. Verify critic/supervisor routing fallback
-        result = await self.manager.supervisor.audit_team_dialog(
-            team, "Dummy dialogue"
-        )
-        self.assertEqual(result.status.value, "healthy")
-        self.assertEqual(result.reason, "Approved")
-        self.assertEqual(len(generated_requests), 8) # Updated from 2 to 8 due to 3-AI committee debate (6 turns + 1 consensus)
-        self.assertEqual(generated_requests[7]["model"], "default")
-        self.assertTrue(generated_requests[7]["json"])
+        self.assertFalse(any(row.table_name == "audit_runs" for row in self.manager._records.snapshot()))
 
     async def test_dispatch_subagent_routing(self):
         """Verify that dispatch_subagent correctly propagates roles_and_models to dynamic child teams using configuration routing."""
@@ -122,34 +118,23 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
             called_models.append(model_name)
             if require_json:
                 return '{"is_healthy": true, "reason": "Dialogue approved."}'
-            return "Final Answer: ok"
+            return "Action: set_activity_intent(intent={'kind': 'idle'})"
 
         self.manager.register_generator_handler(mock_handler)
 
         preset = self.manager.get_preset("generic")
         team = self.manager.create_agent_team(
-            creator=self.root_ai,
+            parent=self.root_ai, creator=self.root_ai,
             member_count=3,
             roles_and_presets=preset["roles"]
         )
 
         dispatch_tool = team.tools["dispatch_subagent"]
 
-        # Intercept execute_team_discussion to check the spawned team
-        original_execute = self.manager.execute_team_discussion
-        captured_child_team = None
-
-        async def mock_execute_team_discussion(child_team, prompt, rounds=2):
-            nonlocal captured_child_team
-            captured_child_team = child_team
-            return "Mocked debate result"
-
-        self.manager.execute_team_discussion = mock_execute_team_discussion
-
         agent_token = self.manager._active_tool_agent.set(team.members[0])
         team_token = self.manager._active_team.set(team)
         try:
-            await dispatch_tool(
+            result = await dispatch_tool(
                 task="Do task",
                 team_purpose="Sub task",
                 member_configs={
@@ -162,9 +147,11 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
         finally:
             self.manager._active_team.reset(team_token)
             self.manager._active_tool_agent.reset(agent_token)
-            self.manager.execute_team_discussion = original_execute
 
-        self.assertIsNotNone(captured_child_team)
+        payload = json.loads(result)
+        self.assertEqual(payload["status"], "CREATED")
+        captured_child_team = self.manager.teams[payload["team_id"]]
+        await settle_governance_activity(self.manager)
         self.assertEqual(captured_child_team.depth, 2)
         # Sibling names in dynamic dispatch are "Dynamic_{role_name}"
         # Let's verify client routing on the spawned child team members
@@ -181,13 +168,13 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
             called_models.append(model_name)
             if require_json:
                 return '{"is_healthy": true, "reason": "Dialogue approved."}'
-            return "Final Answer: ok"
+            return "Action: set_activity_intent(intent={'kind': 'idle'})"
 
         self.manager.register_generator_handler(mock_handler)
 
         preset = self.manager.get_preset("generic")
         team = self.manager.create_agent_team(
-            creator=self.root_ai,
+            parent=self.root_ai, creator=self.root_ai,
             member_count=3,
             roles_and_presets=preset["roles"]
         )
@@ -241,7 +228,7 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
             system_instruction_captured = system_instruction
             if require_json:
                 return '{"is_healthy": true, "reason": "Dialogue approved."}'
-            return "Final Answer: ok"
+            return "Action: set_activity_intent(intent={'kind': 'idle'})"
 
         self.manager.register_generator_handler(mock_handler)
 
@@ -265,7 +252,7 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
         }
 
         team = self.manager.create_agent_team(
-            creator=self.root_ai,
+            parent=self.root_ai, creator=self.root_ai,
             member_configs=member_configs
         )
 
@@ -275,7 +262,7 @@ class TestATTRouting(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(planner.system_instructions, "Prioritize clarity, decompose objectives, and verify sub-tasks.")
 
         # Run execute_react_step on Lead_Planner to capture system instructions
-        await team.execute_react_step(planner, "Start task", "Base system instruction", max_steps=1, manager=self.manager)
+        await interact_and_idle(self.manager, planner, "Start task", team=team)
 
         self.assertIsNotNone(system_instruction_captured)
         self.assertIn("Prioritize clarity, decompose objectives, and verify sub-tasks.", system_instruction_captured)

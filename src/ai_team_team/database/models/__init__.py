@@ -9,7 +9,7 @@ from .communication import (
     PeerMessageModel,
 )
 from .config import ManagerConfigModel
-from .governance import GovernanceBallotModel, GovernanceElectorateModel, GovernanceRoundModel, MigrationRequestModel
+from .governance import GovernanceBallotModel, GovernanceElectorateModel, GovernanceCaseModel, MigrationRequestModel
 from .libraries import (
     DocLibFileModel,
     DocLibLinkModel,
@@ -53,7 +53,7 @@ __all__ = [
     "LibraryModel",
     "LibraryPermissionModel",
     "ManagerConfigModel",
-    "GovernanceRoundModel",
+    "GovernanceCaseModel",
     "GovernanceElectorateModel",
     "ACTIVITY_TABLES",
     "commit_receipts",

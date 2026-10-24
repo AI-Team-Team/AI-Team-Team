@@ -56,10 +56,26 @@ class SnapshotValidationMixin:
             agent_ids,
             root_id,
             {row["team_id"]: row.get("inbox", []) for row in payload.teams},
+            inactive_team_ids={row["team_id"] for row in payload.teams if row.get("lifecycle_state", "active") != "active"},
         )
         validate_detached_records(state)
         validate_activity_contexts(payload, state.get("records", ()))
         index = {record.identity: record for record in state.get("records", ())}
+        for draft in payload.formation_drafts:
+            invocation_id = draft.get("initiator_invocation_id")
+            if invocation_id is not None:
+                source = index.get(("activity_invocations", (invocation_id,)))
+                if source is None or source.values["agent_id"] != draft["initiator_agent_id"]:
+                    raise StateRestoreError("A formation candidate has a missing or cross-owner invocation source.")
+                if source.values["started_at"] > draft["created_at"]:
+                    raise StateRestoreError("A formation candidate predates its invocation source.")
+            message_id = draft.get("source_message_id")
+            if message_id is not None:
+                source = index.get(("chat_messages", (message_id,)))
+                if source is None or source.values["author_agent_id"] != draft["initiator_agent_id"]:
+                    raise StateRestoreError("A formation candidate has a missing or cross-owner authored message source.")
+                if source.values["created_at"] > draft["created_at"]:
+                    raise StateRestoreError("A formation candidate predates its authored message source.")
         for agent in payload.agents:
             for message in agent.get("messages", ()):
                 for field, table in (("invocation_id", "activity_invocations"), ("source_execution_id", "executions")):

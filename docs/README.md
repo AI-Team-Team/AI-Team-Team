@@ -10,18 +10,18 @@ To understand specific systems in detail, please refer to the following document
 
 ### 👤 User Guides
 
-1. **[Quickstart Integration Guide](user/Quickstart.md)**: A step-by-step tutorial on how to install, register custom tools, implement LLM client adapters, and run agent debates.
+1. **[Quickstart Integration Guide](user/Quickstart.md)**: A step-by-step tutorial on how to install, register custom tools, implement LLM client adapters, and admit continuing personal activity.
 2. **[Public API Reference](user/API_Reference.md)**: A clean, public-only reference for all external integration classes (`ATTManager`, `Agent`, `ATTConfig`, etc.).
 
 ### 🛠️ System Specifications & Dev Docs
 
-1. **[Hierarchical Dynamic Delegation](Dynamic_Delegation.md)**: Explains the recursive `Agent` and `AgentTeam` lineages (Level 0 Root AI spawning Level 1 ATs, which recursively spawn deeper sub-teams of Level $N$), ReAct execution loops with safe literal evaluation, and the lineage escalation channels.
+1. **[Hierarchical Dynamic Delegation](Dynamic_Delegation.md)**: Explains explicit-parent organizational forests, nonblocking creation and consent, bounded personal tool protocols, and authorized escalation.
 2. **[Token-Based File Reading](Gated_Reading.md)**: Details effective-model token budgets, line and character continuation, collaborative team DocLib ACLs, and persistent Private Agent DocLib boundaries.
 3. **[Supervisory Team](Supervisory_Team.md)**: Details the short-lived, registered supervisory AgentTeam created for each audit, its fresh auditors, durable evidence, and lineage escalation.
-4. **[State Persistence & Multi-Turn Memory](State_Persistence.md)**: Explains the asynchronous single-writer SQLite design, incremental deltas, validated recovery, multi-turn memory, and turn-based pruning.
+4. **[State Persistence & Personal Memory](State_Persistence.md)**: Explains the asynchronous single-writer SQLite design, incremental deltas, validated recovery, personal memory, and source-linked context compaction.
 5. **[Selective Episodic Memory](Selective_Episodic_Memory.md)**: Defines the optional Agent-owned Memory Catalog, immutable Journal boundary, isolated indexing, ephemeral recall, tool capture policy, and current-schema recovery rules.
-6. **[Consensual Existing-Agent Team Formation](Consensual_Team_Formation.md)**: Defines persistent Agent identity inboxes, revision-bound invitation attitudes, immutable proposal history, optional detached creator-Team deliberation, accepted-subset creation, late joining, trusted bootstrap, and the invariant that membership never mutates Agent-owned state.
-7. **[Team Governance & Communication Policies](Team_Governance.md)**: Details configuration-owned communication, explicit AgentTeam/Root Agent principals, durable Requests and Agreements, migration policies, token-budget failover, and emergency wakeups.
+6. **[Consensual Existing-Agent Team Formation](Consensual_Team_Formation.md)**: Defines persistent Agent identity inboxes, revision-bound invitation attitudes, immutable proposal history, optional initiator-authored candidates, accepted-subset creation, late joining, trusted bootstrap, and the invariant that membership never mutates Agent-owned state.
+7. **[Team Governance & Communication Policies](Team_Governance.md)**: Details configuration-owned communication, actual AgentTeam or Agent principals, durable Requests and Agreements, migration policies, token-budget failover, and explicit incident handling.
 8. **[Tool Execution & Development System](Tool_System.md)**: Explains the native tool-calling loop, Thorough Abstraction schema extraction, concurrent parallel executions, tool registration, and `ToolAuditor` pre-execution hooks.
 9. **[Core Objects Model](Core_Objects_Model.md)**: A deep-dive architectural data dictionary defining the internal memory mechanics and states of `ATTManager`, `AgentTeam`, and `Agent`.
 10. **[Developer Testing & Mocking Guide](dev/testing.md)**: Guidelines for writing unit tests and mocking sequence responses.
@@ -45,9 +45,9 @@ For visual diagrams sequencing ATT loops, refer to the flowchart index and speci
 * **[Lineage Tree Mutations](flowcharts/Lineage_Tree_Mutations.md)**: Visualizes child creation, membership voting, and explicitly governed migration.
 * **[Token-Based File Reading Sequence](flowcharts/Gated_Reading.md)**: Visualizes effective-model counter resolution, token-safe continuation, and DocLib authorization.
 * **[Autonomous Communication Governance](flowcharts/Autonomous_Communication_Governance.md)**: Sequences configuration selection, explicit-principal approval, Agreement creation, delivery, and revocation.
-* **[Supervision and Emergencies](flowcharts/Supervision_and_Emergencies.md)**: Sequences dialogue auditing and ancestor anomaly routing.
+* **[Supervision and Emergencies](flowcharts/Supervision_and_Emergencies.md)**: Sequences typed health evidence, fresh temporary audits, and explicit incident attention.
 * **[State Persistence Flowchart](flowcharts/State_Persistence.md)**: Sequences SQLite auto-saving event triggers and reconstruction cycles.
-* **[Tooling and Execution](flowcharts/Tooling_and_Execution.md)**: Sequences discussion and individual Agent reasoning/tool loops.
+* **[Tooling and Execution](flowcharts/Tooling_and_Execution.md)**: Sequences personal admission, provider protocols, common tool execution, and receipt boundaries.
 
 ## Core Architecture Overview
 
@@ -58,7 +58,7 @@ The ATT Topology transitions AI agents from passive context-consumers to active,
                      │ Supervisory AgentTeam       │
                      │ (Fresh per audit, >= 3 AIs) │
                      └──────────────┬───────────────┘
-                                    │ Audits Dialogue Logs
+                                    │ Assesses Permitted Evidence
                                     ▼
                      ┌──────────────────────────────┐
                      │         ATT Manager          │

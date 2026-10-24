@@ -176,7 +176,7 @@ class DispatchMixin:
                     job.result._execution_id = job.execution_id
                     if self.manager._closed or self.sealed:
                         return
-                    if not self.closing and job.context.generation != self.manager._resources.generation:
+                    if not self.closing and not self.manager._closing and job.context.generation != self.manager._resources.generation:
                         raise PermissionError("An obsolete executor cannot publish into the new runtime.")
                     job.result = await self.finish_result(job, job.result)
         except asyncio.CancelledError as error:

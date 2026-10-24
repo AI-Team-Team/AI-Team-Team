@@ -10,6 +10,7 @@ from test.test_att.test_private_doclib._support import (
     os,
     sqlite3,
 )
+from test.personal_activity import interact_and_idle
 
 
 class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
@@ -20,7 +21,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         member = Agent("StillMember", "Member", self.client)
         self.manager.register_agent(member)
         self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={
                 "PeerE": {"model": "default"},
                 "PeerF": {"model": "default"},
@@ -32,7 +33,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
 
         creator = Agent("Creator", "Lead", self.client)
         self.manager.register_agent(creator)
-        self.manager.create_agent_team(creator)
+        self.manager.create_agent_team(creator, parent=creator)
         with self.assertRaises(ValueError):
             await self.manager.retire_agent(creator.agent_id)
 
@@ -131,34 +132,30 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         release = asyncio.Event()
 
         class BlockingClient:
+            calls = 0
+
             async def generate(self, prompt, **kwargs):
                 started.set()
                 await release.wait()
-                return "Final Answer: complete"
+                self.calls += 1
+                return "Final Answer: complete" if self.calls == 1 else "Action: set_activity_intent(intent={'kind': 'idle'})"
 
         blocking_client = BlockingClient()
         self.manager.register_llm_client("blocking", blocking_client)
         worker = Agent("Blocking", "Worker", blocking_client)
         self.manager.register_agent(worker)
-        team = self.manager.create_agent_team(self.root)
+        team = self.manager.create_agent_team(self.root, parent=self.root)
         state_path = os.path.join(self.temp_dir, "active-invocation.db")
         self.manager.db_path = state_path
         await self.manager.save_state()
-        task = asyncio.create_task(
-            team.execute_reasoning_step(
-                worker,
-                "Work.",
-                "Complete the task.",
-                manager=self.manager,
-            )
-        )
+        task = asyncio.create_task(interact_and_idle(self.manager, worker, "Work."))
         await started.wait()
         with self.assertRaisesRegex(ValueError, "active model invocation"):
             await self.manager.retire_agent(worker.agent_id, "archive")
-        with self.assertRaisesRegex(StateRestoreError, "invocation"):
+        with self.assertRaisesRegex(StateRestoreError, "personal activity"):
             await self.manager.load_state(state_path)
         release.set()
-        self.assertEqual(await task, "complete")
+        self.assertEqual((await task).answer, "complete")
         await self.manager.retire_agent(worker.agent_id, "archive")
 
     async def test_delete_revalidates_membership_after_preflush(self):
@@ -181,7 +178,7 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         )
         await started.wait()
         team = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={
                 "PeerD1": {"model": "default"},
                 "PeerD2": {"model": "default"},

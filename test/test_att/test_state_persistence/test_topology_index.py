@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from ai_team_team import ATTConfig, ATTManager, Agent, StateRestoreError
+from test.governance_client import approve_pending_business
 
 
 class _UnusedClient:
@@ -29,10 +30,11 @@ class TopologyIndexTests(unittest.IsolatedAsyncioTestCase):
             persistence_mode="volatile",
         )
         self.manager.register_llm_client("default", client)
+        self.manager._activity.schedule_notice = lambda _identifier: None
         self.addAsyncCleanup(self.manager.close)
-        self.parent = self.manager.create_agent_team(self.manager.root_ai)
-        self.moving = self.manager.create_agent_team(self.manager.root_ai)
-        self.target = self.manager.create_agent_team(self.parent)
+        self.parent = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
+        self.moving = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
+        self.target = self.manager.create_agent_team(self.parent, parent=self.parent)
         self.original_index = self.manager._team_parent_map
         self.path = os.path.join(self.workspace, "state.sqlite")
 
@@ -40,7 +42,9 @@ class TopologyIndexTests(unittest.IsolatedAsyncioTestCase):
         result = await self.manager.negotiate_and_execute_migration(
             moving, target, "Exercise the authoritative parent index."
         )
-        self.assertEqual(result.status, "EXECUTED")
+        self.assertEqual(result.status, "PENDING")
+        await approve_pending_business(self.manager, result.request_id)
+        self.assertEqual(self.manager.inspect_migration_request(result.request_id).status, "EXECUTED")
 
     def _assert_index(self, expected):
         self.assertIs(self.manager._team_parent_map, self.original_index)
@@ -48,7 +52,7 @@ class TopologyIndexTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.original_index, expected)
 
     async def test_tool_view_cannot_restore_an_obsolete_parent_after_load(self):
-        descendant = self.manager.create_agent_team(self.moving)
+        descendant = self.manager.create_agent_team(self.moving, parent=self.moving)
         expected_index = dict(self.original_index)
         await self.manager.save_state(self.path)
         await self._migrate(self.moving, self.target)
@@ -129,7 +133,7 @@ class TopologyIndexTests(unittest.IsolatedAsyncioTestCase):
             patch.object(self.parent, "add_child_team", side_effect=fail_after_parent_update),
             self.assertRaisesRegex(RuntimeError, "Injected parent publication failure"),
         ):
-            self.manager.create_agent_team(self.parent)
+            self.manager.create_agent_team(self.parent, parent=self.parent)
 
         self._assert_index(expected_index)
         self.assertEqual(self.manager.teams, expected_teams)

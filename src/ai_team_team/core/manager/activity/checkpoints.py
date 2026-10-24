@@ -42,6 +42,10 @@ class CheckpointMixin:
     ):
         """Never acknowledge a frame independently of its personal checkpoint."""
         manager = self.manager
+        if session.audit_profile is not None:
+            if window or inbox or notifications or last_context is not None:
+                raise PermissionError("Audit checkpoints cannot publish ordinary personal records.")
+            return await manager._records.commit(records, allow_closing=allow_closing)
         dirty = manager._new_dirty_state()
         read_acknowledgements = tuple(session.pending_chat_read_acknowledgements) if window else ()
         records = (*records, *manager._messaging.read_acknowledgement_records(read_acknowledgements))
@@ -78,6 +82,8 @@ class CheckpointMixin:
                 del session.pending_chat_read_acknowledgements[:len(read_acknowledgements)]
 
     async def checkpoint(self, session, *, end_invocation=False, interrupted=False, extra=()):
+        if session.audit_profile is not None:
+            return await self.audit_checkpoint(session, end_invocation=end_invocation, interrupted=interrupted, extra=extra)
         records = list(extra)
         if end_invocation and session.invocation_id:
             invocation = self.manager._records.index.get(
@@ -167,4 +173,5 @@ class CheckpointMixin:
                 if not future.done():
                     future.set_exception(session.failure)
         if end_invocation:
+            session.last_checkpoint_invocation_id = session.invocation_id
             session.invocation_id = None

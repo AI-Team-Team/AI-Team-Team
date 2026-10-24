@@ -45,8 +45,8 @@ class StateAPI:
     def _auto_save(self, *args: Any, **kwargs: Any) -> Any:
         return self._state._auto_save(*args, **kwargs)
 
-    async def _commit_dirty_state(self, dirty: Dict[str, Any]) -> None:
-        await self._state._commit_dirty_state(dirty)
+    async def _commit_dirty_state(self, dirty: Dict[str, Any], *, operation_id=None, authority_check=None) -> None:
+        await self._state._commit_dirty_state(dirty, operation_id=operation_id, authority_check=authority_check)
 
     def _submit_dirty_state(self, dirty: Dict[str, Any]) -> None:
         self._state._submit_dirty_state(dirty)
@@ -84,6 +84,8 @@ class StateAPI:
                 raise StateRestoreError("Cannot restore state while Agent registrations are awaiting membership commit.")
             if self._messaging.read_deliveries:
                 raise StateRestoreError("Cannot restore state while a chat read delivery or its receipt cleanup is pending.")
+            if self.supervisor.active_tasks or self.supervisor.finalizers:
+                raise StateRestoreError("Cannot restore state while health-assessment admission or finalization is active.")
             self._activity.assert_restore_ready()
             self._executions.assert_restore_ready()
             if self._active_formation_operations:
@@ -140,6 +142,11 @@ class StateAPI:
             async with self._activity.lock:
                 await self._activity.after_restore(restoration_start=restoration_start)
                 self._executions.reset_after_restore()
+            await self._failover.interrupt_pending()
+            await self.supervisor.interrupt_restored_assessments()
+            for row in self._records.snapshot():
+                if row.table_name == "team_position_cooldowns" and row.values["accounting_mode"] == "remaining":
+                    self._migration.cooldown_deadlines[row.values["team_id"]] = restoration_start + row.values["remaining_seconds"]
             recovered = True
         finally:
             self._finish_restore_protection()
@@ -149,7 +156,13 @@ class StateAPI:
             self.broker.resume_pending_requests()
             self._governance.resume()
             self._migration.resume()
-            self._auto_save(governance_rounds={item.round_id for item in self._governance.rounds.values() if item.status == "EXPIRED"})
+            self._topology.schedule_notices()
+            self.supervisor.resume_detection()
+            self.supervisor.resume_incident_delivery()
+            for team in self.teams.values():
+                if team.team_kind == "ordinary" and getattr(team, "_lifecycle_state", "active") == "active":
+                    self._formations.schedule_initial_arrivals(team)
+            self._auto_save(governance_cases={item.case_id for item in self._governance.cases.values() if item.status == "EXPIRED"})
 
     @asynccontextmanager
     async def agent_invocation(self, agent: Agent, *, allow_runtime: bool = False):

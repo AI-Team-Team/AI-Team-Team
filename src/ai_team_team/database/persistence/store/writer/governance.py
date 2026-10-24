@@ -6,14 +6,14 @@ from ai_team_team.database.models import (
     GovernanceBallotModel,
     CommunicationApprovalModel,
     GovernanceElectorateModel,
-    GovernanceRoundModel,
+    GovernanceCaseModel,
     MigrationRequestModel,
 )
 
 
 class GovernanceWriteMixin:
     @staticmethod
-    def _write_governance(session, rounds, migrations, state_version=1):
+    def _write_governance(session, cases, migrations, state_version=1):
         for item in migrations:
             session.merge(
                 MigrationRequestModel(
@@ -30,19 +30,19 @@ class GovernanceWriteMixin:
                     data=dict(item),
                 )
             )
-        for item in rounds:
+        for item in cases:
             data = {key: value for key, value in item.items() if key != "ballots"}
             principal = item["principal"]
-            current = session.get(GovernanceRoundModel, item["round_id"])
+            current = session.get(GovernanceCaseModel, item["case_id"])
             if current is not None:
                 immutable = set(data) - {"status", "reason", "resolved_at"}
                 if any(current.data[key] != data[key] for key in immutable):
                     raise StatePersistenceError(
-                        "A governance round's identity or electorate cannot be rewritten."
+                        "A governance case's identity or electorate cannot be rewritten."
                     )
             session.merge(
-                GovernanceRoundModel(
-                    round_id=item["round_id"],
+                GovernanceCaseModel(
+                    case_id=item["case_id"],
                     principal_team_id=principal["principal_id"]
                     if principal["kind"] == "agent_team"
                     else None,
@@ -50,26 +50,24 @@ class GovernanceWriteMixin:
                     if principal["kind"] == "agent"
                     else None,
                     data=data,
-                    electorate_revision=item["round_number"],
+                    electorate_revision=item["electorate_revision"],
                     choice_schema=choice_schema(item["choice_kind"], item["candidates"]),
                     state_version=max(1, state_version),
                 )
             )
             session.flush()
-            if item["business_kind"] == "communication":
-                approval = session.get(CommunicationApprovalModel, (item["business_id"], principal["kind"], principal["principal_id"]))
-                if approval is not None:
-                    previous_case = session.get(GovernanceRoundModel, approval.case_id) if approval.case_id else None
-                    if previous_case is None or previous_case.electorate_revision <= item["round_number"]:
-                        approval.case_id = item["round_id"]
             for position, voter in enumerate(item["voter_agent_ids"]):
-                if session.get(GovernanceElectorateModel, (item["round_id"], voter)) is None:
-                    session.add(GovernanceElectorateModel(case_id=item["round_id"], voter_agent_id=voter, position=position, eligibility={"frozen": True}, created_version=max(1, state_version)))
+                if session.get(GovernanceElectorateModel, (item["case_id"], voter)) is None:
+                    binding = item["electorate_bindings"].get(voter)
+                    session.add(GovernanceElectorateModel(case_id=item["case_id"], voter_agent_id=voter,
+                        membership_interval_id=binding, position=position,
+                        eligibility={"membership_interval_id": binding} if binding else {"agent_id": voter},
+                        created_version=max(1, state_version)))
             session.flush()
             for ballot in item["ballots"]:
                 existing = (
                     session.query(GovernanceBallotModel)
-                    .filter_by(round_id=item["round_id"], voter_agent_id=ballot["voter_agent_id"])
+                    .filter_by(case_id=item["case_id"], voter_agent_id=ballot["voter_agent_id"])
                     .one_or_none()
                 )
                 if existing is not None:

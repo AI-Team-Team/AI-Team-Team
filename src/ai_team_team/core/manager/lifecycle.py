@@ -170,7 +170,6 @@ class LifecycleService:
             await manager._activity.close()
         except BaseException as error:
             activity_error = error
-        manager._formations.cancel_for_shutdown()
         await manager._memory.close()
         current = asyncio.current_task()
         audit_tasks = {
@@ -181,7 +180,7 @@ class LifecycleService:
             task
             for task in (
                 manager._llm_tasks
-                | manager._emergency_tasks
+                | manager._institutional_tasks
                 | manager._formations.tasks
                 | manager._formation_operation_tasks
                 | manager.supervisor.active_tasks
@@ -225,9 +224,10 @@ class LifecycleService:
         reset_error: Optional[BaseException] = None
         try:
             await manager.broker.reset_processing_for_shutdown()
-            for item in list(manager._governance.rounds.values()):
+            await manager._failover.interrupt_pending()
+            for item in list(manager._governance.cases.values()):
                 if item.business_kind == "failover" and item.status == "PENDING":
-                    await manager._governance.expire(item.round_id, "The manager closed the originating failover attempt.")
+                    await manager._governance.expire(item.case_id, "The manager closed the originating failover attempt.")
         except BaseException as exc:
             reset_error = exc
         try:
@@ -263,7 +263,7 @@ class LifecycleService:
             if manager._closing or manager._restore_in_progress:
                 raise RuntimeError("ATTManager is closing or restoring and rejects new agent invocations.")
             registered = manager._agents_by_id.get(agent.agent_id) is agent
-            if (not registered and not allow_runtime) or (agent.lifecycle_state != "active"):
+            if (not registered and not allow_runtime) or (agent.lifecycle_state != "active") or manager._topology.is_agent_pending(agent.agent_id):
                 raise RuntimeError("Agent is not an active identity in this manager.")
             dependency_chain = self._live_invocation_chain_locked()
             if any(agent_id == agent.agent_id for agent_id, _ in dependency_chain):

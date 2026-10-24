@@ -9,7 +9,7 @@ from ai_team_team import (
     ATTManager,
     Agent,
     AgentTeam,
-    DiscussionResult,
+    InteractionResult,
     FileReadConfig,
     FileReadResult,
     LLMClientProto,
@@ -58,7 +58,7 @@ assert_type(config.file_read, FileReadConfig)
 assert_type(config.model_token_limits["default"], int)
 assert_type(tool.json_schema, Dict[str, Any])
 assert_type(ToolResult("call-1", "noop", "done"), ToolResult)
-assert_type(DiscussionResult, type[DiscussionResult])
+assert_type(InteractionResult, type[InteractionResult])
 assert_type(FileReadResult, type[FileReadResult])
 
 

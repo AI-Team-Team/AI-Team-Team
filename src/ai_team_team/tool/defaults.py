@@ -8,6 +8,7 @@ from .delegation import build_delegation_tools
 from .discovery import build_discovery_tools
 from .formation import build_formation_tools
 from .governance import build_governance_tools
+from .health import build_health_tools
 from .libraries import build_library_tools
 from .membership import build_membership_tools
 from .memory import build_memory_tools
@@ -24,6 +25,7 @@ def get_default_tools(context: Dict[str, Any], caller_node: Any) -> Dict[str, To
     tools.update(build_delegation_tools(att_manager, caller_node))
     tools.update(build_formation_tools(att_manager, caller_node))
     tools.update(build_governance_tools(att_manager))
+    tools.update(build_health_tools(att_manager))
     tools.update(build_communication_tools(att_manager, caller_node))
 
     membership_tools = build_membership_tools(att_manager, caller_node)

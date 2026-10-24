@@ -16,7 +16,7 @@ class DiscoveryAuthorityTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase
         invitees = [self.person(f"Invitee{index}") for index in range(3)]
         for person in invitees:
             self.manager.inspect_entity("agent", person.agent_id)
-        request = self.manager.create_agent_team(self.root, existing_members=invitees)
+        request = self.manager.create_agent_team(self.root, parent=self.root, existing_members=invitees)
         self.assertIsInstance(request, TeamFormationRequest)
         self.assertEqual(len(self.manager.teams), 0)
         self.assertEqual(
@@ -31,8 +31,8 @@ class DiscoveryAuthorityTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase
 
     async def test_discovering_a_team_does_not_grant_communication_or_document_access(self):
         self.manager.config.communication = ParentApprovalCommunicationConfig()
-        first = self.manager.create_agent_team(self.root)
-        second = self.manager.create_agent_team(self.root)
+        first = self.manager.create_agent_team(self.root, parent=self.root)
+        second = self.manager.create_agent_team(self.root, parent=self.root)
         self.manager.inspect_entity("agent_team", second.team_id)
         sent = await self.manager.broker.send_peer_message(
             first, second, first.members[0].agent_id, "A message without an Agreement."
@@ -71,8 +71,8 @@ class DiscoveryAuthorityTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase
 
     async def test_round_trip_uses_restored_registries_without_a_persisted_discovery_index(self):
         person = self.person("RestoredResearcher", description="Public database expertise")
-        first = self.manager.create_agent_team(self.root)
-        child = self.manager.create_agent_team(first, team_purpose="Restored research team")
+        first = self.manager.create_agent_team(self.root, parent=self.root)
+        child = self.manager.create_agent_team(first, parent=first, team_purpose="Restored research team")
         before = self.manager.list_entities(end_index=999).model_dump()
         path = os.path.join(self.workspace.name, "state.sqlite")
         await self.manager.save_state(path)

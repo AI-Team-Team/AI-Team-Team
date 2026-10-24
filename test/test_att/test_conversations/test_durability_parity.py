@@ -2,7 +2,7 @@
 
 import unittest
 
-from ai_team_team import Agent, ToolBusinessError
+from ai_team_team import Agent, ToolBusinessError, ToolPermissionError
 from test.test_att.test_autonomous_activity_phase1._support import make_manager
 
 
@@ -15,7 +15,7 @@ class DurabilityParityTests(unittest.IsolatedAsyncioTestCase):
                 manager.register_token_counter("fixture", len)
                 person = manager.register_agent(Agent("Person", "Researcher", client))
                 root = manager.root_ai
-                team = manager.bootstrap_agent_team(root, existing_members=[root, person], member_configs={"Another": {"model": "fixture"}})
+                team = manager.bootstrap_agent_team(root, parent=root, existing_members=[root, person], member_configs={"Another": {"model": "fixture"}})
                 private_id, personal_window = person.private_doc_library_id, person.messages
                 sent = await manager.send_team_message(team.team_id, "Original", actor=root)
                 self.assertEqual(sent.durability, "volatile" if volatile else "durable")
@@ -47,7 +47,7 @@ class DurabilityParityTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(PermissionError):
                 await operation
         team = manager._team_creation.create_supervisory_team()
-        with self.assertRaises(PermissionError):
+        with self.assertRaises((PermissionError, ToolPermissionError)):
             await manager.send_direct_message(team.members[0].agent_id, "Denied", actor=manager.root_ai)
         await manager._team_creation.dissolve_supervisory_team(team, persist=False)
         self.assertEqual(len([row for row in manager._records.snapshot() if row.table_name == "chat_messages"]), 1)

@@ -13,11 +13,10 @@ from typing_extensions import NotRequired, TypedDict
 
 from ai_team_team import (
     Agent,
-    AgentTurnStatus,
+    InteractionStatus,
     ATTException,
     ATTConfig,
     ATTManager,
-    DiscussionStatus,
     OperationalStatus,
     RetryableToolError,
     StatePersistenceError,

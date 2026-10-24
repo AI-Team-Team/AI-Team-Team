@@ -1,3 +1,4 @@
+from test.personal_activity import interact_and_idle
 import asyncio
 import json
 import os
@@ -14,7 +15,7 @@ from ai_team_team import (
     ATTManager,
     Agent,
     AgentMemorySegment,
-    AgentTurnStatus,
+    InteractionStatus,
     MemoryCardStatus,
     MemoryIndexStatus,
     ToolResultStatus,
@@ -43,11 +44,11 @@ class TestOptionalMode(unittest.IsolatedAsyncioTestCase):
             persistence_mode="volatile",
         )
         manager.register_llm_client("model", client)
-        team = manager.create_agent_team(manager.root_ai, member_count=3)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
         agent = team.members[0]
         names = manager.get_available_tools(team, agent)
         self.assertNotIn("search_memories", names)
-        await team.execute_reasoning_step_detailed(agent, "Work.", "System.", manager=manager)
+        await interact_and_idle(manager, agent, "Work.", team=team)
         self.assertFalse(manager._memory.segments)
 
         manager.config.episodic_memory.enabled = True
@@ -82,14 +83,9 @@ class TestOptionalMode(unittest.IsolatedAsyncioTestCase):
                 persistence_mode=("durable" if (db_path) else "volatile"),
             )
             manager.register_llm_client("model", client)
-            team = manager.create_agent_team(manager.root_ai, member_count=3)
+            team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
             agent = team.members[0]
-            await team.execute_reasoning_step_detailed(
-                agent,
-                "Remember the durable blue rocket.",
-                "System.",
-                manager=manager,
-            )
+            await interact_and_idle(manager, agent, "Remember the durable blue rocket.", team=team)
             await manager.flush_memory_indexing()
 
             agent_token = manager._active_tool_agent.set(agent)
@@ -113,13 +109,8 @@ class TestOptionalMode(unittest.IsolatedAsyncioTestCase):
                 persistence_mode="volatile",
             )
             manager.register_llm_client("model", client)
-            team = manager.create_agent_team(manager.root_ai, member_count=3)
-            await team.execute_reasoning_step_detailed(
-                team.members[0],
-                "Work without the optional catalog.",
-                "System.",
-                manager=manager,
-            )
+            team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
+            await interact_and_idle(manager, team.members[0], "Work without the optional catalog.", team=team)
             await manager.save_state(db_path)
             await manager.close()
 
@@ -167,13 +158,8 @@ class TestOptionalMode(unittest.IsolatedAsyncioTestCase):
             persistence_mode="volatile",
         )
         manager.register_llm_client("model", client)
-        team = manager.create_agent_team(manager.root_ai, member_count=3)
-        await team.execute_reasoning_step_detailed(
-            team.members[0],
-            "Create a pending memory.",
-            "System.",
-            manager=manager,
-        )
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
+        await interact_and_idle(manager, team.members[0], "Create a pending memory.", team=team)
         await indexing_started.wait()
         manager.config.episodic_memory.enabled = False
         release_indexing.set()

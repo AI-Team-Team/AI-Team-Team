@@ -23,11 +23,7 @@ class TeamFormationStatus(str, Enum):
 
 
 class FormationDraftStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
     READY = "ready"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
     STALE = "stale"
     PUBLISHED = "published"
 
@@ -82,6 +78,7 @@ class TeamFormationRequest(BaseModel):
     creator_kind: Literal["agent", "agent_team"]
     creator_id: str
     parent_team_id: Optional[str] = None
+    parent_agent_id: Optional[str] = None
     task: Optional[str] = None
     member_count: int = Field(ge=1)
     roles_and_presets: Optional[List[List[str]]] = None
@@ -129,7 +126,7 @@ class TeamFormationRevisionPatch(BaseModel):
 
 
 class TeamFormationDraftCandidate(BaseModel):
-    """Complete structured candidate synthesized from proposal deliberation."""
+    """A complete candidate supplied by its initiating person's own activity."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -185,7 +182,7 @@ class TeamFormationInvitationDecision(BaseModel):
 
 
 class TeamFormationDraft(BaseModel):
-    """Persistent detached deliberation and structured synthesis job."""
+    """An optional validated proposal artifact, never consent or a model worker."""
 
     model_config = ConfigDict(extra="forbid", strict=True, validate_assignment=True)
 
@@ -194,13 +191,14 @@ class TeamFormationDraft(BaseModel):
     creator_kind: Literal["agent", "agent_team"]
     creator_id: str
     creator_team_id: Optional[str] = None
+    parent_team_id: Optional[str] = None
+    parent_agent_id: Optional[str] = None
     request_id: Optional[str] = None
     base_revision: Optional[int] = Field(default=None, ge=1)
     base_revision_fingerprint: Optional[str] = None
     objective: str
-    status: FormationDraftStatus = FormationDraftStatus.PENDING
+    status: FormationDraftStatus = FormationDraftStatus.READY
     participant_agent_ids: List[str] = Field(default_factory=list)
-    source_discussion_id: Optional[str] = None
     source_message_id: Optional[str] = None
     initiator_invocation_id: Optional[str] = None
     candidate: Optional[TeamFormationDraftCandidate] = None
@@ -257,9 +255,7 @@ class FormationOperationResult(BaseModel):
         "REVISED",
         "UNCHANGED",
         "STALE_REVISION",
-        "DRAFT_PENDING",
         "DRAFT_READY",
-        "DRAFT_FAILED",
         "DRAFT_PUBLISHED",
     ]
     request_id: str

@@ -32,8 +32,6 @@ class SystemMemoryEvent(BaseModel):
     invocation_id: Optional[str] = None
     source_chat_message_id: Optional[str] = None
     source_execution_id: Optional[str] = None
-    discussion_id: Optional[str] = None
-    turn_id: Optional[str] = None
     role: Optional[str] = None
     payload: Dict[str, Any] = Field(default_factory=dict)
     redacted: bool = False
@@ -41,7 +39,7 @@ class SystemMemoryEvent(BaseModel):
 
 
 class AgentMemorySegment(BaseModel):
-    """A deterministic, sanitized Agent-turn segment awaiting catalog indexing."""
+    """A deterministic, sanitized personal-invocation segment awaiting catalog indexing."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -51,10 +49,8 @@ class AgentMemorySegment(BaseModel):
 
     segment_id: str = Field(min_length=1)
     agent_id: str = Field(min_length=1)
-    turn_id: str = Field(min_length=1)
-    invocation_id: Optional[str] = None
+    invocation_id: str = Field(min_length=1)
     origin_team_id: Optional[str] = None
-    discussion_id: Optional[str] = None
     source_event_ids: List[str] = Field(min_length=1)
     recall_content: str = Field(min_length=1)
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -66,7 +62,7 @@ class AgentMemorySegment(BaseModel):
 
 
 class AgentMemoryCard(BaseModel):
-    """Agent-owned, AI-visible metadata for one indexed turn."""
+    """Agent-owned, AI-visible metadata for one indexed invocation."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -76,13 +72,11 @@ class AgentMemoryCard(BaseModel):
 
     memory_id: str = Field(min_length=1)
     agent_id: str = Field(min_length=1)
-    turn_id: str = Field(min_length=1)
-    invocation_id: Optional[str] = None
+    invocation_id: str = Field(min_length=1)
     title: str = Field(min_length=1, max_length=120)
     summary: str = Field(min_length=1, max_length=1000)
     tags: List[str] = Field(min_length=1)
     origin_team_id: Optional[str] = None
-    discussion_id: Optional[str] = None
     segment_id: str = Field(min_length=1)
     status: MemoryCardStatus = MemoryCardStatus.ACTIVE
     version: int = Field(default=1, ge=1)
@@ -114,7 +108,7 @@ class MemorySearchItem(BaseModel):
     summary: str
     tags: List[str]
     origin_team_id: Optional[str] = None
-    discussion_id: Optional[str] = None
+    invocation_id: str
     created_at: float
 
 
@@ -130,7 +124,7 @@ class MemoryRecallResult(BaseModel):
 
     memory_id: str
     origin_team_id: Optional[str] = None
-    discussion_id: Optional[str] = None
+    invocation_id: str
     content: str
     start_line: int = Field(ge=1)
     start_character: int = Field(ge=1)

@@ -1,3 +1,4 @@
+from test.personal_activity import interact_and_idle
 import os
 import sqlite3
 from copy import deepcopy
@@ -8,8 +9,8 @@ from ai_team_team import (
     ATTConfig,
     ATTManager,
     Agent,
-    AgentTurnResult,
-    AgentTurnStatus,
+    InteractionResult,
+    InteractionStatus,
     LLMResponse,
     StateRestoreError,
     ToolCall,
@@ -27,16 +28,11 @@ from ai_team_team.core.memory.sanitization import content_digest, render_recall_
 
 class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
     async def test_membership_changes_do_not_touch_agent_memory(self):
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Create stable personal memory.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Create stable personal memory.", team=self.team)
         await self.manager.flush_memory_indexing()
         before = self._agent_memory_snapshot(self.agent.agent_id)
         another = self.manager.bootstrap_agent_team(
-            self.manager.root_ai,
+            self.manager.root_ai, parent=self.manager.root_ai,
             member_configs={
                 "HelperOne": {"model": "memory-model"},
                 "HelperTwo": {"model": "memory-model"},
@@ -47,78 +43,25 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
         another.members.remove(self.agent)
         self.assertEqual(self._agent_memory_snapshot(self.agent.agent_id), before)
 
-    async def test_permanent_agent_delete_removes_derived_memory_but_retains_journal(self):
-        doomed = Agent("Doomed", "Researcher", self.client)
-        self.manager.register_agent(doomed)
-        # This pure catalog fixture has no actual provider request. A separate
-        # test verifies that retained request/quota evidence prevents deletion.
-        turn_id = "standalone-delete-fixture"
-        token = self.manager._active_agent_turn_id.set(turn_id)
-        try:
-            self.manager._memory.start_turn(doomed, None, turn_id)
-            doomed.append_message({"role": "user", "content": "Create personal history before retirement."})
-            doomed.append_message({"role": "assistant", "content": "Completed personal fixture work."})
-            await self.manager._memory.finalize_turn(doomed, None, AgentTurnResult(
-                agent_id=doomed.agent_id, turn_id=turn_id, status=AgentTurnStatus.COMPLETED,
-                answer="Completed personal fixture work.",
-            ))
-        finally:
-            self.manager._active_agent_turn_id.reset(token)
-        async def derived_labels(agent, segment, prompt, system_instruction):
-            import json
-            return json.dumps(self.client.labels)
-        with patch.object(self.manager._activity.models, "index", derived_labels):
-            await self.manager.flush_memory_indexing()
-        self.assertTrue(any(card.agent_id == doomed.agent_id for card in self.manager._memory.cards.values()))
+    async def test_person_without_runtime_references_can_be_deleted_and_journal_is_retained(self):
+        doomed = self.manager.register_agent(Agent("Doomed", "Researcher", self.client))
         db_path = os.path.join(self.tmpdir, "delete.db")
         self.manager.db_path = db_path
-        await self.manager.save_state()
-        self.manager.config.episodic_memory.enabled = False
-
-        await self.manager.retire_agent(
-            doomed.agent_id,
-            policy="delete",
-            confirm_delete=True,
-        )
+        await self.manager.save_state(db_path)
+        await self.manager.retire_agent(doomed.agent_id, policy="delete", confirm_delete=True)
         with closing(sqlite3.connect(db_path)) as connection:
-            self.assertEqual(
-                connection.execute(
-                    "SELECT COUNT(*) FROM agents WHERE agent_id=?",
-                    (doomed.agent_id,),
-                ).fetchone()[0],
-                0,
-            )
-            self.assertEqual(
-                connection.execute(
-                    "SELECT COUNT(*) FROM agent_memory_cards WHERE agent_id=?",
-                    (doomed.agent_id,),
-                ).fetchone()[0],
-                0,
-            )
-            self.assertIsNone(
-                connection.execute(
-                    "SELECT name FROM sqlite_master WHERE name='agent_memory_cards_fts'"
-                ).fetchone()
-            )
-            self.assertGreater(
-                connection.execute(
-                    "SELECT COUNT(*) FROM system_memory_events WHERE agent_id=?",
-                    (doomed.agent_id,),
-                ).fetchone()[0],
-                0,
-            )
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM agents WHERE agent_id=?", (doomed.agent_id,)).fetchone()[0], 0)
+            self.assertGreater(connection.execute("SELECT COUNT(*) FROM system_memory_events WHERE agent_id=?", (doomed.agent_id,)).fetchone()[0], 0)
         self.assertTrue(self.manager.list_agent_history(doomed.agent_id))
 
-    async def test_actual_index_request_evidence_prevents_physical_agent_deletion(self):
+    async def test_actual_memory_and_request_evidence_prevents_physical_agent_deletion(self):
         owner = self.manager.register_agent(Agent("RetainedIndexerOwner", "Researcher", self.client))
-        turn_id = "retained-index-request-fixture"
-        self.manager._memory.start_turn(owner, None, turn_id)
-        await self.manager._memory.finalize_turn(owner, None, AgentTurnResult(
-            agent_id=owner.agent_id, turn_id=turn_id, status=AgentTurnStatus.COMPLETED, answer="Done."))
+        await interact_and_idle(self.manager, owner, "Preserve independent personal history.")
         await self.manager.flush_memory_indexing()
         requests = [row for row in self.manager._records.snapshot() if row.table_name == "memory_index_requests"
                     and row.values["beneficiary_agent_id"] == owner.agent_id]
         self.assertEqual(len(requests), 1)
+        self.assertTrue(any(card.agent_id == owner.agent_id for card in self.manager._memory.cards.values()))
         with self.assertRaisesRegex(ValueError, "durable history references"):
             await self.manager.retire_agent(owner.agent_id, "delete", confirm_delete=True)
         await self.manager.retire_agent(owner.agent_id, "archive")

@@ -10,7 +10,9 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from ai_team_team import AgentTurnStatus, ATTConfig, ATTManager, Agent, Tool, DiscussionStatus, OperationalStatus
+from ai_team_team import ATTConfig, ATTManager, Agent, Tool
+from ai_team_team.core.manager.activity.values import ModelUnavailable
+from test.personal_activity import interact_and_idle
 
 class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -24,8 +26,9 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         self.mock_client = MagicMock()
         self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Approved"}')
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
-        self.config = ATTConfig(llm_max_retries=2, llm_retry_backoff_factor=0.01, tool_calling_mode="react") # fast retry for test
+        self.config = ATTConfig(tool_calling_mode="react")
         self.manager = ATTManager(root_ai=self.root_ai, config=self.config, persistence_mode="volatile")
+        self.addAsyncCleanup(self.manager.close)
 
     async def test_lexical_argument_parsing_with_commas(self):
         """Verify that tool arguments containing commas inside quotes are parsed correctly."""
@@ -50,7 +53,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
             }
             return "Success"
 
-        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3)
         team.tools = {
             "query_db": Tool("query_db", "Query DB", mock_tool)
         }
@@ -58,19 +61,21 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         # 1. Test keyword argument with comma
         self.mock_client.generate.side_effect = [
             'Thought: Run tool.\nAction: query_db(sql="SELECT name, age FROM users", limit=5)',
-            'Final Answer: Done'
+            'Final Answer: Done',
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
         agent = team.members[0]
-        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await interact_and_idle(self.manager, agent, "run", team=team)
         self.assertEqual(received_kwargs, {"sql": "SELECT name, age FROM users", "limit": 5})
         self.assertEqual(received_args, [])
 
         # 2. Test nested dict argument with commas
         self.mock_client.generate.side_effect = [
             'Thought: Run tool.\nAction: query_db(configs={"Planner": {"model": "default"}, "Writer": {"model": "default"}})',
-            'Final Answer: Done'
+            'Final Answer: Done',
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
-        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await interact_and_idle(self.manager, agent, "run", team=team)
         self.assertEqual(received_kwargs, {
             "configs": {
                 "Planner": {"model": "default"},
@@ -78,63 +83,52 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
             }
         })
 
-    async def test_configurable_retry_mechanism_success(self):
-        """Verify that LLM client generation retries upon failure and succeeds when it eventually works."""
-        call_count = 0
+    async def test_configurable_typed_provider_retry_succeeds(self):
+        calls = 0
 
         class FlakyClient:
-            async def generate(self, prompt, system_instruction=None, temperature=0.3, require_json=False):
-                nonlocal call_count
-                call_count += 1
-                if call_count < 2:
-                    raise ConnectionError("Transient API Error")
-                if require_json:
-                    return '{"is_healthy": true, "reason": "Approved"}'
-                return "Final Answer: Worked after retry"
+            async def generate(self, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise ConnectionError("Transient API error")
+                return "Final Answer: Worked after retry" if calls == 2 else "Action: set_activity_intent(intent={'kind': 'idle'})"
 
-        flaky = FlakyClient()
-        agent = Agent(name="FlakyAgent", role="Test", llm_client=flaky)
-        self.root_ai.llm_client = flaky
-        config = ATTConfig(llm_max_retries=3, llm_retry_backoff_factor=0.01, tool_calling_mode="react")
-        manager = ATTManager(root_ai=self.root_ai, config=config, persistence_mode="volatile")
-        team = manager.create_agent_team(creator=self.root_ai, member_count=3)
-        manager.register_agent(agent)
-        
-        # Replace flaky agent in the team
-        team.members[0] = agent
+        client = FlakyClient()
+        config = ATTConfig(workspace_root=self._test_tmpdir, tool_calling_mode="react")
+        config.activity.llm.max_retries = 3
+        config.activity.llm.backoff_base_seconds = 0.01
+        manager = ATTManager(Agent("RetryRoot", "Architect", client), config, persistence_mode="volatile")
+        manager.register_llm_client("flaky", client)
+        self.addAsyncCleanup(manager.close)
+        result = await interact_and_idle(manager, manager.root_ai, "Continue.")
+        self.assertEqual(result.answer, "Worked after retry")
+        self.assertEqual(calls, 3)
+        requests = [row for row in manager._records.snapshot() if row.table_name == "model_requests"]
+        self.assertEqual([row.values["outcome"] for row in requests], ["failed", "completed", "completed"])
 
-        res = await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=manager)
-        self.assertEqual(res, "Worked after retry")
-        self.assertEqual(call_count, 2) # 1 fail + 1 success
+    async def test_permanent_provider_failure_does_not_blame_or_replace_the_person(self):
+        calls = 0
 
-    async def test_permanent_llm_failure_isolates_member_turn(self):
-        """Verify that permanent LLM failures produce partial discussions and operational events."""
         class DeadClient:
-            async def generate(self, prompt, system_instruction=None, temperature=0.3, require_json=False):
-                raise RuntimeError("Permanent API Error")
+            async def generate(self, **kwargs):
+                nonlocal calls
+                calls += 1
+                raise ValueError("Provider configuration requires repair.")
 
-        dead = DeadClient()
-        agent = Agent(name="DeadAgent", role="Test", llm_client=dead)
-        self.root_ai.llm_client = dead
-        config = ATTConfig(llm_max_retries=2, llm_retry_backoff_factor=0.001)
-        manager = ATTManager(root_ai=self.root_ai, config=config, persistence_mode="volatile")
-        team = manager.create_agent_team(creator=self.root_ai, member_count=3)
-        manager.register_agent(agent)
-        team.members[0] = agent
-
-        result = await manager.execute_team_discussion_detailed(
-            team, "run", rounds=1, skip_audit=True
-        )
-
-        self.assertIs(result.status, DiscussionStatus.PARTIAL)
-        self.assertIs(result.rounds[0].turns[0].status, AgentTurnStatus.INCOMPLETE)
-        self.assertEqual(
-            result.rounds[0].turns[0].error_kind,
-            "llm_generation_failed",
-        )
-        self.assertIs(
-            result.audit.operational_status, OperationalStatus.DEGRADED
-        )
+        client = DeadClient()
+        manager = ATTManager(Agent("Unavailable", "Researcher", client),
+            ATTConfig(workspace_root=self._test_tmpdir), persistence_mode="volatile")
+        manager.register_llm_client("unavailable", client)
+        self.addAsyncCleanup(manager.close)
+        person = manager.root_ai
+        before = person.agent_id, person.private_doc_library_id, person.llm_client
+        with self.assertRaises(ModelUnavailable):
+            await manager.execute_agent_interaction(person, "Continue.")
+        self.assertEqual(calls, 1)
+        self.assertEqual((person.agent_id, person.private_doc_library_id, person.llm_client), before)
+        self.assertFalse(any(row.table_name in {"audit_runs", "health_incidents"}
+            for row in manager._records.snapshot()))
 
     async def test_robust_action_parser(self):
         """Verify that XML-style actions, Markdown fences, and multiline parameter blocks are parsed correctly."""
@@ -150,7 +144,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
             }
             return "Success"
 
-        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3)
         team.tools = {
             "query_db": Tool("query_db", "Query DB", mock_tool)
         }
@@ -160,27 +154,30 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         received_args, received_kwargs = [], {}
         self.mock_client.generate.side_effect = [
             '<action name="query_db">\nsql_command="SELECT * FROM characters", limit=10\n</action>',
-            'Final Answer: Done'
+            'Final Answer: Done',
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
-        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await interact_and_idle(self.manager, agent, "run", team=team)
         self.assertEqual(received_kwargs, {"sql_command": "SELECT * FROM characters", "limit": 10})
 
         # 2. Markdown Code Block Fences
         received_args, received_kwargs = [], {}
         self.mock_client.generate.side_effect = [
             'Action: ```python\nquery_db(sql_command="SELECT * FROM characters")\n```',
-            'Final Answer: Done'
+            'Final Answer: Done',
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
-        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await interact_and_idle(self.manager, agent, "run", team=team)
         self.assertEqual(received_kwargs, {"sql_command": "SELECT * FROM characters"})
 
         # 3. Multiline Argument Block
         received_args, received_kwargs = [], {}
         self.mock_client.generate.side_effect = [
             'Action: query_db(\n  sql_command="SELECT * FROM characters",\n  limit=5\n)',
-            'Final Answer: Done'
+            'Final Answer: Done',
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
-        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await interact_and_idle(self.manager, agent, "run", team=team)
         self.assertEqual(received_kwargs, {"sql_command": "SELECT * FROM characters", "limit": 5})
 
     async def test_quoted_argument_parsing_with_commas(self):
@@ -199,7 +196,7 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
             }
             return "Success"
 
-        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3)
         team.tools = {
             "query_db": Tool("query_db", "Query DB", mock_tool)
         }
@@ -208,18 +205,20 @@ class TestLexicalRetry(unittest.IsolatedAsyncioTestCase):
         # 1. Quoted keyword argument with comma
         self.mock_client.generate.side_effect = [
             'Thought: Run tool.\nAction: query_db(sql_command="SELECT name, status FROM users", limit=10)',
-            'Final Answer: Done'
+            'Final Answer: Done',
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
-        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await interact_and_idle(self.manager, agent, "run", team=team)
         self.assertEqual(received_kwargs, {"sql_command": "SELECT name, status FROM users", "limit": 10})
 
         # 2. Quoted positional argument with comma
         received_args, received_kwargs = [], {}
         self.mock_client.generate.side_effect = [
             'Thought: Run tool.\nAction: query_db("SELECT name, status FROM users", 5)',
-            'Final Answer: Done'
+            'Final Answer: Done',
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
-        await team.execute_react_step(agent, "run", "inst", max_steps=2, manager=self.manager)
+        await interact_and_idle(self.manager, agent, "run", team=team)
         self.assertEqual(received_args, ["SELECT name, status FROM users", 5])
 
 if __name__ == "__main__":

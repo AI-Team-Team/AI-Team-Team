@@ -29,7 +29,7 @@ async def install_request_sources(manager):
               )]
     content = render_recall_content(events)
     manager._memory.segments["index-segment"] = AgentMemorySegment(
-        segment_id="index-segment", agent_id=owner, turn_id="index-turn", invocation_id="invocation",
+        segment_id="index-segment", agent_id=owner, invocation_id="invocation",
         source_event_ids=[event.event_id for event in events], recall_content=content,
         content_sha256=content_digest(content), status=MemoryIndexStatus.FAILED,
         attempts=1, last_error_kind="fixture", created_at=1.0, updated_at=1.0,

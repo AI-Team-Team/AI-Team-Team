@@ -14,23 +14,29 @@ class MailIngressTransactionTests(ActivityTestCase):
             with self.subTest(policy=policy):
                 recipient = self.manager.register_agent(Agent(policy, "Researcher", self.client))
                 waiting = asyncio.Event()
+                retiring = asyncio.Event()
                 delivery = None
+                retirement = None
                 original = self.manager._activity.lock.acquire
 
                 async def acquire():
                     if asyncio.current_task() is delivery:
                         waiting.set()
+                    if asyncio.current_task() is retirement:
+                        retiring.set()
                     return await original()
 
                 with patch.object(self.manager._activity.lock, "acquire", acquire):
                     async with self.manager._activity.lock:
+                        retirement = asyncio.create_task(self.manager.retire_agent(
+                            recipient.agent_id, policy=policy, confirm_delete=policy == "delete"
+                        ))
+                        await asyncio.wait_for(retiring.wait(), 5)
                         delivery = asyncio.create_task(self.manager.deliver_agent_mail(
                             recipient.agent_id, message_type="note", payload={}
                         ))
                         await asyncio.wait_for(waiting.wait(), 5)
-                        await self.manager.retire_agent(
-                            recipient.agent_id, policy=policy, confirm_delete=policy == "delete"
-                        )
+                    await asyncio.wait_for(retirement, 5)
                     with self.assertRaises(PermissionError):
                         await asyncio.wait_for(delivery, 5)
                 self.assertFalse(recipient.agent_inbox)

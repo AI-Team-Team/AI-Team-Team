@@ -54,6 +54,7 @@ class FormationProposalMixin:
             "creator_kind": request.creator_kind,
             "creator_id": request.creator_id,
             "parent_team_id": request.parent_team_id,
+            "parent_agent_id": request.parent_agent_id,
             "task": request.task,
             "member_count": request.member_count,
             "roles_and_presets": request.roles_and_presets,
@@ -121,18 +122,6 @@ class FormationProposalMixin:
             raise ValueError("The formation initiator must be actively registered.")
         return initiator
 
-    def _resolve_parent(self, creator: Any, initiator: Agent) -> Optional[AgentTeam]:
-        manager = self.manager
-        if isinstance(creator, AgentTeam):
-            return creator
-        active_team = manager._active_team.get()
-        if (
-            active_team is not None
-            and manager.teams.get(active_team.team_id) is active_team
-            and any(member.agent_id == initiator.agent_id for member in active_team.members)
-        ):
-            return active_team
-        return manager.get_agent_team(creator)
 
     def propose_team_formation(
         self,
@@ -154,6 +143,7 @@ class FormationProposalMixin:
         unanimous_acceptance_action: str = "require_confirmation",
         late_join_policy: str = "disabled",
         task: Optional[str] = None,
+        parent: Any = None,
         _deliberated: bool = False,
         _source_draft_id: Optional[str] = None,
         _emit_event: bool = True,
@@ -204,24 +194,10 @@ class FormationProposalMixin:
             team_purpose=team_purpose,
             is_public_visible=is_public_visible,
         )
-        if _parent_team is _INFER_PARENT:
-            parent = self._resolve_parent(creator, initiator)
-        else:
-            if _parent_team is not None and (
-                not isinstance(_parent_team, AgentTeam)
-                or manager.teams.get(_parent_team.team_id) is not _parent_team
-            ):
-                raise ValueError("The explicit formation parent is not registered.")
+        if _parent_team is not _INFER_PARENT:
             parent = _parent_team
-        if (
-            parent is not None
-            and manager.config.formation_deliberation_policy
-            == "required_when_team_scoped"
-            and not _deliberated
-        ):
-            raise PermissionError(
-                "Team-scoped formation requires a published collaborative draft."
-            )
+        parent = manager._topology.resolve_parent(parent)
+        manager._team_creation.validate_creation_depth(parent)
         now = time.time()
         request_id = f"TFR-{uuid.uuid4().hex}"
         roles_payload = (
@@ -234,7 +210,8 @@ class FormationProposalMixin:
         content_payload = {
             "creator_kind": creator_kind,
             "creator_id": creator_id,
-            "parent_team_id": parent.team_id if parent else None,
+            "parent_team_id": parent.team_id if isinstance(parent, AgentTeam) else None,
+            "parent_agent_id": parent.agent_id if isinstance(parent, Agent) else None,
             "task": task,
             "member_count": member_count,
             "roles_and_presets": roles_payload,
@@ -261,7 +238,8 @@ class FormationProposalMixin:
             initiator_agent_id=initiator.agent_id,
             creator_kind=creator_kind,
             creator_id=creator_id,
-            parent_team_id=parent.team_id if parent else None,
+            parent_team_id=parent.team_id if isinstance(parent, AgentTeam) else None,
+            parent_agent_id=parent.agent_id if isinstance(parent, Agent) else None,
             task=task,
             member_count=member_count,
             roles_and_presets=roles_payload,

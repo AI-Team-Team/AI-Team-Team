@@ -1,4 +1,5 @@
-"""Real SQLite coverage for indexing while a discussion batch remains open."""
+from test.personal_activity import interact_and_idle
+"""Real SQLite coverage for indexing while independent personal work remains live."""
 
 import asyncio
 from contextlib import closing
@@ -12,6 +13,7 @@ from unittest.mock import patch
 from ai_team_team import ATTConfig, ATTManager, Agent, LLMResponse
 from ai_team_team.core.exceptions import StatePersistenceError
 from ai_team_team.core.memory import RetainedMemoryReference
+from test.governance_client import approve_pending_business
 
 
 class GatedMemoryClient:
@@ -24,6 +26,7 @@ class GatedMemoryClient:
         self.index_started = asyncio.Event()
         self.release_turn = asyncio.Event()
         self.release_index = asyncio.Event()
+        self.personal_calls = {}
         self.index_response = json.dumps(
             {
                 "title": "Completed work",
@@ -46,11 +49,15 @@ class GatedMemoryClient:
             self.index_started.set()
             await self.release_index.wait()
             return LLMResponse(text=self.index_response)
-        chain = self.manager._agent_invocation_chain.get()
-        if chain[-1][0] == self.slow_agent_id:
+        owner = next(person.agent_id for person in self.manager._agents_by_id.values()
+                     if f"({person.agent_id})" in (system_instruction or ""))
+        if owner == self.slow_agent_id:
             self.slow_started.set()
             await self.release_turn.wait()
-        return LLMResponse(text="Final Answer: complete")
+        count = self.personal_calls.get(owner, 0) + 1
+        self.personal_calls[owner] = count
+        return LLMResponse(text="Final Answer: complete" if count % 2 else "Action: set_activity_intent(intent={'kind': 'idle'})")
+
 
 
 class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
@@ -60,14 +67,14 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
         self.db_path = str(Path(self.temporary.name) / "state.db")
         self.managers = []
         self.clients = []
-        self.discussions = []
+        self.interactions = []
 
     async def asyncTearDown(self):
         for client in self.clients:
             client.release_turn.set()
             client.release_index.set()
         await asyncio.wait_for(
-            asyncio.gather(*self.discussions, return_exceptions=True), 10
+            asyncio.gather(*self.interactions, return_exceptions=True), 10
         )
         for manager in reversed(self.managers):
             await manager.close()
@@ -97,23 +104,22 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
         with closing(sqlite3.connect(self.db_path)) as connection:
             return connection.execute(sql, parameters).fetchall()
 
-    async def pause_discussion(self, manager, client, team):
+    async def pause_personal_work(self, manager, client, team):
         client.slow_agent_id = team.members[-1].agent_id
-        discussion = asyncio.create_task(
-            manager.execute_team_discussion_detailed(
-                team, "Complete a recorded task.", rounds=1, skip_audit=True
-            )
-        )
-        self.discussions.append(discussion)
+        async def work():
+            return await asyncio.gather(*(interact_and_idle(manager, person, "Complete a recorded task.", team=team)
+                                          for person in team.members))
+        discussion = asyncio.create_task(work())
+        self.interactions.append(discussion)
         await asyncio.wait_for(client.slow_started.wait(), 10)
         await asyncio.wait_for(client.index_started.wait(), 10)
         self.assertFalse(discussion.done())
         return discussion
 
-    async def finish_discussion(self, manager, client, discussion):
+    async def finish_personal_work(self, manager, client, discussion):
         client.release_turn.set()
         result = await asyncio.wait_for(discussion, 10)
-        self.assertEqual(result.status.value, "completed")
+        self.assertTrue(all(item.status.value == "completed" for item in result))
         client.release_index.set()
         await asyncio.wait_for(manager.flush_memory_indexing(), 10)
         await manager.flush_state()
@@ -131,38 +137,43 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
 
     async def verify_open_batch(self, manager, client, team):
         await manager.flush_state()
-        original_rows = {
-            table: self.rows(f"SELECT * FROM {table} ORDER BY 1")
-            for table in ("agents", "agent_messages", "teams", "libraries")
+        member_ids = tuple(person.agent_id for person in team.members)
+        placeholders = ",".join("?" for _ in member_ids)
+        statements = {
+            "agents": (f"SELECT * FROM agents WHERE agent_id NOT IN ({placeholders}) ORDER BY 1", member_ids),
+            "agent_messages": (f"SELECT * FROM agent_messages WHERE agent_id NOT IN ({placeholders}) ORDER BY 1", member_ids),
+            "teams": ("SELECT * FROM teams ORDER BY 1", ()),
+            "libraries": ("SELECT * FROM libraries ORDER BY 1", ()),
         }
-        discussion = await self.pause_discussion(manager, client, team)
+        original_rows = {table: self.rows(*query) for table, query in statements.items()}
+        discussion = await self.pause_personal_work(manager, client, team)
         state = await self.assert_dependency_complete(manager)
         self.assertTrue(
             any(segment["status"] == "processing" for segment in state["memory_segments"])
         )
         for table, rows in original_rows.items():
-            self.assertEqual(self.rows(f"SELECT * FROM {table} ORDER BY 1"), rows, table)
+            self.assertEqual(self.rows(*statements[table]), rows, table)
 
-        # The indexer also finishes before the discussion submits its Journal batch.
+        # Another person remains blocked, without delaying an accepted memory checkpoint.
         client.release_index.set()
         await asyncio.wait_for(manager.flush_memory_indexing(), 10)
         state = await self.assert_dependency_complete(manager)
         self.assertTrue(state["memory_cards"])
         self.assertFalse(discussion.done())
-        await self.finish_discussion(manager, client, discussion)
+        await self.finish_personal_work(manager, client, discussion)
         self.assertEqual(self.rows("SELECT COUNT(*) FROM agent_memory_cards"), [(3,)])
         await manager.save_state()
         await manager.close()
 
     async def test_constructor_database_indexes_before_discussion_batch_commits(self):
         manager, client = self.make_manager()
-        team = manager.create_agent_team(manager.root_ai, member_count=3)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
         await manager.save_state()
         await self.verify_open_batch(manager, client, team)
 
     async def test_restored_database_indexes_before_discussion_batch_commits(self):
         original, _ = self.make_manager(incremental=False)
-        team = original.create_agent_team(original.root_ai, member_count=3)
+        team = original.create_agent_team(original.root_ai, parent=original.root_ai, member_count=3)
         await original.save_state(self.db_path)
         await original.close()
         manager, client = self.make_manager(incremental=False)
@@ -172,9 +183,9 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_processing_checkpoint_restores_and_resumes_its_index_job(self):
         manager, client = self.make_manager()
-        team = manager.create_agent_team(manager.root_ai, member_count=3)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
         await manager.save_state()
-        discussion = await self.pause_discussion(manager, client, team)
+        discussion = await self.pause_personal_work(manager, client, team)
         checkpoint_state = await self.assert_dependency_complete(manager)
         checkpoint = str(Path(self.temporary.name) / "processing-checkpoint.db")
         with closing(sqlite3.connect(self.db_path)) as source:
@@ -183,7 +194,7 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
         expected_segments = {
             segment["segment_id"] for segment in checkpoint_state["memory_segments"]
         }
-        await self.finish_discussion(manager, client, discussion)
+        await self.finish_personal_work(manager, client, discussion)
         await manager.close()
 
         restored, restored_client = self.make_manager(incremental=False)
@@ -199,15 +210,15 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(restored._memory, "_index_segment", index):
             await restored.load_state(checkpoint)
-            self.assertEqual(set(restored._memory.segments), expected_segments)
+            self.assertLessEqual(expected_segments, set(restored._memory.segments))
             await asyncio.wait_for(restored_client.index_started.wait(), 10)
             restored_client.release_index.set()
             await asyncio.wait_for(restored.flush_memory_indexing(), 10)
-        self.assertEqual(pending_at_dispatch, expected_segments)
+        self.assertLessEqual(expected_segments, pending_at_dispatch)
         await restored.flush_state()
         state = await restored._persistence.read(checkpoint)
         restored._validate_state_snapshot(state)
-        self.assertEqual(len(state["memory_cards"]), len(expected_segments))
+        self.assertGreaterEqual(len(state["memory_cards"]), len(expected_segments))
         self.assertTrue(all(segment["status"] == "indexed" for segment in state["memory_segments"]))
         with closing(sqlite3.connect(checkpoint)) as connection:
             self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
@@ -216,9 +227,9 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
         manager, client = self.make_manager()
         await manager.save_state()
         async with manager.suppress_auto_save():
-            parent = manager.create_agent_team(manager.root_ai, member_count=3)
-            team = manager.create_agent_team(parent, member_count=3)
-            discussion = await self.pause_discussion(manager, client, team)
+            parent = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
+            team = manager.create_agent_team(parent, parent=parent, member_count=3)
+            discussion = await self.pause_personal_work(manager, client, team)
             state = await self.assert_dependency_complete(manager)
             self.assertEqual(
                 {row["team_id"] for row in state["teams"]},
@@ -229,15 +240,15 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
             client.release_index.set()
             await asyncio.wait_for(manager.flush_memory_indexing(), 10)
             await self.assert_dependency_complete(manager)
-            await self.finish_discussion(manager, client, discussion)
+            await self.finish_personal_work(manager, client, discussion)
         await self.assert_dependency_complete(manager)
 
     async def test_index_failure_delta_keeps_sources_while_discussion_remains_open(self):
         manager, client = self.make_manager()
         manager.config.episodic_memory.index_max_retries = 0
-        team = manager.create_agent_team(manager.root_ai, member_count=3)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
         await manager.save_state()
-        discussion = await self.pause_discussion(manager, client, team)
+        discussion = await self.pause_personal_work(manager, client, team)
         client.index_response = '{"title": false}'
         client.release_index.set()
         await asyncio.wait_for(manager.flush_memory_indexing(), 10)
@@ -245,13 +256,13 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(segment["status"] == "failed" for segment in state["memory_segments"]))
         self.assertFalse(state["memory_cards"])
         self.assertFalse(discussion.done())
-        await self.finish_discussion(manager, client, discussion)
+        await self.finish_personal_work(manager, client, discussion)
 
     async def test_index_cancellation_delta_keeps_sources_and_pending_state(self):
         manager, client = self.make_manager()
-        team = manager.create_agent_team(manager.root_ai, member_count=3)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
         await manager.save_state()
-        discussion = await self.pause_discussion(manager, client, team)
+        discussion = await self.pause_personal_work(manager, client, team)
         await manager._memory.close()
         state = await self.assert_dependency_complete(manager)
         self.assertTrue(all(segment["status"] == "pending" for segment in state["memory_segments"]))
@@ -263,15 +274,13 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
 
     async def prepare_unpersisted_memory(self):
         manager, client = self.make_manager(incremental=False)
-        team = manager.create_agent_team(manager.root_ai, member_count=3)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
         private_library = manager.libraries[team.members[0].private_doc_library_id]
         private_library.write_file("notes.txt", "Persisted private notes.")
         await manager.save_state(self.db_path)
         client.release_turn.set()
         client.release_index.set()
-        await team.execute_reasoning_step_detailed(
-            team.members[0], "Create a memory.", "System.", manager=manager
-        )
+        await interact_and_idle(manager, team.members[0], "Create a memory.", team=team)
         await manager.flush_memory_indexing()
         return manager, team
 
@@ -317,22 +326,22 @@ class IncrementalMemoryDependencyTests(unittest.IsolatedAsyncioTestCase):
         manager, client = self.make_manager(incremental=False)
         manager.config.migration_policy = "permissive"
         await manager.save_state(self.db_path)
-        original_parent = manager.create_agent_team(manager.root_ai, member_count=3)
-        current_parent = manager.create_agent_team(manager.root_ai, member_count=3)
-        team = manager.create_agent_team(original_parent, member_count=3)
-        result = await manager.negotiate_and_execute_migration(
-            team, current_parent, "Move to a different parent."
-        )
-        self.assertEqual(result.status, "EXECUTED", result.reason)
+        original_parent = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
+        current_parent = manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
+        team = manager.create_agent_team(original_parent, parent=original_parent, member_count=3)
+        with patch.object(manager._activity, "schedule_notice"):
+            result = await manager.negotiate_and_execute_migration(team, current_parent, "Move to a different parent.")
+            await approve_pending_business(manager, result.request_id)
+        self.assertEqual(manager.inspect_migration_request(result.request_id).status, "EXECUTED")
         client.release_turn.set()
         client.release_index.set()
-        await team.execute_reasoning_step_detailed(
-            team.members[0], "Create a memory after migration.", "System.", manager=manager
-        )
+        await interact_and_idle(manager, team.members[0], "Create a memory after migration.", team=team)
         await manager.flush_memory_indexing()
         dirty = manager._new_dirty_state()
         dirty["memory_cards"] = set(manager._memory.cards)
         delta = manager._capture_state_snapshot(dirty)
+        self.assertTrue(any(record.table_name == "team_position_cooldowns" and record.values["team_id"] == team.team_id
+                            for record in delta["records"]))
         self.assertEqual(
             {record["team_id"] for record in delta["team_dependencies"]},
             {original_parent.team_id, current_parent.team_id, team.team_id},

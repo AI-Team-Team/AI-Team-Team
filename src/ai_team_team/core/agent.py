@@ -147,6 +147,7 @@ class Agent:
         unanimous_acceptance_action: str = "require_confirmation",
         late_join_policy: str = "disabled",
         task: Optional[str] = None,
+        parent: Any = None,
     ) -> "AgentTeam | TeamFormationRequest":
         """Allows this agent to launch a dynamic sub-team (Level $N$)."""
         return manager.create_agent_team(
@@ -166,4 +167,5 @@ class Agent:
             unanimous_acceptance_action=unanimous_acceptance_action,
             late_join_policy=late_join_policy,
             task=task,
+            parent=parent,
         )

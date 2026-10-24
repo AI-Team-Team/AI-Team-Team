@@ -57,7 +57,6 @@ class FormationLateJoinMixin:
         )
         self.decisions[decision.decision_id] = decision
         initiator = self.manager._agents_by_id[request.initiator_agent_id]
-        old_inboxes = self._copy_inboxes((initiator, actor))
         invitation.attitude = attitude
         invitation.responded_at = (
             time.time() if attitude is not InvitationAttitude.NO_RESPONSE else None
@@ -91,7 +90,6 @@ class FormationLateJoinMixin:
             except Exception:
                 self.invitations[(request.request_id, actor.agent_id)] = old_invitation
                 self.decisions.pop(decision.decision_id, None)
-                self._restore_inboxes((initiator, actor), old_inboxes)
                 raise
             if attitude_changed:
                 self._emit_event(
@@ -136,7 +134,6 @@ class FormationLateJoinMixin:
             except Exception:
                 self.invitations[(request.request_id, actor.agent_id)] = old_invitation
                 self.decisions.pop(decision.decision_id, None)
-                self._restore_inboxes((initiator, actor), old_inboxes)
                 raise
             self._emit_event(
                 "team_formation_late_join_requested",
@@ -194,7 +191,6 @@ class FormationLateJoinMixin:
                 raise ValueError("The invited Agent no longer exists.")
             if not approved:
                 old = invitation.model_copy(deep=True)
-                old_inboxes = self._copy_inboxes((invitee,))
                 invitation.late_join_pending = False
                 invitation.late_join_decision = "denied"
                 try:
@@ -208,7 +204,6 @@ class FormationLateJoinMixin:
                     )
                 except Exception:
                     self.invitations[(request_id, invitee_agent_id)] = old
-                    self._restore_inboxes((invitee,), old_inboxes)
                     raise
                 self._emit_event(
                     "team_formation_late_join_denied",

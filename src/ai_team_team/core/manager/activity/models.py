@@ -120,7 +120,7 @@ class ModelRequestService:
         provider_context = contextvars.Context()
         # A trusted adapter can inspect factual scope, but receives no tool
         # actor, personal admission, or inherited governance authority.
-        provider_context.run(self.manager._active_team.set, getattr(session, "provider_team", None))
+        provider_context.run(self.manager._active_team.set, self.activity.team_for(session))
         task = asyncio.create_task(
             self._call(client, kwargs),
             context=provider_context,
@@ -211,7 +211,7 @@ class ModelRequestService:
     ):
         manager, activity = self.manager, self.activity
         policy = manager.config.activity.llm
-        alias = manager.resolve_model_alias(client)
+        alias, client = manager._runtime.provider_binding(client)
         sequence_id = identifier("SEQUENCE")
         start = activity.clock.monotonic()
         deadline = start + policy.sequence_timeout_seconds
@@ -316,6 +316,7 @@ class ModelRequestService:
                     if maintenance_segment is None and audit_profile is None
                     else (),
                 )
+                session.last_request_id = request_id
                 parameter = _output_limit_parameter(client)
                 if alias in manager.config.model_token_limits and parameter is None:
                     raise ValueError("A quota-limited client must accept an output-token limit.")
@@ -380,11 +381,22 @@ class ModelRequestService:
                     response = LLMResponse(text=response)
                 if not isinstance(response, LLMResponse):
                     raise TypeError("A model client must return text or LLMResponse.")
+                from ai_team_team.core.exceptions import ModelProtocolError
+                from ai_team_team.core.response import ToolCall
+                if (response.text is not None and not isinstance(response.text, str)
+                        or not isinstance(response.tool_calls, list)
+                        or any(not isinstance(call, ToolCall) or not isinstance(call.name, str) or not call.name
+                            or not isinstance(call.arguments, dict) or any(type(key) is not str for key in call.arguments)
+                            for call in response.tool_calls)):
+                    error = ModelProtocolError("The response violates the native text/tool envelope.")
+                    error.usage = response.usage
+                    raise error
                 call_ids = [call.call_id for call in response.tool_calls]
                 if any(
                     not isinstance(identity, str) or not identity.strip() for identity in call_ids
                 ) or len(set(call_ids)) != len(call_ids):
-                    error = ValueError(
+                    from ai_team_team.core.exceptions import ModelProtocolError
+                    error = ModelProtocolError(
                         "Native tool-call identities must be nonblank and unique within a batch."
                     )
                     error.usage = response.usage
@@ -494,6 +506,11 @@ class ModelRequestService:
                 ):
                     raise
                 failure = error
+                from ai_team_team.core.exceptions import ModelProtocolError
+                if isinstance(error, ModelProtocolError) and maintenance_segment is None:
+                    if audit_profile is None:
+                        await manager.supervisor.observe_model(session, valid=False, error_kind="native_call_identity")
+                    raise
                 recoverable = (
                     _is_retryable_llm_error(error)
                     or isinstance(error, ModelUnavailable)
@@ -544,6 +561,13 @@ class ModelRequestService:
             if recoverable
             else None
         )
+        resource_attempt_id = None
+        from ai_team_team.core.exceptions import TokenLimitExceededError
+        if isinstance(failure, TokenLimitExceededError) and maintenance_segment is None and audit_profile is None:
+            remedy = await manager._failover.request(activity.require_agent(session.agent_id), activity.team_for(session), failure)
+            resource_attempt_id = remedy.attempt_id
+            if remedy.status == "APPLIED":
+                recoverable, boundary = True, activity.clock.wall_time()
         if maintenance_segment is None and audit_profile is None:
             await self.availability(
                 session, alias, sequence_id, failure, earliest=boundary, recoverable=recoverable
@@ -552,6 +576,7 @@ class ModelRequestService:
             f"Model {alias!r} is unavailable ({type(failure).__name__}).",
             recoverable=recoverable,
             earliest=boundary,
+            resource_attempt_id=resource_attempt_id,
         ) from failure
 
     def check_request(self, session, segment, audit_profile=None):
@@ -598,29 +623,6 @@ class ModelRequestService:
             maintenance_segment=segment,
         )
         return response.text or ""
-
-    async def audit(self, audit_id, agent, prompt, system_instruction, **kwargs):
-        from .values import Session
-
-        row = self.manager._records.index.get(("audit_runs", (audit_id,)))
-        participant = self.manager._records.index.get(
-            ("audit_participants", (audit_id, agent.agent_id))
-        )
-        if row is None or participant is None or row.values["status"] != "running":
-            raise PermissionError(
-                "An audit request requires its retained run and exact scoped participant."
-            )
-        session = Session(agent.agent_id, audit_id, self.activity.generation)
-        session.invocation_id = identifier("AUDIT-INVOCATION")
-        session.provider_team = self.manager.teams.get(row.values["temporary_team_id"])
-        return await self.generate(
-            session,
-            client=agent.llm_client,
-            prompt=prompt,
-            system_instruction=system_instruction,
-            audit_profile=row.values,
-            **kwargs,
-        )
 
     def close(self):
         for task in tuple(self.tasks):

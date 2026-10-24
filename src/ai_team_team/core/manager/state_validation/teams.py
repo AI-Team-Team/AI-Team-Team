@@ -35,6 +35,8 @@ def validate_teams(
     parent_map: Dict[str, Optional[str]] = {}
     for row in payload.teams:
         team_id = row["team_id"]
+        if type(row.get("position_revision")) is not int or row["position_revision"] < 1:
+            raise StateRestoreError("An organizational position requires a positive strict revision.")
         if row.get("lifecycle_state", "active") not in {"active", "dissolved"}:
             raise StateRestoreError("Invalid AgentTeam lifecycle state.")
         if row.get("lifecycle_state") == "dissolved" and row.get("members"):
@@ -61,7 +63,8 @@ def validate_teams(
             raise StateRestoreError(f"Team {team_id!r} references missing parent {parent_id!r}.")
         parent_map[team_id] = parent_id
         parent_agent_id = row.get("parent_agent_id")
-        if parent_agent_id is not None and (parent_agent_id not in active_agent_ids or parent_id is not None):
+        if parent_agent_id is not None and (parent_agent_id not in agent_id_set or parent_id is not None
+                or row.get("lifecycle_state", "active") == "active" and parent_agent_id not in active_agent_ids):
             raise StateRestoreError("A current Agent parent must be active and exclusive.")
         if row.get("lifecycle_state", "active") == "active" and parent_id is not None and any(parent["team_id"] == parent_id and parent.get("lifecycle_state", "active") != "active" for parent in payload.teams):
             raise StateRestoreError("A current AgentTeam parent cannot be dissolved.")

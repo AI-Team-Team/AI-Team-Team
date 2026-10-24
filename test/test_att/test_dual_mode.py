@@ -14,7 +14,8 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from ai_team_team import ATTManager, Agent, Tool, ATTConfig, LLMResponse, ToolCall, ToolResult
+from ai_team_team import ATTManager, Agent, Tool, ATTConfig, LLMResponse, ToolCall
+from test.personal_activity import interact_and_idle
 
 class TestDualModeToolCalling(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -39,7 +40,7 @@ class TestDualModeToolCalling(unittest.IsolatedAsyncioTestCase):
         self.assertIn("city", schema["required"])
         self.assertNotIn("limit", schema["required"])
 
-    def test_pythonic_tool_instantiation(self):
+    async def test_pythonic_tool_instantiation(self):
         """Verify Tool can be instantiated using Pythonic constructor shortcuts."""
         def my_test_tool(x: int) -> int:
             """Retrieve the value of x.
@@ -72,6 +73,7 @@ class TestDualModeToolCalling(unittest.IsolatedAsyncioTestCase):
         manager.register_tool(my_test_tool)
         self.assertIn("my_test_tool", manager.global_tools)
         self.assertEqual(manager.global_tools["my_test_tool"].description, "Retrieve the value of x.")
+        await manager.close()
 
     async def test_schema_generation_handwritten(self):
         """Verify tool schema using custom dict override."""
@@ -116,95 +118,72 @@ class TestDualModeToolCalling(unittest.IsolatedAsyncioTestCase):
         self.assertIn("city", schema["required"])
 
     async def test_native_mode_parallel_execution(self):
-        """Verify that native mode concurrently executes multiple tool calls and returns final answer."""
-        config = ATTConfig(tool_calling_mode="native", max_tool_rounds=2)
-        
-        # We will mock the LLM Client generate method
-        mock_client = MagicMock()
-        
-        # Round 1 returns parallel tool calls, Round 2 returns text response
+        """Independent native tool calls share a batch, not a team round."""
         responses = [
             LLMResponse(tool_calls=[
                 ToolCall(call_id="call_1", name="tool_a", arguments={"val": 10}),
-                ToolCall(call_id="call_2", name="tool_b", arguments={"val": 20})
+                ToolCall(call_id="call_2", name="tool_b", arguments={"val": 20}),
             ]),
-            LLMResponse(text="Final result of parallel execution is success")
+            LLMResponse(text="Final result of parallel execution is success"),
+            LLMResponse(tool_calls=[ToolCall("idle", "set_activity_intent", {"intent": {"kind": "idle"}})]),
         ]
-        
-        async def mock_generate(*args, **kwargs):
-            return responses.pop(0)
-            
-        mock_client.generate = mock_generate
-        mock_client.supports_native_tool_calling = lambda: True
-        
-        root_ai = Agent(name="Root", role="Architect", llm_client=mock_client)
-        manager = ATTManager(root_ai=root_ai, config=config, persistence_mode="volatile")
-        
-        # Register tools
-        tool_a_runs = 0
+        client = MagicMock()
+        client.generate = AsyncMock(side_effect=responses)
+        client.supports_native_tool_calling = lambda: True
+        manager = ATTManager(Agent("Root", "Architect", client),
+            ATTConfig(tool_calling_mode="native"), persistence_mode="volatile")
+        self.addAsyncCleanup(manager.close)
+        started = set()
+        both_started = asyncio.Event()
+
+        async def perform(name, val):
+            started.add(name)
+            if len(started) == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), 5)
+            return f"{name}: {val}"
+
         async def tool_a(val: int):
-            nonlocal tool_a_runs
-            tool_a_runs += 1
-            await asyncio.sleep(0.01)
-            return f"A: {val}"
-            
-        tool_b_runs = 0
+            return await perform("A", val)
+
         async def tool_b(val: int):
-            nonlocal tool_b_runs
-            tool_b_runs += 1
-            await asyncio.sleep(0.01)
-            return f"B: {val}"
-            
+            return await perform("B", val)
+
         manager.register_tool("tool_a", "Run tool A", tool_a)
         manager.register_tool("tool_b", "Run tool B", tool_b)
-        
-        team = manager.create_agent_team(creator=root_ai, member_count=3)
-        # Force members client to use mock_client
-        for m in team.members:
-            m.llm_client = mock_client
-            
-        ans = await team.execute_reasoning_step(team.members[0], "Start task", "System instructions")
-        
-        self.assertEqual(ans, "Final result of parallel execution is success")
-        self.assertEqual(tool_a_runs, 1)
-        self.assertEqual(tool_b_runs, 1)
-        
-        # Verify messages history format
-        messages = team.members[0].messages
-        # We expect user prompt, assistant tool call response, tool result answers, and assistant final answer
-        self.assertEqual(messages[0]["role"], "user")
-        self.assertEqual(messages[1]["role"], "assistant")
-        self.assertIsNotNone(messages[1].get("tool_calls"))
-        self.assertEqual(messages[2]["role"], "tool")
-        self.assertEqual(messages[3]["role"], "tool")
-        self.assertEqual(messages[4]["role"], "assistant")
-        self.assertEqual(messages[4]["content"], "Final result of parallel execution is success")
+        team = manager.create_agent_team(creator=manager.root_ai)
+        person = team.members[0]
+        result = await interact_and_idle(manager, person, "Start task", team=team)
+        self.assertEqual(result.answer, "Final result of parallel execution is success")
+        self.assertEqual(started, {"A", "B"})
+        messages = person.messages
+        call_index = next(index for index, item in enumerate(messages) if item.get("tool_calls"))
+        self.assertEqual([item["role"] for item in messages[call_index:call_index + 3]],
+            ["assistant", "tool", "tool"])
+        self.assertEqual({item["tool_call_id"] for item in messages[call_index + 1:call_index + 3]},
+            {"call_1", "call_2"})
 
     async def test_auto_mode_routing_fallback(self):
-        """Verify auto-mode selects the correct reasoning strategy based on client capabilities."""
-        # 1. Native capable client
-        mock_native_client = MagicMock()
-        mock_native_client.generate = AsyncMock(return_value=LLMResponse(text="Native Answer"))
-        mock_native_client.supports_native_tool_calling = lambda: True
-        
-        agent_native = Agent(name="NativeAgent", role="Specialist", llm_client=mock_native_client)
-        
-        # 2. Text React fallback client
-        mock_text_client = MagicMock()
-        mock_text_client.generate = AsyncMock(return_value=LLMResponse(text="Final Answer: Text React Answer"))
-        mock_text_client.supports_native_tool_calling = lambda: False
-        
-        agent_text = Agent(name="TextAgent", role="Specialist", llm_client=mock_text_client)
-        
-        config = ATTConfig(tool_calling_mode="auto")
-        root_ai = Agent(name="Root", role="Architect", llm_client=mock_native_client)
-        manager = ATTManager(root_ai=root_ai, config=config, persistence_mode="volatile")
-        team = manager.create_agent_team(creator=root_ai, member_count=3)
-        manager.register_agent(agent_native)
-        manager.register_agent(agent_text)
-        
-        ans_native = await team.execute_reasoning_step(agent_native, "Start", "System instructions", manager=manager)
-        self.assertEqual(ans_native, "Native Answer")
-        
-        ans_text = await team.execute_reasoning_step(agent_text, "Start", "System instructions", manager=manager)
-        self.assertEqual(ans_text, "Text React Answer")
+        """Actual personal activity uses the selected provider-neutral mode."""
+        native = MagicMock()
+        native.generate = AsyncMock(side_effect=[
+            LLMResponse(text="Native Answer"),
+            LLMResponse(tool_calls=[ToolCall("idle-native", "set_activity_intent", {"intent": {"kind": "idle"}})]),
+        ])
+        native.supports_native_tool_calling = lambda: True
+        text = MagicMock()
+        text.generate = AsyncMock(side_effect=[
+            "Final Answer: Text ReAct Answer",
+            "Action: set_activity_intent(intent={'kind': 'idle'})",
+        ])
+        text.supports_native_tool_calling = lambda: False
+        manager = ATTManager(Agent("Root", "Architect", native),
+            ATTConfig(tool_calling_mode="auto"), persistence_mode="volatile")
+        self.addAsyncCleanup(manager.close)
+        native_person = manager.register_agent(Agent("NativeAgent", "Specialist", native))
+        text_person = manager.register_agent(Agent("TextAgent", "Specialist", text))
+        result = await interact_and_idle(manager, native_person, "Start")
+        self.assertEqual(result.answer, "Native Answer")
+        result = await interact_and_idle(manager, text_person, "Start")
+        self.assertEqual(result.answer, "Text ReAct Answer")
+        self.assertTrue(all(isinstance(item, Tool) for item in native.generate.call_args_list[0].kwargs["tools"]))

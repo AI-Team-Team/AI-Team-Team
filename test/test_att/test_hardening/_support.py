@@ -29,7 +29,8 @@ class ATTHardeningTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp(prefix="att_hardening_")
         self.client = MagicMock()
-        self.client.generate = AsyncMock(return_value="Final Answer: Done")
+        self.client.generate = AsyncMock(return_value="Action: set_activity_intent(intent={'kind': 'idle'})")
+        self.client.supports_native_tool_calling = lambda: False
         self.root = Agent("Root", "Architect", llm_client=self.client)
         self.manager = ATTManager(
             self.root,

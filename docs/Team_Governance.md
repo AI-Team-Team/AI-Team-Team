@@ -1,254 +1,233 @@
-# Team Governance, Policies & Protocols
+# Team Governance
 
-This document explains how ATT governs AgentTeam communication, topology migration, token budgeting, model failover, and emergency wakeups.
+ATTConfig defines the institution, AgentTeams hold organizational authority, and Agents act only through their actual invocation scope.
 
-ATT separates institutional authority from model execution.
-
-`ATTConfig` defines the communication institution, an `AgentTeam` owns communication requests and agreements, and an `Agent` invokes tools with the authority of its current invocation-scoped AgentTeam.
-
-Member order, creator identity, role names, and fallback selection never create governance authority.
+Membership, creator provenance, organizational parenthood, communication channels, personal email, and document permissions are separate relationships.
 
 ## 1. The Team Inbox & Communication Protocols
 
-Every `AgentTeam` maintains a `message_inbox` for incoming messages, governance requests, and escalation events.
+An AgentTeam inbox retains AT-addressed communication and governance references; it is not a shared model conversation.
 
-Messages are not inserted into an Agent's active reasoning turn.
+Each Agent has one continuing personal runtime and identity-owned inbox, even when the Agent belongs to several teams.
 
-`manager.execute_team_discussion()` reads the current inbox at the start of a discussion and adds the relevant items to the discussion context.
+Incoming notices are presented at committed personal checkpoints, never inserted into an in-flight provider request.
 
-Each AgentTeam owns one discussion-session lock.
+An Agent may explicitly read a message, discuss it through team chat, and independently submit a governance choice.
 
-Normal, emergency, audit, and communication-governance discussions for the same AgentTeam execute serially, while different AgentTeams may continue concurrently unless they share an Agent whose invocation lock is in use.
+Ordinary model output is not automatically published, delivered as a reply, or treated as a ballot.
 
-Peer messages are acknowledged only after a successful discussion.
+There are no discussion rounds, compulsory all-member execution barriers, or whole-team discussion-session locks.
 
-Failed or cancelled discussions leave peer messages and pending communication approvals available for a later retry.
-
-Normal discussions collect `AgentTurnResult` values.
-
-With the default isolate policy, a member-scoped tool or LLM failure produces an incomplete placeholder, preserves every peer result, marks the discussion `PARTIAL`, and lets that Agent rejoin the next round with a fresh tool-correction budget.
-
-Strict communication, migration, full-member ballot, and parent-failover discussions require complete turns; any incomplete member keeps the governance action pending and cannot authorize from a partial transcript.
-
-### Inbox Summarization
-
-`inbox_summarize_threshold_chars` controls when a large inbox is summarized before prompt injection.
-
-UNKNOWN audit alerts have no TTL and no hard capacity limit.
-
-Stable fingerprints merge repeated UNKNOWN alerts while preserving occurrence counts and first/last timestamps.
-
-A discussion marks an UNKNOWN alert as processing and removes it only after success; failure or cancellation returns it to pending.
-
-Operational degradation alerts use the same durable lifecycle when `operational_degraded_escalation_mode` is `"queue"` or `"wake"`.
-
-Content health and runtime health are independent, so an otherwise healthy transcript may still produce operational `DEGRADED` because one member turn was incomplete.
+Different people may act concurrently; the same person's invocation lock protects their single Working Context and memory across all memberships.
 
 ## 2. Peer Communication & Negotiation Broker
 
-`NegotiationBroker` coordinates the communication policy, persistent requests, approvals, agreements, delivery records, and audit events.
+`NegotiationBroker` coordinates configured policy, persistent requests, approvals, Agreements, durable messages, and metadata-only events.
 
-The broker never uses member order, creator identity, or Root AI fallback to infer AgentTeam authority.
+It never infers authority from member order, creator identity, role labels, or a Root fallback.
 
-Any active member may invoke a communication tool for its current invocation-scoped AgentTeam.
+The public communication tools are:
 
-The public tools do not accept sender, policy, direction, mode, or approval-principal overrides.
+- `send_peer_message(team_id, message)`
+- `request_peer_communication(team_id, rationale)`
+- `revoke_peer_agreement(agreement_id, reason)`
+- `list_peer_requests(status="pending")`
+- `list_peer_agreements(active_only=True)`
+- `list_peer_messages()`
+- `read_peer_message(message_id)`
 
-The available tools are:
+All team-sensitive tools resolve the current active Agent and AgentTeam from invocation context and validate live membership.
 
-* `send_peer_message(team_id, message)`
-* `request_peer_communication(team_id, rationale)`
-* `revoke_peer_agreement(agreement_id, reason)`
-* `list_peer_requests(status="pending")`
-* `list_peer_agreements(active_only=True)`
+No tool accepts a sender, policy, direction, mode, or approval-principal override.
 
-Under an approval policy, `send_peer_message()` returns `NO_AGREEMENT` until a matching active channel exists and does not create a request implicitly.
+Message records and their inbox references must commit before the sender receives `DELIVERED`.
 
-Under the permissive policy, `send_peer_message()` delivers directly without creating an implicit Agreement.
+An addressed reference does not copy the message body into every member's context, and reading does not imply a reply or governance approval.
 
-Durable message and inbox records commit before `DELIVERED` is returned.
-
-Communication Agreements do not grant DocLib, managed-link, or file access.
+Communication Agreements never grant DocLib, managed-link, or file permissions.
 
 ## 3. Inter-Team Communication Policies
 
-`ATTConfig.communication` is a strict Pydantic discriminated union with `extra="forbid"` and assignment validation.
-
-The selected policy applies to every AgentTeam at every topology depth.
+`ATTConfig.communication` is a strict Pydantic discriminated union with forbidden extra fields and assignment validation.
 
 ### A. Permissive Policy (`"permissive"`)
 
-Authenticated AgentTeam members may deliver peer messages directly.
+Authenticated endpoint members may send directly without a Request or implicit Agreement.
 
-No approval request or Agreement is required.
+Two independent AgentTeams also communicate this way under an approval institution.
+
+Independence means an explicit organizational parent of `None`, not a depth label or creator identity.
 
 ### B. Parent Approval Policy (`"parent_approval"`)
 
-The sender and recipient parent principals must all approve a persistent channel.
+Each attached endpoint's actual parent principal must approve the channel, with duplicate principals removed.
 
-An ordinary parent is an `ApprovalPrincipal(kind="agent_team", ...)`.
+A parent can be an `agent_team` or an `agent`; Root AI participates only when it is the explicitly recorded Agent parent.
 
-The parent of a top-level AgentTeam is the Root AI as an explicit `ApprovalPrincipal(kind="agent", ...)`.
-
-Duplicate parent principals are removed.
+An independent endpoint contributes no parent authority, but does not exempt the other endpoint's actual parent.
 
 ### C. Lineage Approval Policy (`"lineage_approval"`)
 
-The sender's request is the sender AgentTeam's consent.
+The sender's request expresses the sender AT's consent.
 
-The recipient, every intermediate AgentTeam on the unique route, and the Root AI Agent when the route crosses top-level branches must approve.
+ATT traverses the actual explicit-parent paths, excludes the sender, and includes the required recipient-side and intermediate authorities.
+
+An independent endpoint exempts its own side only, not an attached endpoint or its authorities.
+
+Separate independent trees do not gain a virtual common Root Agent.
+
+A child of an independent AgentTeam remains attached to that AgentTeam and is not itself independent.
 
 ### D. Request Delivery and Direction
 
-`request_delivery="queue"` places AgentTeam approvals in their inboxes for the next normal discussion.
+Approval configurations accept only `request_delivery="queue"`; `"wake"` is rejected rather than translated into a hidden all-member discussion.
 
-Agent principals have no AgentTeam inbox, so their approvals are delivered directly to their personal Agent inbox and notified through a detached ordinary interaction.
+An exact governance case delivers an addressed voting email to each eligible person through the common personal runtime.
 
-`request_delivery="wake"` schedules an AgentTeam governance discussion immediately while still respecting that AgentTeam's discussion lock.
+Receiving that notice does not force the person to reply, change scope, or start another model persona.
 
-`direction="one_way"` creates a source-to-target channel.
-
-`direction="bidirectional"` creates a channel usable by both endpoints.
+`direction="one_way"` permits source-to-target communication, while `"bidirectional"` permits both directions.
 
 ### E. Approval Decisions
 
-An AgentTeam decision freezes the active membership at discussion start and requires one valid ballot from every frozen member.
+A governance case freezes its eligible people, principal, choice schema, electorate revision, and business request.
 
-After a complete governance discussion, ATT persists a voting round and delivers a personal voting email to each frozen member.
+Each AgentTeam voter submits their own strict structured choice using `submit_governance_choice(case_id, choice)`.
 
-Each Agent receives a normal-context notice identifying `open_agent_mail()` and `submit_governance_choice()` rather than a separate model call with a generic ballot persona.
+All frozen members must provide valid ballots before a strict majority can authorize an outcome.
 
-The same Agent's personal instructions, working memory, message history, and invocation lock apply to this activity.
+Strictly more than half literal `true` votes approve, and strictly more than half literal `false` votes deny.
 
-Opening the email and submitting a choice are voluntary separate operations; the AgentTeam session lock is released while personal responses are outstanding.
+Missing or invalid choices, a tie, changed eligibility, unavailable people, or failed activity do not create approval.
 
-Strictly more than half JSON literal `true` ballots approve, and strictly more than half JSON literal `false` ballots deny.
+An Agent principal can submit only its own ballot; another person cannot substitute for it.
 
-A tie, membership change, missing ballot, invalid ballot, model error, incomplete discussion, or cancellation keeps the Approval pending.
+A committed ballot is immutable and idempotent within its exact case, and survives cancellation of an observer or a later ordinary activity failure.
 
-An Agent principal decides under that Agent's invocation lock and cannot be replaced by another Agent.
-
-The Root Agent uses its own personal inbox and ordinary interaction context without a fabricated AgentTeam.
-
-Only the JSON literal `true` grants approval.
-
-Strings, numbers, null, missing fields, and extra fields are invalid governance results.
-
-An accepted ballot is immutable within its identified round, and resubmitting the same choice is idempotent.
-
-A tie or changed electorate can start a new identified round while retaining the preceding round, emails, and public choices.
+An explicit retry after a tie or electorate change can create a fresh case while retaining preceding cases, mail, and choices.
 
 ### Personal Email Is Not a Ballot
 
-`open_agent_mail(message_id)` neither marks the message read nor votes.
+`open_agent_mail(message_id)` inspects owned mail without changing its read receipt or submitting a choice.
 
-`mark_agent_inbox_read()` changes only the read receipt, and `submit_governance_choice(round_id, choice)` changes only the ballot and public response history.
+`mark_agent_inbox_read()` changes only mail state.
 
-`list_governance_requests()` keeps unanswered pending requests discoverable even after their emails are marked read.
+`list_governance_requests(pending_only=True)` keeps unanswered eligible cases discoverable even after the emails are read.
 
-The four team-formation attitudes remain `accepted`, `declined`, `explicitly_ignored`, and `no_response`; explicit `None` withholds a public attitude and still projects to `no_response`.
+Formation attitudes remain `accepted`, `declined`, `explicitly_ignored`, and `no_response`.
 
-Those attitudes are independent of email states and do not become a universal governance vocabulary.
+An explicit `None` withholds a public attitude and externally projects to `no_response`, independently of whether the email was opened.
 
-Communication and migration use strict boolean choices, parent failover uses eligible model aliases, and membership proposals keep `Agree`, `Disagree`, and `Abstain` with their existing rules.
+Communication and migration use strict boolean choices, failover uses eligible model aliases, and membership proposals retain their own Agree/Disagree/Abstain rules.
 
-Optional episodic memory is not required for voting, and ATT does not automatically read a private DocLib to prepare a choice.
+Optional episodic memory is not required for voting, and a private DocLib is never automatically read to prepare a choice.
 
 ### F. Request and Agreement Lifecycle
 
-`request_peer_communication()` creates a durable `CommunicationRequest` under an approval policy.
-
-Each request stores its endpoint AgentTeams, initiating Agent audit metadata, rationale, direction, immutable policy snapshot, ordered principals, individual Approvals, ballots, route fingerprint, state, and timestamps.
+A governed Request stores immutable policy, ordered approval principals, route evidence, fingerprints, reasons, timestamps, and linked successor references.
 
 Equivalent pending requests reuse the existing request ID.
 
-An explicit denial marks the request `DENIED` and cancels unfinished Approvals.
+A valid denial terminates the Request and cancels unfinished Approvals; unavailable or incomplete decisions remain pending.
 
-Temporary failures and cancellations return the affected Approval to `PENDING`.
+Before final approval, ATT validates the relevant captured position revisions and authority path.
 
-Before final approval, ATT recomputes the relevant route fingerprint.
+A relevant path change makes the Request `STALE` and creates a successor under the saved policy; unrelated topology changes do not invalidate it.
 
-A changed route marks the old request `STALE` and creates a successor using the stored policy snapshot.
+All required Approvals and creation of the resulting Agreement commit through the same authoritative transaction.
 
-An approved request creates one durable `CommunicationAgreement` in the same persistence transaction.
+Existing Agreements survive policy and topology changes until an endpoint explicitly revokes them.
 
-An Agreement remains active across later policy and topology changes until either endpoint revokes it.
-
-For the detailed state machine, see [Autonomous Communication Governance](flowcharts/Autonomous_Communication_Governance.md).
+See [Autonomous Communication Governance](flowcharts/Autonomous_Communication_Governance.md) for the complete routing and persistence flow.
 
 ## 4. Migration & Reorganization Policies
 
-Dynamic topology migration is requested through `request_migration()` and governed by `migration_policy`.
+The organization is an explicit forest: an AgentTeam has no parent, an Agent parent, or an AgentTeam parent.
+
+Creator provenance and team membership never infer organizational parenthood.
+
+`request_migration(target_parent, rationale)` returns an immediate durable operation reference instead of synchronously awaiting the target's model work.
 
 ### A. Permissive Policy (`"permissive"`)
 
-The manager may commit the migration after topology validation without a governance decision.
+Ordinary path approval is unnecessary, but a prospective parent must still explicitly accept attachment.
+
+Permissive migration is not permission to attach to an unwilling parent.
 
 ### B. Ancestor Approval Policy (`"ancestor_approval"`)
 
-The explicit current-parent, target-parent, and Least Common Ancestor principals decide, with duplicates removed.
+The actual current parent, target parent, and existing common ancestor decide, with duplicates removed.
+
+No virtual common ancestor is manufactured between independent trees.
 
 ### C. Lineage Path Policy (`"lineage_path"`)
 
-Every explicit principal along the affected lineage path decides.
+Every required explicit authority along the affected path decides through its exact governance case.
 
-Ordinary topology authorities are AgentTeam principals, while a root-level authority is the Root AI Agent principal.
+An AgentTeam acts through complete personal-email ballots, while an Agent parent acts through that person's own choice.
 
-AgentTeam principals use full-member personal-email ballots, and the Root AI Agent submits its own explicit personal-email choice.
+Final application revalidates availability, cycles, parent acceptance, captured positions, and cooldown under the topology lock.
 
-The API returns a `MigrationOperationResult` with a durable request ID and `PENDING` status while approvals are outstanding instead of waiting inside the initiating tool invocation.
+The serialized admission also rechecks live Host migration and unilateral-detachment switches immediately before accepting the transition, without replacing the request's captured migration institution.
 
-`inspect_migration_request(request_id)` lets the moving, target, or original-parent AgentTeam inspect progress without granting authority to decide for another principal.
+Successful changes to a team's own position start the confirmed 600-second cooldown.
 
-Authorization runs outside the topology lock.
+The transition timestamp and cooldown bind together after runtime admission, record queues, JSON preparation, and graph validation have completed.
 
-Before committing, the manager reacquires the topology lock and revalidates the parent relationship, cycle constraints, migration count, and authorized path.
+Durable mode binds that time inside the SQLite transaction immediately before writing its receipt, so waiting for or preparing the database write does not consume the interval.
+
+The coordinator samples the registered clock on its owning event loop and passes immutable time readings to the writer; SQL workers do not inspect live Agents, teams, or formation candidates.
+
+The accepted position event, cooldown, migration projection, and receipt digest use the same canonical time, while remaining-duration accounting retains its monotonic anchor even if observation of the committed result is delayed.
+
+`migration_cooldown_downtime` controls whether offline elapsed time counts, defaulting to `"include"`.
+
+Denied requests, failed commits, inherited subtree movement, and forced parent loss do not charge that cooldown.
+
+`allow_unilateral_detachment=True` permits voluntary detachment independently of ordinary migration enablement.
+
+Retiring an Agent parent or dissolving a parent AT detaches surviving direct children without deleting those children or altering their members' identities.
+
+Topology changes publish one retained event and addressed notices only after their exact receipt.
 
 ## 5. Token Budget & Failover Policies
 
-Configured model token limits are hard quotas.
+Configured token limits constrain the shared atomic model ledger.
 
-Before each model attempt, ATT atomically reserves the estimated prompt, system instruction, transmitted tool-definition, and maximum output tokens.
+Each provider attempt reserves estimated prompt messages, system instructions, transmitted tool definitions and JSON Schema, and maximum output tokens before dispatch.
 
-The estimate covers explicit ATT request components without attempting to reproduce provider-internal framing or billing details.
+The estimate covers ATT's actual request components without promising exact provider billing equivalence.
 
-Settlement charges reported usage when available, refunds unused output capacity, and conservatively accounts for sent failures or cancellations.
+Settlement uses reported usage when available, refunds unused reservation, and conservatively accounts for sent failures or cancellation.
 
-Failover reads the same atomic ledger, including active reservations.
-
-A token limit of `0` disables the model alias.
+A token limit of zero disables that alias.
 
 ### A. Failover Routing Strategies
 
-* **Auto (`"auto"`)**: Selects an explicitly bound compatible alias with available quota.
-* **Parent (`"parent"`)**: Requests a model choice from the explicit parent principal.
-* **None (`"none"`)**: Performs no model failover.
+- `"auto"` selects a compatible explicitly bound alias with currently available quota.
+- `"parent"` requests a choice from the actual organizational parent.
+- `"none"` performs no model failover.
 
-For parent failover, an AgentTeam principal discusses the choice and every member submits a valid model-alias ballot.
+Parent failover is a separate durable resource attempt with a total `parent_failover_timeout_seconds=120` deadline.
 
-Strictly more than half of the ballots must select the same eligible alias.
+An AgentTeam parent requires a valid eligible-alias ballot from every frozen member and a strict majority for one alias.
 
-At the top level, the Root AI Agent receives a personal model-selection email and explicitly submits an eligible alias through its ordinary tools and memory context.
+An Agent parent uses its own personal inbox and activity, never an implicit representative.
 
-Timeout, lock conflict, invalid output, missing majority, model failure, or unavailable authority fails closed without falling back to `auto`.
+The request returns `PENDING` while choices are outstanding and does not hold the initiating Agent's model lock waiting for parent work.
 
-`parent_failover_timeout_seconds` defaults to `120` and must be positive.
+Timeout, shared-Agent conflicts, missing majority, invalid aliases, changed topology, stale model bindings, or unavailable quota fail closed without falling back to auto.
 
-The bounded failover attempt expires after timeout, caller cancellation, shutdown, or process interruption; a late reply cannot change the replacement client after that attempt ends.
+Restore expires interrupted attempts instead of replaying them.
 
-Expiration closes execution authority but retains the email, accepted public choices, and personal memory.
+An expired execution authority does not delete mail, accepted choices, or personal memory.
 
 ## 6. Code Configuration Example
 
-Communication policy is configured once in `ATTConfig` and cannot be changed by a communication tool invocation.
+Communication policy is configured in ATTConfig and cannot be overridden by tools.
 
 ```python
-from ai_team_team import (
-    ATTConfig,
-    ATTManager,
-    Agent,
-    ParentApprovalCommunicationConfig,
-)
+from ai_team_team import ATTConfig, ParentApprovalCommunicationConfig
 
 config = ATTConfig(
     communication=ParentApprovalCommunicationConfig(
@@ -256,43 +235,34 @@ config = ATTConfig(
         direction="bidirectional",
     ),
     migration_policy="lineage_path",
+    allow_unilateral_detachment=True,
     failover_policy="parent",
     parent_failover_timeout_seconds=120,
     model_token_limits={"reasoning": 50_000},
     model_max_output_tokens={"reasoning": 2_048},
 )
-
-root_agent = Agent(name="Root_AI", role="Architect")
-manager = ATTManager(root_ai=root_agent, config=config, db_path="att_state.db")
 ```
 
-## 7. Emergency Wakeup Protocol
+An explicitly supplied `parent=` creates an organizational attachment; omitting it creates an independent team.
 
-Emergency wakeups allow critical child failures and supervisory anomalies to schedule a parent AgentTeam discussion.
+Trusted Host bootstrap is distinct from normal consent-bearing formation.
 
-Emergency discussions use the same discussion-session lock as normal and communication-governance discussions.
+## 7. Health Attention and Escalation
 
-### A. Trigger Conditions
+Health assessment is event-driven rather than automatically run after ordinary output.
 
-Emergency wakeups may be triggered by:
+Typed detector thresholds request inspection, not permission changes, forced model replacement, or termination.
 
-* `"child_failure_escalation"`
-* `"escalation_spawn"`
-* `"audit_unknown_escalation"` when `audit_unknown_escalation_mode="wake"`
-* `"operational_degraded_escalation"` when `operational_degraded_escalation_mode="wake"`
+Confirmed permission-execution or integrity faults require immediate deterministic protection and a durable incident without waiting for an LLM audit.
 
-When `enable_emergency_wakeup=True`, an idle AgentTeam is scheduled immediately and a running AgentTeam keeps the alert queued.
+Incidents use stable persisted fingerprints, occurrence counts, and first/latest timestamps, with no TTL or hard drop limit.
 
-### B. Active and Deferred Scheduling
+`"queue"` delivers addressed attention without forcing activation, while `"wake"` may request ordinary personal activity without changing the recipient's intent or team scope.
 
-With an active event loop, ATT schedules `execute_emergency_discussion()` as an asynchronous task.
+Explicit incident claims distinguish handling from mail reading; acknowledgement requires the current occurrence generation.
 
-Without an active event loop, ATT stores a plain deferred call specification for `flush_deferred_tasks()` and does not retain an un-awaited coroutine object.
+Failure, cancellation, or interrupted recovery releases claims to pending attention rather than deleting evidence.
 
-### C. UNKNOWN Audit Failures
+Root or whole-ATT incidents propagate through `on_system_event`, not a fabricated parent or direct print.
 
-`audit_unknown_escalation_mode="wake"` schedules an immediate parent discussion, while `"queue"` waits for the next normal discussion.
-
-Emergency discussions created by UNKNOWN audit failures or operational degradation skip that round's supervision, and identical active wakeups are deduplicated, preventing recursive supervision or failure storms.
-
-Root-level anomalies are emitted through system events and callbacks.
+See [Supervisory Team](Supervisory_Team.md) for fresh temporary audit teams, evidence boundaries, deadlines, and aggregate findings.

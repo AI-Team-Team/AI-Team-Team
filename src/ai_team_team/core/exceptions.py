@@ -2,9 +2,22 @@ class ATTException(Exception):
     """Base exception for ATT framework errors."""
     pass
 
+
+class RuntimeAdmissionClosedError(RuntimeError):
+    """A local operation was not admitted before shutdown or restore fenced it."""
+
+
+class TeamCreationLimitError(ValueError):
+    """A valid formation cannot satisfy the Host's live creation limits."""
+
+
 class LLMGenerationError(ATTException):
     """Raised when LLM generation fails after all retry attempts."""
     pass
+
+
+class ModelProtocolError(LLMGenerationError):
+    """A structurally invalid model response, not provider availability or tool input."""
 
 class TokenLimitExceededError(ATTException):
     """Raised when a model exceeds its allocated session token budget."""
@@ -37,14 +50,6 @@ class LLMRateLimitError(TransientLLMError):
 
 class LLMServiceError(TransientLLMError):
     """Raised for retryable provider service failures."""
-
-
-class AgentTurnIncompleteError(ATTException):
-    """Raised when configured policy aborts on an incomplete member turn."""
-
-    def __init__(self, result):
-        self.result = result
-        super().__init__(result.reason or "Agent turn was incomplete.")
 
 
 class AgentInvocationDependencyError(ATTException):

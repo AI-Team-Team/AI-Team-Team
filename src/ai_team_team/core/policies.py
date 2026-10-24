@@ -49,41 +49,6 @@ def parse_governance_decision(
     return decision.approved, decision.reason
 
 
-def get_ancestry_chain(team: Any) -> List[Any]:
-    chain = []
-    current = team
-    while current is not None:
-        chain.append(current)
-        current = current.parent_team
-    return chain
-
-
-def find_lca(first: Any, second: Any) -> Any:
-    if first is None or second is None:
-        return None
-    second_ids = {team.team_id for team in get_ancestry_chain(second)}
-    return next(
-        (
-            team
-            for team in get_ancestry_chain(first)
-            if team.team_id in second_ids
-        ),
-        None,
-    )
-
-
-def get_path_to_ancestor(start: Any, ancestor: Any) -> List[Any]:
-    path = []
-    current = start
-    while current is not None:
-        path.append(current)
-        if current is ancestor:
-            break
-        current = current.parent_team
-
-    return path
-
-
 class BaseMigrationPolicy:
     async def authorize_migration(self, team: Any, target_parent: Any, manager: Any, rationale: str) -> MigrationOperationResult:
         """Returns the durable operation; missing personal choices are pending."""
@@ -94,49 +59,10 @@ class PermissiveMigrationPolicy(BaseMigrationPolicy):
     pass
 
 
-def _principal_for_team(team: Any, manager: Any) -> ApprovalPrincipal:
-    if team is None:
-        return ApprovalPrincipal(kind="agent", principal_id=manager.root_ai.agent_id)
-    return ApprovalPrincipal(kind="agent_team", principal_id=team.team_id)
-
-
-def _deduplicate(principals: List[ApprovalPrincipal]) -> List[ApprovalPrincipal]:
-    result = []
-    seen = set()
-    for principal in principals:
-        if principal.key not in seen:
-            seen.add(principal.key)
-            result.append(principal)
-    return result
-
-
-def migration_approval_principals(
-    policy_name: str,
-    team: Any,
-    target_parent: Any,
-    manager: Any,
-) -> List[ApprovalPrincipal]:
-    """Resolves the exact migration authorities for validation and approval."""
-    if policy_name == "permissive":
-        return []
-    current_parent = team.parent_team
-    lca = find_lca(current_parent, target_parent)
-    if policy_name == "ancestor_approval":
-        return _deduplicate(
-            [
-                _principal_for_team(current_parent, manager),
-                _principal_for_team(target_parent, manager),
-                _principal_for_team(lca, manager),
-            ]
-        )
-    if policy_name == "lineage_path":
-        path = get_path_to_ancestor(current_parent, lca)
-        path.extend(get_path_to_ancestor(target_parent, lca))
-        principals = [_principal_for_team(item, manager) for item in path]
-        if lca is None:
-            principals.append(_principal_for_team(None, manager))
-        return _deduplicate(principals)
-    raise ValueError(f"Unknown migration policy: {policy_name!r}.")
+def migration_approval_principals(policy_name, team, target_parent, manager):
+    """Use the same explicit-parent route as the authoritative migration service."""
+    operation = "voluntary_detachment" if target_parent is None else "reattachment" if team.is_independent else "migration"
+    return manager._migration.route(team, target_parent, policy_name, operation)[0]
 
 
 class AncestorApprovalMigrationPolicy(BaseMigrationPolicy):

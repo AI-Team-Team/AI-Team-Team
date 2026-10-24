@@ -12,13 +12,25 @@ Phase 3 adds [team conversations and personal direct chat](Phase_3.md), includin
 
 Phase 4 adds [registered execution and background detachment](Phase_4.md), with resource coordination, protected owner-only results, independent task dimensions, factual stopping, and schema 14.
 
+Phase 5 implements [round-free institutional execution and health supervision](Phase_5.md) with explicit organizational parents, personal-mail cases, independent resource attempts, restricted common-runtime audits, and schema 15.
+
+Phase 5 implementation and local acceptance checks are complete; Phase 6 lifecycle and recovery integration, Phase 7 broader documentation work, and Phase 8 extended reliability acceptance remain separate work.
+
+The Autonomous Agent Runtime coordinates personal activity, scheduling, provider calls, and invocation-scoped execution.
+
+Governance, Team Formation, communication, migration, failover, and supervision retain their own institutional rules, authorization boundaries, and durable state.
+
+These mechanisms use the common runtime to execute Agent activity, while explicit ballots, exact-revision consent, and their domain transactions determine institutional outcomes.
+
+The execution mechanism replaced in this update is discussion-round orchestration; receiving a notification, running an Agent, or producing an ordinary answer supplies no institutional authority.
+
 The governing [blueprint](../../blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md) and [implementation plan](../../blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md), including the confirmed decisions recorded on 2026-10-07, remain authoritative.
 
 This directory records their engineering contracts and phase-specific verification artifacts.
 
 All D01 through D15 decisions remain confirmed, and no institution is reopened by these specifications.
 
-The running persistence schema is now `14`; schema 13 and earlier are rejected without migration.
+The running persistence schema is now `15`; schema 14 and earlier are rejected without migration.
 
 ## Deliverables
 
@@ -26,6 +38,7 @@ The running persistence schema is now `14`; schema 13 and earlier are rejected w
 - [Schema 12](Schema_12.md): relational groups, reference constraints, ordering, and publication protocol.
 - [Schema 13](Schema_13.md): chat command receipts, personal preferences, explicit reply references, and authoritative conversation projections.
 - [Schema 14](Schema_14.md): captured executor contracts, protected source provenance, Host execution origin, timing evidence, and unique input/result records.
+- [Schema 15](Schema_15.md): electorate-bound cases, explicit topology evidence, resource attempts, scoped audit findings, and durable health handling.
 - [Replacement inventory](Replacement_Inventory.md): ownership and disposition of round-dependent code and documentation.
 - [Machine-readable line inventory](round_dependencies.json): every selected source occurrence, including exports, tests, callbacks, diagrams, and examples.
 - [Built-in effect declarations](tool_effects.json): the reviewed target registration contracts, not permissions already installed in `Tool`.
@@ -35,6 +48,7 @@ The running persistence schema is now `14`; schema 13 and earlier are rejected w
 - [Phase 2 implementation](Phase_2.md): one personal admission, fair continuation, explicit controls, notification frames, exact personal checkpoints, and bounded ordinary/audit/maintenance requests.
 - [Phase 3 implementation](Phase_3.md): deliberate publications, historical membership visibility, direct relationships, read and withdrawal evidence, and isolated personal reminders.
 - [Phase 4 implementation](Phase_4.md): execution ownership, explicit and threshold detachment, resource coordination, results, controls, and supported health evidence.
+- [Phase 5 implementation](Phase_5.md): retained institutional mechanisms using common Agent execution, complete round removal, and completed local adversarial verification.
 
 ## Green and Red Checks
 

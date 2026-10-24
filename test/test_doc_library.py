@@ -1,3 +1,4 @@
+import asyncio
 import os
 import json
 import shutil
@@ -14,6 +15,7 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from ai_team_team import ATTManager, Agent, AgentTeam, Tool, ATTConfig, DocumentLibrary
+from test.governance_client import settle_governance_activity
 
 class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -22,12 +24,14 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
         os.chdir(self.tmpdir)
         
         self.mock_client = MagicMock()
-        self.mock_client.generate = AsyncMock(return_value='{"is_healthy": true, "reason": "Dialogue approved."}')
+        self.mock_client.generate = AsyncMock(return_value="Action: set_activity_intent(intent={'kind': 'idle'})")
+        self.mock_client.supports_native_tool_calling = lambda: False
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
         self.manager = ATTManager(root_ai=self.root_ai, persistence_mode="volatile")
         self.manager.register_tools_context({"att_manager": self.manager})
 
-    def tearDown(self):
+    async def asyncTearDown(self):
+        await self.manager.close()
         os.chdir(self.old_cwd)
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
@@ -42,7 +46,7 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
 
     async def test_built_in_library_creation(self):
         """Verify that a team gets a default built-in DocLib on creation."""
-        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3, is_public_visible=True)
+        team = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3, is_public_visible=True)
         self.assertIsNotNone(team.doc_library)
         self.assertEqual(team.doc_library.owner_team_id, team.team_id)
         self.assertTrue(team.doc_library.is_public_visible)
@@ -58,7 +62,7 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
             "notes.md": "# Quick notes"
         }
         team = self.manager.create_agent_team(
-            creator=self.root_ai,
+            parent=self.root_ai, creator=self.root_ai,
             member_count=3,
             initial_docs=initial_docs
         )
@@ -74,8 +78,8 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
 
     async def test_public_visibility_listing(self):
         """Verify discovery of publicly visible libraries and listing."""
-        team_a = self.manager.create_agent_team(creator=self.root_ai, member_count=3, is_public_visible=True)
-        team_b = self.manager.create_agent_team(creator=self.root_ai, member_count=3, is_public_visible=False)
+        team_a = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3, is_public_visible=True)
+        team_b = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3, is_public_visible=False)
         
         # We call the tool list_public_libraries
         list_tool = team_a.tools["list_public_libraries"]
@@ -86,8 +90,8 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
 
     async def test_permission_acl_isolation(self):
         """Verify permissions: read/write permissions block or allow access correctly."""
-        team_a = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
-        team_b = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team_a = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3)
+        team_b = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3)
         
         lib_a_id = team_a.doc_library.lib_id
         
@@ -122,19 +126,9 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
     async def test_dispatch_subagent_with_docs(self):
         """Verify that dispatch_subagent correctly propagates documents to the spawned child team."""
         preset = self.manager.get_preset("generic")
-        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3)
         dispatch_tool = team.tools["dispatch_subagent"]
         
-        # We mock execute_team_discussion to capture the spawned team
-        original_execute = self.manager.execute_team_discussion
-        captured_child = None
-        
-        async def mock_execute(child_team, prompt, rounds=2):
-            nonlocal captured_child
-            captured_child = child_team
-            return "Result"
-            
-        self.manager.execute_team_discussion = mock_execute
         agent_token = self.manager._active_tool_agent.set(team.members[0])
         team_token = self.manager._active_team.set(team)
         
@@ -143,7 +137,7 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
                 "guide.txt": "Subagent guidelines",
                 "rules/rules.md": "# Safety first"
             }
-            await dispatch_tool(
+            result = await dispatch_tool(
                 task="Analyze task",
                 team_purpose="Analysis team",
                 member_configs={
@@ -156,9 +150,13 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
         finally:
             self.manager._active_team.reset(team_token)
             self.manager._active_tool_agent.reset(agent_token)
-            self.manager.execute_team_discussion = original_execute
             
-        self.assertIsNotNone(captured_child)
+        payload = json.loads(result)
+        self.assertEqual(payload['status'], 'CREATED')
+        captured_child = self.manager.teams[payload['team_id']]
+        if self.manager._formations.tasks:
+            await asyncio.gather(*tuple(self.manager._formations.tasks))
+        await settle_governance_activity(self.manager)
         self.assertIsNotNone(captured_child.doc_library)
         
         # Read propagated files from child library
@@ -171,7 +169,7 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
     async def test_token_bounded_library_file_reading(self):
         """Verify that model reads are bounded by content tokens rather than file size."""
         self.manager.config.file_read.max_read_tokens = 40
-        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3)
         lib_id = team.doc_library.lib_id
 
         # Write large content (exceeds 50 KB)
@@ -204,7 +202,7 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
 
     async def test_prefix_bypass_path_traversal_prevention(self):
         """Verify that sibling prefix traversal (e.g. DL-AT-abc123_private) is blocked."""
-        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3)
         lib = team.doc_library
         
         base_dir_name = os.path.basename(lib.root_dir)
@@ -226,7 +224,7 @@ class TestDocLibrary(unittest.IsolatedAsyncioTestCase):
     async def test_portable_file_operations_without_dir_fd(self):
         """Verify the checked fallback used on platforms without dir_fd."""
         team = self.manager.create_agent_team(
-            creator=self.root_ai,
+            parent=self.root_ai, creator=self.root_ai,
             member_count=3,
         )
         library = team.doc_library

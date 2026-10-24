@@ -5,10 +5,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from ai_team_team.doc_library import DocumentLibrary
 
 from ...agent import Agent
+from ...exceptions import TeamCreationLimitError
 from ...team import AgentTeam
 
 
 class TeamCreationValidationMixin:
+    def validate_creation_depth(self, parent) -> None:
+        """All creation paths use the live parent position and Host depth limit."""
+        if isinstance(parent, AgentTeam) and parent.depth >= self.manager.config.max_delegation_depth:
+            raise TeamCreationLimitError(
+                f"Maximum delegation depth ({self.manager.config.max_delegation_depth}) would be exceeded."
+            )
+
     def _resolve_existing_team_members(
         self,
         existing_members: Optional[List[Agent]],
@@ -30,6 +38,7 @@ class TeamCreationValidationMixin:
                 or manager.agents.get(agent.name) is not agent
                 or agent.lifecycle_state != "active"
                 or manager.supervisor.is_supervisory_agent(agent.agent_id)
+                or manager._topology.is_agent_pending(agent.agent_id)
             ):
                 raise ValueError(
                     f"Existing Agent {agent.name!r} must be actively registered with this manager."
@@ -45,6 +54,7 @@ class TeamCreationValidationMixin:
                 or manager.agents.get(agent.name) is not agent
                 or agent.lifecycle_state != "active"
                 or manager.supervisor.is_supervisory_agent(agent.agent_id)
+                or manager._topology.is_agent_pending(agent.agent_id)
             ):
                 raise ValueError(f"Existing Agent ID {agent_id!r} is not actively registered.")
             resolved.append(agent)
@@ -189,48 +199,8 @@ class TeamCreationValidationMixin:
         manager = self.manager
         if manager._closing:
             raise RuntimeError("ATTManager is closing and rejects new teams.")
+        self._validate_creation_authority(stage)
         team = stage["team"]
-        creator = team.creator
-        if isinstance(creator, Agent) and (
-            creator.lifecycle_state != "active"
-            or manager._agents_by_id.get(creator.agent_id) is not creator
-            or manager.agents.get(creator.name) is not creator
-        ):
-            raise ValueError("The creator Agent changed during team staging.")
-        if stage.get("parent_override_provided"):
-            current_parent = stage["parent"]
-            if current_parent is not None and manager.teams.get(current_parent.team_id) is not current_parent:
-                raise ValueError("The intended parent changed during team staging.")
-            if isinstance(creator, AgentTeam) and current_parent is not creator:
-                raise ValueError("An AgentTeam creator must be the intended parent.")
-        elif isinstance(creator, AgentTeam):
-            if manager.teams.get(creator.team_id) is not creator:
-                raise ValueError("The creator AgentTeam changed during team staging.")
-            current_parent = creator
-        else:
-            if creator.lifecycle_state != "active":
-                raise ValueError("The creator Agent is no longer active.")
-            current_parent = manager.get_agent_team(creator)
-        if current_parent is not stage["parent"]:
-            raise ValueError("The proposed parent changed during team staging.")
-        if current_parent is not None:
-            manager._topology.require_available(current_parent)
-        required_agent_id = stage.get("required_creator_member_agent_id")
-        if required_agent_id is not None:
-            required_agent = manager._agents_by_id.get(required_agent_id)
-            if (
-                required_agent is None
-                or required_agent.lifecycle_state != "active"
-                or manager.agents.get(required_agent.name) is not required_agent
-            ):
-                raise ValueError("The formation initiator changed during team staging.")
-            authority_team = creator if isinstance(creator, AgentTeam) else current_parent
-            if authority_team is not None and all(
-                member.agent_id != required_agent_id for member in authority_team.members
-            ):
-                raise ValueError(
-                    "The formation initiator left the creating AgentTeam during staging."
-                )
         if team.team_id in manager.teams:
             raise ValueError(f"AgentTeam ID {team.team_id!r} is already registered.")
         for lib_id in stage["libraries"]:
@@ -241,6 +211,48 @@ class TeamCreationValidationMixin:
             existing_name = manager.agents.get(agent.name)
             if existing_id is not None or existing_name is not None:
                 raise ValueError(f"Agent identity {agent.name!r} changed during team staging.")
+
+    def validate_published_creation(self, stage):
+        """Pending registry objects confer no authority before their exact receipt."""
+        team = stage["team"]
+        if self.manager.teams.get(team.team_id) is not team or not team._publication_pending:
+            raise ValueError("The provisional AgentTeam changed before creation acceptance.")
+        self._validate_creation_authority(stage)
+
+    def _validate_creation_authority(self, stage):
+        """Shared live checks for staging publication and authoritative acceptance."""
+        manager = self.manager
+        team = stage["team"]
+        creator = team.creator
+        if isinstance(creator, Agent) and (
+            creator.lifecycle_state != "active"
+            or manager._agents_by_id.get(creator.agent_id) is not creator
+            or manager.agents.get(creator.name) is not creator
+        ):
+            raise ValueError("The creator Agent changed during team staging.")
+        if isinstance(creator, AgentTeam):
+            manager._topology.require_available(creator)
+        current_parent = manager._topology.resolve_parent(stage["parent"])
+        if team.team_kind == "ordinary":
+            self.validate_creation_depth(current_parent)
+        required_agent_id = stage.get("required_creator_member_agent_id")
+        if required_agent_id is not None:
+            required_agent = manager._agents_by_id.get(required_agent_id)
+            if (
+                required_agent is None
+                or required_agent.lifecycle_state != "active"
+                or manager.agents.get(required_agent.name) is not required_agent
+            ):
+                raise ValueError("The formation initiator changed during team staging.")
+            authority_team = creator if isinstance(creator, AgentTeam) else current_parent if isinstance(current_parent, AgentTeam) else None
+            if authority_team is not None and all(
+                member.agent_id != required_agent_id for member in authority_team.members
+            ):
+                raise ValueError(
+                    "The formation initiator left the creating AgentTeam during staging."
+                )
+        if len(team.members) < manager.config.min_subagent_team_size:
+            raise ValueError("The founding membership no longer meets the minimum team size.")
         for agent in stage["existing_agents"]:
             if (
                 manager._agents_by_id.get(agent.agent_id) is not agent

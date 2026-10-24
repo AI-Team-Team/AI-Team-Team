@@ -190,8 +190,6 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
             raise ToolPermissionError("Only an active team member can vote.")
         caller_agent_name = actual_agent.name
         caller_agent_id = actual_agent.agent_id
-        new_agent = None
-        membership_changed = False
 
         async with att_manager._messaging.membership_transaction(actual_team) as change:
             if actual_agent not in actual_team.members:
@@ -238,123 +236,8 @@ def build_membership_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
                     )
                 else:
                     prop["status"] = "approved"
-                    details = prop.setdefault("proposed_details", {})
-                    if getattr(actual_team, "is_running", False):
-                        details["executed"] = False
-                        if prop["action"] == "remove" and len(
-                            actual_team.members
-                        ) <= att_manager.config.min_subagent_team_size:
-                            prop["status"] = "rejected"
-                            result = (
-                                f"Proposal '{proposal_id}' failed execution. "
-                                "Removing the member would violate minimum "
-                                "team size constraints."
-                            )
-                        else:
-                            result = (
-                                f"Proposal '{proposal_id}' approved "
-                                f"({agree_count}/{total_members} Agree). "
-                                "Membership execution is deferred to the end "
-                                "of the current round."
-                            )
-                    elif details.get("executed", False):
-                        result = f"Proposal '{proposal_id}' was already executed."
-                    elif prop["action"] == "add":
-                        details["executed"] = True
-                        role_name = prop["target"]
-                        model_name = details.get("model")
-                        role_desc = details.get("role_description", "")
-                        sys_inst = details.get("system_instructions", "")
-                        if model_name and model_name != "default":
-                            if model_name in att_manager.llm_clients:
-                                client = att_manager.llm_clients[model_name]
-                            elif (
-                                model_name in att_manager.model_configs
-                                and att_manager.generator_handler
-                            ):
-                                from ..core import HandlerClientAdapter
-
-                                client = HandlerClientAdapter(
-                                    model_name, att_manager.generator_handler
-                                )
-                                client._supports_native = (
-                                    att_manager.model_configs.get(
-                                        model_name, {}
-                                    ).get("supports_native_tool_calling")
-                                    is True
-                                )
-                            else:
-                                prop["status"] = "rejected"
-                                result = (
-                                    f"Proposal '{proposal_id}' failed execution because model {model_name!r} is not registered."
-                                )
-                                client = None
-                        else:
-                            from ..core import ManagerDefaultClientAdapter
-
-                            client = ManagerDefaultClientAdapter(att_manager)
-                        if client is not None:
-                            from ..core import Agent
-
-                            new_agent = Agent(
-                                name=att_manager.unique_agent_name(
-                                    f"Dynamic_{role_name}", actual_team
-                                ),
-                                role=role_name,
-                                llm_client=client,
-                                role_description=role_desc,
-                                system_instructions=sys_inst,
-                            )
-                            if any(
-                                member.name == new_agent.name
-                                for member in actual_team.members
-                            ):
-                                prop["status"] = "rejected"
-                                result = (
-                                    f"Proposal '{proposal_id}' failed execution because member {new_agent.name!r} already exists."
-                                )
-                                new_agent = None
-                            else:
-                                change.register_agent(new_agent)
-                                change.members.append(new_agent)
-                                membership_changed = True
-                                result = (
-                                    f"Proposal '{proposal_id}' approved "
-                                    f"({agree_count}/{total_members} Agree). "
-                                    f"Added new member '{new_agent.name}' to the team!"
-                                )
-                    else:
-                        details["executed"] = True
-                        min_size = att_manager.config.min_subagent_team_size
-                        target_agent = next(
-                            (
-                                member
-                                for member in actual_team.members
-                                if member.name == prop["target"]
-                            ),
-                            None,
-                        )
-                        if len(actual_team.members) <= min_size:
-                            prop["status"] = "rejected"
-                            result = (
-                                f"Proposal '{proposal_id}' failed execution. "
-                                "Removing the member would violate minimum "
-                                "team size constraints."
-                            )
-                        elif target_agent is None:
-                            prop["status"] = "rejected"
-                            result = (
-                                f"Proposal '{proposal_id}' failed execution. "
-                                f"Member '{prop['target']}' not found."
-                            )
-                        else:
-                            change.members.remove(target_agent)
-                            membership_changed = True
-                            result = (
-                                f"Proposal '{proposal_id}' approved "
-                                f"({agree_count}/{total_members} Agree). "
-                                f"Removed member '{target_agent.name}' from the team!"
-                            )
+                    effect = att_manager._membership.execute_approved(change, actual_team, prop)
+                    result = f"Proposal '{proposal_id}' {prop['status']} ({agree_count}/{total_members} Agree). {effect}"
 
         return result
 

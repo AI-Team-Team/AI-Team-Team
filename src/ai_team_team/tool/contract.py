@@ -133,7 +133,7 @@ class Tool:
         try:
             bound = self._signature.bind(*args, **kwargs)
         except TypeError as exc:
-            raise ToolArgumentError(str(exc)) from exc
+            raise ToolArgumentError(str(exc), error_kind="signature_binding") from exc
 
         mapping = dict(bound.arguments)
         raw_mapping = dict(mapping)
@@ -168,7 +168,10 @@ class Tool:
             ValueError,
             OverflowError,
         ) as exc:
-            raise ToolArgumentError(str(exc)) from exc
+            kind = ("pydantic:" + exc.errors(include_input=False)[0]["type"] if isinstance(exc, ValidationError)
+                    else "json_schema:" + str(exc.validator) if isinstance(exc, JSONSchemaValidationError)
+                    else "argument_serialization")
+            raise ToolArgumentError(str(exc), error_kind=kind) from exc
 
         for name, value in mapping.items():
             bound.arguments[name] = value

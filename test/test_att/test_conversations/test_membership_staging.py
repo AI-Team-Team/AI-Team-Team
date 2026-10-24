@@ -49,7 +49,7 @@ class MembershipStagingTests(ChatTestCase):
             saving = asyncio.create_task(self.manager.save_state())
             await asyncio.wait_for(entered.wait(), 10)
             async with self.manager._activity.lock:
-                changing = asyncio.create_task(self.manager._membership._apply_deferred_membership_changes(team))
+                changing = asyncio.create_task(self.manager._membership.apply_approved_proposals(team))
                 try:
                     (reservation,) = await self.prepared()
                     self.assertEqual(set(self.manager._agents_by_id), known)
@@ -69,7 +69,7 @@ class MembershipStagingTests(ChatTestCase):
             self.assertNotIn("executed", json.loads(details))
         await self.manager.load_state(self.path)
         team = self.manager.teams[team.team_id]
-        await self.manager._membership._apply_deferred_membership_changes(team)
+        await self.manager._membership.apply_approved_proposals(team)
         self.assertEqual(sum(member.role == "StagedMember" for member in team.members), 1)
 
     async def test_accepted_cancel_publishes_every_identity_and_skips_stale_proposal_snapshots(self):
@@ -87,7 +87,7 @@ class MembershipStagingTests(ChatTestCase):
             return original_write(snapshot)
 
         with patch.object(store, "write", slow):
-            changing = asyncio.create_task(self.manager._membership._apply_deferred_membership_changes(team))
+            changing = asyncio.create_task(self.manager._membership.apply_approved_proposals(team))
             try:
                 self.assertTrue(await asyncio.to_thread(entered.wait, 5))
                 (reservation,) = tuple(self.manager._agent_registry.pending.values())
@@ -111,7 +111,7 @@ class MembershipStagingTests(ChatTestCase):
         await self.manager.load_state(self.path)
         restored = self.manager.teams[team.team_id]
         self.assertTrue(restored.proposals["staged-proposal"]["proposed_details"]["executed"])
-        await self.manager._membership._apply_deferred_membership_changes(restored)
+        await self.manager._membership.apply_approved_proposals(restored)
         self.assertEqual(sum(member.role == "StagedMember" for member in restored.members), 1)
 
     async def test_failure_releases_only_this_staged_identity_and_workspace(self):
@@ -121,7 +121,7 @@ class MembershipStagingTests(ChatTestCase):
         directories = set(Path(self.manager.config.workspace_root, ".att_doc_libs").iterdir())
         with patch.object(self.manager._records, "commit", side_effect=RuntimeError("Injected membership rejection")):
             with self.assertRaisesRegex(RuntimeError, "rejection"):
-                await self.manager._membership._apply_deferred_membership_changes(team)
+                await self.manager._membership.apply_approved_proposals(team)
         self.assertEqual(before, (set(self.manager._agents_by_id), set(self.manager.libraries)))
         self.assertEqual(directories, set(Path(self.manager.config.workspace_root, ".att_doc_libs").iterdir()))
         self.assertFalse(self.manager._agent_registry.pending)
@@ -136,7 +136,7 @@ class MembershipStagingTests(ChatTestCase):
         second.proposals = {"second-staged-proposal": {**second.proposals["staged-proposal"], "proposal_id": "second-staged-proposal"}}
         await self.manager.save_state()
         async with self.manager._activity.lock:
-            tasks = [asyncio.create_task(self.manager._membership._apply_deferred_membership_changes(team))
+            tasks = [asyncio.create_task(self.manager._membership.apply_approved_proposals(team))
                      for team in (first, second)]
             try:
                 reservations = await self.prepared(2)
@@ -197,7 +197,7 @@ class MembershipStagingTests(ChatTestCase):
         store = self.manager._persistence._store(self.path)
         with patch.object(store, "write", side_effect=RuntimeError("Injected membership disk failure")):
             with self.assertRaisesRegex(RuntimeError, "disk failure"):
-                await self.manager._membership._apply_deferred_membership_changes(team)
+                await self.manager._membership.apply_approved_proposals(team)
         self.assertEqual(before, (set(self.manager._agents_by_id), set(self.manager.libraries)))
         self.assertEqual(directories, set(Path(self.manager.config.workspace_root, ".att_doc_libs").iterdir()))
         self.assertFalse(self.manager._agent_registry.pending)

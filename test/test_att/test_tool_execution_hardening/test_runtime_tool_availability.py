@@ -1,3 +1,5 @@
+from test.personal_activity import interact_and_idle
+from test.test_att.test_institutional_runtime.test_tool_entry_points import proposal
 import asyncio
 import concurrent.futures
 import os
@@ -13,11 +15,10 @@ from typing_extensions import NotRequired, TypedDict
 
 from ai_team_team import (
     Agent,
-    AgentTurnStatus,
+    InteractionStatus,
     ATTException,
     ATTConfig,
     ATTManager,
-    DiscussionStatus,
     OperationalStatus,
     RetryableToolError,
     StatePersistenceError,
@@ -72,7 +73,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=self.tmpdir, tool_calling_mode="react"),
             persistence_mode="volatile",
         )
-        self.team = self.manager.create_agent_team(self.manager.root_ai)
+        self.team = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
         self.agent = self.team.members[0]
 
     async def asyncTearDown(self):
@@ -82,19 +83,19 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
         self.manager.config.enable_dynamic_delegation = False
         self.assertNotIn("dispatch_subagent", self.manager.get_available_tools(self.team, self.agent))
         self.assertNotIn(
-            "discuss_team_formation_proposal",
+            "propose_team_formation",
             self.manager.get_available_tools(self.team, self.agent),
         )
         self.manager.config.enable_dynamic_delegation = True
         self.assertIn("dispatch_subagent", self.manager.get_available_tools(self.team, self.agent))
         self.assertIn(
-            "discuss_team_formation_proposal",
+            "propose_team_formation",
             self.manager.get_available_tools(self.team, self.agent),
         )
         self.manager.config.max_delegation_depth = self.team.depth
         self.assertNotIn("dispatch_subagent", self.manager.get_available_tools(self.team, self.agent))
-        self.assertNotIn(
-            "discuss_team_formation_proposal",
+        self.assertIn(
+            "propose_team_formation",
             self.manager.get_available_tools(self.team, self.agent),
         )
         self.assertNotIn("delegate_escalation", self.manager.get_available_tools(self.team, self.agent))
@@ -107,8 +108,8 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
 
         async with self.manager.agent_invocation(self.agent):
             result = await executor.execute(
-                "discuss_team_formation_proposal",
-                kwargs={"objective": "Attempt a disabled delegation path."},
+                "propose_team_formation",
+                kwargs={"proposal": proposal()},
                 tools=dict(self.team.tools),
             )
 
@@ -130,37 +131,34 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
         await self.manager.flush_callbacks()
         self.assertEqual(events[0][0], "tool_capability_probe_failed")
         self.assertNotIn("probe failed", repr(events[0][1]))
-    async def test_direct_client_probe_failure_without_manager_falls_back(self):
-        from ai_team_team import AgentTeam
-
+    async def test_direct_client_probe_failure_uses_the_common_text_runtime(self):
         class BrokenProbe:
             def supports_native_tool_calling(self):
                 raise RuntimeError("probe failed")
 
             async def generate(self, **kwargs):
-                return "Final Answer: text fallback"
+                return "Action: set_activity_intent(intent={'kind': 'idle'})"
 
-        agent = Agent("Standalone", "Tester", BrokenProbe())
-        team = AgentTeam(agent, preset_name="standalone")
-        team.members = [agent]
-        result = await team.execute_reasoning_step_detailed(
-            agent, "work", "system", manager=None
-        )
-        self.assertIs(result.status, AgentTurnStatus.COMPLETED)
-        self.assertEqual(result.answer, "text fallback")
+        client = BrokenProbe()
+        self.agent.llm_client = client
+        self.manager.register_llm_client("broken-probe", client)
+        self.manager.config.tool_calling_mode = "auto"
+        result = await interact_and_idle(self.manager, self.agent, "Work.", team=self.team)
+        self.assertIs(result.status, InteractionStatus.COMPLETED)
+        self.assertFalse(hasattr(self.team, "execute_reasoning_step_detailed"))
+
     async def test_native_handler_receives_tool_objects(self):
         captured = None
 
         async def handler(tools=None, **kwargs):
             nonlocal captured
             captured = tools
-            return LLMResponse(text="done")
+            from test.test_att.test_agent_activity._support import idle
+            return idle()
 
         self.manager.register_generator_handler(handler)
         self.manager.config.tool_calling_mode = "native"
         self.agent.llm_client = HandlerClientAdapter("default", handler)
-        await self.team.execute_reasoning_step_detailed(
-            self.agent, "work", "system", manager=self.manager
-        )
+        await interact_and_idle(self.manager, self.agent, "Work.", team=self.team)
         self.assertTrue(captured)
         self.assertTrue(all(isinstance(tool, Tool) for tool in captured))

@@ -14,6 +14,20 @@ from ai_team_team.database.models import (
 
 class FormationWriteMixin:
     @staticmethod
+    def _write_agent_inbox_dependencies(session: Any, messages: Iterable[Dict[str, Any]]) -> None:
+        """Insert causal mail without rewriting independent live read receipts."""
+        from ai_team_team.core.exceptions import StatePersistenceError
+
+        for message in messages:
+            existing = session.get(AgentInboxModel, message["message_id"])
+            if existing is not None:
+                if any(getattr(existing, key) != message[key] for key in
+                       ("agent_id", "message_type", "payload", "created_at")):
+                    raise StatePersistenceError("A causal personal mail identity cannot be rewritten.")
+                continue
+            session.add(AgentInboxModel(**message))
+
+    @staticmethod
     def _write_agent_inboxes(session: Any, inboxes: Dict[str, Dict[str, Any]]) -> None:
         for agent_id, inbox in inboxes.items():
             session.query(AgentInboxModel).filter_by(agent_id=agent_id).delete(
@@ -48,6 +62,7 @@ class FormationWriteMixin:
                         else None
                     ),
                     parent_team_id=request.get("parent_team_id"),
+                    parent_agent_id=request.get("parent_agent_id"),
                     task=request.get("task"),
                     member_count=request["member_count"],
                     roles_and_presets=request.get("roles_and_presets"),
@@ -119,7 +134,8 @@ class FormationWriteMixin:
                     creator_team_id=(
                         draft["creator_id"] if draft["creator_kind"] == "agent_team" else None
                     ),
-                    deliberation_team_id=draft.get("creator_team_id"),
+                    parent_team_id=draft.get("parent_team_id"),
+                    parent_agent_id=draft.get("parent_agent_id"),
                     request_id=draft.get("request_id"),
                     base_revision=draft.get("base_revision"),
                     base_revision_fingerprint=draft.get("base_revision_fingerprint"),
@@ -128,7 +144,6 @@ class FormationWriteMixin:
                     participant_agent_ids=draft.get("participant_agent_ids", []),
                     source_message_id=draft.get("source_message_id"),
                     initiator_invocation_id=draft.get("initiator_invocation_id"),
-                    checkpoint_context={"source_discussion_id": draft.get("source_discussion_id")},
                     candidate=draft.get("candidate"),
                     reason=draft.get("reason", ""),
                     created_at=draft["created_at"],

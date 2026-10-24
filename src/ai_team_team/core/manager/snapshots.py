@@ -37,34 +37,66 @@ class SnapshotBuilder:
     def _capture_state_snapshot(self, dirty: Dict[str, Any]) -> Dict[str, Any]:
         manager = self.manager
         full = dirty["full"]
+        formation_state = dirty.get("_formation_state", manager._formations._published)
         agent_lookup = {**manager._agents_by_id, **dirty.get("_staged_agents", {})}
         library_lookup = {**manager.libraries, **dirty.get("_staged_libraries", {})}
         now = time.time()
         temporary_teams = {
             team_id: team
             for team_id, team in manager.teams.items()
-            if team.team_kind == "supervisory"
+            if team.team_kind == "supervisory" or (getattr(team, "_publication_pending", False)
+                and team_id not in dirty.get("_creation_teams", ()))
         }
         temporary_team_ids = set(temporary_teams)
         temporary_agent_ids = {
             agent.agent_id
             for team in temporary_teams.values()
             for agent in team.members
+            if team.team_kind == "supervisory" or agent.agent_id in team._provisional_agent_ids
         }
         temporary_library_ids = {
             f"DL-{team_id}" for team_id in temporary_team_ids
         } | {f"PDL-{agent_id}" for agent_id in temporary_agent_ids}
         memory_records = capture_memory_records(manager, dirty)
-        round_ids = (
-            set(manager._governance.rounds)
+        case_ids = (
+            set(manager._governance.cases)
             if full
-            else set(dirty["governance_rounds"])
+            else set(dirty["governance_cases"])
         )
-        governance_rounds = [
-            manager._governance.rounds[identifier].model_dump(mode="json")
-            for identifier in sorted(round_ids)
-            if identifier in manager._governance.rounds
+        # Historical positions keep their exact acceptance proof even on an
+        # independent first partial export. Existing identity dependencies are
+        # insert-only and never overwrite another person's current state.
+        case_ids.update(row.values["case_id"] for row in manager._records.snapshot()
+            if row.table_name == "parent_acceptances" and row.values["case_id"] is not None)
+        governance_cases = [
+            manager._governance.cases[identifier].model_dump(mode="json")
+            for identifier in sorted(case_ids)
+            if identifier in manager._governance.cases
         ]
+        governance_mail_dependencies = []
+        if not full:
+            for case in governance_cases:
+                for owner in case["voter_agent_ids"]:
+                    person = agent_lookup.get(owner)
+                    if person is None:
+                        raise StatePersistenceError("A captured governance case is missing its addressed voter.")
+                    with person.inbox_lock:
+                        messages = [dict(mail) for mail in person.agent_inbox
+                            if mail["message_type"] == "governance_choice_request" and mail["payload"].get("case_id") == case["case_id"]]
+                    if len(messages) != 1:
+                        raise StatePersistenceError("A captured governance case is missing its unique addressed mail.")
+                    governance_mail_dependencies.extend(messages)
+        from ai_team_team.database.persistence.records import dependency_closure
+        governance_dependencies = dependency_closure(
+            [manager._records.index[("membership_intervals", (interval_id,))]
+             for item in governance_cases for interval_id in item["electorate_bindings"].values()],
+            manager._records.index,
+        )
+        governance_dependencies += dependency_closure(
+            [row for row in manager._records.snapshot() if row.table_name == "resource_decisions"
+                and any(item["business_kind"] == "failover" and item["business_id"] == row.values["attempt_id"]
+                        for item in governance_cases)], manager._records.index,
+        )
         migration_ids = (
             set(manager._migration.requests)
             if full
@@ -72,7 +104,7 @@ class SnapshotBuilder:
         )
         migration_ids.update(
             item["business_id"]
-            for item in governance_rounds
+            for item in governance_cases
             if item["business_kind"] == "migration"
         )
         migration_requests = [
@@ -82,17 +114,18 @@ class SnapshotBuilder:
         ]
         governance_agents = {
             agent_id
-            for item in governance_rounds
+            for item in governance_cases
             for agent_id in item["voter_agent_ids"]
         }
         governance_agents.update(dirty.get("record_dependency_agents", ()))
         governance_teams = {
             item["principal"]["principal_id"]
-            for item in governance_rounds
+            for item in governance_cases
             if item["principal"]["kind"] == "agent_team"
         }
         governance_teams.update(dirty.get("record_dependency_teams", ()))
         for item in migration_requests:
+            governance_agents.update(identifier for identifier in (item.get("target_parent_agent_id"), item.get("original_parent_agent_id")) if identifier)
             governance_teams.update(
                 identifier
                 for identifier in (
@@ -107,7 +140,7 @@ class SnapshotBuilder:
             | set(dirty["communication_approvals"])
             | {
                 item["business_id"]
-                for item in governance_rounds
+                for item in governance_cases
                 if item["business_kind"] == "communication"
             }
         )
@@ -127,6 +160,11 @@ class SnapshotBuilder:
                 )
                 if request.initiated_by_agent_id is not None:
                     governance_agents.add(request.initiated_by_agent_id)
+                for edge in request.route_evidence.get("edges", ()):
+                    governance_teams.add(edge["team_id"])
+                    parent = edge["parent"]
+                    if parent is not None:
+                        (governance_teams if parent["kind"] == "agent_team" else governance_agents).add(parent["principal_id"])
         governance_teams.update(dirty["inboxes"])
         # A file-only first delta still needs its library's concrete owner.
         # These are insert-only prerequisites, never authoritative Agent edits.
@@ -189,7 +227,7 @@ class SnapshotBuilder:
             }
 
         relevant_teams = (
-            (team for team in manager.teams.values() if team.team_kind == "ordinary")
+            (team for team in manager.teams.values() if team.team_id not in temporary_team_ids)
             if full
             else (
                 manager.teams[team_id]
@@ -228,17 +266,25 @@ class SnapshotBuilder:
                 | dirty["formation_revisions"]
                 | dirty["formation_decisions"]
             ):
-                request = manager._formations.requests.get(request_id)
+                request = formation_state["requests"].get(request_id)
                 if request is None:
                     continue
                 agent_dependency_ids.add(request.initiator_agent_id)
                 agent_dependency_ids.update(request.invitee_agent_ids)
                 if request.creator_kind == "agent":
                     agent_dependency_ids.add(request.creator_id)
+                if request.parent_agent_id is not None:
+                    agent_dependency_ids.add(request.parent_agent_id)
+                if request.parent_team_id is not None:
+                    memory_team_ids.add(request.parent_team_id)
             for draft_id in dirty["formation_drafts"]:
-                draft = manager._formations.drafts.get(draft_id)
+                draft = formation_state["drafts"].get(draft_id)
                 if draft is not None:
                     agent_dependency_ids.add(draft.initiator_agent_id)
+                    if draft.parent_agent_id is not None:
+                        agent_dependency_ids.add(draft.parent_agent_id)
+                    if draft.parent_team_id is not None:
+                        memory_team_ids.add(draft.parent_team_id)
         agent_ids.difference_update(temporary_agent_ids)
         agent_dependency_ids.difference_update(agent_ids | temporary_agent_ids)
         serialized_agents: Dict[str, Dict[str, Any]] = {}
@@ -277,7 +323,7 @@ class SnapshotBuilder:
                 "role": agent.role,
                 "role_description": getattr(agent, "role_description", ""),
                 "system_instructions": getattr(agent, "system_instructions", ""),
-                "model_alias": model_alias,
+                "model_alias": dirty.get("agent_models", {}).get(agent_id, model_alias),
                 "lifecycle_state": agent.lifecycle_state,
                 "presentation_preferences": getattr(agent, "presentation_preferences", {}),
                 "last_context": (dict(agent.last_context) if agent.last_context else None),
@@ -319,7 +365,8 @@ class SnapshotBuilder:
             serialized_teams[team_id] = {
                 "team_id": team.team_id,
                 "state_version": max(1, manager._state_version),
-                "parent_agent_id": getattr(team, "_parent_agent_id", None),
+                "parent_agent_id": dirty.get("team_parents", {}).get(team_id, {}).get("parent_agent_id", getattr(team, "_parent_agent_id", None)),
+                "position_revision": team._position_revision + (1 if team_id in dirty.get("team_parents", {}) else 0),
                 "lifecycle_state": dirty.get("team_lifecycles", {}).get(team.team_id, getattr(team, "_lifecycle_state", "active")),
                 "team_kind": team.team_kind,
                 "preset_name": team.preset_name,
@@ -327,8 +374,7 @@ class SnapshotBuilder:
                 "team_progress": team.team_progress,
                 "depth": team.depth,
                 "chapter_num": team.chapter_num,
-                "parent_team_id": (team.parent_team.team_id if team.parent_team else None),
-                "migration_count": team.migration_count,
+                "parent_team_id": dirty.get("team_parents", {}).get(team_id, {}).get("parent_team_id", team.parent_team.team_id if team.parent_team else None),
                 "creator_type": creator_type,
                 "creator_id": creator_id,
                 "status_map": team.status_snapshot(),
@@ -356,7 +402,7 @@ class SnapshotBuilder:
             if team is None:
                 continue
             with team.inbox_lock:
-                messages = tuple(dict(message) for message in team.message_inbox)
+                messages = tuple(dict(message) for message in dirty.get("team_inboxes", {}).get(team_id, team.message_inbox))
             inboxes[team_id] = {
                 "messages": messages,
                 "message_timestamp": now,
@@ -370,7 +416,8 @@ class SnapshotBuilder:
             if agent is None:
                 continue
             with agent.inbox_lock:
-                messages = tuple(dict(message) for message in agent.agent_inbox)
+                messages = tuple(dict(message) for message in agent.agent_inbox
+                    if manager._inbox.is_capturable(message["message_id"]))
             agent_inboxes[agent_id] = {"messages": messages}
         proposal_ids = (
             set(manager.teams) if full else set(dirty["proposals"])
@@ -479,13 +526,13 @@ class SnapshotBuilder:
             if full
             else set(dirty["communication_requests"])
         )
-        request_ids.update(item["business_id"] for item in governance_rounds if item["business_kind"] == "communication")
+        request_ids.update(item["business_id"] for item in governance_cases if item["business_kind"] == "communication")
         approval_request_ids = (
             set(manager.broker.communication_requests)
             if full
             else set(dirty["communication_approvals"])
         )
-        approval_request_ids.update(item["business_id"] for item in governance_rounds if item["business_kind"] == "communication")
+        approval_request_ids.update(item["business_id"] for item in governance_cases if item["business_kind"] == "communication")
         agreement_ids = (
             set(manager.broker.agreements) if full else set(dirty["communication_agreements"])
         )
@@ -519,51 +566,52 @@ class SnapshotBuilder:
         ]
 
         formation_request_ids = (
-            set(manager._formations.requests)
+            set(formation_state["requests"])
             if full
             else set(dirty["formation_requests"])
         )
         formation_invitation_request_ids = (
-            set(manager._formations.requests)
+            set(formation_state["requests"])
             if full
             else set(dirty["formation_invitations"])
         )
         formation_requests = [
-            manager._formations.requests[request_id].model_dump(mode="json")
+            formation_state["requests"][request_id].model_dump(mode="json")
             for request_id in sorted(formation_request_ids)
-            if request_id in manager._formations.requests
+            if request_id in formation_state["requests"]
         ]
         formation_invitations = []
         for request_id in sorted(formation_invitation_request_ids):
-            if request_id not in manager._formations.requests:
+            if request_id not in formation_state["requests"]:
                 continue
             formation_invitations.extend(
                 invitation.model_dump(mode="json")
-                for invitation in manager._formations._request_invitations(request_id)
+                for invitation in formation_state["invitations"].values()
+                if invitation.request_id == request_id
             )
         formation_revisions = [
             revision.model_dump(mode="json")
-            for revision in manager._formations.revisions.values()
+            for revision in formation_state["revisions"].values()
             if full or revision.request_id in dirty["formation_revisions"]
         ]
         formation_decisions = [
             decision.model_dump(mode="json")
-            for decision in manager._formations.decisions.values()
+            for decision in formation_state["decisions"].values()
             if full or decision.request_id in dirty["formation_decisions"]
         ]
         formation_draft_ids = (
-            set(manager._formations.drafts)
+            set(formation_state["drafts"])
             if full
             else set(dirty["formation_drafts"])
         )
         formation_drafts = [
-            manager._formations.drafts[draft_id].model_dump(mode="json")
+            formation_state["drafts"][draft_id].model_dump(mode="json")
             for draft_id in sorted(formation_draft_ids)
-            if draft_id in manager._formations.drafts
+            if draft_id in formation_state["drafts"]
         ]
 
         snapshot = {
-            "records": manager._records.snapshot() if full else tuple({row.identity: row for row in (*relationship_records, *execution_dependencies)}.values()),
+            "records": tuple({row.identity: row for row in (*manager._records.snapshot(), *relationship_records)}.values()) if full else tuple({row.identity: row for row in (*relationship_records, *execution_dependencies, *governance_dependencies)}.values()),
             "state_version": manager._state_version,
             "full": full,
             "episodic_memory_enabled": manager.config.episodic_memory.enabled,
@@ -574,6 +622,7 @@ class SnapshotBuilder:
             "team_dependencies": team_dependencies,
             "inboxes": inboxes,
             "agent_inboxes": agent_inboxes,
+            "agent_inbox_dependencies": governance_mail_dependencies,
             "proposals": proposals,
             "formation_requests": formation_requests,
             "formation_invitations": formation_invitations,
@@ -588,7 +637,7 @@ class SnapshotBuilder:
             "communication_ballots": communication_ballots,
             "communication_agreements": communication_agreements,
             "peer_messages": peer_messages,
-            "governance_rounds": governance_rounds,
+            "governance_cases": governance_cases,
             "migration_requests": migration_requests,
             **memory_records,
             "libraries": libraries,

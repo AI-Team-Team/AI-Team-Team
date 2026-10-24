@@ -1,3 +1,4 @@
+from test.personal_activity import interact_and_idle
 import os
 import sqlite3
 from copy import deepcopy
@@ -89,12 +90,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
             )
 
     async def test_current_schema_restores_working_context_and_journal_separately(self):
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Remember the complete historical record.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Remember the complete historical record.", team=self.team)
         await self.manager.flush_memory_indexing()
         journal_count = len(
             [
@@ -104,7 +100,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
             ]
         )
         self.agent.messages = self.agent.messages[-1:]
-        expected_working_context = [dict(message) for message in self.agent.messages]
+        expected_working_context = [{key: value for key, value in message.items() if value is not None} for message in self.agent.messages]
         db_path = os.path.join(self.tmpdir, "memory.db")
         await self.manager.save_state(db_path)
         await self.manager.close()
@@ -135,12 +131,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
         await restored.close()
 
     async def test_enabled_database_has_fts_and_corrupt_segment_is_rejected_atomically(self):
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Index the blue rocket.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Index the blue rocket.", team=self.team)
         await self.manager.flush_memory_indexing()
         db_path = os.path.join(self.tmpdir, "fts.db")
         await self.manager.save_state(db_path)
@@ -169,12 +160,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
         await replacement.close()
 
     async def test_restore_validation_rejects_invalid_memory_lifecycle_edges(self):
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Build a strictly validated memory.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Build a strictly validated memory.", team=self.team)
         await self.manager.flush_memory_indexing()
         db_path = os.path.join(self.tmpdir, "memory-validation.db")
         await self.manager.save_state(db_path)
@@ -189,7 +175,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
         segment["source_event_ids"] = [
             event_id
             for event_id in segment["source_event_ids"]
-            if event_map[event_id].event_type != "agent_turn_finished"
+            if event_map[event_id].event_type != "activity_invocation_finished"
         ]
         remaining = [event_map[event_id] for event_id in segment["source_event_ids"]]
         segment["recall_content"] = render_recall_content(remaining)
@@ -241,12 +227,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
             self.manager._validate_state_snapshot(indexed_without_card)
 
     async def test_restore_quiesces_existing_memory_index_workers(self):
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Create restorable memory state.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Create restorable memory state.", team=self.team)
         await self.manager.flush_memory_indexing()
         db_path = os.path.join(self.tmpdir, "restore-workers.db")
         await self.manager.save_state(db_path)
@@ -261,12 +242,7 @@ class TestPersistenceAndPrivacy(EpisodicMemoryTestCase):
         self.assertTrue(all(worker.done() for worker in old_workers))
 
     async def test_disabled_snapshot_with_cards_needs_no_fts_and_rebuilds_on_reenable(self):
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Create a card before disabling the optional catalog.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Create a card before disabling the optional catalog.", team=self.team)
         await self.manager.flush_memory_indexing()
         db_path = os.path.join(self.tmpdir, "disabled-with-cards.db")
         await self.manager.save_state(db_path)

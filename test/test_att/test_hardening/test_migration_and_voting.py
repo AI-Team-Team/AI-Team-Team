@@ -16,15 +16,16 @@ from test.test_att.test_hardening._support import (
     patch,
     sqlite3,
 )
+from test.governance_client import approve_pending_business, settle_governance_activity
 
 
 class TestATTHardening(ATTHardeningTestCase):
     async def test_migration_invalidates_all_descendant_depths(self):
-        left = self.manager.create_agent_team(self.root)
-        moving = self.manager.create_agent_team(left)
-        descendant = self.manager.create_agent_team(moving)
-        right = self.manager.create_agent_team(self.root)
-        right_child = self.manager.create_agent_team(right)
+        left = self.manager.create_agent_team(self.root, parent=self.root)
+        moving = self.manager.create_agent_team(left, parent=left)
+        descendant = self.manager.create_agent_team(moving, parent=moving)
+        right = self.manager.create_agent_team(self.root, parent=self.root)
+        right_child = self.manager.create_agent_team(right, parent=right)
 
         self.assertEqual(moving.depth, 2)
         self.assertEqual(descendant.depth, 3)
@@ -34,38 +35,30 @@ class TestATTHardening(ATTHardeningTestCase):
             moving, right_child, "Move the complete branch."
         )
 
-        self.assertEqual(result.status, "EXECUTED")
+        self.assertEqual(result.status, "PENDING")
+        await approve_pending_business(self.manager, result.request_id)
+        self.assertEqual(self.manager.inspect_migration_request(result.request_id).status, "EXECUTED")
         self.assertEqual(moving.depth, 3)
         self.assertEqual(descendant.depth, 4)
     async def test_migration_rejects_changed_approval_path(self):
-        from types import SimpleNamespace
-
-        left = self.manager.create_agent_team(self.root)
-        right = self.manager.create_agent_team(self.root)
-        moving = self.manager.create_agent_team(left)
+        left = self.manager.create_agent_team(self.root, parent=self.root)
+        right = self.manager.create_agent_team(self.root, parent=self.root)
+        moving = self.manager.create_agent_team(left, parent=left)
         self.manager.config.migration_policy = "ancestor_approval"
 
-        async def discuss(team, *args, **kwargs):
-            return SimpleNamespace(transcript="Public migration discussion."), list(team.members)
+        result = await self.manager.negotiate_and_execute_migration(moving, right, "path changes")
+        await settle_governance_activity(self.manager)
+        original_cases = list(self.manager._governance.cases.values())
+        self.manager.config.migration_policy = "permissive"
+        change = await self.manager.negotiate_and_execute_migration(right, left, "Change a relevant ancestor path.")
+        await approve_pending_business(self.manager, change.request_id)
 
-        with patch.object(self.manager, "_execute_team_discussion_with_members", side_effect=discuss):
-            result = await self.manager.negotiate_and_execute_migration(moving, right, "path changes")
-            while self.manager._emergency_tasks:
-                await asyncio.gather(*tuple(self.manager._emergency_tasks))
-                await asyncio.sleep(0)
-
-        with self.manager._topology_lock:
-            left.add_child_team(right)
-            right._parent_team = left
-            self.manager._team_parent_map[right.team_id] = left.team_id
-            right.invalidate_depth_cache(recursive=True)
-
-        for item in list(self.manager._governance.rounds.values()):
+        for item in original_cases:
             for agent_id in item.voter_agent_ids:
                 actor = self.manager._agents_by_id[agent_id]
                 token = self.manager._active_tool_agent.set(actor)
                 try:
-                    await self.manager.submit_governance_choice(item.round_id, {"approved": True}, actor=actor)
+                    await self.manager.submit_governance_choice(item.case_id, {"approved": True}, actor=actor)
                 finally:
                     self.manager._active_tool_agent.reset(token)
         await self.manager._migration.complete_request(result.request_id)
@@ -74,7 +67,7 @@ class TestATTHardening(ATTHardeningTestCase):
         self.assertIn("approval path changed", current.reason)
         self.assertIs(moving.parent_team, left)
     async def test_parallel_votes_are_atomic_and_execute_once(self):
-        team = self.manager.create_agent_team(self.root)
+        team = self.manager.create_agent_team(self.root, parent=self.root)
         first, second, third = team.members
         first_tools = get_default_tools(
             {"att_manager": self.manager}, first

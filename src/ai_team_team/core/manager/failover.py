@@ -1,190 +1,260 @@
-"""Token-budget failover selection and client replacement."""
+"""Bounded personal resource decisions, independent of issuing call stacks."""
 
 import asyncio
-from typing import TYPE_CHECKING
+import contextvars
+
+from pydantic import BaseModel, ConfigDict
+from typing import Literal
 
 from ..adapters import HandlerClientAdapter, ManagerDefaultClientAdapter
-from ..agent import Agent
-from ..exceptions import TokenLimitExceededError
-from ..team import AgentTeam
+from ..communication import ApprovalPrincipal
+from ..exceptions import RuntimeAdmissionClosedError
+from .activity.values import capture, identifier
+from .timing import wait_until
 
-if TYPE_CHECKING:
-    from .facade import ATTManager
+
+class ResourceDecisionResult(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+    status: Literal["PENDING", "APPLIED", "UNAVAILABLE"]
+    attempt_id: str | None = None
+    model_alias: str | None = None
+    reason: str = ""
 
 
 class FailoverService:
-    """Owns automatic and parent-governed model failover."""
-
-    def __init__(self, manager: "ATTManager") -> None:
+    def __init__(self, manager):
         self.manager = manager
+        self.lock = asyncio.Lock()
+        self.tasks = {}
 
-    async def handle_failover(
-        self, agent: Agent, team: AgentTeam, error: TokenLimitExceededError
-    ) -> bool:
-        """
-        Handles client failover for an agent when a token limit is reached.
-        Returns True if hot-swap succeeded and caller should retry.
-        """
+    def binding(self, alias):
         manager = self.manager
-        old_model = manager.resolve_runtime_model_alias(agent.llm_client)
-        policy = manager.config.failover_policy
+        if alias in manager.llm_clients:
+            return manager.llm_clients[alias]
+        if alias in manager.model_configs and manager.generator_handler:
+            client = HandlerClientAdapter(alias, manager.generator_handler)
+            client._supports_native = manager.model_configs[alias].get("supports_native_tool_calling") is True
+            return client
+        if alias == "default" and manager.generator_handler:
+            return ManagerDefaultClientAdapter(manager)
+        return None
 
-        def has_binding(alias: str) -> bool:
-            if alias in manager.llm_clients:
-                return True
-            if alias in manager.model_configs and manager.generator_handler:
-                return True
-            if alias == "default":
-                return bool(
-                    manager.generator_handler or getattr(manager.root_ai, "llm_client", None)
-                )
-            return False
+    def candidates(self, old, required):
+        aliases = sorted(set(self.manager.llm_clients) | set(self.manager.model_configs))
+        result = []
+        for alias in aliases:
+            remaining = self.manager.token_budget.available(alias)
+            if alias != old and self.binding(alias) is not None and (remaining is None or remaining >= required):
+                result.append(alias)
+        return result
 
-        parent_team = team.parent_team or manager.find_parent_team(team)
+    def track(self, key, coroutine):
+        current = self.tasks.get(key)
+        if self.manager._closing or current is not None and not current.done():
+            coroutine.close()
+            return
+        task = asyncio.create_task(coroutine, context=contextvars.Context(), name=f"att-resource-{key}")
+        self.tasks[key] = task
+        self.manager._institutional_tasks.add(task)
+        def finished(done):
+            if self.tasks.get(key) is done:
+                self.tasks.pop(key, None)
+            self.manager._institutional_tasks.discard(done)
+            if done.cancelled():
+                return
+            error = done.exception()
+            if isinstance(error, RuntimeAdmissionClosedError):
+                self.manager._emit_callback("on_system_event", "resource_decision_admission_deferred",
+                    {"operation_key": key, "reason": "runtime_admission_closed"})
+            elif error is not None:
+                self.manager.logger.error("Resource decision failed (%s).", type(error).__name__)
+        task.add_done_callback(finished)
 
-        candidates = []
-        required_tokens = max(1, getattr(error, "required_tokens", 1))
-        for name in manager.config.model_token_limits.keys():
-            if name == old_model:
-                continue
-            if not has_binding(name):
-                continue
-            available = manager.token_budget.available(name)
-            if available is not None and available >= required_tokens:
-                candidates.append(name)
-        if (
-            "default" not in manager.config.model_token_limits
-            and "default" not in candidates
-            and old_model != "default"
-            and has_binding("default")
-        ):
-            candidates.append("default")
+    async def request(self, agent, team, error):
+        manager = self.manager
+        current = manager._active_tool_agent.get()
+        if current is not None and current is not agent:
+            raise PermissionError("A tool cannot change another person's model binding.")
+        if manager._agents_by_id.get(agent.agent_id) is not agent or agent.lifecycle_state != "active":
+            raise PermissionError("Resource remedies require this manager's active person.")
+        if team is not None and (manager.teams.get(team.team_id) is not team or agent not in team.members
+                or getattr(team, "_lifecycle_state", "active") != "active"):
+            raise PermissionError("A resource scope must be a current active membership.")
+        old = manager.resolve_runtime_model_alias(agent.llm_client)
+        required = max(1, getattr(error, "required_tokens", 1))
+        candidates = self.candidates(old, required)
+        if not candidates or manager.config.failover_policy == "none":
+            return ResourceDecisionResult(status="UNAVAILABLE", reason="No configured resource remedy is available.")
+        if manager.config.failover_policy == "auto":
+            from contextlib import AsyncExitStack
+            async with AsyncExitStack() as gates:
+                session = manager._activity.current.get()
+                if session is None or session.agent_id != agent.agent_id:
+                    await gates.enter_async_context(agent.invocation_guard())
+                await gates.enter_async_context(agent.lifecycle_lock)
+                await gates.enter_async_context(manager._activity.lock)
+                candidates = self.candidates(old, required)
+                if not candidates or agent.lifecycle_state != "active":
+                    return ResourceDecisionResult(status="UNAVAILABLE", reason="No eligible live resource remains.")
+                alias = candidates[0]
+                dirty = manager._new_dirty_state()
+                dirty["agents"].add(agent.agent_id)
+                def authorized():
+                    if (alias not in self.candidates(old, required)
+                            or manager.resolve_runtime_model_alias(agent.llm_client) != old):
+                        raise RuntimeError("The model or atomic quota changed before resource acceptance.")
+                await manager._records.commit((), dirty=dirty, agent_models={agent.agent_id: (alias, self.binding(alias))},
+                    authority_check=authorized)
+            manager._emit_callback("on_system_event", "model_binding_changed",
+                {"agent_id": agent.agent_id, "old_model": old, "model_alias": alias, "policy": "auto"})
+            return ResourceDecisionResult(status="APPLIED", model_alias=alias)
+        principal = team.organizational_parent if team is not None else None
+        if principal is None:
+            return ResourceDecisionResult(status="UNAVAILABLE", reason="No explicit organizational parent supplies resources.")
+        electorate = manager._governance.electorate(principal)
+        if not electorate or any(voter.agent_id == agent.agent_id for voter in electorate):
+            return ResourceDecisionResult(status="UNAVAILABLE", reason="The required parent electorate cannot decide without self-reentry.")
+        async with self.lock:
+            existing = next((row for row in manager._records.snapshot() if row.table_name == "resource_decisions"
+                and row.values["agent_id"] == agent.agent_id and row.values["status"] == "pending"), None)
+            if existing is not None:
+                return ResourceDecisionResult(status="PENDING", attempt_id=existing.values["attempt_id"])
+            now = manager._activity.clock.wall_time()
+            attempt_id = identifier("FAILOVER")
+            row = capture(manager, "resource_decisions", attempt_id=attempt_id, agent_id=agent.agent_id,
+                scope_team_id=team.team_id if team else None, exhausted_alias=old,
+                scope_position_revision=team._position_revision,
+                principal_agent_id=principal.principal_id if principal.kind == "agent" else None,
+                principal_team_id=principal.principal_id if principal.kind == "agent_team" else None,
+                candidates=candidates, required_tokens=required, created_at=now,
+                deadline=now + manager.config.parent_failover_timeout_seconds, status="pending")
 
-        selected_model = None
+            def authorized():
+                if (agent.lifecycle_state != "active" or agent not in team.members
+                        or team.organizational_parent != principal
+                        or team._position_revision != row.values["scope_position_revision"]
+                        or manager.resolve_runtime_model_alias(agent.llm_client) != old
+                        or any(voter.agent_id == agent.agent_id for voter in manager._governance.electorate(principal))):
+                    raise PermissionError("The resource requester or explicit parent changed before admission.")
 
-        if policy == "auto":
-            if candidates:
-                selected_model = candidates[0]
-            else:
-                manager.logger.error(
-                    f"Failover failed: No candidate models with remaining budget found."
-                )
-                return False
-
-        elif policy == "parent":
-            from ..communication import ApprovalPrincipal
-
-            if not candidates:
-                manager.logger.error("Parent-governed failover has no eligible model candidates.")
-                return False
-            principal = (
-                ApprovalPrincipal(kind="agent_team", principal_id=parent_team.team_id)
-                if parent_team is not None
-                else ApprovalPrincipal(kind="agent", principal_id=manager.root_ai.agent_id)
-            )
-            if principal.kind == "agent" and principal.principal_id == agent.agent_id:
-                manager.logger.error("Parent-governed failover cannot re-enter the failing Agent.")
-                return False
-            if principal.kind == "agent_team" and any(
-                member.agent_id == agent.agent_id for member in parent_team.members
-            ):
-                manager.logger.error(
-                    "Parent-governed failover cannot re-enter the failing Agent "
-                    "through a shared parent AgentTeam membership."
-                )
-                return False
-            prompt = (
-                "Select a replacement model for an Agent whose token budget is "
-                "exhausted.\n\n"
-                f"Child AgentTeam: {team.team_id}\n"
-                f"Agent: {agent.name} ({agent.role})\n"
-                f"Exhausted model: {old_model}\n"
-                f"Required tokens: {required_tokens}\n"
-            )
             try:
-                if principal.kind == "agent":
-                    decision = await asyncio.wait_for(
-                        manager.broker.decision_provider.decide_agent_model(
-                            principal, prompt, candidates
-                        ),
-                        timeout=manager.config.parent_failover_timeout_seconds,
-                    )
-                else:
-                    decision = await asyncio.wait_for(
-                        manager.broker.decision_provider.decide_team_model(
-                            principal, prompt, candidates
-                        ),
-                        timeout=manager.config.parent_failover_timeout_seconds,
-                    )
-            except asyncio.TimeoutError:
-                manager.logger.error("Parent-governed failover did not complete before timeout.")
-                return False
-            except Exception as exc:
-                manager.logger.error("Parent-governed failover failed closed: %s", exc)
-                return False
-            if decision.status != "approved" or decision.selected_value not in candidates:
-                manager.logger.error(
-                    "Parent-governed failover failed closed: %s",
-                    decision.reason,
-                )
-                return False
-            selected_model = decision.selected_value
+                await manager._records.commit((row,), operation_id=f"RESOURCE-{attempt_id}", authority_check=authorized)
+            finally:
+                if row.identity in manager._records.index:
+                    self.arm_deadline(row)
+                    self.track(f"prepare:{attempt_id}", self.prepare(attempt_id))
+        return ResourceDecisionResult(status="PENDING", attempt_id=attempt_id)
 
-        if not selected_model:
-            manager.logger.error("No failover model selected.")
-            return False
+    def arm_deadline(self, row):
+        clock = self.manager._activity.clock
+        deadline = clock.monotonic() + max(0.0, row.values["deadline"] - clock.wall_time())
+        self.track(f"deadline:{row.values['attempt_id']}", self.expire_at(row.values["attempt_id"], deadline))
 
-        new_client = None
-        if selected_model in manager.llm_clients:
-            new_client = manager.llm_clients[selected_model]
-        elif selected_model in manager.model_configs and manager.generator_handler:
-            new_client = HandlerClientAdapter(selected_model, manager.generator_handler)
-            config = manager.model_configs.get(selected_model)
-            if config:
-                new_client._supports_native = config.get("supports_native_tool_calling", False)
-        elif selected_model == "default" and has_binding("default"):
-            new_client = ManagerDefaultClientAdapter(manager)
-        else:
-            manager.logger.error("Failover model %r has no runtime binding.", selected_model)
-            return False
+    async def prepare(self, attempt_id):
+        row = self.manager._records.index[("resource_decisions", (attempt_id,))]
+        if row.values["status"] != "pending":
+            return
+        principal = ApprovalPrincipal(kind="agent" if row.values["principal_agent_id"] else "agent_team",
+            principal_id=row.values["principal_agent_id"] or row.values["principal_team_id"])
+        await self.manager.broker.decision_provider.request_model_choice(principal, attempt_id,
+            "Explicitly choose an eligible replacement model for resource request " + attempt_id,
+            list(row.values["candidates"]), expires_at=row.values["deadline"])
+        await self.resolve(attempt_id)
 
-        agent.llm_client = new_client
-        agent._model_alias = selected_model
+    async def expire_at(self, attempt_id, deadline):
+        await wait_until(self.manager._activity.clock, deadline)
+        await self.finish(attempt_id, "expired")
 
-        agent_status = f"Failover: Switched to {selected_model}"
-        team.set_status(agent.name, agent_status)
-        manager._emit_callback("on_status_change", agent.name, agent_status)
+    async def finish(self, attempt_id, status):
+        async with self.lock:
+            row = self.manager._records.index[("resource_decisions", (attempt_id,))]
+            if row.values["status"] != "pending":
+                return
+            await self.manager._records.commit((capture(self.manager, "resource_decisions", attempt_id=attempt_id,
+                status=status, resolved_at=max(self.manager._activity.clock.wall_time(), row.values["created_at"])),), allow_closing=True)
+        self.cancel_deadline(attempt_id)
+        for stage in ("prepare", "apply"):
+            task = self.tasks.get(f"{stage}:{attempt_id}")
+            if task is not None and task is not asyncio.current_task() and not task.done():
+                task.cancel()
+        for case in tuple(self.manager._governance.cases.values()):
+            if case.business_kind == "failover" and case.business_id == attempt_id and case.status == "PENDING":
+                await self.manager._governance.expire(case.case_id, f"Resource attempt {status}.")
 
-        if manager.on_log_append:
-            log_title = f"[SYSTEM ALERT] Model Failover Event | {agent.name}"
-            log_content = (
-                f"AGENT: {agent.name}\n"
-                f"ROLE: {agent.role}\n"
-                f"TEAM: {team.team_id}\n"
-                f"FAILOVER POLICY: {policy}\n"
-                f"ACTION: Switched client from Model '{old_model}' to Model '{selected_model}' due to budget exhaustion ({error})."
-            )
-            manager._emit_callback(
-                "on_log_append",
-                team.team_id,
-                log_title,
-                log_content,
-                team.chapter_num,
-            )
+    def cancel_deadline(self, attempt_id):
+        task = self.tasks.get(f"deadline:{attempt_id}")
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
 
-        manager._emit_callback(
-            "on_system_event",
-            "model_failover",
-            {
-                "agent_name": agent.name,
-                "team_id": team.team_id,
-                "old_model": old_model,
-                "new_model": selected_model,
-                "reason": str(error),
-            },
-        )
+    async def resolve(self, attempt_id):
+        row = self.manager._records.index.get(("resource_decisions", (attempt_id,)))
+        if row is None or row.values["status"] != "pending":
+            return
+        principal = ApprovalPrincipal(kind="agent" if row.values["principal_agent_id"] else "agent_team",
+            principal_id=row.values["principal_agent_id"] or row.values["principal_team_id"])
+        case = self.manager._governance.latest("failover", attempt_id, principal)
+        if case is None or not self.manager._governance.electorate_valid(case):
+            return
+        if case.status == "DENIED":
+            await self.finish(attempt_id, "denied")
+        elif case.status == "APPROVED":
+            self.track(f"apply:{attempt_id}", self.apply(attempt_id, case))
 
-        manager.logger.warning(
-            f"[FAILOVER SUCCESS] Switched Agent '{agent.name}' from Model '{old_model}' to Model '{selected_model}'. Retrying turn."
-        )
-        return True
+    async def apply(self, attempt_id, case):
+        manager = self.manager
+        row = manager._records.index[("resource_decisions", (attempt_id,))]
+        agent = manager._agents_by_id.get(row.values["agent_id"])
+        if agent is None:
+            await self.finish(attempt_id, "cancelled")
+            return
+        async with agent.invocation_guard(), agent.lifecycle_lock, self.lock, manager._activity.lock:
+            row = manager._records.index[("resource_decisions", (attempt_id,))]
+            if row.values["status"] != "pending":
+                return
+            alias = manager.broker.decision_provider.outcome(case).selected_value
+            team = manager.teams.get(row.values["scope_team_id"])
+            expected = ApprovalPrincipal(kind="agent" if row.values["principal_agent_id"] else "agent_team",
+                principal_id=row.values["principal_agent_id"] or row.values["principal_team_id"])
+            live = manager._activity.models.live.get(agent.agent_id)
+            def eligible():
+                return (not manager._closing and agent.lifecycle_state == "active" and team is not None
+                    and getattr(team, "_lifecycle_state", "active") == "active"
+                    and agent in team.members and team.organizational_parent == expected
+                    and team._position_revision == row.values["scope_position_revision"]
+                    and manager.resolve_runtime_model_alias(agent.llm_client) == row.values["exhausted_alias"]
+                    and manager._governance.latest("failover", attempt_id, expected) is case
+                    and row.values["decision_case_id"] == case.case_id
+                    and manager._governance.electorate_valid(case) and (live is None or live.done())
+                    and alias in self.candidates(row.values["exhausted_alias"], row.values["required_tokens"]))
+            now = manager._activity.clock.wall_time()
+            status = "expired" if now >= row.values["deadline"] else "applied" if eligible() else "cancelled"
+            dirty = manager._new_dirty_state()
+            if status == "applied":
+                dirty["agents"].add(agent.agent_id)
+            def authorized():
+                if status == "applied" and (not eligible() or manager._activity.clock.wall_time() >= row.values["deadline"]):
+                    raise PermissionError("The resource authority, deadline, or atomic quota changed before model publication.")
+
+            operation_id = f"RESOURCE-APPLY-{attempt_id}"
+            try:
+                await manager._records.commit((capture(manager, "resource_decisions", attempt_id=attempt_id,
+                    status=status, selected_alias=alias if status == "applied" else None, resolved_at=now),),
+                    dirty=dirty, agent_models={agent.agent_id: (alias, self.binding(alias))} if status == "applied" else None,
+                    operation_id=operation_id, authority_check=authorized)
+            finally:
+                if operation_id in manager._records.receipts:
+                    if status == "applied":
+                        manager._activity.schedule_activation(agent.agent_id)
+                    self.cancel_deadline(attempt_id)
+                    manager._emit_callback("on_system_event", "resource_decision_resolved",
+                        {"attempt_id": attempt_id, "agent_id": agent.agent_id, "status": status})
+
+    async def interrupt_pending(self):
+        tasks = [task for task in tuple(self.tasks.values()) if task is not asyncio.current_task() and not task.done()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for row in self.manager._records.snapshot():
+            if row.table_name == "resource_decisions" and row.values["status"] == "pending":
+                await self.finish(row.values["attempt_id"], "interrupted")

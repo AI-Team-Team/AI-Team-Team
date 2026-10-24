@@ -20,7 +20,7 @@ class ContextMixin:
         """Keep complete recent exchanges; the person's Journal remains intact."""
         config = self.manager.config
         agent = self.require_agent(session.agent_id)
-        limit = config.max_memory_turns
+        limit = config.working_context_message_limit
         if not config.enable_memory_compression or len(agent.messages) <= limit + 2:
             return
         cut = len(agent.messages) - limit
@@ -65,16 +65,24 @@ class ContextMixin:
 
     def append(self, session, message, *, capture_content=True):
         agent = self.require_agent(session.agent_id)
+        if session.audit_profile is not None:
+            agent.messages.append(dict(message))
+            return
         _append_agent_message(
             agent, message, self.team_for(session), self.manager, capture_content=capture_content
         )
 
     def instructions(self, session, tools, native):
+        if session.audit_profile is not None:
+            return self.manager.supervisor.instructions(session, tools, native)
         agent = self.require_agent(session.agent_id)
         team = self.team_for(session)
+        alias = self.manager.resolve_runtime_model_alias(agent.llm_client)
+        model_note = self.manager.model_configs.get(alias, {}).get("ai_note", "")
         parts = [
             agent.system_instructions,
             f"You are {agent.name} ({agent.agent_id}), role: {agent.role}. {agent.role_description}",
+            f"Current model binding: {alias}" + (f": {model_note}" if model_note else ""),
             (
                 f"Current AgentTeam: {team.team_id}. Purpose: {team.team_purpose}.\n{team.system_instructions}"
                 if team
@@ -91,6 +99,12 @@ class ContextMixin:
         ]
         if self.manager.config.episodic_memory.enabled:
             parts.append(self.manager._memory.retained_context(agent.agent_id))
+        if "propose_team_formation" in tools or "dispatch_subagent" in tools:
+            aliases = sorted(set(self.manager.llm_clients) | set(self.manager.model_configs) | {"default"})
+            parts.append("You may design and propose an AgentTeam yourself using the available formation tools. "
+                "Existing people join only after explicit exact-revision consent; advice and reading are not consent. "
+                f"Minimum team size: {self.manager.config.min_subagent_team_size}. Registered model aliases: {', '.join(aliases)}. "
+                "Creator provenance is not an organizational parent; choose the parent explicitly when the tool offers that choice.")
         if not native:
             parts.append(
                 "AVAILABLE TOOLS\n"
@@ -112,7 +126,7 @@ class ContextMixin:
 
     def append_observation(self, session, result, tools, native):
         agent, team = self.require_agent(session.agent_id), self.team_for(session)
-        _record_tool_result(self.manager, team, agent, result)
+        _record_tool_result(self.manager, team, agent, result, known_tools=tools)
         message = (
             {
                 "role": "tool",
@@ -134,6 +148,9 @@ class ContextMixin:
         )
         if result._execution_id is not None:
             message["source_execution_id"] = result._execution_id
+        if session.audit_profile is not None:
+            self.append(session, message, capture_content=False)
+            return
         if result.name == "read_chat_message" and not result.failed:
             message["source_chat_message_id"] = json.loads(result.content)["message_id"]
         if result.name in _PRIVATE_TOOL_NAMES or result._private_result or result.name == "read_background_task_result":

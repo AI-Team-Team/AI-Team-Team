@@ -39,7 +39,9 @@ flowchart TD
 
 - SQLite uses foreign keys, WAL, and an explicit busy timeout.
 - A second manager or process fails its non-blocking writer lease immediately.
-- Schema 11 stores Agent inboxes, frozen governance rounds, append-only explicit ballots, durable migration requests, consensual formation revisions, invitation decisions, detached formation drafts, autonomous communication records, separated Working Context, the append-only Journal, the optional episodic-memory catalog, source provenance, retained references, and the FTS5 index.
-- Restore cross-validates personal emails against rounds and voters, resets communication processing states, and expires interrupted failover attempts without treating read receipts as ballots or deleting historical choices.
-- Audit-scoped supervisory teams and auditors stay live only during their audit; snapshots exclude their identities and DocLibs, while the Journal retains completed audit evidence.
+- Schema 15 stores Agent inboxes, exact governance cases and frozen electorates, append-only explicit ballots, durable migration requests, consensual formation revisions, invitation decisions, optional initiator-authored candidates, autonomous communication records, separated Working Context, the append-only Journal, the optional episodic-memory catalog, source provenance, retained references, and the FTS5 index.
+- Restore cross-validates personal emails against cases and voters, resets communication processing states, and expires interrupted failover attempts without treating read receipts as ballots or deleting historical choices.
+- Audit-scoped supervisory teams and auditors stay live only during their audit; snapshots exclude their identities and DocLibs, while audit-specific tables retain scoped evidence and results.
+- Position events include parent acceptance and cooldown prerequisites; stale projections cannot replace accepted parent edges.
+- Health observations, incidents, occurrence generations, scoped audit requests, findings, and results validate before publication.
 - It intentionally does not migrate old databases.

@@ -1,569 +1,375 @@
-"""Managed supervisory AgentTeams, isolation, and audit evidence."""
+"""Fresh managed audit people, exact profiles, and receipt-owned teardown."""
 
 import asyncio
+import copy
 import os
 import sqlite3
-import tempfile
-import unittest
 from contextlib import closing
 from unittest.mock import patch
 
-from ai_team_team import ATTConfig, ATTManager, Agent, AuditStatus, StatePersistenceError
+from ai_team_team import ATTConfig, Agent, AuditStatus, HealthSubject, LLMResponse, StatePersistenceError, ToolCall
+from ai_team_team.core.activity.contracts import AgentTeamScope
 from test.async_waits import wait_for_runtime
+from test.health_client import HealthModelClient
+from test.test_att.test_agent_activity._support import ActivityTestCase
 
 
-class _AuditClient:
-    def __init__(self) -> None:
-        self.manager = None
-        self.seen_teams: dict[str, set[str]] = {}
-        self.entered = asyncio.Event()
-        self.release = asyncio.Event()
-        self.pause_parallel = False
-        self.pause_all = False
-        self.cancel_delay = 0.0
+class ScopedHealthClient(HealthModelClient):
+    def __init__(self, manager):
+        super().__init__()
+        self.manager = manager
+        self.seen = {}
+        self.entered, self.release = asyncio.Event(), asyncio.Event()
+        self.pause = False
 
-    async def generate(
-        self,
-        prompt,
-        system_instruction=None,
-        temperature=0.3,
-        require_json=False,
-        **_kwargs,
-    ):
-        if self.manager is not None:
-            team = self.manager._active_team.get()
-            if team is not None and team.team_kind == "supervisory":
-                self.seen_teams.setdefault(team.team_id, set()).update(
-                    agent.agent_id for agent in team.members
-                )
-                if (self.pause_all or self.pause_parallel) and not require_json:
-                    if self.pause_all or len(self.seen_teams) >= 2:
-                        self.entered.set()
-                    try:
-                        await self.release.wait()
-                    except asyncio.CancelledError:
-                        if self.cancel_delay:
-                            await asyncio.sleep(self.cancel_delay)
-                        raise
-        if require_json:
-            return '{"is_healthy": true, "reason": "The audit team approved."}'
-        for marker in ("BUSINESS_ALPHA_MARKER", "BUSINESS_BETA_MARKER"):
-            if marker in str(prompt):
-                return f"Final Answer: The business team completed {marker}."
-        return "Final Answer: The discussion is coherent."
+    async def generate(self, *args, **kwargs):
+        team = self.manager._active_team.get()
+        if team is not None and team.team_kind == "supervisory":
+            self.seen.setdefault(team.team_id, set()).update(member.agent_id for member in team.members)
+            if self.pause:
+                self.entered.set()
+                await self.release.wait()
+        return await super().generate(*args, **kwargs)
 
 
-class TestSupervisoryTeamLifecycle(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.workspace = tempfile.TemporaryDirectory(prefix="att-supervision-")
-        self.addCleanup(self.workspace.cleanup)
-        self.client = _AuditClient()
-        self.root = Agent("Root", "Architect", llm_client=self.client)
-        self.manager = ATTManager(
-            self.root,
-            ATTConfig(workspace_root=self.workspace.name),
-            persistence_mode="volatile",
-        )
-        self.client.manager = self.manager
-        self.manager.register_llm_client("default", self.client)
-        self.addAsyncCleanup(self.manager.close)
-        self.team = self.manager.create_agent_team(self.root, member_count=3)
+class TestSupervisoryTeamLifecycle(ActivityTestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.health = ScopedHealthClient(self.manager)
+        self.manager.register_llm_client("audit", self.health)
+        self.root.llm_client = self.health
+        self.team = self.manager.create_agent_team(self.root)
 
-    async def test_each_audit_uses_new_registered_team_and_disposes_it(self) -> None:
-        before_agents = set(self.manager._agents_by_id)
-        before_teams = set(self.manager.teams)
-        before_libraries = set(self.manager.libraries)
+    def subject(self, team=None):
+        return HealthSubject(kind="agent_team", subject_id=(team or self.team).team_id)
 
-        first = await self.manager.supervisor.audit_team_dialog(self.team, "first input")
-        second = await self.manager.supervisor.audit_team_dialog(self.team, "second input")
+    async def admit(self, team=None, marker="Permitted metadata"):
+        return await self.manager.request_health_assessment(self.subject(team), {"kind": "host", "facts": [marker]})
 
-        self.assertIs(first.status, AuditStatus.HEALTHY)
-        self.assertIs(second.status, AuditStatus.HEALTHY)
-        self.assertEqual(len(self.client.seen_teams), 2)
-        member_groups = list(self.client.seen_teams.values())
-        self.assertFalse(member_groups[0].intersection(member_groups[1]))
-        self.assertEqual(set(self.manager._agents_by_id), before_agents)
-        self.assertEqual(set(self.manager.teams), before_teams)
-        self.assertEqual(set(self.manager.libraries), before_libraries)
-        evidence = [
-            event for event in self.manager._memory.events.values()
-            if event.event_type == "supervisory_audit_completed"
-        ]
-        self.assertEqual(len(evidence), 2)
-        self.assertEqual(
-            {event.payload["source_transcript"] for event in evidence},
-            {"first input", "second input"},
-        )
-        self.assertTrue(all(event.payload["debate_transcript"] for event in evidence))
+    def ordinary_identities(self):
+        return set(self.manager._agents_by_id), set(self.manager.teams), set(self.manager.libraries)
 
-    async def test_temporary_team_creation_does_not_submit_identity_state(self) -> None:
-        with patch.object(self.manager, "_auto_save", side_effect=AssertionError("unexpected save")):
-            supervisory = self.manager._team_creation.create_supervisory_team()
-        self.assertIs(self.manager.teams[supervisory.team_id], supervisory)
-        await self.manager._team_creation.dissolve_supervisory_team(
-            supervisory, persist=False
-        )
+    def assert_no_auditors(self):
+        self.assertFalse(any(team.team_kind == "supervisory" for team in self.manager.teams.values()))
+        self.assertFalse(self.manager.supervisor.profiles)
 
-    async def test_parallel_audits_have_distinct_live_team_and_agent_owners(self) -> None:
-        other = self.manager.create_agent_team(self.root, member_count=3)
-        self.client.pause_parallel = True
-        first = asyncio.create_task(
-            self.manager.supervisor.audit_team_dialog(self.team, "alpha input")
-        )
-        second = asyncio.create_task(
-            self.manager.supervisor.audit_team_dialog(other, "beta input")
-        )
+    async def test_each_audit_is_a_new_registered_team_and_disposes_its_people(self):
+        before = self.ordinary_identities()
+        for marker in ("First permitted signal", "Second permitted signal"):
+            admission = await self.admit(marker=marker)
+            result = await self.manager.wait_for_health_assessment(admission.audit_id)
+            self.assertEqual(result.status, AuditStatus.HEALTHY)
+            self.assertEqual(self.ordinary_identities(), before)
+        self.assertEqual(len(self.health.seen), 2)
+        first, second = self.health.seen.values()
+        self.assertFalse(first & second)
+        self.assertEqual(len(self.records("audit_evidence")), 2)
+        self.assert_no_auditors()
+
+    async def test_temporary_factory_does_not_publish_ordinary_identity_state(self):
+        with patch.object(self.manager, "_auto_save", side_effect=AssertionError("Unexpected ordinary save")):
+            team = self.manager._team_creation.create_supervisory_team()
+        self.assertIs(self.manager.teams[team.team_id], team)
+        await self.manager._team_creation.dissolve_supervisory_team(team, persist=False)
+
+    async def test_parallel_audits_have_separate_live_owners_and_provider_context(self):
+        self.health.pause = True
+        other = self.manager.create_agent_team(self.root)
+        first, second = await asyncio.gather(self.admit(marker="ALPHA_SIGNAL"), self.admit(other, "BETA_SIGNAL"))
         try:
-            await wait_for_runtime(self.manager, self.client.entered.wait(), label="Parallel audit entry")
-            live = [
-                team for team in self.manager.teams.values()
-                if team.team_kind == "supervisory"
-            ]
-            self.assertEqual(len(live), 2)
-            self.assertTrue(all(self.manager.get_available_tools(team) == {} for team in live))
-            self.assertFalse(
-                {agent.agent_id for agent in live[0].members}
-                & {agent.agent_id for agent in live[1].members}
-            )
-            public_topology = self.manager.render_topology_tree()
-            for team in live:
-                self.assertIs(self.manager.teams[team.team_id], team)
-                self.assertNotIn(team.team_id, public_topology)
-                self.assertIsNone(self.manager.find_parent_team(team))
-                self.assertTrue(
-                    all(self.manager._agents_by_id[agent.agent_id] is agent for agent in team.members)
-                )
-                with self.assertRaises(ValueError):
-                    self.manager._resolve_existing_team_members([team.members[0]], None)
-        finally:
-            self.client.release.set()
-        results = await wait_for_runtime(self.manager, asyncio.gather(first, second), label="Parallel audit completion")
-        self.assertTrue(all(result.status is AuditStatus.HEALTHY for result in results))
-        self.assertFalse(
-            any(team.team_kind == "supervisory" for team in self.manager.teams.values())
-        )
-
-    async def test_parallel_business_discussions_keep_separate_live_audit_contexts(self) -> None:
-        other = self.manager.create_agent_team(self.root, member_count=3)
-        self.client.pause_parallel = True
-        first = asyncio.create_task(
-            self.manager.execute_team_discussion_detailed(
-                self.team, "BUSINESS_ALPHA_MARKER", rounds=1
-            )
-        )
-        second = asyncio.create_task(
-            self.manager.execute_team_discussion_detailed(
-                other, "BUSINESS_BETA_MARKER", rounds=1
-            )
-        )
-        try:
-            await wait_for_runtime(self.manager, self.client.entered.wait(), label="Parallel discussion audit entry")
+            async with asyncio.timeout(10):
+                while len(self.health.seen) < 2:
+                    await asyncio.sleep(0)
             live = [team for team in self.manager.teams.values() if team.team_kind == "supervisory"]
             self.assertEqual(len(live), 2)
-            for marker in ("BUSINESS_ALPHA_MARKER", "BUSINESS_BETA_MARKER"):
-                matching = [
-                    team for team in live
-                    if all(marker in str(agent.messages) for agent in team.members)
-                ]
-                self.assertEqual(len(matching), 1)
+            self.assertFalse({person.agent_id for person in live[0].members} & {person.agent_id for person in live[1].members})
+            topology = self.manager.render_topology_tree()
+            for team in live:
+                self.assertNotIn(team.team_id, topology)
+                self.assertEqual(self.manager.get_available_tools(team), {})
+                for person in team.members:
+                    self.assertIs(self.manager._agents_by_id[person.agent_id], person)
+                    with self.assertRaises(ValueError):
+                        self.manager._resolve_existing_team_members([person], None)
+            self.assertIsNone(self.manager._active_team.get())
+            self.assertIsNone(self.manager._active_tool_agent.get())
         finally:
-            self.client.release.set()
-        results = await wait_for_runtime(self.manager, asyncio.gather(first, second), label="Parallel discussion audit completion")
-        self.assertTrue(all(result.audit.status is AuditStatus.HEALTHY for result in results))
+            self.health.release.set()
+        results = await asyncio.gather(self.manager.wait_for_health_assessment(first.audit_id), self.manager.wait_for_health_assessment(second.audit_id))
+        self.assertTrue(all(result.status == AuditStatus.HEALTHY for result in results))
+        self.assert_no_auditors()
 
-    async def test_audit_evidence_survives_database_restore_without_live_auditors(self) -> None:
-        database_path = os.path.join(self.workspace.name, "state.db")
-        self.manager.db_path = database_path
-        await self.manager.save_state()
-        result = await self.manager.supervisor.audit_team_dialog(self.team, "saved input")
-        self.assertIs(result.status, AuditStatus.HEALTHY)
-        await self.manager.flush_state()
-        await self.manager.close()
+    async def test_parallel_personal_activities_and_audits_keep_separate_contexts(self):
+        manager = self.manager
+        manager.config.activity.max_concurrent_activities = 8
+        manager.config.activity.max_concurrent_model_requests = 8
 
-        new_root = Agent("Replacement", "Architect", llm_client=self.client)
-        restored = ATTManager(
-            new_root,
-            ATTConfig(workspace_root=self.workspace.name),
-            db_path=database_path,
-            persistence_mode=("durable" if (database_path) else "volatile"),
-        )
-        restored.register_llm_client("default", self.client)
+        class ConcurrentClient(HealthModelClient):
+            def __init__(inner):
+                super().__init__()
+                inner.ordinary_ready, inner.audits_ready = asyncio.Event(), asyncio.Event()
+                inner.release_ordinary, inner.release_audits = asyncio.Event(), asyncio.Event()
+                inner.ordinary_owners, inner.audit_owners = set(), set()
+                inner.frames, inner.contexts = {}, {}
+
+            async def generate(inner, prompt, system_instruction=None, tools=None, **kwargs):
+                team = manager._active_team.get()
+                if team is None:
+                    raise AssertionError("The provider lost its invocation-scoped AgentTeam.")
+                owners = [person.agent_id for person in team.members if person.agent_id in system_instruction]
+                if len(owners) != 1:
+                    raise AssertionError("The provider instructions do not identify exactly one caller.")
+                owner = owners[0]
+                inner.frames.setdefault(owner, []).append((copy.deepcopy(prompt), system_instruction))
+
+                def sample_context():
+                    scope = manager._active_team.get()
+                    inner.contexts.setdefault(owner, []).append((
+                        scope.team_id if scope else None, manager._active_tool_agent.get(), manager._activity.current.get()))
+
+                sample_context()
+                if team.team_kind == "ordinary":
+                    inner.ordinary_owners.add(owner)
+                    if len(inner.ordinary_owners) == 2:
+                        inner.ordinary_ready.set()
+                    await inner.release_ordinary.wait()
+                else:
+                    called = {call["function"]["name"] for message in prompt for call in message.get("tool_calls", ())}
+                    if "read_audit_evidence" not in called:
+                        return LLMResponse(tool_calls=[ToolCall("read-evidence", "read_audit_evidence", {})])
+                    if "submit_health_finding" not in called:
+                        inner.audit_owners.add(owner)
+                        if len(inner.audit_owners) == 6:
+                            inner.audits_ready.set()
+                        await inner.release_audits.wait()
+                sample_context()
+                return await super().generate(prompt, system_instruction, tools, **kwargs)
+
+        client = ConcurrentClient()
+        manager.register_llm_client("isolation", client)
+        self.root.llm_client = client
+        people = [manager.register_agent(Agent(f"Worker{label}", "Researcher", client,
+            system_instructions=f"ORDINARY_{label}_PRIVATE_CONTEXT")) for label in ("ALPHA", "BETA")]
+        teams = [manager.bootstrap_agent_team(self.root, existing_members=[person],
+            member_configs={f"{label}HelperA": {}, f"{label}HelperB": {}})
+            for label, person in zip(("Alpha", "Beta"), people)]
+        before = self.ordinary_identities()
+        admissions = await asyncio.gather(*(manager.activate_agent(person.agent_id,
+            scope=AgentTeamScope(team_id=team.team_id)) for person, team in zip(people, teams)))
         try:
-            await restored.load_state(database_path)
-            self.assertFalse(
-                any(team.team_kind == "supervisory" for team in restored.teams.values())
-            )
-            self.assertFalse(
-                any(agent.name.startswith("Auditor_") for agent in restored._agents_by_id.values())
-            )
-            evidence = [
-                event for event in restored._memory.events.values()
-                if event.event_type == "supervisory_audit_completed"
-            ]
-            self.assertEqual(len(evidence), 1)
-            self.assertEqual(evidence[0].payload["source_transcript"], "saved input")
+            await wait_for_runtime(manager, client.ordinary_ready.wait(), label="Two ordinary providers are live")
+            audits = await asyncio.gather(*(self.admit(team, f"HEALTH_{label}_EVIDENCE")
+                for team, label in zip(teams, ("ALPHA", "BETA"))))
+            await wait_for_runtime(manager, client.audits_ready.wait(), label="Both audit electorates read their own evidence")
+            live = [team for team in manager.teams.values() if team.team_kind == "supervisory"]
+            self.assertEqual(len(live), 2)
+            self.assertEqual(len(client.audit_owners), 6)
+            self.assertTrue(all(manager.inspect_agent_activity(person.agent_id).intent == "continuing" for person in people))
+            self.assertTrue(all(not manager._activity.models.live[person.agent_id].done() for person in people))
+            self.assertIsNone(manager._active_team.get())
+            self.assertIsNone(manager._active_tool_agent.get())
+            client.release_audits.set()
+            results = await wait_for_runtime(manager, asyncio.gather(*(manager.wait_for_health_assessment(audit.audit_id)
+                for audit in audits)), label="Parallel audits finish while ordinary providers wait")
+            self.assertTrue(all(result.status is AuditStatus.HEALTHY for result in results))
+            self.assert_no_auditors()
+            self.assertEqual(self.ordinary_identities(), before)
+            self.assertTrue(all(not manager._activity.models.live[person.agent_id].done() for person in people))
         finally:
-            await restored.close()
+            client.release_audits.set()
+            client.release_ordinary.set()
+            await asyncio.gather(*(self.wait(admission) for admission in admissions))
+            await self.settle()
 
-    async def test_snapshot_during_audit_excludes_temporary_identities_and_files(self) -> None:
-        database_path = os.path.join(self.workspace.name, "inflight-snapshot.db")
-        self.manager.db_path = database_path
+        for index, (person, team) in enumerate(zip(people, teams)):
+            own, other = ("ALPHA", "BETA") if index == 0 else ("BETA", "ALPHA")
+            frame = repr(client.frames[person.agent_id])
+            self.assertIn(f"ORDINARY_{own}_PRIVATE_CONTEXT", frame)
+            self.assertNotIn(f"ORDINARY_{other}_PRIVATE_CONTEXT", frame)
+            self.assertNotIn("HEALTH_ALPHA_EVIDENCE", frame)
+            self.assertNotIn("HEALTH_BETA_EVIDENCE", frame)
+            remembered = repr((person.messages, person.message_history))
+            self.assertNotIn("HEALTH_ALPHA_EVIDENCE", remembered)
+            self.assertNotIn("HEALTH_BETA_EVIDENCE", remembered)
+            self.assertEqual(client.contexts[person.agent_id], [(team.team_id, None, None)] * 2)
+        runs = {row.values["audit_id"]: row for row in self.records("audit_runs")}
+        checkpoints = self.records("audit_activity_checkpoints")
+        for index, audit in enumerate(audits):
+            own, other = ("ALPHA", "BETA") if index == 0 else ("BETA", "ALPHA")
+            run = runs[audit.audit_id]
+            for owner in run.values["electorate"]:
+                frames = repr(client.frames[owner])
+                self.assertIn(f"HEALTH_{own}_EVIDENCE", frames)
+                self.assertNotIn(f"HEALTH_{other}_EVIDENCE", frames)
+                self.assertNotIn("ORDINARY_ALPHA_PRIVATE_CONTEXT", frames)
+                self.assertNotIn("ORDINARY_BETA_PRIVATE_CONTEXT", frames)
+                self.assertTrue(all(context == (run.values["temporary_team_id"], None, None)
+                    for context in client.contexts[owner]))
+            retained = repr([row.values["working_context"] for row in checkpoints if row.values["audit_id"] == audit.audit_id])
+            self.assertIn(f"HEALTH_{own}_EVIDENCE", retained)
+            self.assertNotIn(f"HEALTH_{other}_EVIDENCE", retained)
+            self.assertNotIn("ORDINARY_ALPHA_PRIVATE_CONTEXT", retained)
+            self.assertNotIn("ORDINARY_BETA_PRIVATE_CONTEXT", retained)
+
+    async def test_live_snapshot_contains_evidence_but_no_temporary_identity_or_files(self):
+        path = os.path.join(self.workspace.name, "live.sqlite")
+        self.manager.db_path = path
         await self.manager.save_state()
-        self.client.pause_all = True
-        task = asyncio.create_task(
-            self.manager.supervisor.audit_team_dialog(self.team, "inflight input")
-        )
+        self.health.pause = True
+        admission = await self.admit()
+        await asyncio.wait_for(self.health.entered.wait(), 10)
+        live = next(team for team in self.manager.teams.values() if team.team_kind == "supervisory")
+        temporary_ids = [person.agent_id for person in live.members]
         try:
-            await asyncio.wait_for(self.client.entered.wait(), timeout=5)
-            supervisory = next(
-                team for team in self.manager.teams.values()
-                if team.team_kind == "supervisory"
-            )
-            auditor_ids = {agent.agent_id for agent in supervisory.members}
-            temporary_library_ids = {f"DL-{supervisory.team_id}"} | {
-                f"PDL-{agent_id}" for agent_id in auditor_ids
-            }
-            await self.manager.flush_state()
-            for full_save in (False, True):
-                if full_save:
-                    await self.manager.save_state(database_path)
-                with closing(sqlite3.connect(database_path)) as connection:
-                    self.assertEqual(
-                        connection.execute(
-                            "SELECT COUNT(*) FROM teams WHERE team_id = ?",
-                            (supervisory.team_id,),
-                        ).fetchone()[0],
-                        0,
-                    )
-                    for agent_id in auditor_ids:
-                        self.assertEqual(
-                            connection.execute(
-                                "SELECT COUNT(*) FROM agents WHERE agent_id = ?", (agent_id,)
-                            ).fetchone()[0],
-                            0,
-                        )
-                    for lib_id in temporary_library_ids:
-                        self.assertEqual(
-                            connection.execute(
-                                "SELECT COUNT(*) FROM libraries WHERE lib_id = ?", (lib_id,)
-                            ).fetchone()[0],
-                            0,
-                        )
+            await self.manager.save_state()
+            with closing(sqlite3.connect(path)) as database:
+                self.assertEqual(database.execute("SELECT COUNT(*) FROM teams WHERE team_id=?", (live.team_id,)).fetchone()[0], 0)
+                for owner in temporary_ids:
+                    self.assertEqual(database.execute("SELECT COUNT(*) FROM agents WHERE agent_id=?", (owner,)).fetchone()[0], 0)
+                    self.assertEqual(database.execute("SELECT COUNT(*) FROM libraries WHERE owner_agent_id=?", (owner,)).fetchone()[0], 0)
+                self.assertEqual(database.execute("SELECT COUNT(*) FROM audit_participants").fetchone()[0], 3)
+                self.assertEqual(database.execute("PRAGMA foreign_key_check").fetchall(), [])
         finally:
-            self.client.release.set()
-        await asyncio.wait_for(task, timeout=5)
-        await self.manager.close()
+            self.health.release.set()
+        await self.manager.wait_for_health_assessment(admission.audit_id)
 
-        restored = ATTManager(
-            Agent("Restore Root", "Architect", llm_client=self.client),
-            ATTConfig(workspace_root=self.workspace.name),
-            db_path=database_path,
-            persistence_mode=("durable" if (database_path) else "volatile"),
-        )
-        restored.register_llm_client("default", self.client)
-        try:
-            await restored.load_state(database_path)
-            self.assertFalse(
-                any(team.team_kind == "supervisory" for team in restored.teams.values())
-            )
-        finally:
-            await restored.close()
+    async def test_evidence_survives_restore_without_reviving_auditors(self):
+        admission = await self.admit()
+        await self.manager.wait_for_health_assessment(admission.audit_id)
+        path = os.path.join(self.workspace.name, "completed.sqlite")
+        await self.manager.save_state(path)
+        before = len(self.health.calls)
+        await self.manager.load_state(path)
+        self.assert_no_auditors()
+        self.assertEqual(len(self.health.calls), before)
+        result = await self.manager.wait_for_health_assessment(admission.audit_id)
+        self.assertEqual(result.status, AuditStatus.HEALTHY)
+        self.assertEqual(len(self.records("audit_findings")), 3)
 
-    async def test_failed_deletion_commit_restores_registered_team_and_files(self) -> None:
-        database_path = os.path.join(self.workspace.name, "rollback.db")
-        self.manager.db_path = database_path
-        await self.manager.save_state()
-        supervisory = self.manager._team_creation.create_supervisory_team()
-        await self.manager.flush_state()
-        library_roots = [
-            supervisory.doc_library.root_dir,
-            *(
-                self.manager.libraries[agent.private_doc_library_id].root_dir
-                for agent in supervisory.members
-            ),
-        ]
-        original_commit = self.manager._commit_dirty_state
+    async def test_failed_factory_teardown_restores_registered_people_and_directories(self):
+        team = self.manager._team_creation.create_supervisory_team()
+        roots = [self.manager.libraries[owner].root_dir for owner in [f"DL-{team.team_id}", *[person.private_doc_library_id for person in team.members]]]
+        with patch.object(self.manager, "_commit_dirty_state", side_effect=StatePersistenceError("Rejected teardown")):
+            with self.assertRaises(StatePersistenceError):
+                await self.manager._team_creation.dissolve_supervisory_team(team)
+        self.assertIs(self.manager.teams[team.team_id], team)
+        self.assertTrue(all(os.path.isdir(root) for root in roots))
+        await self.manager._team_creation.dissolve_supervisory_team(team, persist=False)
 
-        async def fail_deletion(dirty):
-            if dirty["deleted_teams"]:
-                raise RuntimeError("injected deletion failure")
-            await original_commit(dirty)
+    async def test_names_stay_reserved_until_teardown_settles(self):
+        team = self.manager._team_creation.create_supervisory_team()
+        person = team.members[0]
+        entered, release = asyncio.Event(), asyncio.Event()
+        original = self.manager._commit_dirty_state
 
-        with patch.object(self.manager, "_commit_dirty_state", side_effect=fail_deletion):
-            with self.assertRaisesRegex(RuntimeError, "injected deletion failure"):
-                await self.manager._team_creation.dissolve_supervisory_team(supervisory)
-        self.assertIs(self.manager.teams[supervisory.team_id], supervisory)
-        self.assertTrue(all(os.path.isdir(root) for root in library_roots))
-        self.assertTrue(
-            all(self.manager._agents_by_id[agent.agent_id] is agent for agent in supervisory.members)
-        )
-        await self.manager._team_creation.dissolve_supervisory_team(supervisory)
+        async def hold(dirty):
+            entered.set()
+            await release.wait()
+            return await original(dirty)
 
-    async def test_deletion_keeps_names_reserved_until_commit_finishes(self) -> None:
-        supervisory = self.manager._team_creation.create_supervisory_team()
-        auditor = supervisory.members[0]
-        entered_commit = asyncio.Event()
-        release_commit = asyncio.Event()
-        original_commit = self.manager._commit_dirty_state
-
-        async def pause_deletion(dirty):
-            if dirty["deleted_teams"]:
-                entered_commit.set()
-                await release_commit.wait()
-            await original_commit(dirty)
-
-        with patch.object(self.manager, "_commit_dirty_state", side_effect=pause_deletion):
-            teardown = asyncio.create_task(
-                self.manager._team_creation.dissolve_supervisory_team(supervisory)
-            )
+        with patch.object(self.manager, "_commit_dirty_state", hold):
+            task = asyncio.create_task(self.manager._team_creation.dissolve_supervisory_team(team))
             try:
-                await asyncio.wait_for(entered_commit.wait(), timeout=5)
-                self.assertIs(self.manager.teams[supervisory.team_id], supervisory)
-                self.assertIs(self.manager.agents[auditor.name], auditor)
+                await entered.wait()
                 with self.assertRaises(ValueError):
-                    self.manager.register_agent(
-                        Agent(auditor.name, "Duplicate", llm_client=self.client)
-                    )
+                    self.manager.register_agent(Agent(person.name, "Duplicate", self.health))
             finally:
-                release_commit.set()
-            await asyncio.wait_for(teardown, timeout=5)
-        self.assertNotIn(auditor.name, self.manager.agents)
+                release.set()
+            await task
+        self.assertNotIn(person.name, self.manager.agents)
 
-    async def test_full_save_cannot_resurrect_team_during_deletion(self) -> None:
-        database_path = os.path.join(self.workspace.name, "save-race.db")
-        self.manager.db_path = database_path
+    async def test_full_save_cannot_resurrect_a_team_during_teardown(self):
+        path = os.path.join(self.workspace.name, "save-race.sqlite")
+        self.manager.db_path = path
         await self.manager.save_state()
-        supervisory = self.manager._team_creation.create_supervisory_team()
-        await self.manager.flush_state()
-        entered_commit = asyncio.Event()
-        release_commit = asyncio.Event()
-        original_commit = self.manager._commit_dirty_state
+        team = self.manager._team_creation.create_supervisory_team()
+        entered, release = asyncio.Event(), asyncio.Event()
+        original = self.manager._commit_dirty_state
 
-        async def pause_deletion(dirty):
-            if dirty["deleted_teams"]:
-                entered_commit.set()
-                await release_commit.wait()
-            await original_commit(dirty)
+        async def hold(dirty):
+            entered.set()
+            await release.wait()
+            return await original(dirty)
 
-        with patch.object(self.manager, "_commit_dirty_state", side_effect=pause_deletion):
-            teardown = asyncio.create_task(
-                self.manager._team_creation.dissolve_supervisory_team(supervisory)
-            )
-            await asyncio.wait_for(entered_commit.wait(), timeout=5)
-            save = asyncio.create_task(self.manager.save_state(full=True))
+        with patch.object(self.manager, "_commit_dirty_state", hold):
+            teardown = asyncio.create_task(self.manager._team_creation.dissolve_supervisory_team(team))
+            await entered.wait()
+            save = asyncio.create_task(self.manager.save_state())
             await asyncio.sleep(0)
             self.assertFalse(save.done())
-            release_commit.set()
-            await asyncio.wait_for(asyncio.gather(teardown, save), timeout=5)
-        with closing(sqlite3.connect(database_path)) as connection:
-            count = connection.execute(
-                "SELECT COUNT(*) FROM teams WHERE team_id = ?", (supervisory.team_id,)
-            ).fetchone()[0]
-        self.assertEqual(count, 0)
+            release.set()
+            await asyncio.gather(teardown, save)
+        with closing(sqlite3.connect(path)) as database:
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM teams WHERE team_id=?", (team.team_id,)).fetchone()[0], 0)
 
-    async def test_repeated_cancellation_does_not_roll_back_committed_deletion(self) -> None:
-        database_path = os.path.join(self.workspace.name, "double-cancel.db")
-        self.manager.db_path = database_path
-        await self.manager.save_state()
-        supervisory = self.manager._team_creation.create_supervisory_team()
-        await self.manager.flush_state()
-        entered_commit = asyncio.Event()
-        release_commit = asyncio.Event()
-        original_commit = self.manager._commit_dirty_state
+    async def test_repeated_cancellation_does_not_undo_receipt_owned_teardown(self):
+        team = self.manager._team_creation.create_supervisory_team()
+        entered, release = asyncio.Event(), asyncio.Event()
+        original = self.manager._commit_dirty_state
 
-        async def pause_deletion(dirty):
-            if dirty["deleted_teams"]:
-                entered_commit.set()
-                await release_commit.wait()
-            await original_commit(dirty)
+        async def hold(dirty):
+            entered.set()
+            await release.wait()
+            return await original(dirty)
 
-        with patch.object(self.manager, "_commit_dirty_state", side_effect=pause_deletion):
-            teardown = asyncio.create_task(
-                self.manager._team_creation.dissolve_supervisory_team(supervisory)
-            )
-            await asyncio.wait_for(entered_commit.wait(), timeout=5)
-            teardown.cancel()
-            await asyncio.sleep(0)
-            teardown.cancel()
-            release_commit.set()
-            with self.assertRaises(asyncio.CancelledError):
-                await asyncio.wait_for(teardown, timeout=5)
-        self.assertNotIn(supervisory.team_id, self.manager.teams)
-        with closing(sqlite3.connect(database_path)) as connection:
-            self.assertEqual(
-                connection.execute(
-                    "SELECT COUNT(*) FROM teams WHERE team_id = ?", (supervisory.team_id,)
-                ).fetchone()[0],
-                0,
-            )
-
-    async def test_cancelled_audit_dissolves_team_and_keeps_cancellation_evidence(self) -> None:
-        self.client.pause_all = True
-        task = asyncio.create_task(
-            self.manager.supervisor.audit_team_dialog(self.team, "cancelled input")
-        )
-        await asyncio.wait_for(self.client.entered.wait(), timeout=5)
-        task.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await asyncio.wait_for(task, timeout=5)
-        self.assertFalse(
-            any(team.team_kind == "supervisory" for team in self.manager.teams.values())
-        )
-        evidence = [
-            event for event in self.manager._memory.events.values()
-            if event.event_type == "supervisory_audit_completed"
-        ]
-        self.assertEqual(len(evidence), 1)
-        self.assertTrue(evidence[0].payload["cancelled"])
-
-    async def test_cancellation_during_initial_flush_still_dissolves_team(self) -> None:
-        entered_flush = asyncio.Event()
-        original_flush = self.manager.flush_state
-        flush_calls = 0
-
-        async def pause_first_flush() -> None:
-            nonlocal flush_calls
-            flush_calls += 1
-            if flush_calls == 1:
-                entered_flush.set()
-                await asyncio.Event().wait()
-            await original_flush()
-
-        with patch.object(self.manager, "flush_state", side_effect=pause_first_flush):
-            task = asyncio.create_task(
-                self.manager.supervisor.audit_team_dialog(self.team, "initial flush input")
-            )
-            await asyncio.wait_for(entered_flush.wait(), timeout=5)
+        with patch.object(self.manager, "_commit_dirty_state", hold):
+            task = asyncio.create_task(self.manager._team_creation.dissolve_supervisory_team(team))
+            await entered.wait()
             task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            release.set()
             with self.assertRaises(asyncio.CancelledError):
-                await asyncio.wait_for(task, timeout=5)
-        self.assertFalse(
-            any(team.team_kind == "supervisory" for team in self.manager.teams.values())
-        )
+                await task
+        self.assertNotIn(team.team_id, self.manager.teams)
 
-    async def test_initial_persistence_failure_dissolves_temporary_team(self) -> None:
-        with patch.object(
-            self.manager,
-            "flush_state",
-            side_effect=StatePersistenceError("injected initial flush failure"),
-        ):
-            with self.assertRaisesRegex(StatePersistenceError, "initial flush failure"):
-                await self.manager.supervisor.audit_team_dialog(self.team, "failed input")
-        self.assertFalse(
-            any(team.team_kind == "supervisory" for team in self.manager.teams.values())
-        )
+    async def test_cancelling_an_observer_does_not_cancel_its_accepted_audit(self):
+        self.health.pause = True
+        admission = await self.admit()
+        await self.health.entered.wait()
+        observer = asyncio.create_task(self.manager.wait_for_health_assessment(admission.audit_id))
+        observer.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await observer
+        self.assertTrue(self.manager.supervisor.profiles)
+        self.health.release.set()
+        self.assertEqual((await self.manager.wait_for_health_assessment(admission.audit_id)).status, AuditStatus.HEALTHY)
 
-    async def test_evidence_commit_failure_dissolves_temporary_team(self) -> None:
-        original_commit = self.manager._records.commit
+    async def test_explicit_cancellation_retains_unknown_and_dissolves_the_team(self):
+        self.health.pause = True
+        admission = await self.admit()
+        await self.health.entered.wait()
+        await self.manager.cancel_health_assessment(admission.audit_id)
+        self.assert_no_auditors()
+        result = await self.manager.wait_for_health_assessment(admission.audit_id)
+        self.assertEqual(result.status, AuditStatus.UNKNOWN)
+        self.assertEqual(self.records("audit_evidence")[0].values["findings"]["failure_kind"], "CancelledError")
+
+    async def test_initial_persistence_failure_never_leaves_privileged_people(self):
+        with patch.object(self.manager._records, "commit", side_effect=StatePersistenceError("Admission rejected")):
+            with self.assertRaises(StatePersistenceError):
+                await self.admit()
+        self.assert_no_auditors()
+
+    async def test_evidence_failure_is_propagated_but_does_not_retain_privilege(self):
+        original = self.manager._records.commit
 
         async def fail_evidence(records, **kwargs):
             if any(row.table_name == "audit_evidence" for row in records):
-                raise StatePersistenceError("injected evidence failure")
-            return await original_commit(records, **kwargs)
+                raise StatePersistenceError("Evidence write rejected")
+            return await original(records, **kwargs)
 
-        with patch.object(self.manager._records, "commit", side_effect=fail_evidence):
-            with self.assertRaisesRegex(StatePersistenceError, "evidence failure"):
-                await self.manager.supervisor.audit_team_dialog(self.team, "failed input")
-        self.assertFalse(
-            any(team.team_kind == "supervisory" for team in self.manager.teams.values())
-        )
-        self.assertFalse(
-            any(
-                event.event_type == "supervisory_audit_completed"
-                for event in self.manager._memory.events.values()
-            )
-        )
+        with patch.object(self.manager._records, "commit", fail_evidence):
+            admission = await self.admit()
+            with self.assertRaises(StatePersistenceError):
+                await self.manager.wait_for_health_assessment(admission.audit_id)
+        self.assert_no_auditors()
 
-    async def test_evidence_construction_failure_dissolves_temporary_team(self) -> None:
-        original_record = self.manager._memory.record_event
-
-        def fail_evidence(event_type, **kwargs):
-            if event_type == "supervisory_audit_completed":
-                raise RuntimeError("injected evidence construction failure")
-            return original_record(event_type, **kwargs)
-
-        with patch.object(self.manager._memory, "record_event", side_effect=fail_evidence):
-            with self.assertRaisesRegex(RuntimeError, "evidence construction failure"):
-                await self.manager.supervisor.audit_team_dialog(self.team, "failed input")
-        self.assertFalse(
-            any(team.team_kind == "supervisory" for team in self.manager.teams.values())
-        )
-
-    async def test_teardown_commit_failure_keeps_evidence_without_live_team(self) -> None:
-        database_path = os.path.join(self.workspace.name, "teardown-failure.db")
-        self.manager.db_path = database_path
-        await self.manager.save_state()
-        original_commit = self.manager._commit_dirty_state
-
-        async def fail_teardown(dirty):
-            if dirty["deleted_teams"]:
-                raise StatePersistenceError("injected teardown failure")
-            await original_commit(dirty)
-
-        with patch.object(self.manager, "_commit_dirty_state", side_effect=fail_teardown):
-            with self.assertRaisesRegex(StatePersistenceError, "teardown failure"):
-                await self.manager.supervisor.audit_team_dialog(self.team, "saved input")
-        self.assertFalse(
-            any(team.team_kind == "supervisory" for team in self.manager.teams.values())
-        )
-        await self.manager.flush_state()
-        with closing(sqlite3.connect(database_path)) as connection:
-            self.assertEqual(
-                connection.execute(
-                    "SELECT COUNT(*) FROM system_memory_events "
-                    "WHERE event_type = 'supervisory_audit_completed'"
-                ).fetchone()[0],
-                1,
-            )
-
-    async def test_close_waits_for_supervisory_teardown_after_cancellation(self) -> None:
-        self.client.pause_all = True
-        task = asyncio.create_task(
-            self.manager.supervisor.audit_team_dialog(self.team, "shutdown input")
-        )
-        await asyncio.wait_for(self.client.entered.wait(), timeout=5)
-        await asyncio.wait_for(self.manager.close(), timeout=5)
-        await asyncio.gather(task, return_exceptions=True)
-        self.assertFalse(
-            any(team.team_kind == "supervisory" for team in self.manager.teams.values())
-        )
+    async def test_close_finishes_durable_unknown_and_removes_live_privilege(self):
+        self.health.pause = True
+        admission = await self.admit()
+        await self.health.entered.wait()
+        await asyncio.wait_for(self.manager.close(), 10)
+        self.assert_no_auditors()
         self.assertFalse(self.manager.supervisor.finalizers)
-
-    async def test_close_waits_for_delayed_cooperative_audit_cancellation(self) -> None:
-        database_path = os.path.join(self.workspace.name, "delayed-close.db")
-        self.manager.db_path = database_path
-        await self.manager.save_state()
-        self.client.pause_all = True
-        self.client.cancel_delay = 0.1
-        task = asyncio.create_task(
-            self.manager.supervisor.audit_team_dialog(self.team, "delayed shutdown input")
-        )
-        await asyncio.wait_for(self.client.entered.wait(), timeout=5)
-        await asyncio.wait_for(self.manager.close(), timeout=5)
-        await asyncio.gather(task, return_exceptions=True)
-        self.assertFalse(
-            any(team.team_kind == "supervisory" for team in self.manager.teams.values())
-        )
-
-    async def test_close_propagates_supervisory_teardown_failure(self) -> None:
-        self.client.pause_all = True
-        task = asyncio.create_task(
-            self.manager.supervisor.audit_team_dialog(self.team, "failed shutdown input")
-        )
-        await asyncio.wait_for(self.client.entered.wait(), timeout=5)
-        original_commit = self.manager._commit_dirty_state
-
-        async def fail_deletion(dirty):
-            if dirty["deleted_teams"]:
-                raise RuntimeError("supervisory teardown failed")
-            await original_commit(dirty)
-
-        with patch.object(self.manager, "_commit_dirty_state", side_effect=fail_deletion):
-            with self.assertRaisesRegex(RuntimeError, "supervisory teardown failed"):
-                await asyncio.wait_for(self.manager.close(), timeout=5)
-        await asyncio.gather(task, return_exceptions=True)
-        self.assertTrue(self.manager._closed)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertEqual((await self.manager.wait_for_health_assessment(admission.audit_id)).status, AuditStatus.UNKNOWN)

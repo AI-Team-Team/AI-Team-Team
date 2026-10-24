@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ...agent import Agent
 from ...team import AgentTeam
 from ...formation import TeamFormationRequest
+from .publication import TeamCreationPublication
 
 
 class TeamCreationTransactionMixin:
@@ -25,11 +26,11 @@ class TeamCreationTransactionMixin:
             creator=self.manager.root_ai,
             roles_and_presets=roles,
             preset_name="supervisor_audit",
-            team_purpose="Audit one AgentTeam discussion for content and operational health.",
+            team_purpose="Assess one explicitly permitted Agent, AgentTeam, or ATT health evidence set.",
             system_instructions=(
-                "You are an objective supervisory audit team. Review the supplied "
-                "discussion for reasoning continuity, deadlocks, and role alignment. "
-                "Do not perform ordinary team operations or request tools."
+                "You are a temporary restricted health-assessment AgentTeam. "
+                "Use only admitted evidence and your predefined audit tools. "
+                "Do not judge business quality, progress, or completion, and do not repair governance or permissions."
             ),
             team_kind="supervisory",
             parent_override=None,
@@ -55,6 +56,7 @@ class TeamCreationTransactionMixin:
         unanimous_acceptance_action: str = "require_confirmation",
         late_join_policy: str = "disabled",
         task: Optional[str] = None,
+        parent: Any = None,
     ) -> Union[AgentTeam, TeamFormationRequest]:
         """Creates an all-new team or opens consent for any existing identity."""
         if existing_members or existing_member_ids or initiator_joins:
@@ -76,6 +78,7 @@ class TeamCreationTransactionMixin:
                 unanimous_acceptance_action=unanimous_acceptance_action,
                 late_join_policy=late_join_policy,
                 task=task,
+                parent=parent,
             )
         return self.create_immediate(
             creator=creator,
@@ -88,6 +91,8 @@ class TeamCreationTransactionMixin:
             member_configs=member_configs,
             is_public_visible=is_public_visible,
             initial_docs=initial_docs,
+            parent=parent,
+            task=task,
         )
 
     def bootstrap_agent_team(self, creator: Any, **kwargs: Any) -> AgentTeam:
@@ -159,9 +164,21 @@ class TeamCreationTransactionMixin:
         required_creator_member_agent_id: Optional[str] = None,
         record_registration_events: bool = True,
         team_kind: str = "ordinary",
+        parent: Any = None,
+        task: Optional[str] = None,
     ) -> AgentTeam:
         """Stages off-registry objects and atomically publishes one AgentTeam."""
         manager = self.manager
+        if task is not None and not isinstance(task, str):
+            raise TypeError("Initial work must be explicit text.")
+        if parent_override_provided:
+            if parent is not None:
+                raise ValueError("Specify one explicit parent only.")
+            parent = parent_override
+        parent_override = manager._topology.resolve_parent(parent)
+        if team_kind == "ordinary":
+            self.validate_creation_depth(parent_override)
+        parent_override_provided = True
         manager._resources.check_authority()
         if manager._restore_in_progress:
             raise RuntimeError("ATTManager is restoring state and rejects new teams.")
@@ -205,7 +222,7 @@ class TeamCreationTransactionMixin:
         os.makedirs(managed_root, exist_ok=True)
         staging_root = tempfile.mkdtemp(prefix=".att-team-stage-", dir=managed_root)
         published: List[Tuple[str, Optional[str]]] = []
-        snapshot: Optional[Dict[str, Any]] = None
+        publication = None
         stage: Optional[Dict[str, Any]] = None
         try:
             stage = manager._create_agent_team(
@@ -229,7 +246,7 @@ class TeamCreationTransactionMixin:
             )
             with manager._resources.topology_mutation():
                 manager._validate_team_creation_commit(stage)
-                snapshot = manager._team_creation_snapshot()
+                publication = TeamCreationPublication(manager, stage)
                 try:
                     published = manager._publish_new_staged_libraries(stage["libraries"], managed_root)
                     manager.libraries.update(stage["libraries"])
@@ -241,9 +258,13 @@ class TeamCreationTransactionMixin:
                     team = stage["team"]
                     batch = manager._persistence_batch.get()
                     team._publication_pending = bool(batch and batch.get("_provisional"))
+                    team._creation_publication = publication if team._publication_pending else None
+                    team._provisional_agent_ids = frozenset(agent.agent_id for agent in stage["new_agents"])
                     manager.teams[team.team_id] = team
+                    if task:
+                        manager._formations.prepare_initial_instructions(team, task)
                     parent = stage["parent"]
-                    if parent is not None:
+                    if isinstance(parent, AgentTeam):
                         manager._team_parent_map[team.team_id] = parent.team_id
                         parent.add_child_team(team)
                     if team_kind == "ordinary" and not team._publication_pending:
@@ -257,16 +278,15 @@ class TeamCreationTransactionMixin:
                     if published:
                         manager._rollback_published_libraries(published)
                         published = []
-                    manager._rollback_team_creation(snapshot)
-                    snapshot = None
+                    publication.rollback()
+                    publication = None
                     raise
             manager._discard_library_backups(published)
         except Exception:
             if published:
                 manager._rollback_published_libraries(published)
-            if snapshot is not None:
-                with manager._topology_lock:
-                    manager._rollback_team_creation(snapshot)
+            if publication is not None:
+                publication.rollback()
             raise
         finally:
             shutil.rmtree(staging_root, ignore_errors=True)
@@ -298,50 +318,8 @@ class TeamCreationTransactionMixin:
             teams={team.team_id} | ({team.parent_team.team_id} if team.parent_team else set()),
             libraries=set(stage["libraries"]),
             memory_events=registration_event_ids,
+            agent_inboxes={member.agent_id for member in team.members} if task else set(),
         )
+        if task and not team._publication_pending:
+            manager._formations.schedule_initial_arrivals(team)
         return team
-
-    def _team_creation_snapshot(self) -> Dict[str, Any]:
-        manager = self.manager
-        return {
-            "agents": dict(manager.agents),
-            "agents_by_id": dict(manager._agents_by_id),
-            "teams": dict(manager.teams),
-            "libraries": dict(manager.libraries),
-            "library_files": dict(manager._library_files),
-            "parent_map": dict(manager._team_parent_map),
-            "children": {
-                team_id: list(team.child_teams) for team_id, team in manager.teams.items()
-            },
-            "private_ids": {
-                id(agent): agent.private_doc_library_id for agent in manager._agents_by_id.values()
-            },
-        }
-
-    def _rollback_team_creation(self, snapshot: Dict[str, Any]) -> None:
-        manager = self.manager
-        removed_teams = set(manager.teams) - set(snapshot["teams"])
-        removed_streams = {row.values["stream_id"] for row in manager._records.snapshot()
-                           if row.table_name == "chat_streams" and row.values["team_id"] in removed_teams}
-        if removed_streams:
-            manager._records.restore(row for row in manager._records.snapshot()
-                if not (row.table_name in {"chat_streams", "chat_events", "membership_intervals"}
-                        and row.values["stream_id"] in removed_streams))
-        prior_library_ids = set(snapshot["libraries"])
-        for lib_id, library in list(manager.libraries.items()):
-            if lib_id not in prior_library_ids:
-                shutil.rmtree(library.root_dir, ignore_errors=True)
-        for agent in manager._agents_by_id.values():
-            if id(agent) not in snapshot["private_ids"]:
-                agent._private_doc_library_id = None
-                agent._manager = None
-        manager._agent_registry.replace_indexes(
-            snapshot["agents"],
-            snapshot["agents_by_id"],
-        )
-        manager.teams = snapshot["teams"]
-        manager.libraries = snapshot["libraries"]
-        manager._library_files = snapshot["library_files"]
-        manager._topology.replace_parent_map(snapshot["parent_map"])
-        for team_id, children in snapshot["children"].items():
-            manager.teams[team_id].child_teams = children

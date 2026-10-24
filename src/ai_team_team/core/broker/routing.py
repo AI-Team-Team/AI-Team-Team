@@ -28,96 +28,21 @@ class BrokerRoutingMixin:
             key=lambda approval: approval.sequence,
         )
 
-    def _parent_principal(self, team: AgentTeam) -> ApprovalPrincipal:
-        parent = team.parent_team or self.manager.find_parent_team(team)
-        if parent is not None:
-            return ApprovalPrincipal(
-                kind="agent_team", principal_id=parent.team_id
-            )
-        return ApprovalPrincipal(
-            kind="agent", principal_id=self.manager.root_ai.agent_id
-        )
+    def approval_path(self, sender: AgentTeam, recipient: AgentTeam, policy=None):
+        from ..organization import communication_route
 
-    @staticmethod
-    def _deduplicate(
-        principals: Iterable[ApprovalPrincipal],
-    ) -> List[ApprovalPrincipal]:
-        result: List[ApprovalPrincipal] = []
-        seen = set()
-        for principal in principals:
-            if principal.key in seen:
-                continue
-            seen.add(principal.key)
-            result.append(principal)
-        return result
-
-    def approval_path(
-        self,
-        sender: AgentTeam,
-        recipient: AgentTeam,
-        policy: Optional[Any] = None,
-    ) -> List[ApprovalPrincipal]:
         policy = policy or self.manager.config.communication
-        if policy.policy == "permissive":
-            return []
-        if policy.policy == "parent_approval":
-            return self._deduplicate(
-                [
-                    self._parent_principal(sender),
-                    self._parent_principal(recipient),
-                ]
-            )
+        parents = {key: team.organizational_parent for key, team in self.manager.teams.items()}
+        return communication_route(sender.team_id, recipient.team_id, parents, policy.policy,
+            {key: team._position_revision for key, team in self.manager.teams.items()})[0]
 
-        sender_chain: List[AgentTeam] = []
-        current: Optional[AgentTeam] = sender
-        while current is not None:
-            sender_chain.append(current)
-            current = current.parent_team
-        recipient_chain: List[AgentTeam] = []
-        current = recipient
-        while current is not None:
-            recipient_chain.append(current)
-            current = current.parent_team
+    def approval_route_evidence(self, sender: AgentTeam, recipient: AgentTeam, policy=None):
+        from ..organization import communication_route
 
-        recipient_index = {
-            team.team_id: index
-            for index, team in enumerate(recipient_chain)
-        }
-        lca_sender_index = None
-        lca_recipient_index = None
-        for index, team in enumerate(sender_chain):
-            if team.team_id in recipient_index:
-                lca_sender_index = index
-                lca_recipient_index = recipient_index[team.team_id]
-                break
-
-        route: List[ApprovalPrincipal] = []
-        if lca_sender_index is None:
-            route.extend(
-                ApprovalPrincipal(kind="agent_team", principal_id=team.team_id)
-                for team in sender_chain[1:]
-            )
-            route.append(
-                ApprovalPrincipal(
-                    kind="agent", principal_id=self.manager.root_ai.agent_id
-                )
-            )
-            route.extend(
-                ApprovalPrincipal(kind="agent_team", principal_id=team.team_id)
-                for team in reversed(recipient_chain)
-            )
-        else:
-            route.extend(
-                ApprovalPrincipal(kind="agent_team", principal_id=team.team_id)
-                for team in sender_chain[1 : lca_sender_index + 1]
-            )
-            route.extend(
-                ApprovalPrincipal(kind="agent_team", principal_id=team.team_id)
-                for team in reversed(
-                    recipient_chain[:lca_recipient_index]
-                )
-            )
-        return self._deduplicate(route)
+        policy = policy or self.manager.config.communication
+        parents = {key: team.organizational_parent for key, team in self.manager.teams.items()}
+        return communication_route(sender.team_id, recipient.team_id, parents, policy.policy,
+            {key: team._position_revision for key, team in self.manager.teams.items()})[1]
 
     def active_agreement(
         self, sender_team_id: str, recipient_team_id: str
@@ -175,6 +100,9 @@ class BrokerRoutingMixin:
                for team in (sender, recipient)):
             raise PermissionError("Peer communication requires active published AgentTeam endpoints.")
         actor = self.manager._agents_by_id.get(initiated_by_agent_id)
+        current = self.manager._active_tool_agent.get()
+        if current is not None and (current is not actor or self.manager._active_team.get() is not sender):
+            raise PermissionError("A tool cannot override its current Agent or AgentTeam.")
         if (
             actor is None
             or actor.lifecycle_state != "active"

@@ -35,7 +35,7 @@ class StateValidationPayload:
     memory_segments: List[Dict[str, Any]]
     memory_cards: List[Dict[str, Any]]
     memory_references: List[Dict[str, Any]]
-    governance_rounds: List[Dict[str, Any]]
+    governance_cases: List[Dict[str, Any]]
     migration_requests: List[Dict[str, Any]]
 
 
@@ -75,7 +75,7 @@ def parse_state_validation_payload(
             memory_segments=state["memory_segments"],
             memory_cards=state["memory_cards"],
             memory_references=state["memory_references"],
-            governance_rounds=state["governance_rounds"],
+            governance_cases=state["governance_cases"],
             migration_requests=state["migration_requests"],
         )
     except Exception as exc:

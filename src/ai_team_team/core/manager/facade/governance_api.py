@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from ...agent import Agent
 from ...governance import GovernanceSubmissionResult
-from ...response import AgentTurnResult
+from ...response import InteractionResult
 from ...team import AgentTeam
 
 
@@ -13,9 +13,9 @@ class GovernanceAPI:
         return self._inbox.open(actor, message_id)
 
     async def submit_governance_choice(
-        self, round_id: str, choice: dict[str, Any], *, actor: Agent
+        self, case_id: str, choice: dict[str, Any], *, actor: Agent
     ) -> GovernanceSubmissionResult:
-        return await self._governance.submit(actor, round_id, choice)
+        return await self._governance.submit(actor, case_id, choice)
 
     def list_governance_requests(
         self, *, actor: Agent, pending_only: bool = True
@@ -23,15 +23,15 @@ class GovernanceAPI:
         if self._agents_by_id.get(actor.agent_id) is not actor or actor.lifecycle_state != "active":
             raise PermissionError("Governance requests require an active registered Agent.")
         return [
-            self._governance.inspect(actor, item.round_id)
-            for item in self._governance.rounds.values()
+            self._governance.inspect(actor, item.case_id)
+            for item in self._governance.cases.values()
             if actor.agent_id in item.voter_agent_ids
-            and (not pending_only or self._governance.is_outstanding(actor.agent_id, item.round_id))
+            and (not pending_only or self._governance.is_outstanding(actor.agent_id, item.case_id))
         ]
 
     async def execute_agent_interaction(
         self, agent: Agent, prompt: str, *, team: Optional[AgentTeam] = None
-    ) -> AgentTurnResult:
+    ) -> InteractionResult:
         """Observe an answer from the common personal runtime without ending activity."""
         from ...activity.contracts import AgentTeamScope, PersonalScope
         if team is not None:

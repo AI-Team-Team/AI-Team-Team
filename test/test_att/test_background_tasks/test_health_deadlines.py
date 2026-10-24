@@ -110,6 +110,14 @@ class HealthDeadlineTests(BackgroundTestCase):
         await self.wait_timer(12)
         entered, release_receipt = asyncio.Event(), asyncio.Event()
         commit = self.manager._records.commit
+        monitor_idle = asyncio.Event()
+        job = self.manager._executions.jobs[handle.execution_id]
+        wait = asyncio.wait
+
+        async def observed_wait(futures, **kwargs):
+            if asyncio.current_task() is job.health_task and len(futures) == 1:
+                monitor_idle.set()
+            return await wait(futures, **kwargs)
 
         async def blocked(records, **kwargs):
             records = tuple(records)
@@ -120,7 +128,7 @@ class HealthDeadlineTests(BackgroundTestCase):
                 await release_receipt.wait()
             return receipt
 
-        with patch.object(self.manager._records, "commit", blocked):
+        with patch.object(self.manager._records, "commit", blocked), patch("asyncio.wait", observed_wait):
             self.clock.advance(7)
             try:
                 await asyncio.wait_for(entered.wait(), 5)
@@ -128,6 +136,7 @@ class HealthDeadlineTests(BackgroundTestCase):
             finally:
                 release_receipt.set()
             await self.wait_stalls(2)
+            await asyncio.wait_for(monitor_idle.wait(), 5)
         stalled = [row.values["evidence_kind"] for row in self.records("execution_observations") if row.values["health"] == "stalled"]
         self.assertEqual(stalled, ["progress", "heartbeat"])
         release.set()

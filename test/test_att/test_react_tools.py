@@ -12,6 +12,7 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from ai_team_team import ATTManager, Agent, Tool, ATTConfig
+from test.personal_activity import interact_and_idle
 
 class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -27,6 +28,7 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
         self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
         self.config = ATTConfig(tool_calling_mode="react")
         self.manager = ATTManager(root_ai=self.root_ai, config=self.config, persistence_mode="volatile")
+        self.addAsyncCleanup(self.manager.close)
 
     async def test_tool_auditor_approval(self):
         """Verify the Tool Auditor registration and interception hook."""
@@ -44,18 +46,19 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
             return False, "Unsafe SQL pattern"
         self.manager.register_tool_auditor("query_db", reject_auditor)
 
-        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3)
         # Configure LLM Client side-effects
         self.mock_client.generate.side_effect = [
             "Thought: Let's run query.\nAction: query_db('SELECT * FROM secrets')",
-            "Thought: Got output.\nFinal Answer: Done!"
+            "Thought: Got output.\nFinal Answer: Done!",
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
 
         agent = team.members[0]
-        final_answer = await team.execute_react_step(agent, "Query secrets", "System instructions", max_steps=2, manager=self.manager)
+        final_answer = await interact_and_idle(self.manager, agent, "Query secrets", team=team)
 
         self.assertFalse(dummy_tool_called)
-        self.assertEqual(final_answer, "Done!")
+        self.assertEqual(final_answer.answer, "Done!")
 
         # 2. Register auditor that approves
         dummy_tool_called = False
@@ -65,12 +68,13 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
 
         self.mock_client.generate.side_effect = [
             "Thought: Let's run query.\nAction: query_db('SELECT * FROM characters')",
-            "Thought: Got output.\nFinal Answer: Done!"
+            "Thought: Got output.\nFinal Answer: Done!",
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
 
-        final_answer = await team.execute_react_step(agent, "Query characters", "System instructions", max_steps=2, manager=self.manager)
+        final_answer = await interact_and_idle(self.manager, agent, "Query characters", team=team)
         self.assertTrue(dummy_tool_called)
-        self.assertEqual(final_answer, "Done!")
+        self.assertEqual(final_answer.answer, "Done!")
 
     async def test_async_tool_auditor_approval(self):
         """Verify that asynchronous tool auditors work correctly and are awaited without crashing."""
@@ -91,27 +95,29 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
         
         self.manager.register_tool_auditor("query_db_async", async_auditor)
 
-        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3)
         agent = team.members[0]
 
         # Test 1: Reject case
         self.mock_client.generate.side_effect = [
             "Thought: Let's run query.\nAction: query_db_async('SELECT * FROM secrets')",
-            "Thought: Got output.\nFinal Answer: Done!"
+            "Thought: Got output.\nFinal Answer: Done!",
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
-        final_answer = await team.execute_react_step(agent, "Query secrets", "System instructions", max_steps=2, manager=self.manager)
+        final_answer = await interact_and_idle(self.manager, agent, "Query secrets", team=team)
         self.assertFalse(dummy_tool_called)
-        self.assertEqual(final_answer, "Done!")
+        self.assertEqual(final_answer.answer, "Done!")
 
         # Test 2: Approve case
         dummy_tool_called = False
         self.mock_client.generate.side_effect = [
             "Thought: Let's run query.\nAction: query_db_async('SELECT * FROM characters')",
-            "Thought: Got output.\nFinal Answer: Done!"
+            "Thought: Got output.\nFinal Answer: Done!",
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
-        final_answer = await team.execute_react_step(agent, "Query characters", "System instructions", max_steps=2, manager=self.manager)
+        final_answer = await interact_and_idle(self.manager, agent, "Query characters", team=team)
         self.assertTrue(dummy_tool_called)
-        self.assertEqual(final_answer, "Done!")
+        self.assertEqual(final_answer.answer, "Done!")
 
     async def test_react_loop_and_tools(self):
         """Verify the ReAct execution loop parsing and tool execution."""
@@ -121,7 +127,7 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
             dummy_tool_called = True
             return f"Processed: {arg1}"
             
-        team = self.manager.create_agent_team(creator=self.root_ai, member_count=3)
+        team = self.manager.create_agent_team(parent=self.root_ai, creator=self.root_ai, member_count=3)
         team.tools = {
             "dummy_tool": Tool("dummy_tool", "A dummy testing tool.", dummy_tool)
         }
@@ -131,14 +137,15 @@ class TestATTReactTools(unittest.IsolatedAsyncioTestCase):
         # Step 2: LLM produces Final Answer
         self.mock_client.generate.side_effect = [
             "Thought: Let's run the dummy tool first.\nAction: dummy_tool('hello_world')",
-            "Thought: I got the observation. We are done.\nFinal Answer: Success!"
+            "Thought: I got the observation. We are done.\nFinal Answer: Success!",
+            "Action: set_activity_intent(intent={'kind': 'idle'})"
         ]
         
         agent = team.members[0]
-        final_answer = await team.execute_react_step(agent, "Run the task", "System instructions", max_steps=2)
+        final_answer = await interact_and_idle(self.manager, agent, "Run the task", team=team)
         
         self.assertTrue(dummy_tool_called)
-        self.assertEqual(final_answer, "Success!")
+        self.assertEqual(final_answer.answer, "Success!")
 
 if __name__ == "__main__":
     unittest.main()

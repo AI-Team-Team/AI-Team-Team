@@ -25,10 +25,11 @@ class SystemClock:
 class ModelUnavailable(LLMGenerationError):
     """Resource evidence, never a voluntary idle choice or a personal answer."""
 
-    def __init__(self, reason: str, *, recoverable: bool = False, earliest: float | None = None):
+    def __init__(self, reason: str, *, recoverable: bool = False, earliest: float | None = None, resource_attempt_id: str | None = None):
         super().__init__(reason)
         self.recoverable = recoverable
         self.earliest = earliest
+        self.resource_attempt_id = resource_attempt_id
 
 
 @dataclass
@@ -44,6 +45,7 @@ class Session:
     intent: str = "continuing"
     availability: str = "ready"
     invocation_id: str | None = None
+    last_checkpoint_invocation_id: str | None = None
     frame_id: str | None = None
     frame_notices: tuple = ()
     pending_intent: Any = None
@@ -57,6 +59,8 @@ class Session:
     interaction_waiters: list = field(default_factory=list)
     prepared_chat_reads: dict = field(default_factory=dict)
     pending_chat_read_acknowledgements: list = field(default_factory=list)
+    audit_profile: dict | None = None
+    audit_finished: Any = None
 
 
 def capture(manager, table: str, **values) -> DomainRecord:

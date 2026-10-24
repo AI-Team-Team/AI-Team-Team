@@ -21,8 +21,8 @@ from ._fixture import DiscoveryFixture
 class DiscoveryContextTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase):
     async def test_text_native_and_personal_contexts_keep_identity_without_global_injection(self):
         outsider = self.person("UNDISCOVERED_AGENT_MARKER", description="Unrelated public role")
-        distant = self.manager.create_agent_team(self.root, team_purpose="UNDISCOVERED_TEAM_MARKER")
-        team = self.manager.create_agent_team(self.root, team_purpose="Current work")
+        distant = self.manager.create_agent_team(self.root, parent=self.root, team_purpose="UNDISCOVERED_TEAM_MARKER")
+        team = self.manager.create_agent_team(self.root, parent=self.root, team_purpose="Current work")
         member = team.members[0]
         member.system_instructions = "CONTINUING_MEMBER_MISSION"
         member.append_message({"role": "assistant", "content": "CONTINUING_MEMBER_MEMORY"})
@@ -96,43 +96,32 @@ class DiscoveryContextTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.manager.teams), 0)
         self.assertIsNone(self.manager._active_team.get())
 
-    async def test_formation_deliberation_does_not_reinject_a_global_candidate_list(self):
+    async def test_candidate_preparation_does_not_reinject_a_global_directory(self):
         outsider = self.person("UNDISCOVERED_FORMATION_CANDIDATE")
-        draft = TeamFormationDraft(
-            draft_id="TFDRAFT-discovery-test",
-            initiator_agent_id=self.root.agent_id,
-            creator_kind="agent",
-            creator_id=self.root.agent_id,
-            objective="Find collaborators for a research proposal.",
-            created_at=1.0,
-            updated_at=1.0,
-        )
-        prompt = self.manager._formations._draft_deliberation_prompt(draft, None)
-        self.assertNotIn(outsider.agent_id, prompt)
-        self.assertNotIn(outsider.name, prompt)
-        self.assertIn("entity-discovery tools", prompt)
-        self.assertIn("membership consent", prompt)
-        explicit = self.manager._formations._draft_deliberation_prompt(
-            draft, {"invitee_agent_ids": [outsider.agent_id]}
-        )
-        self.assertIn(outsider.agent_id, explicit)
+        tools = self.manager.get_available_tools(None, self.root)
+        self.assertIn("propose_team_formation", tools)
+        self.assertIn("prepare_team_formation_draft", tools)
+        definition = tools["prepare_team_formation_draft"].json_schema
+        self.assertNotIn(outsider.agent_id, json.dumps(definition))
+        self.assertNotIn(outsider.name, json.dumps(definition))
+        self.assertFalse(hasattr(self.manager._formations, "_draft_deliberation_prompt"))
 
     async def test_default_context_size_does_not_grow_with_unrelated_registered_people(self):
-        from ai_team_team.core.strategies.shared import _prepare_agent_context
+        from ai_team_team.core.manager.activity.values import Session
 
-        async with self.manager.agent_invocation(self.root):
-            first = await _prepare_agent_context(None, self.root, "Do a small task.", self.manager)
+        session = Session(self.root.agent_id, "unadmitted-context-inspection", self.manager._activity.generation)
+        tools = self.manager.get_available_tools(None, self.root)
+        first = self.manager._activity.instructions(session, tools, False)
         for index in range(100):
             self.person(f"Unrelated{index:03}", description="Long public description " * 20)
-        async with self.manager.agent_invocation(self.root):
-            second = await _prepare_agent_context(None, self.root, "Do a small task.", self.manager)
+        second = self.manager._activity.instructions(session, self.manager.get_available_tools(None, self.root), False)
         self.assertEqual(first, second)
         self.assertEqual(len(self.manager.list_entities("agent", end_index=999).items), 101)
 
     async def test_discovery_tools_remain_available_when_delegation_or_advanced_memory_is_disabled(
         self,
     ):
-        team = self.manager.create_agent_team(self.root)
+        team = self.manager.create_agent_team(self.root, parent=self.root)
         names = {"list_entities", "search_entities", "inspect_entity"}
         self.manager.config.enable_dynamic_delegation = False
         self.manager.config.episodic_memory.enabled = False
@@ -197,12 +186,12 @@ class DiscoveryContextTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_governance_mail_uses_on_demand_discovery_without_an_automatic_directory(self):
         outsider = self.person("UNRELATED_GOVERNANCE_PERSON")
-        self.manager.create_agent_team(self.root, team_purpose="UNRELATED_GOVERNANCE_TEAM")
+        self.manager.create_agent_team(self.root, parent=self.root, team_purpose="UNRELATED_GOVERNANCE_TEAM")
         self.manager.config.communication = ParentApprovalCommunicationConfig()
         for mode in ("text_react", "native"):
             self.manager.config.tool_calling_mode = mode
-            first = self.manager.create_agent_team(self.root)
-            second = self.manager.create_agent_team(self.root)
+            first = self.manager.create_agent_team(self.root, parent=self.root)
+            second = self.manager.create_agent_team(self.root, parent=self.root)
             start = len(self.client.calls)
             request = await self.manager.broker.request_peer_communication(
                 first, second, first.members[0].agent_id, "Consider this public channel."

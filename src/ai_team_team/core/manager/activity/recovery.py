@@ -171,7 +171,7 @@ class ActivityRecoveryMixin:
             agent = self.manager._agents_by_id[owner]
             if affected or session.intent == "continuing":
                 try:
-                    alias = self.manager.resolve_model_alias(agent.llm_client)
+                    alias = self.manager.resolve_runtime_model_alias(agent.llm_client)
                     availability = self.manager._records.index.get(
                         ("model_availability", (owner, alias))
                     )

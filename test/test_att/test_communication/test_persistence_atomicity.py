@@ -1,3 +1,4 @@
+from test.governance_client import approve_pending_business, settle_governance_activity, submit_case_ballots
 import os
 import time
 from types import SimpleNamespace
@@ -59,14 +60,15 @@ class TestAutonomousCommunication(CommunicationTestCase):
             await self._assert_pending_request_and_delivery_round_trip()
 
     async def _assert_pending_request_and_delivery_round_trip(self):
+        self.client.respond = False
         db_path = os.path.join(self.workspace, "communication.db")
         source = self.manager(
             ParentApprovalCommunicationConfig(), db_path=db_path
         )
-        parent_a = source.create_agent_team(self.root, member_count=3)
-        parent_b = source.create_agent_team(self.root, member_count=3)
-        sender = source.create_agent_team(parent_a, member_count=3)
-        recipient = source.create_agent_team(parent_b, member_count=3)
+        parent_a = source.create_agent_team(self.root, parent=self.root, member_count=3)
+        parent_b = source.create_agent_team(self.root, parent=self.root, member_count=3)
+        sender = source.create_agent_team(parent_a, parent=parent_a, member_count=3)
+        recipient = source.create_agent_team(parent_b, parent=parent_b, member_count=3)
         result = await source.broker.request_peer_communication(
             sender, recipient, sender.members[0].agent_id, "persist request"
         )
@@ -79,19 +81,11 @@ class TestAutonomousCommunication(CommunicationTestCase):
         await restored.load_state(db_path)
         request = restored.broker.communication_requests[result.request_id]
         self.assertEqual(request.status.value, "PENDING")
-        self.assertEqual(
-            restored.broker.queued_request_ids_for_team(parent_a.team_id),
-            [request.request_id],
-        )
-
-        await restored.execute_team_discussion(
-            restored.teams[parent_a.team_id], "approve A", rounds=1
-        )
-        await restored.execute_team_discussion(
-            restored.teams[parent_b.team_id], "approve B", rounds=1
-        )
-        await self.wait_for_status(request, "APPROVED")
-        self.assertEqual(request.status.value, "APPROVED")
+        await settle_governance_activity(restored)
+        self.assertTrue(any(case.business_id == request.request_id and case.status == "PENDING"
+                            for case in restored._governance.cases.values()))
+        await approve_pending_business(restored, request.request_id)
+        request = await self.wait_for_status(request, "APPROVED")
         delivered = await restored.broker.send_peer_message(
             restored.teams[sender.team_id],
             restored.teams[recipient.team_id],
@@ -118,14 +112,15 @@ class TestAutonomousCommunication(CommunicationTestCase):
         await final.close()
 
     async def test_authoritative_write_failures_roll_back_runtime_state(self):
+        self.client.respond = False
         governed = self.manager(ParentApprovalCommunicationConfig())
-        parent_a = governed.create_agent_team(self.root, member_count=3)
-        parent_b = governed.create_agent_team(self.root, member_count=3)
-        sender = governed.create_agent_team(parent_a, member_count=3)
-        recipient = governed.create_agent_team(parent_b, member_count=3)
+        parent_a = governed.create_agent_team(self.root, parent=self.root, member_count=3)
+        parent_b = governed.create_agent_team(self.root, parent=self.root, member_count=3)
+        sender = governed.create_agent_team(parent_a, parent=parent_a, member_count=3)
+        recipient = governed.create_agent_team(parent_b, parent=parent_b, member_count=3)
         with patch.object(
-            governed,
-            "_commit_dirty_state",
+            governed._records,
+            "commit",
             AsyncMock(side_effect=OSError("request disk failure")),
         ):
             with self.assertRaisesRegex(OSError, "request disk failure"):
@@ -151,11 +146,12 @@ class TestAutonomousCommunication(CommunicationTestCase):
         )
         request = governed.broker.communication_requests[valid.request_id]
         approval = governed.broker.approvals_for_request(request.request_id)[0]
-        await governed.broker._claim_approval(
-            request.request_id, approval.principal
-        )
+        await settle_governance_activity(governed)
+        case = governed._governance.latest("communication", request.request_id, approval.principal)
+        with patch.object(governed._governance, "schedule_resolution"):
+            await submit_case_ballots(governed, case)
 
-        async def fail_after_unrelated_inbox_change(dirty):
+        async def fail_after_unrelated_inbox_change(*args, **kwargs):
             with parent_a.inbox_lock:
                 parent_a.message_inbox.append(
                     {"type": "unrelated", "reason": "preserve me"}
@@ -163,15 +159,15 @@ class TestAutonomousCommunication(CommunicationTestCase):
             raise OSError("approval disk failure")
 
         with patch.object(
-            governed,
-            "_commit_dirty_state",
+            governed._records,
+            "commit",
             side_effect=fail_after_unrelated_inbox_change,
         ):
             with self.assertRaisesRegex(OSError, "approval disk failure"):
                 await governed.broker._complete_approval(
                     request.request_id,
                     approval.principal,
-                    DecisionOutcome("approved", "approved"),
+                    governed.broker.decision_provider.outcome(governed._governance.cases[case.case_id]),
                 )
         restored_request = governed.broker.communication_requests[
             request.request_id
@@ -187,20 +183,16 @@ class TestAutonomousCommunication(CommunicationTestCase):
                 for item in parent_a.message_inbox
             )
         )
-        self.assertTrue(
-            any(
-                item.get("request_id") == request.request_id
-                for item in parent_a.message_inbox
-            )
-        )
+        self.assertTrue(any(mail["payload"].get("request_id") == request.request_id
+                            for voter in parent_a.members for mail in voter.agent_inbox))
         await governed.close()
 
         direct = self.manager(PermissiveCommunicationConfig())
-        first = direct.create_agent_team(self.root, member_count=3)
-        second = direct.create_agent_team(self.root, member_count=3)
+        first = direct.create_agent_team(self.root, parent=self.root, member_count=3)
+        second = direct.create_agent_team(self.root, parent=self.root, member_count=3)
         with patch.object(
-            direct,
-            "_commit_dirty_state",
+            direct._records,
+            "commit",
             AsyncMock(side_effect=OSError("message disk failure")),
         ):
             with self.assertRaisesRegex(OSError, "message disk failure"):

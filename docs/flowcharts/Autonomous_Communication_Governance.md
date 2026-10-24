@@ -40,69 +40,53 @@ The Root AI is an `agent` governance principal and is never a communication endp
 
 ## 2. Communication Institution Selection
 
-The policy is read from `ATTConfig.communication` and is copied into each governed request as an immutable policy snapshot.
+ATTConfig alone defines policy; an immutable policy snapshot and actual organizational route evidence accompany each governed Request.
 
-`CommunicationConfig` is a strict Pydantic discriminated union with forbidden extra fields and runtime assignment validation.
+`request_delivery` accepts only `"queue"`, while `direction` selects one-way or bidirectional channels.
+
+Changing configuration cannot rewrite pending policy snapshots or revoke existing Agreements.
 
 ```mermaid
 flowchart TD
-    Start["Validated invocation context"] --> Policy{"ATTConfig.communication.policy"}
-    Policy -- "permissive" --> Direct["No Request and no implicit Agreement<br/>Proceed directly to durable message delivery"]
-    Policy -- "parent_approval" --> ParentRoute["Resolve sender and recipient parent principals<br/>Remove duplicate principals"]
-    Policy -- "lineage_approval" --> LineageRoute["Resolve unique sender-to-recipient topology route<br/>Exclude sender and include recipient"]
-    ParentRoute --> Governed["Create or reuse CommunicationRequest"]
-    LineageRoute --> Governed
+    Context["Validate current person and actual AT scope"] --> Independent{"Both endpoints independent?"}
+    Independent -- "Yes" --> Direct["Direct delivery, no Request or implicit Agreement"]
+    Independent -- "No" --> Policy{"ATTConfig.communication.policy"}
+    Policy -- "permissive" --> Direct
+    Policy -- "parent_approval" --> Parents["Actual attached-side parent principals, deduplicated"]
+    Policy -- "lineage_approval" --> Path["Actual sender and recipient paths, no virtual Root"]
+    Parents --> Cases["Persist Request, ordered Approvals and exact governance cases"]
+    Path --> Cases
 ```
-
-Approval configurations also define `request_delivery` as `queue` or `wake` and `direction` as `one_way` or `bidirectional`.
-
-Changing `ATTConfig.communication` later does not modify an existing request snapshot or revoke an active Agreement.
-
-Approval institutions create persistent channels only and do not provide a single-message approval mode.
 
 ## 3. Approval Principal Path Algorithms
 
-Every approval authority is an immutable `ApprovalPrincipal(kind="agent_team" | "agent", principal_id=...)`.
+Every authority is an `ApprovalPrincipal(kind="agent_team" | "agent", principal_id=...)`.
+
+A team's parent is explicitly an Agent, AgentTeam, or absent.
+
+Creator identity, member order, depth labels, and membership in another team never infer an edge.
 
 ### Parent Approval
 
-An ordinary AgentTeam parent becomes an `agent_team` principal.
+Each attached endpoint contributes its actual parent principal, and duplicates are removed.
 
-A top-level AgentTeam has the Root AI Agent as its parent principal.
+An independent endpoint contributes no parent approval but does not exempt the other endpoint's authorities.
 
-```mermaid
-flowchart LR
-    Sender["Sender AgentTeam"] --> SenderParent{"Has AgentTeam parent?"}
-    SenderParent -- "Yes" --> SP["agent_team: sender parent"]
-    SenderParent -- "No" --> RootA["agent: Root AI"]
-    Recipient["Recipient AgentTeam"] --> RecipientParent{"Has AgentTeam parent?"}
-    RecipientParent -- "Yes" --> RP["agent_team: recipient parent"]
-    RecipientParent -- "No" --> RootB["agent: Root AI"]
-    SP --> Deduplicate["Preserve order and remove duplicate principal keys"]
-    RootA --> Deduplicate
-    RP --> Deduplicate
-    RootB --> Deduplicate
-```
+Root AI participates only if it is actually recorded as an Agent parent.
 
 ### Lineage Approval
 
-The sender's act of requesting the channel is the sender AgentTeam's consent, so the sender is excluded from the approval path.
+The sender's request expresses its AT's consent, so sender authority is excluded.
 
-The recipient and every intermediate AgentTeam on the unique route are included.
+ATT walks the actual parent paths and includes required intermediate authorities and the recipient-side authority.
 
-The Root AI Agent is included only when the route crosses separate top-level branches.
+Only an independent endpoint's own side is exempt.
 
-```mermaid
-flowchart LR
-    Sender["Sender AgentTeam<br/>excluded"] --> SenderAncestors["Sender ancestors up to LCA"]
-    SenderAncestors --> LCA{"Shared AgentTeam LCA exists?"}
-    LCA -- "Yes" --> RecipientBranch["Descend from LCA toward recipient"]
-    LCA -- "No" --> Root["agent: Root AI"]
-    Root --> RecipientTop["Recipient top-level AgentTeam"]
-    RecipientTop --> RecipientBranch
-    RecipientBranch --> Recipient["Recipient AgentTeam<br/>included"]
-    Recipient --> Ordered["Ordered and deduplicated ApprovalPrincipal route"]
-```
+For `P → A` and `Q → B` in separate independent trees, A-to-B lineage approval requires P, Q, and B rather than a fabricated Root Agent.
+
+A child of an independent parent is still attached and retains its configured approval obligations.
+
+Captured edge identities and position revisions make relevant topology changes detectable without invalidating requests after unrelated changes.
 
 ## 4. CommunicationRequest Creation and Deduplication
 
@@ -128,7 +112,7 @@ sequenceDiagram
         Broker-->>Agent: PENDING_APPROVAL with existing request_id
     else New governed Request
         Broker->>Broker: Create Request and one ordered Approval per principal
-        Broker->>Broker: Add one notification for every AgentTeam principal
+        Broker->>Broker: Capture exact frozen eligible people for each actual principal
         Broker->>DB: Commit Request, Approvals, and inbox deltas
         alt Commit fails
             DB-->>Broker: Persistence error
@@ -136,7 +120,7 @@ sequenceDiagram
             Broker-->>Agent: Propagate persistence error
         else Commit succeeds
             DB-->>Broker: Durable confirmation
-            Broker->>Approvers: Schedule according to stored request_delivery
+            Broker->>Approvers: Deliver exact-case personal voting mail after acknowledgement
             Broker-->>Agent: PENDING_APPROVAL with request_id
         end
     end
@@ -146,125 +130,69 @@ Equivalent pending requests are matched by endpoints, direction, and policy snap
 
 A denied request does not prevent a later request with a new request ID and rationale.
 
-## 5. Queue and Wake Delivery
+## 5. Queue Delivery Through Personal Activity
 
-AgentTeam and Agent principals use different scheduling because only AgentTeams have discussion inboxes.
+Each case creates addressed voting email for the exact eligible people.
 
-```mermaid
-flowchart TD
-    Approval["Pending Approval"] --> Principal{"Principal kind"}
-    Principal -- "agent" --> AgentWorker["Persist personal voting email<br/>schedule ordinary Agent notification"]
-    Principal -- "agent_team" --> Delivery{"Stored request_delivery"}
-    Delivery -- "queue" --> Queue["Keep notification in AgentTeam inbox<br/>Wait for next normal discussion"]
-    Delivery -- "wake" --> Wake["Schedule governance discussion immediately"]
-    Queue --> TeamLock["Wait for the same discussion_lock used by normal and emergency sessions"]
-    Wake --> TeamLock
-    AgentWorker --> AgentLock["Use that Agent's normal invocation lock,<br/>instructions, memory, and tools"]
-```
+Notice presentation uses the same continuing identity, personal instructions, memory, model lock, and checkpoint mechanism as ordinary activity.
 
-Scheduling is deduplicated by `request_id + principal`.
+No initiating tool waits for another person's model work or acquires a whole-team discussion lock.
 
-Approval tasks are never awaited inside the initiating communication tool stack.
+Receiving mail does not force scope changes, automatically mark mail read, or require a response.
 
-Different AgentTeams may process approvals concurrently, while the same AgentTeam remains serialized.
+Unsupported communication wake is rejected instead of becoming a hidden all-member session.
 
 ## 6. AgentTeam Governance Decision
 
-The active member set is frozen only after the AgentTeam discussion lock has been acquired.
-
-The governance discussion must reach its successful session boundary before ballots may begin.
+A case freezes the principal, eligible active members, electorate revision, business request, and strict choice schema.
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant Broker as NegotiationBroker
-    participant Team as Approval AgentTeam
-    participant Members as Frozen Active Members
-    participant Inbox as Personal Agent Inboxes
-    participant DB as Single SQLite Writer
-
-    Broker->>Team: Claim Approval as PROCESSING
-    Broker->>DB: Queue PROCESSING delta
-    Team->>Team: Acquire discussion_lock
-    Team->>Team: Freeze active member set
-    Team->>Members: Run formal governance discussion
-    alt Discussion, audit, or member reasoning fails
-        Team-->>Broker: Incomplete decision
-        Broker->>DB: Restore this Approval to PENDING; preserve other active claims
-    else Discussion succeeds
-        Team->>DB: Persist frozen GovernanceRound and voting emails
-        Team->>Inbox: Deliver one email per frozen member
-        Team->>Team: Release discussion_lock without waiting for replies
-        Inbox->>Members: Detached ordinary notice identifies open and submit tools
-        Note over Inbox,Members: Same continuing identity, personal instructions, memory, and invocation lock
-        opt Agent voluntarily opens the email
-            Members->>Inbox: open_agent_mail(message_id)
-            Inbox-->>Members: Public request and exact round schema
-        end
-        opt Agent independently chooses to vote
-            Members->>DB: submit_governance_choice(round_id, choice)
-            Note over Members,DB: Strict boolean choice; accepted ballot immutable and idempotent
-        end
-        alt Membership changed or any ballot is missing/invalid
-            DB-->>Broker: PENDING; missing reply is not consent
-        else Strictly more than half true
-            DB-->>Broker: APPROVED with complete durable ballots
-        else Strictly more than half false
-            DB-->>Broker: DENIED with complete durable ballots
-        else Tie
-            DB-->>Broker: TIED round; Approval remains PENDING
-        end
+    participant Broker
+    participant Cases as GovernanceService
+    participant Writer as Single Writer
+    participant People as Frozen Eligible People
+    Broker->>Cases: Prepare exact approval case
+    Cases->>Writer: Commit case, eligibility and personal mail
+    Writer-->>People: Eligible notice at personal checkpoint
+    opt Person explicitly opens the email
+        People->>Cases: open_agent_mail(message_id)
+        Cases-->>People: Public request, exact case and choice schema
+    end
+    opt Person explicitly chooses
+        People->>Writer: submit_governance_choice(case_id, choice)
+        Writer-->>Cases: Exact immutable ballot receipt
+    end
+    alt Every voter submitted valid choice and strict majority true
+        Cases-->>Broker: APPROVED
+    else Every voter submitted valid choice and strict majority false
+        Cases-->>Broker: DENIED
+    else Missing, invalid, tied or changed eligibility
+        Cases-->>Broker: No authority; preserve pending business request
     end
 ```
 
-Strings, numbers, null, missing fields, and extra fields are invalid ballots.
+Strings, numbers, null, missing required fields, and extra fields are invalid boolean ballots.
 
-Every frozen member must produce a valid ballot before a majority can become authoritative.
+Every frozen voter must produce a valid ballot before majority becomes authoritative.
 
-Reading or marking an email read never votes, and voting never changes its read receipt.
+Mail opening, read receipts, notification presentation, ordinary model output, and team chat cannot supply a missing vote.
 
-An unanswered Approval returns to `PENDING`, but its Request remains `PROCESSING` while another principal still holds an active claim.
+An accepted ballot is immutable and survives a cancelled observer or later ordinary activity failure.
 
-Unanswered eligible rounds remain discoverable through `list_governance_requests()` even after their emails are read.
-
-Changed membership or another deliberation after a tie creates a new identified round without rewriting preceding choices.
+An explicit retry after a tie or electorate change may solicit a fresh case without rewriting prior choices or automatically creating a revote loop.
 
 ## 7. Agent Governance Decision
 
-An Agent principal may decide only for its own explicitly listed authority.
+An Agent principal has one exact eligible voter: that Agent.
 
-No other Agent can substitute for an unavailable Agent principal.
+It receives the same addressed case mail and chooses through its ordinary personal runtime.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Broker as NegotiationBroker
-    participant Agent as Explicit Agent Principal
-    participant Inbox as Personal Agent Inbox
-    participant DB as Single SQLite Writer
+An unavailable Agent, missing response, invalid choice, failure, or cancellation creates no consent.
 
-    Broker->>Broker: Claim Approval as PROCESSING
-    Broker->>DB: Persist Agent-owned GovernanceRound and email
-    Broker->>Inbox: Deliver voting request
-    Inbox->>Agent: Detached normal-context notice under Agent invocation lock
-    opt Agent voluntarily opens and answers
-        Agent->>Inbox: open_agent_mail(message_id)
-        Inbox-->>Agent: Public request and strict choice schema
-        Agent->>DB: submit_governance_choice(round_id, choice)
-    end
-    alt Explicit valid literal true
-        DB-->>Broker: APPROVED
-    else Explicit valid literal false
-        DB-->>Broker: DENIED
-    else Unanswered, invalid choice, unavailable Agent, model failure, or cancellation
-        DB-->>Broker: PENDING with reason
-    end
-    Broker->>DB: Commit resulting Approval state
-```
+No substitute voter, generic ballot persona, temporary representative, or alternate memory chain is created.
 
-Root AI approvals use this exact Agent path without a special Root principal type.
-
-No temporary AgentTeam, generic ballot persona, or alternate memory chain is created for Root.
+Root uses this ordinary Agent path only when an actual organizational route names Root.
 
 ## 8. Approval Completion, Denial, and STALE Successors
 
@@ -281,14 +209,14 @@ flowchart TD
     Recompute --> Fingerprint{"Route fingerprint unchanged?"}
     Fingerprint -- "No" --> Stale["Old Request=STALE<br/>Create linked successor Request<br/>Enqueue successor principals"]
     Fingerprint -- "Yes" --> Agreement["Request=APPROVED<br/>Create CommunicationAgreement"]
-    Retry --> Commit["Commit exact Request, Approval, ballot, Agreement, and inbox delta"]
+    Retry --> Commit["Commit exact Request, Approval, case, ballot, Agreement, and inbox delta"]
     Denied --> Commit
     Waiting --> Commit
     Stale --> Commit
     Agreement --> Commit
     Commit --> Result{"Persistence result"}
     Result -- "Success" --> Publish["Emit metadata-only system event"]
-    Result -- "Failure" --> Rollback["Restore only affected communication records and notifications<br/>Preserve unrelated concurrent inbox changes"]
+    Result -- "Failure" --> Rollback["Discard unaccepted copy-on-write candidate<br/>Preserve unrelated concurrent state"]
 ```
 
 A relevant topology change produces a linked successor instead of applying an authorization from the old route.
@@ -317,53 +245,48 @@ Opposite one-way Agreements may coexist until a bidirectional Agreement supersed
 
 Agreements remain active until an endpoint revokes them explicitly.
 
-## 10. Durable Peer Message Delivery and Consumption
+## 10. Durable Peer Message Delivery and Reading
 
-`send_peer_message()` performs delivery only and never creates a Request automatically.
+`send_peer_message()` sends only; it never automatically creates a Request.
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant Agent as Calling Agent
-    participant Broker as NegotiationBroker
-    participant Recipient as Recipient AgentTeam
-    participant DB as Single SQLite Writer
-    participant Discussion as Recipient Discussion
-
-    Agent->>Broker: send_peer_message(recipient_id, message)
-    Broker->>Broker: Validate endpoints and initiating membership
-    alt Current policy is permissive
-        Broker->>Broker: agreement_id remains null
-    else No active Agreement covers this direction
-        Broker-->>Agent: NO_AGREEMENT and request guidance
-    else Active Agreement covers this direction
-        Broker->>Broker: Attach agreement_id
+    participant Person as Current Agent
+    participant Broker
+    participant Writer as Single Writer
+    participant Recipient as Recipient AT
+    Person->>Broker: send_peer_message(recipient_id, message)
+    Broker->>Broker: Validate endpoints, membership and actual scope
+    alt Permissive institution or two independent endpoints
+        Broker->>Broker: No Agreement required
+    else Active channel covers direction
+        Broker->>Broker: Retain channel ID
+    else No applicable channel
+        Broker-->>Person: NO_AGREEMENT with explicit request guidance
     end
-    Broker->>Broker: Check tool invocation idempotency key
-    alt Same key and identical message already exists
-        Broker-->>Agent: DELIVERED with existing message_id
-    else Same key is bound to different content or route
-        Broker-->>Agent: Fail with idempotency conflict
-    else New delivery
-        Broker->>Recipient: Append durable peer-message inbox record
-        Broker->>DB: Commit PeerMessage and recipient inbox delta
-        alt Commit fails
-            Broker->>Recipient: Remove only this inbox record
-            Broker->>Broker: Remove this PeerMessage
-            Broker-->>Agent: Propagate persistence error
-        else Commit succeeds
-            Broker-->>Agent: DELIVERED with message_id
-        end
-    end
-    Discussion->>Recipient: Consume message during a successful discussion
-    alt Discussion succeeds
-        Discussion->>DB: Mark delivery consumed and remove inbox record
-    else Discussion fails or is cancelled
-        Discussion->>Recipient: Keep pending inbox record
+    Broker->>Broker: Validate invocation idempotency key and immutable route/content
+    Broker->>Writer: Commit message and addressed inbox reference
+    alt Commit accepted
+        Writer-->>Broker: Exact receipt
+        Broker-->>Person: DELIVERED with message ID
+        Writer-->>Recipient: Addressed reference, no automatic body injection
+    else Commit rejected
+        Broker->>Broker: Discard only unaccepted candidate
+        Broker-->>Person: Propagate persistence error
     end
 ```
 
-Callbacks and system events contain IDs, endpoints, paths, operation types, and results without logging peer-message content.
+The same invocation key and identical payload return the original message reference.
+
+Reusing the key for different content or endpoints fails.
+
+`list_peer_messages()` returns endpoint-authorized references without message bodies.
+
+`read_peer_message(message_id)` performs a live endpoint membership check before explicit body access.
+
+Mail presentation and reading do not fabricate a reply, successful business handling, or approval.
+
+System events and callbacks carry IDs, endpoints, paths, operation types, and outcomes without peer-message content.
 
 ## 11. Endpoint Revocation
 
@@ -401,32 +324,32 @@ Revocation does not delete historical requests, approvals, ballots, Agreements, 
 
 ## 12. Persistence, Restore, and Shutdown
 
-Schema 11 retains communication requests, ordered approvals, Agreements, deliveries, and correlated AgentTeam inboxes, and adds explicit personal-email voting rounds, append-only choices, and durable migration requests.
+Schema 15 retains exact governance cases, frozen electorate bindings, personal mail, explicit ballots, captured organization paths, Agreements, and peer-delivery records.
 
 ```mermaid
 flowchart TD
-    Open["Open SQLite state database"] --> Preflight["Read schema version before create_all or DDL"]
-    Preflight --> Version{"Schema version is 11?"}
-    Version -- "No" --> Reject["StateRestoreError<br/>Database remains unmodified"]
-    Version -- "Yes" --> Stage["Read into detached staging manager and staged DocLib root"]
-    Stage --> Validate["Validate endpoints, initiators, principal kinds and references,<br/>approval ordering, frozen rounds, and explicit tallies,<br/>personal emails, fingerprints, successor chains,<br/>Agreement uniqueness and source requests,<br/>delivery routes and inbox correlation"]
-    Validate --> Valid{"All invariants valid?"}
-    Valid -- "No" --> Preserve["StateRestoreError<br/>Original manager and DocLibs remain unchanged"]
-    Valid -- "Yes" --> Reset["Reset communication PROCESSING states to PENDING<br/>expire interrupted failover attempts"]
-    Reset --> Publish["Atomically publish staged runtime state and DocLib directories"]
-    Publish --> Resume["Resume ordinary personal notifications,<br/>pending decisions, and wake-mode AgentTeam work"]
-
-    Shutdown["manager.close()"] --> Stop["Stop accepting new tasks and cancel external LLM waits"]
-    Stop --> Release["Reset claimed PROCESSING Approvals to PENDING"]
-    Release --> Flush["Commit accepted communication and other state deltas without arbitrary flush timeout"]
-    Flush --> Close["Release SQLite engine, writer thread, and writer lease"]
+    Open["Acquire exclusive writer lease"] --> Preflight["Read schema version before writable connection or DDL"]
+    Preflight --> Version{"Schema 15?"}
+    Version -- "No" --> Reject["Reject without modifying database"]
+    Version -- "Yes" --> Stage["Read detached state and stage DocLib files"]
+    Stage --> Validate["Validate principals, endpoints, eligibility, mail, ballots, route evidence, successors, Agreements and deliveries"]
+    Validate -- "Invalid" --> Preserve["StateRestoreError; original state unchanged"]
+    Validate -- "Valid" --> Publish["Publish staged runtime and filesystem generation"]
+    Publish --> Resume["Resume permitted personal notices; expire interrupted resource attempts"]
+    Close["manager.close()"] --> Stop["Stop admission and cancel external waits"]
+    Stop --> Settle["Finish accepted local receipts and flush without arbitrary deadline"]
+    Settle --> Release["Close engines, worker and writer lease"]
 ```
 
-Restore rejects missing endpoints, missing initiating Agents, unauthorized Agent principals, malformed status combinations, duplicate routes, broken successor chains, invalid Agreement sources, and orphaned peer-delivery notifications.
+Processing claims reset to pending only after their retained authority combinations validate.
 
-Each SQLite database permits only one active writer manager through a cross-process writer lease.
+Interrupted resource attempts expire without replay, while historical mail and accepted choices remain retained.
 
-The persistence coordinator keeps at most one active delta and one coalesced pending delta.
+A second writer manager fails immediately.
+
+The coordinator retains at most one executing delta and one mergeable pending delta.
+
+Invalid references, unauthorized principals, broken successor chains, duplicate active Agreements, or orphan delivery references fail restore without partially changing the live manager.
 
 ## 13. Isolation Invariants
 

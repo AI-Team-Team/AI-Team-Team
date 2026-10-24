@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 
-from ...exceptions import ToolArgumentError, ToolBusinessError
+from ...exceptions import RuntimeAdmissionClosedError, ToolArgumentError, ToolBusinessError
 from ...governance import GovernanceBallot, GovernanceSubmissionResult
 
 
@@ -12,14 +12,18 @@ class GovernanceSubmissionMixin:
     def business_pending(self, item):
         if item.business_kind == "communication":
             request = self.manager.broker.communication_requests.get(item.business_id)
-            return request is not None and request.status.value in {"PENDING", "PROCESSING"}
+            return request is not None and item.principal in request.approval_principals and request.status.value in {"PENDING", "PROCESSING"}
         if item.business_kind == "migration":
             request = self.manager._migration.requests.get(item.business_id)
-            return request is not None and request.status == "PENDING"
-        return item.expires_at is not None and time.time() < item.expires_at
+            return request is not None and item.principal in request.principals and request.status == "PENDING"
+        attempt = self.manager._records.index.get(("resource_decisions", (item.business_id,)))
+        return bool(attempt and attempt.values["status"] == "pending"
+            and item.principal.principal_id == (attempt.values["principal_agent_id"] or attempt.values["principal_team_id"])
+            and item.principal.kind == ("agent" if attempt.values["principal_agent_id"] else "agent_team")
+            and item.expires_at == attempt.values["deadline"] and self.manager._activity.clock.wall_time() < item.expires_at)
 
     @staticmethod
-    def tally(item):
+    def tally(item, *, resolved_at=None):
         if len(item.ballots) != len(item.voter_agent_ids):
             return
         if item.choice_kind == "boolean":
@@ -47,9 +51,9 @@ class GovernanceSubmissionMixin:
                 if winners
                 else "No model alias received a strict majority."
             )
-        item.resolved_at = time.time()
+        item.resolved_at = resolved_at if resolved_at is not None else time.time()
 
-    async def submit(self, actor, round_id, choice):
+    async def submit(self, actor, case_id, choice):
         if self.manager._active_tool_agent.get() is not actor:
             raise PermissionError(
                 "Governance choices require the current Agent's explicit tool invocation."
@@ -59,15 +63,15 @@ class GovernanceSubmissionMixin:
             or actor.lifecycle_state != "active"
         ):
             raise PermissionError("Only the addressed active Agent may submit its own choice.")
-        async with self.lock:
+        async with self.lock, self.stage() as candidate:
             if self.manager._closing or self.manager._restore_in_progress:
-                raise RuntimeError(
+                raise RuntimeAdmissionClosedError(
                     "ATTManager cannot accept governance choices during shutdown or restore."
                 )
-            item = self.rounds.get(round_id)
+            item = self.cases.get(case_id)
             if item is None or actor.agent_id not in item.voter_agent_ids:
                 raise PermissionError(
-                    "This Agent is not an eligible voter for the requested round."
+                    "This Agent is not an eligible voter for the requested case."
                 )
             try:
                 validated = self.choice_model(item).model_validate(choice, strict=True)
@@ -84,36 +88,39 @@ class GovernanceSubmissionMixin:
             if existing is not None:
                 if existing.choice != payload:
                     raise ToolBusinessError(
-                        "An accepted ballot cannot be changed within the same round."
+                        "An accepted ballot cannot be changed within the same case."
                     )
                 return GovernanceSubmissionResult(
                     status="ALREADY_SUBMITTED",
-                    round_id=round_id,
-                    round_status=item.status,
+                    case_id=case_id,
+                    case_status=item.status,
                     choice=payload,
                 )
-            previous = item.model_copy(deep=True)
+            previous = item
+            item = item.model_copy(deep=True)
+            self.cases[case_id] = item
             if item.status != "PENDING":
                 return GovernanceSubmissionResult(
-                    status="CLOSED", round_id=round_id, round_status=item.status, reason=item.reason
+                    status="CLOSED", case_id=case_id, case_status=item.status, reason=item.reason
                 )
             if not self.electorate_valid(item):
                 item.status = "SUPERSEDED"
                 item.reason = "AgentTeam membership changed before a complete decision."
-                item.resolved_at = time.time()
+                item.resolved_at = self.manager._activity.clock.wall_time()
             elif not self.business_pending(item):
                 item.status = "EXPIRED" if item.business_kind == "failover" else "CANCELLED"
                 item.reason = "The originating operation no longer accepts choices."
-                item.resolved_at = time.time()
+                item.resolved_at = self.manager._activity.clock.wall_time()
             else:
                 item.ballots = item.ballots + [
                     GovernanceBallot(
-                        round_id=round_id, voter_agent_id=actor.agent_id, choice=payload
+                        case_id=case_id, voter_agent_id=actor.agent_id, choice=payload,
+                        created_at=self.manager._activity.clock.wall_time(),
                     )
                 ]
-                self.tally(item)
+                self.tally(item, resolved_at=self.manager._activity.clock.wall_time())
             dirty = self.manager._new_dirty_state()
-            dirty["governance_rounds"].add(round_id)
+            dirty["governance_cases"].add(case_id)
             actor.sync_message_history()
             history_lengths = (len(actor.messages), len(actor.message_history))
             event = None
@@ -124,7 +131,7 @@ class GovernanceSubmissionMixin:
                     "content": "Public governance choice: "
                     + json.dumps(
                         {
-                            "round_id": round_id,
+                            "case_id": case_id,
                             "request": item.prompt,
                             "principal": item.principal.model_dump(mode="json"),
                             "choice": payload,
@@ -134,7 +141,6 @@ class GovernanceSubmissionMixin:
                     "team_id": self.manager._active_team.get().team_id
                     if self.manager._active_team.get()
                     else None,
-                    "discussion_id": self.manager._active_discussion_id.get(),
                 }
                 # The choice and exact ballot commit together. No email flags are changed.
                 # Native tools must return before another ordinary assistant
@@ -155,16 +161,23 @@ class GovernanceSubmissionMixin:
                 )
                 dirty["agents"].add(actor.agent_id)
                 dirty["memory_events"].add(event.event_id)
+            operation_id = f"BALLOT-{case_id}-{actor.agent_id}"
+
+            def revalidate():
+                if len(item.ballots) > len(previous.ballots) and (
+                    not self.electorate_valid(item) or not self.business_pending(item)
+                ):
+                    raise ToolBusinessError("The eligible electorate or originating operation changed before ballot acceptance.")
+
             try:
-                await self.manager._commit_dirty_state(dirty)
-            except asyncio.CancelledError:
-                if item.status in {"APPROVED", "DENIED"}:
-                    self.schedule_resolution(item)
-                if item.status != "PENDING" and (waiter := self.waiters.get(round_id)):
-                    waiter.set()
-                raise
-            except Exception:
-                self.rounds[round_id] = previous
+                await self.manager._records.commit((), dirty=dirty, operation_id=operation_id,
+                    governance_state=candidate, authority_check=revalidate)
+            except BaseException:
+                if operation_id in self.manager._records.receipts:
+                    if item.status in {"APPROVED", "DENIED"}:
+                        self.schedule_resolution(item)
+                    raise
+                self.cases[case_id] = previous
                 for message in actor.messages[history_lengths[0] :]:
                     actor._history_seen_ids.discard(id(message))
                 if public_message is not None:
@@ -174,19 +187,17 @@ class GovernanceSubmissionMixin:
                 if event is not None:
                     self.manager._memory.discard_unpersisted_event(event.event_id)
                 raise
-            if item.status != "PENDING" and (waiter := self.waiters.get(round_id)):
-                waiter.set()
         if item.status in {"APPROVED", "DENIED"}:
             self.schedule_resolution(item)
         self.manager._emit_callback(
             "on_system_event",
             "governance_choice_recorded",
-            {"round_id": round_id, "agent_id": actor.agent_id, "status": item.status},
+            {"case_id": case_id, "agent_id": actor.agent_id, "status": item.status},
         )
         return GovernanceSubmissionResult(
             status="SUBMITTED" if len(item.ballots) > len(previous.ballots) else "CLOSED",
-            round_id=round_id,
-            round_status=item.status,
+            case_id=case_id,
+            case_status=item.status,
             reason=item.reason,
             choice=payload if len(item.ballots) > len(previous.ballots) else None,
         )

@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from ..core.exceptions import (
     ATTException,
-    AgentInvocationDependencyError,
+    TeamCreationLimitError,
     ToolArgumentError,
     ToolBusinessError,
     ToolError,
@@ -31,7 +31,7 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
         late_join_policy: Literal[
             "disabled", "open", "require_initiator_confirmation"
         ] = "disabled",
-    ) -> str:
+    ) -> dict[str, Any]:
         """Spawns a recursive child AT using new member configs and role-neutral existing Agent IDs."""
         if not att_manager:
             raise ToolBusinessError("ATTManager is not available in tools context.")
@@ -107,88 +107,60 @@ def build_delegation_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool
             member_count = min_size
 
         try:
-            if existing_member_ids or initiator_joins:
-                formation = att_manager.create_agent_team(
-                    creator=actual_team,
-                    member_count=member_count,
-                    system_instructions=system_instructions,
-                    team_purpose=team_purpose,
-                    member_configs=member_configs,
-                    existing_member_ids=existing_member_ids,
-                    is_public_visible=is_public_visible,
-                    initial_docs=initial_documents,
-                    initiating_agent=actual_agent,
-                    initiator_joins=initiator_joins,
-                    unanimous_acceptance_action=unanimous_acceptance_action,
-                    late_join_policy=late_join_policy,
-                    task=task,
-                )
-                summary = att_manager.inspect_team_formation(
-                    formation.request_id,
-                    actor=actual_agent,
-                ).summary
-                return (
-                    "{\"status\":\"PENDING_RESPONSES\",\"request\":"
-                    + formation.model_dump_json()
-                    + ",\"summary\":"
-                    + summary.model_dump_json()
-                    + "}"
-                )
-
-            async with att_manager._lifecycle.reserve_synchronous_dependencies(()):
-                child_team = caller_node.launch_att(
-                    manager=att_manager,
-                    member_count=member_count,
-                    system_instructions=system_instructions,
-                    team_purpose=team_purpose,
-                    member_configs=member_configs,
-                    is_public_visible=is_public_visible,
-                    initial_docs=initial_documents,
-                )
-
-                return await att_manager.execute_team_discussion(
-                    child_team,
-                    task,
-                    rounds=config.subagent_discussion_rounds
-                )
-        except AgentInvocationDependencyError as exc:
-            raise ToolBusinessError(
-                str(exc),
-                error_kind="agent_invocation_dependency",
-            ) from exc
-        except (ToolError, ATTException):
-            raise
-        except Exception as e:
-            raise ToolBusinessError(f"Dispatch failed: {e}") from e
-
-
-    async def delegate_escalation(objective: str, rationale: str) -> str:
-        """Escalates objective upward in the ATT lineage tree. Arguments: objective (str), rationale (str)"""
-        if not att_manager:
-            raise ToolBusinessError("ATTManager is not available in tools context.")
-        
-        actual_team = _resolve_actual_team(caller_node, att_manager)
-        
-        if not actual_team:
-            raise ToolPermissionError("The active AgentTeam could not be resolved.")
-
-        parent = actual_team.parent_team or att_manager.find_parent_team(actual_team)
-        if not parent:
-            raise ToolBusinessError("No parent AgentTeam exists for escalation.")
-        
-        try:
-            payload = {
-                "type": "escalation_spawn",
-                "objective": objective,
-                "rationale": rationale,
-                "from": actual_team.team_id
+            child = att_manager.create_agent_team(
+                creator=actual_team,
+                parent=actual_team,
+                member_count=member_count,
+                system_instructions=system_instructions,
+                team_purpose=team_purpose,
+                member_configs=member_configs,
+                existing_member_ids=existing_member_ids,
+                is_public_visible=is_public_visible,
+                initial_docs=initial_documents,
+                initiating_agent=actual_agent,
+                initiator_joins=initiator_joins,
+                unanimous_acceptance_action=unanimous_acceptance_action,
+                late_join_policy=late_join_policy,
+                task=task,
+            )
+            if hasattr(child, "request_id"):
+                return {
+                    "status": "PENDING_RESPONSES",
+                    "request": child.model_dump(mode="json"),
+                    "summary": att_manager.inspect_team_formation(
+                        child.request_id, actor=actual_agent
+                    ).summary.model_dump(mode="json"),
+                }
+            return {
+                "status": "CREATED",
+                "team_id": child.team_id,
+                "instruction_message_ids": [
+                    f"INITIAL-{child.team_id}-{member.agent_id}" for member in child.members
+                ],
+                "reason": "Creation is complete; initial instructions do not certify work completion.",
             }
-            parent.receive_message(payload)
-            return f"Escalation successfully dispatched to parent team '{parent.team_id}'."
         except (ToolError, ATTException):
             raise
-        except Exception as e:
-            raise ToolBusinessError(f"Escalation failed: {e}") from e
+        except TeamCreationLimitError as error:
+            raise ToolBusinessError(str(error)) from error
+        except (ValueError, TypeError) as error:
+            raise ToolArgumentError(str(error)) from error
+
+
+    async def delegate_escalation(objective: str, rationale: str) -> dict[str, Any]:
+        """Ask an actual parent AT through the same configured communication gate."""
+        from .context import _resolve_communication_context
+        try:
+            team, agent = _resolve_communication_context(att_manager)
+        except RuntimeError as error:
+            raise ToolPermissionError(str(error)) from error
+        parent = team.parent_team
+        if parent is None:
+            raise ToolBusinessError("No explicit parent AgentTeam is available for peer escalation.")
+        result = await att_manager.broker.send_peer_message(team, parent, agent.agent_id,
+            f"Help requested by AgentTeam {team.team_id}.\nObjective: {objective}\nRationale: {rationale}",
+            invocation_id=att_manager._active_tool_invocation_id.get())
+        return result.model_dump(mode="json")
 
     async def update_team_purpose(new_purpose: str) -> str:
         """Updates the purpose string of the caller's team. Arguments: new_purpose (str)"""

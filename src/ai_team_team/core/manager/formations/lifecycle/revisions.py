@@ -37,14 +37,6 @@ class FormationRevisionMixin:
                 raise KeyError(f"Unknown team formation request {request_id!r}.")
             if actor.agent_id != request.initiator_agent_id:
                 raise PermissionError("Only the initiating Agent may revise this formation.")
-            if (
-                request.parent_team_id is not None
-                and self.manager.config.formation_deliberation_policy
-                == "required_when_team_scoped"
-            ):
-                raise PermissionError(
-                    "Team-scoped formation revision requires a published collaborative draft."
-                )
             return await self._revise_locked(
                 request,
                 actor=actor,
@@ -96,7 +88,7 @@ class FormationRevisionMixin:
             raise PermissionError(
                 "The initiating Agent is no longer a member of the creator AgentTeam."
             )
-        if isinstance(creator, Agent) and parent is not None and all(
+        if isinstance(creator, Agent) and isinstance(parent, AgentTeam) and all(
             member.agent_id != actor.agent_id for member in parent.members
         ):
             raise PermissionError(
@@ -176,12 +168,6 @@ class FormationRevisionMixin:
         old_invitee_ids = set(request.invitee_agent_ids)
         new_invitee_ids = set(candidate.invitee_agent_ids)
         notification_ids = old_invitee_ids | new_invitee_ids | {actor.agent_id}
-        notification_agents = [
-            self.manager._agents_by_id[agent_id]
-            for agent_id in notification_ids
-            if agent_id in self.manager._agents_by_id
-        ]
-        old_inboxes = self._copy_inboxes(notification_agents)
         old_draft = source_draft.model_copy(deep=True) if source_draft is not None else None
         stale_drafts = {}
         revision = self._revision_record(
@@ -189,6 +175,7 @@ class FormationRevisionMixin:
             revised_by_agent_id=actor.agent_id,
             source_draft_id=source_draft.draft_id if source_draft is not None else None,
         )
+        operation_id = f"FORMATION-REVISE-{candidate.revision_fingerprint}"
 
         try:
             self.requests[request.request_id] = candidate
@@ -278,7 +265,9 @@ class FormationRevisionMixin:
                         set(stale_drafts)
                         | ({source_draft.draft_id} if source_draft is not None else set())
                     ),
-                )
+                ),
+                operation_id=operation_id,
+                authority_check=lambda: self._require_proposal_authority(candidate),
             )
         except Exception:
             self.requests[request.request_id] = old_request
@@ -290,8 +279,12 @@ class FormationRevisionMixin:
                 self.drafts[source_draft.draft_id] = old_draft
             for draft_id, previous in stale_drafts.items():
                 self.drafts[draft_id] = previous
-            self._restore_inboxes(notification_agents, old_inboxes)
             raise
+        finally:
+            if (operation_id in self.manager._records.receipts and not candidate.invitee_agent_ids
+                    and candidate.initiator_joins
+                    and candidate.unanimous_acceptance_action is UnanimousAcceptanceAction.AUTO_CREATE):
+                self._schedule_empty_auto_creation(candidate)
 
         self._emit_event(
             "team_formation_revised",
@@ -311,13 +304,6 @@ class FormationRevisionMixin:
                     "proposal_revision": candidate.proposal_revision,
                 },
             )
-        if (
-            not candidate.invitee_agent_ids
-            and candidate.initiator_joins
-            and candidate.unanimous_acceptance_action
-            is UnanimousAcceptanceAction.AUTO_CREATE
-        ):
-            self._schedule_empty_auto_creation(candidate)
         return FormationOperationResult(
             status=("DRAFT_PUBLISHED" if source_draft is not None else "REVISED"),
             request_id=request.request_id,

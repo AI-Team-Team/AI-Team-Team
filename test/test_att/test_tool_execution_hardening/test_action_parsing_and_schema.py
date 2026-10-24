@@ -1,3 +1,4 @@
+from test.personal_activity import interact_and_idle
 import asyncio
 import concurrent.futures
 import os
@@ -13,11 +14,10 @@ from typing_extensions import NotRequired, Required, TypedDict
 
 from ai_team_team import (
     Agent,
-    AgentTurnStatus,
+    InteractionStatus,
     ATTException,
     ATTConfig,
     ATTManager,
-    DiscussionStatus,
     OperationalStatus,
     RetryableToolError,
     StatePersistenceError,
@@ -83,7 +83,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=self.tmpdir, tool_calling_mode="react"),
             persistence_mode="volatile",
         )
-        self.team = self.manager.create_agent_team(self.manager.root_ai)
+        self.team = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
         self.agent = self.team.members[0]
 
     async def asyncTearDown(self):
@@ -307,6 +307,7 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
                 self.responses = [
                     'Action: remember(content="Final Answer: still payload")',
                     "Thought: stored successfully\nFinal Answer: complete",
+                    "Action: set_activity_intent(intent={\'kind\': \'idle\'})",
                 ]
 
             def supports_native_tool_calling(self):
@@ -316,12 +317,8 @@ class TestToolExecutionHardening(unittest.IsolatedAsyncioTestCase):
                 return self.responses.pop(0)
 
         self.agent.llm_client = SequenceClient()
-        result = await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "work",
-            "system",
-            manager=self.manager,
-        )
-        self.assertIs(result.status, AgentTurnStatus.COMPLETED)
+        self.manager.register_llm_client("sequence", self.agent.llm_client)
+        result = await interact_and_idle(self.manager, self.agent, "Work.", team=self.team)
+        self.assertIs(result.status, InteractionStatus.COMPLETED)
         self.assertEqual(result.answer, "complete")
         self.assertEqual(calls, 1)

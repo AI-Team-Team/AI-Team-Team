@@ -50,7 +50,7 @@ def _write_and_hold(db_path, workspace, ready, release):
             persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("process-model", client)
-        team = manager.create_agent_team(manager.root_ai)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
         await manager.save_state()
         ready.put(team.team_id)
         release.wait(10)
@@ -182,9 +182,9 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                 "INSERT INTO communication_requests "
                 "(request_id, sender_team_id, recipient_team_id, "
                 "initiated_by_agent_id, rationale, direction, policy_snapshot, "
-                "approval_principals, route_fingerprint, status, "
+                "approval_principals, route_fingerprint, route_evidence, status, "
                 "decision_reason, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "CR-corrupt",
                     ids["parent"],
@@ -195,6 +195,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                     '{"policy":"parent_approval","request_delivery":"queue","direction":"bidirectional"}',
                     "[]",
                     "invalid",
+                    "{}",
                     "PENDING",
                     "",
                     1.0,
@@ -248,8 +249,8 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                     persistence_mode=("durable" if (db_path) else "volatile"),
                 )
                 source.register_llm_client("stable", self.client)
-                parent = source.create_agent_team(source.root_ai)
-                child = source.create_agent_team(parent)
+                parent = source.create_agent_team(source.root_ai, parent=source.root_ai)
+                child = source.create_agent_team(parent, parent=parent)
                 parent.doc_library.write_file("source.txt", "persisted")
                 await source.save_state()
                 ids = {
@@ -273,7 +274,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
                     persistence_mode="volatile",
                 )
                 live.register_llm_client("stable", self.client)
-                live_team = live.create_agent_team(live.root_ai)
+                live_team = live.create_agent_team(live.root_ai, parent=live.root_ai)
                 live_team.doc_library.write_file("live.txt", "unchanged")
                 old_agents = live.agents
                 old_teams = live.teams

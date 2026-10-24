@@ -95,9 +95,11 @@ class MemoryCatalogMixin:
                 "Episodic memory requires an active registered Agent invocation."
             )
         team = self.manager._active_team.get()
-        if team is None or agent not in team.members:
+        if team is not None and (
+            self.manager.teams.get(team.team_id) is not team or agent not in team.members
+        ):
             raise PermissionError(
-                "Episodic memory requires the Agent's invocation-scoped AgentTeam membership."
+                "The current AgentTeam scope must still contain this Agent."
             )
         return agent
 
@@ -107,10 +109,10 @@ class MemoryCatalogMixin:
         query: Optional[str],
         tags: Sequence[str],
         team_id: Optional[str],
-        discussion_id: Optional[str],
+        invocation_id: Optional[str],
     ) -> str:
         source = json.dumps(
-            [agent_id, query or "", list(tags), team_id, discussion_id],
+            [agent_id, query or "", list(tags), team_id, invocation_id],
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -122,7 +124,7 @@ class MemoryCatalogMixin:
         query: Optional[str] = None,
         tags: Optional[List[str]] = None,
         team_id: Optional[str] = None,
-        discussion_id: Optional[str] = None,
+        invocation_id: Optional[str] = None,
         limit: int = 20,
         cursor: Optional[str] = None,
     ) -> MemorySearchResult:
@@ -141,7 +143,7 @@ class MemoryCatalogMixin:
             normalized_query,
             normalized_tags,
             team_id,
-            discussion_id,
+            invocation_id,
         )
         offset = 0
         if cursor:
@@ -160,7 +162,7 @@ class MemoryCatalogMixin:
             if card.agent_id == agent.agent_id
             and card.status is MemoryCardStatus.ACTIVE
             and (team_id is None or card.origin_team_id == team_id)
-            and (discussion_id is None or card.discussion_id == discussion_id)
+            and (invocation_id is None or card.invocation_id == invocation_id)
             and all(tag in card.tags for tag in normalized_tags)
         ]
         if normalized_query:
@@ -216,7 +218,7 @@ class MemoryCatalogMixin:
                 ),
                 "tags": normalized_tags,
                 "origin_team_id": team_id,
-                "discussion_id": discussion_id,
+                "invocation_id": invocation_id,
                 "result_count": len(page),
             },
             redacted=query is not None,
@@ -229,7 +231,7 @@ class MemoryCatalogMixin:
                     summary=card.summary,
                     tags=card.tags,
                     origin_team_id=card.origin_team_id,
-                    discussion_id=card.discussion_id,
+                    invocation_id=card.invocation_id,
                     created_at=card.created_at,
                 )
                 for card in page
@@ -361,10 +363,11 @@ class MemoryCatalogMixin:
         else:
             next_line = None
             next_character = None
-        turn_id = self.manager._active_agent_turn_id.get()
-        if not turn_id:
-            raise RuntimeError("Memory recall requires an active Agent turn.")
-        self._recalled_by_turn.setdefault(turn_id, set()).add(memory_id)
+        session = self.manager._activity.current.get()
+        invocation_id = session.invocation_id if session is not None and session.agent_id == agent.agent_id else None
+        if not invocation_id:
+            raise RuntimeError("Memory recall requires an active personal invocation.")
+        self._recalled_by_invocation.setdefault(invocation_id, set()).add(memory_id)
         self.record_event(
             "memory_recalled",
             agent=agent,
@@ -385,7 +388,7 @@ class MemoryCatalogMixin:
         return MemoryRecallResult(
             memory_id=memory_id,
             origin_team_id=card.origin_team_id,
-            discussion_id=card.discussion_id,
+            invocation_id=card.invocation_id,
             content=recalled_content,
             start_line=start_line,
             start_character=start_character,
@@ -403,9 +406,10 @@ class MemoryCatalogMixin:
         card = self.cards.get(memory_id)
         if card is None or card.agent_id != agent.agent_id or card.status is not MemoryCardStatus.ACTIVE:
             raise PermissionError("The requested active memory is not owned by this Agent.")
-        turn_id = self.manager._active_agent_turn_id.get()
-        if not turn_id or memory_id not in self._recalled_by_turn.get(turn_id, set()):
-            raise ValueError("The memory must be recalled earlier in the current Agent turn.")
+        session = self.manager._activity.current.get()
+        invocation_id = session.invocation_id if session is not None and session.agent_id == agent.agent_id else None
+        if not invocation_id or memory_id not in self._recalled_by_invocation.get(invocation_id, set()):
+            raise ValueError("The memory must be recalled earlier in the current personal invocation.")
         retained_note = card.summary if note is None else note.strip()
         if not retained_note or len(retained_note) > 1000:
             raise ValueError("A retained memory note must contain 1 to 1000 characters.")

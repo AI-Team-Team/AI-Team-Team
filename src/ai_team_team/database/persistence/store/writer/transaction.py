@@ -6,6 +6,7 @@ from sqlalchemy import text
 from ..records import read_receipt, write_records, write_receipts
 
 from .cleanup import CleanupWriteMixin
+from .acceptance_time import AcceptanceTimeWriteMixin
 from .communication import CommunicationWriteMixin
 from .core_state import CoreStateWriteMixin
 from .formations import FormationWriteMixin
@@ -15,6 +16,7 @@ from .memory import MemoryWriteMixin
 
 
 class StoreWriteMixin(
+    AcceptanceTimeWriteMixin,
     CleanupWriteMixin,
     MemoryWriteMixin,
     CoreStateWriteMixin,
@@ -26,7 +28,7 @@ class StoreWriteMixin(
     session_factory: Any
     _materialize: Callable[[Dict[str, Any]], Dict[str, Any]]
 
-    def write(self, snapshot: Dict[str, Any]):
+    def write(self, snapshot: Dict[str, Any], *, acceptance_reader=None):
         """Writes a full snapshot or an incremental immutable delta."""
         self._validation.check_file_identity()
         self._preflight_schema(self.db_path)
@@ -91,6 +93,8 @@ class StoreWriteMixin(
                 snapshot.get("formation_invitation_request_ids", []),
             )
             self._write_agent_inboxes(session, snapshot.get("agent_inboxes", {}))
+            session.flush()
+            self._write_agent_inbox_dependencies(session, snapshot.get("agent_inbox_dependencies", ()))
             self._write_inboxes(session, snapshot.get("inboxes", {}))
             self._write_proposals(session, snapshot.get("proposals", {}))
             self._write_communication_requests(session, snapshot.get("communication_requests", []))
@@ -104,7 +108,7 @@ class StoreWriteMixin(
                 session, snapshot.get("communication_agreements", [])
             )
             self._write_peer_messages(session, snapshot.get("peer_messages", []))
-            self._write_governance(session, snapshot.get("governance_rounds", []), snapshot.get("migration_requests", []), snapshot.get("state_version", 1))
+            self._write_governance(session, snapshot.get("governance_cases", []), snapshot.get("migration_requests", []), snapshot.get("state_version", 1))
             self._write_library_dependencies(session, snapshot.get("library_dependencies", []))
             self._write_libraries(session, snapshot.get("libraries", []))
             session.flush()
@@ -114,8 +118,10 @@ class StoreWriteMixin(
             session.flush()
             write_records(session, snapshot.get("records", ()), read_compensations=snapshot.get("_read_compensations", ()))
             self._sync_current_memberships(session, snapshot.get("records", ()), team_dependencies + snapshot.get("teams", []))
+            self._sync_current_topology(session, snapshot.get("records", ()), team_dependencies + snapshot.get("teams", []))
             candidate = self._validation.prepare(session)
-            receipts = write_receipts(session, snapshot.get("_operations", ()))
+            operations, timestamps = self._bind_acceptance_times(session, snapshot, acceptance_reader)
+            receipts = write_receipts(session, operations)
             for receipt in receipts:
                 if read_receipt(session, receipt.operation_id) != receipt:
                     raise RuntimeError("The stored receipt does not match the accepted operation.")
@@ -124,8 +130,8 @@ class StoreWriteMixin(
                 # facts. Validate those effects before the real commit too.
                 candidate = self._validation.prepare(session)
             session.commit()
-            self._validation.finish(candidate)
-            return receipts
+            self._validation.finish(None if timestamps else candidate)
+            return self._accepted_write(receipts, timestamps)
         except BaseException:
             self._validation.finish()
             session.rollback()

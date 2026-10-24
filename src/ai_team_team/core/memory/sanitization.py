@@ -78,17 +78,6 @@ def render_recall_content(events: Sequence[SystemMemoryEvent]) -> str:
         if event.event_type == "activity_invocation_finished":
             lines.append(f"ACTIVITY CHECKPOINT: {event.payload.get('intent', 'unknown')}")
             continue
-        if event.event_type == "agent_turn_started":
-            round_number = event.payload.get("round_number")
-            suffix = f"; round {round_number}" if round_number is not None else ""
-            lines.append(f"TURN STARTED{suffix}")
-            continue
-        if event.event_type == "agent_turn_finished":
-            status = str(event.payload.get("status", "unknown")).upper()
-            error_kind = event.payload.get("error_kind")
-            suffix = f"; error kind: {error_kind}" if error_kind else ""
-            lines.append(f"TURN FINISHED: {status}{suffix}")
-            continue
         if event.event_type != "message":
             continue
         content = event.payload.get("content")

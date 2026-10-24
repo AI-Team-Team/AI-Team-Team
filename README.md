@@ -3,15 +3,17 @@
 > [!IMPORTANT]
 > **Major architectural refactor in progress.**
 >
-> ATT is replacing team-wide discussion rounds and all-member response barriers with one continuing personal activity mechanism per Agent.
+> ATT is replacing team-wide discussion-round execution with one continuing personal activity mechanism per Agent.
 >
-> Planned changes include explicit team conversation streams and personal messaging, notification and sleep controls, tracked background execution, and durable activity checkpoints and recovery.
+> Implemented foundations include explicit team conversation streams and personal messaging, notification and sleep controls, tracked background execution, and durable activity checkpoints and recovery.
 >
-> Governance, team formation, topology, supervision, model and tool execution, persistence, public APIs, configuration, tests, and documentation will be updated around this model.
+> Governance, Team Formation, topology, and supervision retain their institutional rules, authorization, and durable state while their Agent execution uses this common activity mechanism.
 >
 > Agent identity, personal memory, membership consent, and permission boundaries remain core requirements.
 >
-> Phase 0 freezes contracts, Phase 1 establishes durability foundations, Phase 2 adds continuing personal activity and bounded model requests, Phase 3 adds explicit team conversations and personal direct chat, and Phase 4 adds registered execution and background detachment on schema 14; institutional round removal and the remaining breaking changes are still in progress.
+> Phases 0–4 provide the contract, durability, personal-activity, conversation, and execution foundations.
+>
+> Phase 5 implements these institutional execution adapters, removes the old discussion engine, and introduces incompatible schema 15; its local implementation gate has passed, while later phases and cross-platform CI verification remain separate work.
 >
 > See the [Design Blueprints](docs/blueprints/README.md) for the design, implementation phases, and deferred features.
 
@@ -19,7 +21,7 @@ A generic framework for persistent, hierarchical, and dynamically organized mult
 
 ATT models stable Agent identities that can participate in autonomous AgentTeams.
 
-Agents can propose teams, participate in structured discussions, communicate across teams, and reorganize recursive topology under explicit system-wide rules.
+Agents can propose teams, publish messages, make explicit governance choices, communicate across teams, and reorganize topology under shared system-wide rules.
 
 ATT keeps identity, authority, memory, and team state as separate system concepts as its coordination structure grows.
 
@@ -47,7 +49,9 @@ The basic idea is simple: every AI remains an independent Agent, and the relatio
 
 An Agent can join several AgentTeams without becoming a different Agent. Its identity, memory, model binding, private workspace, and personal messages remain its own.
 
-An AgentTeam is more than a container for model calls. It can conduct discussions, make team-level decisions, communicate with other AgentTeams, create specialized child teams, and reorganize its position under the shared rules defined by ATT.
+An AgentTeam is an organization with its own relationships and shared resources.
+
+Its members can exchange messages, make team-level decisions, communicate with other AgentTeams, create specialized teams, and reorganize its position under the shared rules defined by ATT.
 
 ATT therefore separates who an Agent is from the teams it joins, and separates what an AgentTeam decides from the individual member who performs an operation.
 
@@ -74,11 +78,13 @@ Joining or leaving an AgentTeam changes only the `team_id ↔ agent_id` membersh
 
 When an Agent belongs to several AgentTeams, model invocations for that identity are serialized so concurrent teams cannot mutate its reusable context at the same time.
 
-Cross-team memory continuity is intentional, while framework-recorded messages, memory sources, and model invocations retain team and discussion provenance so their origins remain inspectable.
+Cross-team memory continuity is intentional, while messages, memory sources, and model invocations retain explicit team and invocation provenance so their origins remain inspectable.
 
 ### AgentTeams Are Autonomous Coordination Units
 
-An `AgentTeam` represents a group-level coordination unit with its own purpose, members, discussion session lock, inbox, proposals, topology position, DocLib, and governance responsibilities.
+An `AgentTeam` has its own purpose, members, explicit conversation stream, inbox, proposals, topology position, DocLib, and governance responsibilities.
+
+It does not own a second execution loop or a whole-team session lock.
 
 The AgentTeam is the subject of inter-team communication requests, Agreements, topology migration, and team-level decisions; an individual Agent performs an operation from the authority of its current invocation-scoped AgentTeam.
 
@@ -98,11 +104,17 @@ A material proposal revision creates immutable history and resets the attitudes 
 
 The initiating Agent may create an eligible accepted subset when the configured minimum team size is satisfied, may require a final confirmation even after unanimous acceptance, and may define whether nonmembers can request a later join.
 
-Creator-AgentTeam deliberation can prepare a detached proposal draft, but the discussion is advisory and cannot supply consent for an invited Agent or publish a proposal on behalf of the initiator.
+The initiator may seek voluntary advice and prepare an optional validated candidate, but no compulsory drafting process or all-member response barrier precedes proposal publication.
+
+Advice and candidate validation never supply another Agent's consent.
 
 ### Configuration Defines Shared Institutions
 
-`ATTConfig` defines runtime-wide institutions for communication, migration, failover, tool execution, supervision, memory, persistence-related paths, and resource limits.
+`ATTConfig` defines ATT-wide policies and settings for communication, migration, failover, tool execution, supervision, memory, persistence-related paths, and resource limits.
+
+The Autonomous Agent Runtime coordinates each Agent's activity, scheduling, and model and tool execution.
+
+Governance, Team Formation, and the other institutional mechanisms retain their own rules, authorization, and durable state while using that execution infrastructure.
 
 Agent-facing tools cannot override the configured sender, communication policy, direction, approval path, or governance subject for an individual request.
 
@@ -124,17 +136,23 @@ Topology depth limits bound recursive delegation, and cycle detection rejects ch
 
 The hierarchy provides routing and governance context, while execution authority remains assigned by explicit relationships and institutions.
 
-Top-level AgentTeams are connected through the Root Agent boundary for governance that explicitly requires a root-level principal, while permissive institutions do not introduce approval solely because a team is deep in the tree.
+An AgentTeam may be independent or have an explicit Agent or AgentTeam parent.
+
+Creator provenance and membership do not select that parent, and independent organizational trees do not acquire a virtual Root connection.
+
+Independent communication endpoints are exempt from their own parent or ancestor approvals without erasing an attached endpoint's required authority.
 
 Agents discover current people and organizations on demand through listing, keyword search, and stable-ID inspection, while discovery and authorization remain separate operations.
 
 ### Concurrency Is Scoped to the State Being Protected
 
-Normal, emergency, supervision-related, and governance discussions for the same AgentTeam share one session lock and therefore execute serially.
+One personal runtime and invocation lock serialize each Agent's model and tool activity, including explicit ballots.
 
-Different AgentTeams may discuss concurrently unless they need the same Agent invocation lock or another explicitly shared resource.
+Different people can act concurrently, including members of the same AgentTeam, unless their operations require a shared resource.
 
-AgentTeam structural state uses a separate lock for proposals, ballots, membership mutations, and inbox transitions so short authoritative updates do not hold a discussion lock across unrelated work.
+Concurrent inputs for one person coalesce rather than create team-local copies or parallel model calls.
+
+AgentTeam structural state uses short mutation locks and receipt-bound publication for proposals, ballots, memberships, and inbox transitions.
 
 Topology mutations are revalidated under a manager-level lock after any external authorization work and before all parent, child, depth, and registry pointers change atomically.
 
@@ -152,13 +170,17 @@ The [Phase 4 execution service](docs/dev/autonomous_activity/Phase_4.md) tracks 
 
 ### Failure Semantics Follow the Type of Decision
 
-An ordinary discussion may retain successful member results when another member cannot complete a turn, record a structured incomplete result, and allow that Agent to participate again in the next round.
+A failed tool operation produces a typed observation for the same continuing person; it does not terminate peers or create a failed team round.
 
-Cancellation, manager shutdown, persistence failure, and state-consistency violations remain framework-level failures rather than being converted into ordinary incomplete turns.
+Technical fairness limits yield execution without declaring idle or business completion.
+
+Cancellation, manager shutdown, persistence failure, and state-integrity violations retain their own factual outcomes rather than being converted into ordinary answers.
 
 Governance operations fail closed: communication approval, migration approval, full-member ballots, and parent failover do not authorize an action from missing, invalid, tied, cancelled, or incomplete decisions.
 
-Indeterminate supervisory results remain distinct from confirmed unhealthy content, and degraded execution remains distinct from content health so operational failure does not become an unsupported judgment about the discussion itself.
+A health threshold requests assessment rather than declaring a person unhealthy.
+
+Fresh restricted supervisory ATs assess explicitly admitted evidence through the common runtime, with independent health and operational dimensions, a total deadline, and no business-completion authority.
 
 Typed tool outcomes distinguish invalid arguments, permission denial, business rejection, transient failure, internal failure, and unknown tools instead of inferring semantics from error-message prefixes.
 
@@ -188,7 +210,7 @@ Runtime callables and external connections are deliberately not serialized, so a
 
 ### Organizational State Is Durable and Auditable
 
-ATT persists stable identities, role-neutral memberships, topology, discussions, Agent and AgentTeam inboxes, proposal revisions, invitation decisions, communication requests, approvals, Agreements, memory records, DocLib metadata, files, ACLs, and token usage as structured state.
+ATT persists stable identities, role-neutral memberships, topology, personal activity and chat facts, inboxes, governance cases and ballots, proposal revisions, invitation decisions, communication Agreements, memory records, DocLib state, token claims, execution evidence, and health incidents.
 
 Incremental persistence records changed entities and file paths through a single asynchronous writer instead of rewriting the entire organization after every operation.
 
@@ -198,14 +220,14 @@ A failed restore leaves the existing manager and managed files unchanged rather 
 
 Schema versions are checked before database definition changes, and incompatible databases are rejected explicitly because the project currently favors unambiguous state semantics over legacy-schema compatibility.
 
-Callbacks remain observational extensions: they are dispatched in order outside the discussion path, and callback delay or failure does not change core business outcomes.
+Callbacks remain observational extensions: `on_system_event` is dispatched in order outside personal activity, and observer delay or failure does not change core outcomes.
 
 </details>
 
 ## Core Commitments
 
 * Each Agent retains one identity and its Agent-owned state across all memberships.
-* Each AgentTeam acts as the explicit subject of its discussions, communication, Agreements, and team-level governance.
+* Each AgentTeam acts as the explicit subject of its shared conversation, communication, Agreements, and team-level governance.
 * Membership changes modify only the relationship between an Agent ID and an AgentTeam ID.
 * Authority comes from explicit invocation context, topology, and configured institutions.
 * Deliberate Agent memory and work artifacts remain auditable without accessing, inferring, or persisting hidden model reasoning.
@@ -223,15 +245,15 @@ ATT represents dynamic multi-agent topologies as recursive lineages with explici
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Permits active teams to request parent-hierarchy migrations, arbitrated by modular strategies with loop/cycle detection and parent notification logs.
 * **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Provides a trusted-host ASCII map of ordinary teams, purposes, status, and progress without automatically inserting the full map into Agent prompts.
 * **[Agent and AgentTeam Discovery](docs/Agent_and_AgentTeam_Discovery.md)**: Lets Agents explicitly list public directory records, search case-insensitive OR keywords, and inspect stable IDs, using inclusive entity-position ranges with a default page of 30 and no implicit collaborator selection or authority grant.
-* **[Shared-Agent Continuity](docs/Consensual_Team_Formation.md)**: One `Agent` may participate in several teams with one identity, one persistent Agent inbox, and complete memory. Invocation-scoped team/discussion context keeps prompts and team-sensitive tools correctly scoped while the agent's own model calls remain serialized.
+* **[Shared-Agent Continuity](docs/Consensual_Team_Formation.md)**: One `Agent` may participate in several teams with one identity, one persistent Agent inbox, and complete memory. Invocation-scoped team and personal invocation context keeps prompts and team-sensitive tools correctly scoped while the agent's own model calls remain serialized.
 * **[Resilient Failover Routing](docs/Team_Governance.md#5-token-budget--failover-policies)**: Dynamically hot-swaps exhausted or failing model clients. `"auto"` selects from available bindings; `"parent"` uses an explicit parent AgentTeam ballot or a Root Agent decision and fails closed.
 
 ### 🧠 ReAct Loops & Execution Engine
 
-* **Bounded ReAct Loops**: Executes standard Thought/Action/Observation reasoning cycles, capped by max steps to prevent runaway API tokens.
+* **Continuing Personal Activity**: Uses one common model/tool mechanism per person, bounded requests, fair technical checkpoints, and explicit idle or finite sleep controls.
 * **Strict Balanced Action Parser**: A character-level scanner handles nested delimiters, quotes, triple quotes, escapes, multiline input, Markdown fences, and Unicode before literal-only argument parsing; malformed or unquoted expressions never execute a tool.
-* **[Bounded Memory Compression](docs/State_Persistence.md)**: Automates memory pruning by extracting early conversation turns, calling the agent's LLM to generate a `*** HISTORICAL SUMMARY ARCHIVE ***`, and retaining a bounded high-fidelity window.
-* **[Optional Selective Episodic Memory](docs/Selective_Episodic_Memory.md)**: When explicitly enabled, records one deterministic Agent-owned segment per terminal business turn, queues isolated retrieval-metadata indexing in the background, and lets only that Agent search or temporarily recall its own Memory Cards through token-bounded, gap-free continuation coordinates.
+* **[Bounded Working Context](docs/State_Persistence.md)**: Compacts the model window into derived history references without a separate summary model call, while retaining the complete sanitized personal Journal.
+* **[Optional Selective Episodic Memory](docs/Selective_Episodic_Memory.md)**: When explicitly enabled, records one deterministic Agent-owned segment per committed personal invocation boundary, queues isolated retrieval-metadata indexing in the background, and lets only that Agent search or temporarily recall its own Memory Cards through token-bounded, gap-free continuation coordinates.
 * **[LLM Adapter Architecture](docs/Tool_System.md)**: Unifies sync, async, and streaming LLM payloads from various providers (Google, OpenAI, Anthropic) into standard `LLMResponse` and `ToolCall` formats via the `ManagerDefaultClientAdapter`.
 * **[Atomic Token Budget Circuit Breakers](docs/Team_Governance.md#5-token-budget--failover-policies)**: Enforces hard per-model quotas by atomically reserving prompt and maximum output capacity before each request, settling provider usage, refunding unused capacity, and routing failover through the same ledger.
 
@@ -246,15 +268,15 @@ ATT represents dynamic multi-agent topologies as recursive lineages with explici
 * **[Token-Bounded File Reading](docs/Gated_Reading.md)**: Limits model-facing reads by the effective model's content-token budget rather than file size or line count, supports exact continuation inside long lines, and rejects stale file cursors.
 * **[Collaborative DocLib Storage](docs/Gated_Reading.md#6-document-libraries-doclib)**: Equips teams with built-in document libraries. Access is governed by prefix path ACL permissions (`READ`/`WRITE`) that inherit recursively downward to subdirectories.
 * **Private Agent DocLibs**: Gives every registered AI one persistent private workspace (`PDL-<agent_id>`). Private files follow a shared AI across teams, remain outside team ACLs and prompts, and enter a team library only through an explicit copy/publish tool.
-* **[Consensual Existing-Agent Membership](docs/Consensual_Team_Formation.md)**: Ordinary Agent and host APIs send revision-bound identity-inbox invitations before adding a registered Agent to a new AgentTeam. Material proposal revisions preserve immutable history and renew consent, while optional detached creator-Team deliberation can shape a structured draft without deciding for invitees. Membership remains a role-neutral relation that never rebinds or clears Agent-owned identity, memory, model, lifecycle, lock, inbox, or Private DocLib state.
+* **[Consensual Existing-Agent Membership](docs/Consensual_Team_Formation.md)**: Ordinary Agent and host APIs send revision-bound identity-inbox invitations before adding a registered Agent to a new AgentTeam. Material proposal revisions preserve immutable history and renew consent, while the initiator may prepare an optional validated candidate without deciding for invitees. Membership remains a role-neutral relation that never rebinds or clears Agent-owned identity, memory, model, lifecycle, lock, inbox, or Private DocLib state.
 * **Tool Auditor Interception**: Registers pre-execution interception hooks to audit, vet, approve, or reject specific tool calls (e.g. database safety query check).
 
 ### 💾 Persistence & Diagnostics
 
 * **[Asynchronous SQLite Persistence](docs/State_Persistence.md)**: Serializes changed topology, memory, DocLib, ACL, and governance records through an exclusive cross-process writer lease with one active and one coalesced pending delta, explicit flush, and transactional restore validation.
-* **[Supervisory Dialogue Audits](docs/Supervisory_Team.md)**: Each audit creates a short-lived, registered supervisory AgentTeam with fresh Integrity, Continuity, and Deadlock auditors.
-  It reviews the discussion through normal team execution, retains durable audit evidence, dissolves the temporary team, and escalates confirmed anomalies up the tree lineage.
-* **Decoupled Dashboards**: Dispatches synchronous or asynchronous runtime callbacks (`on_status_change`, `on_activity_added`, `on_log_append`) in order on an isolated background channel, so slow or failing observers cannot block discussions.
+* **[Evidence-Based Health Supervision](docs/Supervisory_Team.md)**: Each assessment creates a real short-lived privileged AT with fresh auditors, uses the common personal runtime, retains evidence, and dissolves its temporary people and team.
+* **Persistent Incident Attention**: Stable fingerprints merge repeated occurrences; queue or wake delivers protected attention, and only explicit authorized acknowledgement resolves it.
+* **Decoupled Observers**: Dispatches synchronous or asynchronous `on_system_event` callbacks in order on a background channel without exposing private bodies or blocking personal activity.
 
 ## 📦 Installation
 
@@ -288,177 +310,130 @@ python -c "import ai_team_team; print('ATT is available ^_^')"
 
 ## 🏛️ System Architecture
 
-`ATTManager` connects the host application to stable Agent identities, recursive AgentTeams, serialized discussions, governed tools and communication, protected knowledge, supervision, and durable state:
+`ATTManager` connects the Host to stable people, explicit organizations, continuing personal activity, governed actions, protected knowledge, health assessment, and durable state:
 
 ```mermaid
 flowchart TB
     subgraph Host["Host Integration"]
-        HostApp["Host Application"]
-        Config["Validated ATTConfig"]
-        Bindings["LLM, Tool, Auditor, and Callback Bindings"]
+        App["Host Application"]
+        Config["Strict ATTConfig<br/>shared institutions and resource limits"]
+        Bindings["Model, Tool, Auditor, and Observer Bindings"]
         Manager["ATTManager"]
-
-        HostApp --> Manager
+        App --> Manager
         Config --> Manager
         Bindings --> Manager
     end
 
-    subgraph Organization["Identity and Recursive Organization"]
-        Root["Root AI Agent<br/>root governance principal"]
-        Agents["Stable Agent Registry<br/>one identity and memory per Agent"]
-        AgentInbox["Persistent Agent Inbox<br/>invitations, voting emails, and results"]
-        Membership["Role-Neutral Membership<br/>team_id ↔ agent_id"]
-        Teams["Recursive AgentTeam Tree<br/>dynamic creation and migration"]
-        Discovery["On-Demand Public Entity Discovery<br/>list, keyword search, inspect; no authority grant"]
-        Formation["Consensual Team Formation<br/>persistent invitations, attitudes, and late join"]
-        DelegationAdmission["Atomic Delegation Admission<br/>manager-wide Agent wait graph"]
-        PrivateDocLib["Private Agent DocLibs"]
-        TeamDocLib["Team DocLibs and Path ACLs"]
-
-        Root --> Agents
-        Agents --> AgentInbox
-        Agents --> Membership
-        Membership --> Teams
-        Agents --> Discovery
-        Teams --> Discovery
-        AgentInbox --> Formation
+    subgraph Organization["People and Explicit Organizations"]
+        People["Stable Agent Identities<br/>Root is an Agent, not an implicit substitute"]
+        Membership["Consensual Memberships<br/>team_id ↔ agent_id"]
+        Forest["Organizational Forest<br/>independent, Agent parent, or AT parent"]
+        Discovery["Public Entity Discovery<br/>no automatic access or membership"]
+        Formation["Exact-Revision Invitations<br/>four attitudes and optional candidates"]
+        Position["Accepted Position Changes<br/>target consent, cycle checks, cooldown"]
+        Private["One Private DocLib per Person"]
+        Shared["Team DocLibs and Live Path ACLs"]
+        People --> Membership --> Forest
+        People --> Private
+        Forest --> Shared
+        People --> Discovery
+        Forest --> Discovery
         Formation --> Membership
-        DelegationAdmission --> Teams
-        Agents --> PrivateDocLib
-        Teams --> TeamDocLib
+        Position --> Forest
     end
 
-    subgraph Runtime["Personal Activity and Transitional Institutional Execution"]
-        PersonalActivity["One Continuing Activity per Agent<br/>deduplicated admission and fair invocations"]
-        PersonalBoundary["Durable Frames and Checkpoints<br/>explicit idle, finite sleep, and scope changes"]
-        RequestEvidence["Bounded Model Requests<br/>durable claims, retry boundaries, and late-result fencing"]
-        DiscussionLock["Per-AgentTeam Discussion Lock<br/>normal, emergency, and governance sessions"]
-        Rounds["Multi-Round Discussion<br/>frozen membership per round"]
-        Turns["Concurrent Member Turns"]
-        AgentLock["Per-Agent Invocation Lock<br/>shared Agent calls remain serialized"]
-        WaitGraph["Reference-Counted Wait Graph<br/>reject synchronous cycles before creation"]
-        Strategy["Text ReAct or Native Tool Calling"]
-        Model["LLM Adapter, Atomic Token Budget,<br/>and Configured Failover"]
-        Tools["Validated Tool Runtime<br/>ContextVars, schema, auditor, typed results"]
-        ExecutionService["Registered Execution Service<br/>one execution, declared effects, resource coordination"]
-        BackgroundTasks["Personal Background Tasks<br/>explicit start or timed detachment; owner-only results"]
-        RoundResults["Turn and Round Results<br/>completed or incomplete members"]
-        DiscussionResult["Transcript or Structured Discussion Result"]
-
-        DiscussionLock --> Rounds
-        Rounds --> Turns
-        Turns --> AgentLock
-        AgentLock --> WaitGraph
-        WaitGraph --> DelegationAdmission
-        AgentLock --> Strategy
-        AgentInbox --> PersonalActivity
-        PersonalActivity --> AgentLock
-        AgentLock --> PersonalBoundary
-        PersonalBoundary --> RequestEvidence
-        PersonalBoundary --> Tools
-        Tools --> ExecutionService
-        ExecutionService -->|explicit or detached| BackgroundTasks
-        BackgroundTasks -->|addressed result notice| PersonalActivity
-        Tools -->|complete batch| PersonalBoundary
-        RequestEvidence --> Model
-        PersonalBoundary -->|continuing yield| PersonalActivity
-        Strategy --> Model
-        Strategy --> Tools
-        Model --> RoundResults
-        Tools --> RoundResults
-        RoundResults -->|next round| Rounds
-        RoundResults -->|aggregate| DiscussionResult
+    subgraph Runtime["One Continuing Personal Runtime"]
+        Inbox["Personal Mail and Addressed Notifications"]
+        Activity["Deduplicated Personal Admission"]
+        Lock["One Serial Invocation per Person"]
+        Boundary["Frames and Durable Checkpoints<br/>continue, change scope, idle, finite sleep"]
+        Model["Bounded Model Requests<br/>typed retry, atomic quota, late fencing"]
+        Tools["Common ToolExecutor<br/>strict schema, active scope, auditor, typed result"]
+        Executor["Registered Execution and Resources"]
+        Background["Same-Owned Background Tasks<br/>detachment, health, explicit result reads"]
+        Inbox --> Activity --> Lock --> Boundary
+        Boundary --> Model --> Boundary
+        Boundary --> Tools --> Executor
+        Executor --> Background
+        Background -->|addressed result reference| Inbox
+        Tools -->|complete batch| Boundary
+        Boundary -->|continuing yield| Activity
     end
 
-    subgraph Coordination["Autonomous Coordination and Safety"]
-        Governance["Membership, Migration,<br/>and Parent Failover Governance"]
-        Communication["Peer Communication<br/>policy, requests, approvals, agreements, delivery"]
-        Conversations["Explicit Team and Personal Chat<br/>Markdown messages, versions, and withdrawal"]
-        Contact["Personal Contact Relationships<br/>friendship, blocks, refusal, stranger allowance"]
-        ChatViews["Authorized Personal Chat Views<br/>read state, reminders, and frozen archives"]
-        Knowledge["Private Publish, Team Files,<br/>Gated Reading, and Managed Links"]
-        Supervision["Fresh Managed Supervisory ATs<br/>content and operational audits"]
-        Alerts["Deduplicated Parent or Root Alerts"]
-
-        Supervision --> Alerts
+    subgraph Coordination["Autonomous Communication and Governance"]
+        Chat["Explicit Team and Personal Chat<br/>versions, withdrawal, frozen personal views"]
+        Contact["Personal Contact Controls<br/>friendship, blocks, stranger allowance"]
+        Cases["Governance Cases and Immutable Ballots<br/>complete electorate, explicit choices, strict majority"]
+        Peer["AT Peer Communication<br/>policy snapshots, channels, idempotent delivery"]
+        Resource["Bounded Parent Resource Decisions<br/>own deadline, no representative or auto fallback"]
+        Health["Health Evidence and Configured Detectors<br/>thresholds request assessment, not intervention"]
+        Audit["Fresh Restricted Supervisory AT<br/>common runtime, all findings, total deadline"]
+        Incidents["Persistent Deduplicated Incidents<br/>protected attention and explicit acknowledgement"]
+        Contact --> Chat
+        Cases --> Peer
+        Cases --> Position
+        Cases --> Resource
+        Health --> Audit --> Incidents
+        Health -->|confirmed integrity fault: immediate protection| Incidents
     end
 
-    subgraph MemorySystem["Agent-Owned Memory Boundaries"]
-        WorkingContext["Persisted Working Context<br/>bounded model-visible window"]
-        Journal["System Memory Journal<br/>append-only host audit history"]
-        Catalog["Optional Memory Catalog<br/>Agent-owned cards and FTS5 search"]
-        Indexer["Isolated Background Indexer<br/>title, summary, and normalized tags"]
-        Recall["Ephemeral Recall and Explicit Retention"]
-
-        Turns --> WorkingContext
-        Turns --> Journal
-        Journal --> Indexer
-        Indexer --> Catalog
-        Catalog --> Recall
-        Recall --> Strategy
+    subgraph Memory["Agent-Owned Knowledge and Memory"]
+        Window["Bounded Working Context"]
+        Journal["Append-Only Sanitized Journal"]
+        Catalog["Optional Episodic Catalog<br/>isolated indexing, owner-only recall"]
+        Files["Token-Gated Reads and Explicit Publication<br/>live ACLs and managed links"]
+        Journal --> Catalog --> Window
+        Private --> Files
+        Shared --> Files
     end
 
-    subgraph Durability["Durability and Host Observation"]
-        Dirty["Entity-Level Dirty Deltas"]
-        Writer["Coalescing Single Writer<br/>cross-process lease"]
-        SQLite[(SQLite State)]
-        Restore["Validated Atomic Recovery"]
-        Events["Ordered Background Callbacks and Events"]
-
-        Dirty --> Writer
-        Writer --> SQLite
-        SQLite --> Restore
-        Restore --> Manager
-        Events --> HostApp
+    subgraph Durability["Durability, Recovery, and Observation"]
+        Delta["Immutable Entity and Domain Deltas"]
+        Writer["One Exclusive Coalescing Writer"]
+        Database[(SQLite Schema 15)]
+        Restore["Validated Staging and Atomic Recovery<br/>causal references, no external replay"]
+        Events["Ordered Metadata-Only System Events"]
+        Delta --> Writer --> Database --> Restore
+        Events --> App
     end
 
-    Manager --> Root
-    Manager --> Teams
-    Manager --> DiscussionLock
-    Teams --> DiscussionLock
-    Tools --> Governance
-    Tools --> Discovery
+    Manager --> People
+    Manager --> Forest
+    Manager --> Activity
     Tools --> Formation
-    Governance -->|governance session| DiscussionLock
-    Model -->|parent failover request| Governance
-    Governance -->|selected model binding| Model
-    Tools --> Communication
-    Tools --> Conversations
+    Tools --> Chat
     Tools --> Contact
-    Membership --> Conversations
-    Contact --> Conversations
-    Conversations --> ChatViews
-    ChatViews --> PersonalBoundary
-    Communication -->|approval session| DiscussionLock
-    Tools --> Knowledge
-    PrivateDocLib --> Knowledge
-    TeamDocLib --> Knowledge
-    Governance --> Teams
-    Formation --> Teams
-    Communication --> Teams
-    DiscussionResult --> Supervision
-    Alerts -->|queue| Teams
-    Alerts -->|wake| DiscussionLock
-    Agents --> Dirty
-    AgentInbox --> Dirty
-    Teams --> Dirty
-    RoundResults --> Dirty
-    WorkingContext --> Dirty
-    Journal --> Dirty
-    Catalog --> Dirty
-    DiscussionResult --> Dirty
-    Governance --> Dirty
-    Formation --> Dirty
-    Communication --> Dirty
-    Conversations --> Dirty
-    Contact --> Dirty
-    ChatViews --> Dirty
-    Knowledge --> Dirty
-    ExecutionService --> Dirty
-    BackgroundTasks --> Events
-    DiscussionResult --> Events
-    DiscussionResult -->|return| HostApp
-    Alerts --> Events
+    Tools --> Peer
+    Tools --> Position
+    Tools --> Cases
+    Tools --> Files
+    Cases -->|addressed voluntary voting mail| Inbox
+    Peer -->|message references| Inbox
+    Chat -->|authorized notices| Inbox
+    Model -->|resource remedy handle| Resource
+    Resource -->|authorized binding change| Model
+    Position -->|affected-person notices| Inbox
+    Incidents -->|queue or wake attention; no forced decision| Inbox
+    Audit -->|restricted profile| Activity
+    Model -->|typed protocol evidence| Health
+    Tools -->|classified operation evidence| Health
+    Boundary --> Window
+    Boundary --> Journal
+    Window --> Model
+    Files -->|explicit authorized observation| Window
+    Membership --> Delta
+    Forest --> Delta
+    Boundary --> Delta
+    Executor --> Delta
+    Cases --> Delta
+    Peer --> Delta
+    Chat --> Delta
+    Journal --> Delta
+    Files --> Delta
+    Audit --> Delta
+    Incidents --> Delta
+    Restore --> Manager
+    Delta --> Events
 
     classDef host fill:#eceff1,stroke:#455a64,stroke-width:1.5px;
     classDef identity fill:#e3f2fd,stroke:#1976d2,stroke-width:1.5px;
@@ -466,24 +441,20 @@ flowchart TB
     classDef governance fill:#fce4ec,stroke:#c2185b,stroke-width:1.5px;
     classDef knowledge fill:#e8f5e9,stroke:#388e3c,stroke-width:1.5px;
     classDef supervision fill:#fff3e0,stroke:#ef6c00,stroke-width:1.5px;
-    classDef memory fill:#e0f2f1,stroke:#00796b,stroke-width:1.5px;
     classDef persistence fill:#ede7f6,stroke:#5e35b1,stroke-width:1.5px;
-
     style Host fill:#f4f7f9,stroke:#455a64,stroke-width:2px,color:#1f2937;
     style Organization fill:#eff6ff,stroke:#1976d2,stroke-width:2px,color:#1f2937;
     style Runtime fill:#fffbeb,stroke:#f9a825,stroke-width:2px,color:#1f2937;
     style Coordination fill:#fff1f2,stroke:#c2185b,stroke-width:2px,color:#1f2937;
-    style MemorySystem fill:#ecfdf5,stroke:#00796b,stroke-width:2px,color:#1f2937;
+    style Memory fill:#ecfdf5,stroke:#00796b,stroke-width:2px,color:#1f2937;
     style Durability fill:#f5f3ff,stroke:#5e35b1,stroke-width:2px,color:#1f2937;
-
-    class HostApp,Config,Bindings,Manager host;
-    class Root,Agents,AgentInbox,Membership,Teams,Discovery,Formation,DelegationAdmission identity;
-    class PersonalActivity,PersonalBoundary,RequestEvidence,DiscussionLock,Rounds,Turns,AgentLock,WaitGraph,Strategy,Model,Tools,ExecutionService,BackgroundTasks,RoundResults,DiscussionResult execution;
-    class Governance,Communication,Conversations,Contact,ChatViews governance;
-    class PrivateDocLib,TeamDocLib,Knowledge knowledge;
-    class Supervision,Alerts supervision;
-    class WorkingContext,Journal,Catalog,Indexer,Recall memory;
-    class Dirty,Writer,SQLite,Restore,Events persistence;
+    class App,Config,Bindings,Manager host;
+    class People,Membership,Forest,Discovery,Formation,Position identity;
+    class Inbox,Activity,Lock,Boundary,Model,Tools,Executor,Background execution;
+    class Chat,Contact,Cases,Peer,Resource governance;
+    class Private,Shared,Window,Journal,Catalog,Files knowledge;
+    class Health,Audit,Incidents supervision;
+    class Delta,Writer,Database,Restore,Events persistence;
 ```
 
 * [Open the detailed ATT system architecture](docs/flowcharts/System_Architecture.md)
@@ -493,7 +464,7 @@ flowchart TB
 
 The complete setup and first-use guide has moved to the [Quickstart Guide](docs/user/Quickstart.md).
 
-The Quickstart now covers manager configuration, LLM integration, model and Agent registration, persistence, custom tools, callbacks, team discussions, migration, governed communication, Native Strategy, and DocLib usage.
+The Quickstart now covers manager configuration, LLM integration, model and Agent registration, persistence, custom tools, callbacks, personal activity, explicit conversations, migration, governed communication, Native tool calling, and DocLib usage.
 
 ## ⚙️ Advanced Configuration
 
@@ -505,7 +476,7 @@ The reference includes every top-level option, nested policy configuration, toke
 
 The [Design Blueprints](docs/blueprints/README.md) collect the autonomous Agent activity blueprint, implementation plan, and deferred features.
 
-They describe the target architecture and implementation boundaries; Phases 0–2 supply the contract, durability, and personal-runtime foundations, while the remaining phases are still in progress.
+They describe the target architecture and implementation boundaries; Phases 0–4 supply the foundational services, Phase 5 integrates institutions and removes the old engine, and later phases remain separate work.
 
 ## 📊 Architecture & Control Flow Diagrams
 
@@ -517,7 +488,7 @@ For visual flowcharts and sequencing diagrams detailing the runtime loops, gated
 * **[State Persistence (SQLite Recovery & ORM Deletions)](docs/flowcharts/State_Persistence.md)**
 * **[Autonomous Communication Governance](docs/flowcharts/Autonomous_Communication_Governance.md)**
 * **[Lineage Tree Mutations (Spawning, Voting, Migration)](docs/flowcharts/Lineage_Tree_Mutations.md)**
-* **[Supervision & Emergencies (3-AI Audits, Emergency Wakeup)](docs/flowcharts/Supervision_and_Emergencies.md)**
+* **[Health Supervision (Evidence, Scoped Auditors, Incident Attention)](docs/flowcharts/Supervision_and_Emergencies.md)**
 * **[Token-Bounded File Reading & DocLib ACL Traversal](docs/flowcharts/Gated_Reading.md)**
 
 ## 📄 License

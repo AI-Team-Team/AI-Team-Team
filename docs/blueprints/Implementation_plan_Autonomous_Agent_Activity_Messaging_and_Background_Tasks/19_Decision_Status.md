@@ -38,7 +38,9 @@ The prospective parent must accept reattachment, unilateral voluntary detachment
 
 The confirmed default intentionally allows an AT to gain its own permissive communication status through authorized voluntary independence, while preserving another endpoint's requirements.
 
-Remaining engineering review covers exact public signatures and configuration placement, strict executor capability declarations, typed fault classification, transaction and lock ordering, physical schema design, configurable audit deadlines and per-evidence thresholds, and measured timer-checkpoint precision.
+The health defaults confirmed on 2026-10-22 are three protocol failures or five same-tool same-category argument failures within a rolling 600-second window, a configurable 600-second total audit deadline, and semantic detectors disabled by default.
+
+Remaining engineering review covers exact public signatures and configuration placement, strict executor capability declarations, typed fault classification, transaction and lock ordering, physical schema design, and measured timer-checkpoint precision.
 
 Those items implement the confirmed institutions and are not unapproved alternatives to them or permission to change their defaults.
 

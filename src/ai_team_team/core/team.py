@@ -1,22 +1,18 @@
 import uuid
 import asyncio
-import inspect
 import logging
 import threading
 from typing import TYPE_CHECKING, List, Dict, Optional, Tuple, Any, Union
 from ai_team_team.tool import Tool
 from ai_team_team.doc_library import DocumentLibrary
 from .agent import Agent
-from .exceptions import ATTException
-from .utils import generate_with_retry
 
 if TYPE_CHECKING:
     from .formation import TeamFormationRequest
     from .manager import ATTManager
-    from .response import AgentTurnResult
 
 class AgentTeam:
-    """Represents a recursive team panel of Agents collaborating to debate/solve goals."""
+    """An organizational team with explicit membership and parent relations."""
     def __init__(
         self,
         creator: Any,
@@ -43,12 +39,10 @@ class AgentTeam:
         self.message_inbox: List[Dict[str, Any]] = []
         self.tools: Dict[str, Tool] = {}
         self._parent_team: Optional['AgentTeam'] = None
-        self.migration_count = 0
+        self._position_revision = 1
         self.doc_library: Optional[DocumentLibrary] = None
-        self.is_running = False
         self._cached_depth: Optional[int] = None
         self._state_lock: Optional[asyncio.Lock] = None
-        self._discussion_lock: Optional[asyncio.Lock] = None
         self._status_lock = threading.RLock()
         self._inbox_lock = threading.RLock()
 
@@ -60,20 +54,21 @@ class AgentTeam:
         return self._state_lock
 
     @property
-    def discussion_lock(self):
-        """Serializes normal and emergency discussions for this team."""
-        if self._discussion_lock is None:
-            self._discussion_lock = asyncio.Lock()
-        return self._discussion_lock
-
+    def parent_team(self) -> Optional['AgentTeam']:
+        return self._parent_team
 
     @property
-    def parent_team(self) -> Optional['AgentTeam']:
+    def organizational_parent(self):
+        from .communication import ApprovalPrincipal
+
         if self._parent_team is not None:
-            return self._parent_team
-        if isinstance(self.creator, AgentTeam):
-            return self.creator
-        return None
+            return ApprovalPrincipal(kind="agent_team", principal_id=self._parent_team.team_id)
+        owner = getattr(self, "_parent_agent_id", None)
+        return ApprovalPrincipal(kind="agent", principal_id=owner) if owner else None
+
+    @property
+    def is_independent(self) -> bool:
+        return self.organizational_parent is None
 
     @property
     def depth(self) -> int:
@@ -137,6 +132,7 @@ class AgentTeam:
         """Allows any active team to recursively launch their own child AT."""
         child = manager.create_agent_team(
             creator=self,
+            parent=self,
             member_count=member_count,
             roles_and_presets=roles_and_presets,
             system_instructions=system_instructions,
@@ -158,342 +154,10 @@ class AgentTeam:
         return child
 
 
-    def receive_message(self, message: Dict[str, Any]):
+    def receive_message(self, message: Dict[str, Any]) -> None:
+        """Retain an addressed organizational item without starting a discussion."""
+        with self._inbox_lock:
+            self.message_inbox.append(dict(message))
         manager = getattr(self, "manager", None)
-        if manager and message.get("type") in {
-            "audit_unknown_escalation",
-            "operational_degraded_escalation",
-        }:
-            message = manager._merge_durable_alert(self, message)
-        else:
-            with self._inbox_lock:
-                self.message_inbox.append(message)
-        self.logger.info(f"Team {self.team_id} received message of type '{message.get('type')}' from '{message.get('from')}'")
-        if manager:
-            message_type = message.get("type")
-            should_wake = message_type in {
-                "child_failure_escalation",
-                "escalation_spawn",
-            }
-            skip_audit = False
-            if message_type == "audit_unknown_escalation":
-                should_wake = (
-                    manager.config.audit_unknown_escalation_mode == "wake"
-                )
-                skip_audit = True
-            elif message_type == "operational_degraded_escalation":
-                should_wake = (
-                    manager.config.operational_degraded_escalation_mode
-                    == "wake"
-                )
-                skip_audit = True
-
-            if should_wake:
-                if (
-                    not self.is_running
-                    and manager.config.enable_emergency_wakeup
-                ):
-                    manager.schedule_emergency_wakeup(
-                        self, message, skip_audit=skip_audit
-                    )
-                manager._emit_callback(
-                    "on_emergency_escalation",
-                    self.team_id,
-                    message_type,
-                    message.get("reason")
-                    or message.get("objective")
-                    or str(message),
-                )
-            
+        if manager is not None:
             manager._auto_save(inboxes={self.team_id})
-
-    async def execute_reasoning_step(
-        self,
-        agent: Agent,
-        prompt: str,
-        system_instruction: str,
-        max_steps: int = 5,
-        manager: Optional['ATTManager'] = None
-    ) -> str:
-        """Executes one Agent turn and returns its text-compatible result."""
-        result = await self.execute_reasoning_step_detailed(
-            agent,
-            prompt,
-            system_instruction,
-            max_steps=max_steps,
-            manager=manager,
-        )
-        return result.text
-
-    async def execute_reasoning_step_detailed(
-        self,
-        agent: Agent,
-        prompt: str,
-        system_instruction: str,
-        max_steps: int = 5,
-        manager: Optional['ATTManager'] = None,
-    ) -> "AgentTurnResult":
-        """Executes one terminal Agent turn and journals its lifecycle."""
-        manager = manager if manager is not None else getattr(self, "manager", None)
-        if (
-            manager is None
-            or manager._memory_internal_operation.get()
-        ):
-            return await self._execute_reasoning_step_detailed_inner(
-                agent,
-                prompt,
-                system_instruction,
-                max_steps=max_steps,
-                manager=manager,
-            )
-
-        from .exceptions import AgentTurnIncompleteError
-
-        turn_id = f"TURN-{uuid.uuid4().hex}"
-        turn_token = manager._active_agent_turn_id.set(turn_id)
-        outer_discussion_id = manager._active_discussion_id.get()
-        discussion_token = None
-        if outer_discussion_id is None:
-            discussion_token = manager._active_discussion_id.set(
-                f"DISC-{uuid.uuid4().hex}"
-            )
-        def identify(result: "AgentTurnResult") -> "AgentTurnResult":
-            return result.model_copy(
-                update={
-                    "turn_id": turn_id,
-                    "discussion_id": (
-                        result.discussion_id
-                        or manager._active_discussion_id.get()
-                    ),
-                    "round_number": (
-                        result.round_number
-                        if result.round_number is not None
-                        else manager._active_round_number.get()
-                    ),
-                }
-            )
-
-        try:
-            manager._memory.start_turn(agent, self, turn_id)
-            try:
-                result = await self._execute_reasoning_step_detailed_inner(
-                    agent,
-                    prompt,
-                    system_instruction,
-                    max_steps=max_steps,
-                    manager=manager,
-                )
-            except AgentTurnIncompleteError as exc:
-                result = identify(exc.result)
-                await manager._memory.finalize_turn(agent, self, result)
-                raise AgentTurnIncompleteError(result) from exc
-            except asyncio.CancelledError:
-                manager._memory.cancel_turn(agent, self, turn_id, "cancelled")
-                raise
-            except BaseException as exc:
-                manager._memory.cancel_turn(agent, self, turn_id, type(exc).__name__)
-                raise
-            result = identify(result)
-            await manager._memory.finalize_turn(agent, self, result)
-            return result
-        finally:
-            if discussion_token is not None:
-                manager._active_discussion_id.reset(discussion_token)
-            manager._active_agent_turn_id.reset(turn_token)
-
-    async def _execute_reasoning_step_detailed_inner(
-        self,
-        agent: Agent,
-        prompt: str,
-        system_instruction: str,
-        max_steps: int = 5,
-        manager: Optional['ATTManager'] = None,
-    ) -> "AgentTurnResult":
-        """Executes one Agent turn without creating a journal boundary."""
-        manager = manager if manager is not None else getattr(self, "manager", None)
-        if (
-            not isinstance(max_steps, int)
-            or isinstance(max_steps, bool)
-            or max_steps < 1
-        ):
-            raise ValueError("max_steps must be a positive integer.")
-        from .response import AgentTurnResult, AgentTurnStatus
-        from .exceptions import AgentTurnIncompleteError, LLMGenerationError
-
-        def incomplete(kind: str, reason: str) -> AgentTurnResult:
-            result = AgentTurnResult(
-                agent_id=agent.agent_id,
-                team_id=self.team_id,
-                discussion_id=(
-                    manager._active_discussion_id.get() if manager else None
-                ),
-                status=AgentTurnStatus.INCOMPLETE,
-                error_kind=kind,
-                reason=reason,
-            )
-            policy = (
-                manager.config.turn_failure_policy.llm
-                if manager
-                else "isolate"
-            )
-            if policy == "abort":
-                raise AgentTurnIncompleteError(result)
-            return result
-
-        if not agent.llm_client:
-            return incomplete(
-                "llm_client_missing", "Agent has no LLM client configured."
-            )
-
-        from .exceptions import TokenLimitExceededError
-
-        max_failovers = len(manager.config.model_token_limits) if manager and getattr(manager, 'config', None) else 3
-        failover_attempts = 0
-
-        invocation = (
-            manager.agent_invocation(agent)
-            if manager is not None
-            else agent.invocation_guard()
-        )
-        async with invocation:
-            team_token = manager._active_team.set(self) if manager else None
-            discussion_token = None
-            if manager:
-                discussion_id = manager._active_discussion_id.get()
-                if discussion_id is None:
-                    discussion_id = f"DISC-{uuid.uuid4().hex}"
-                discussion_token = manager._active_discussion_id.set(discussion_id)
-            try:
-                while True:
-                    try:
-                        is_react_default = (
-                            hasattr(self, "execute_react_step")
-                            and getattr(
-                                self.execute_react_step, "__func__", None
-                            )
-                            is AgentTeam.execute_react_step
-                        )
-                        if not is_react_default:
-                            custom_result = await self.execute_react_step(
-                                agent=agent,
-                                prompt=prompt,
-                                system_instruction=system_instruction,
-                                max_steps=max_steps,
-                                manager=manager,
-                            )
-                            if isinstance(custom_result, AgentTurnResult):
-                                return custom_result
-                            return AgentTurnResult(
-                                agent_id=agent.agent_id,
-                                team_id=self.team_id,
-                                discussion_id=(
-                                    manager._active_discussion_id.get()
-                                    if manager
-                                    else None
-                                ),
-                                status=AgentTurnStatus.COMPLETED,
-                                answer=str(custom_result),
-                            )
-
-                        from .strategies import (
-                            NativeReasoningStrategy,
-                            TextReactReasoningStrategy,
-                        )
-
-                        mode = (
-                            manager.config.tool_calling_mode
-                            if manager
-                            else "auto"
-                        )
-                        if mode == "auto":
-                            native_check = getattr(
-                                agent.llm_client,
-                                "supports_native_tool_calling",
-                                None,
-                            )
-                            is_native = (
-                                manager.probe_native_tool_capability(
-                                    agent.llm_client,
-                                    agent=agent,
-                                    team=self,
-                                )
-                                if manager
-                                else self._probe_native_without_manager(
-                                    native_check
-                                )
-                            )
-                            strategy = (
-                                NativeReasoningStrategy()
-                                if is_native
-                                else TextReactReasoningStrategy()
-                            )
-                        elif mode == "native":
-                            strategy = NativeReasoningStrategy()
-                        else:
-                            strategy = TextReactReasoningStrategy()
-
-                        result = await strategy.execute(
-                            team=self,
-                            agent=agent,
-                            prompt=prompt,
-                            system_instruction=system_instruction,
-                            max_steps=max_steps,
-                            manager=manager,
-                        )
-                        if (
-                            result.status is AgentTurnStatus.INCOMPLETE
-                            and manager
-                            and manager.config.turn_failure_policy.tool
-                            == "abort"
-                        ):
-                            raise AgentTurnIncompleteError(result)
-                        return result
-                    except TokenLimitExceededError as e:
-                        if manager and failover_attempts < max_failovers:
-                            swapped = await manager.handle_failover(agent, self, e)
-                            if swapped:
-                                failover_attempts += 1
-                                if agent.messages and agent.messages[-1].get("role") == "user":
-                                    agent.messages.pop()
-                                continue
-                        return incomplete("token_limit_exhausted", str(e))
-                    except LLMGenerationError as exc:
-                        return incomplete("llm_generation_failed", str(exc))
-            finally:
-                if manager and discussion_token is not None:
-                    manager._active_discussion_id.reset(discussion_token)
-                if manager and team_token is not None:
-                    manager._active_team.reset(team_token)
-
-    @staticmethod
-    def _probe_native_without_manager(probe: Any) -> bool:
-        """Safely probes native capability when no manager can emit events."""
-        if not callable(probe):
-            return False
-        try:
-            result = probe()
-            if inspect.isawaitable(result):
-                close = getattr(result, "close", None)
-                if callable(close):
-                    close()
-                return False
-            return result is True
-        except Exception:
-            return False
-
-    async def execute_react_step(
-        self,
-        agent: Agent,
-        prompt: str,
-        system_instruction: str,
-        max_steps: int = 5,
-        manager: Optional['ATTManager'] = None
-    ) -> str:
-        """Alias for execute_reasoning_step for backward compatibility with existing tests."""
-        return await self.execute_reasoning_step(
-            agent=agent,
-            prompt=prompt,
-            system_instruction=system_instruction,
-            max_steps=max_steps,
-            manager=manager
-        )

@@ -2,6 +2,7 @@ import inspect
 import json
 from typing import TYPE_CHECKING, Union, List, Dict, Optional, Any, Callable
 from ai_team_team.core.response import ToolCall, LLMResponse
+from ai_team_team.core.exceptions import ModelProtocolError
 
 if TYPE_CHECKING:
     from ai_team_team.core.manager import ATTManager
@@ -93,7 +94,12 @@ class HandlerClientAdapter:
         elif isinstance(res, dict):
             text = res.get("text")
             t_calls = []
-            for tc in res.get("tool_calls", []):
+            calls = res.get("tool_calls", [])
+            if not isinstance(calls, list):
+                raise ModelProtocolError("The native tool-call collection must be a list.")
+            for tc in calls:
+                if not isinstance(tc, dict) or not isinstance(tc.get("function", {}), dict):
+                    raise ModelProtocolError("A native tool call must contain an object function envelope.")
                 function = tc.get("function") or {}
                 name = tc.get("name") or function.get("name")
                 arguments = tc.get("arguments", function.get("arguments", {}))
@@ -101,15 +107,9 @@ class HandlerClientAdapter:
                     try:
                         arguments = json.loads(arguments)
                     except json.JSONDecodeError as exc:
-                        raise ValueError(
-                            f"Invalid JSON arguments for tool '{name}': {exc}"
-                        ) from exc
-                if arguments is None:
-                    arguments = {}
+                        raise ModelProtocolError("Native tool arguments contain invalid JSON.") from exc
                 if not isinstance(arguments, dict):
-                    raise ValueError(
-                        f"Tool arguments for '{name}' must be an object."
-                    )
+                    raise ModelProtocolError("Native tool arguments must be a JSON object.")
                 t_calls.append(ToolCall(
                     call_id=tc.get("id"),
                     name=name,

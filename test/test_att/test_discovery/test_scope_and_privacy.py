@@ -4,6 +4,8 @@ import asyncio
 import copy
 import unittest
 
+from test.governance_client import approve_pending_business
+
 from pydantic import ValidationError
 
 from ai_team_team import ToolBusinessError, ToolPermissionError
@@ -75,9 +77,9 @@ class DiscoveryScopeTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(person.role, "Researcher")
 
     async def test_topology_is_public_across_branches_and_depth_caches_are_not_mutated(self):
-        first = self.manager.create_agent_team(self.root)
-        second = self.manager.create_agent_team(self.root)
-        child = self.manager.create_agent_team(first, team_purpose="Distant research")
+        first = self.manager.create_agent_team(self.root, parent=self.root)
+        second = self.manager.create_agent_team(self.root, parent=self.root)
+        child = self.manager.create_agent_team(first, parent=first, team_purpose="Distant research")
         for team in (first, second, child):
             team._cached_depth = None
         state = self.manager._state_version
@@ -117,8 +119,8 @@ class DiscoveryScopeTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_shared_person_has_one_directory_record_and_unchanged_personal_state(self):
         members = [self.person(f"Shared{index}") for index in range(3)]
-        first = self.manager.bootstrap_agent_team(self.root, existing_members=members)
-        second = self.manager.bootstrap_agent_team(self.root, existing_members=members)
+        first = self.manager.bootstrap_agent_team(self.root, parent=self.root, existing_members=members)
+        second = self.manager.bootstrap_agent_team(self.root, parent=self.root, existing_members=members)
         person = members[0]
         person.append_message({"role": "assistant", "content": "Continuing personal experience."})
         before = dict(person.__dict__)
@@ -132,15 +134,17 @@ class DiscoveryScopeTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_migration_is_reflected_in_next_directory_query_without_cached_depth(self):
         self.manager.config.migration_policy = "permissive"
-        first = self.manager.create_agent_team(self.root)
-        second = self.manager.create_agent_team(self.root)
-        child = self.manager.create_agent_team(first)
+        first = self.manager.create_agent_team(self.root, parent=self.root)
+        second = self.manager.create_agent_team(self.root, parent=self.root)
+        child = self.manager.create_agent_team(first, parent=first)
         before = self.manager.inspect_entity("agent_team", second.team_id)
         self.assertEqual((before.parent_team_id, before.depth), (None, 1))
         result = await self.manager.negotiate_and_execute_migration(
             second, child, "Move this team below another branch."
         )
-        self.assertEqual(result.status, "EXECUTED")
+        self.assertEqual(result.status, "PENDING")
+        await approve_pending_business(self.manager, result.request_id)
+        self.assertEqual(self.manager.inspect_migration_request(result.request_id).status, "EXECUTED")
         second._cached_depth = 999
         current = self.manager.inspect_entity("agent_team", second.team_id)
         self.assertEqual((current.parent_team_id, current.depth), (child.team_id, 3))

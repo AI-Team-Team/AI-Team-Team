@@ -346,12 +346,32 @@ class RuntimeRegistry:
     def resolve_runtime_model_alias(self, llm_client: Any) -> str:
         """Resolves operational budgets without making an alias persistable."""
         manager = self.manager
+        from ..adapters import ManagerDefaultClientAdapter
+
+        if isinstance(llm_client, ManagerDefaultClientAdapter) and manager.generator_handler is None:
+            forwarded = manager.root_ai.llm_client
+            if forwarded is llm_client or isinstance(forwarded, ManagerDefaultClientAdapter):
+                raise ValueError("The default adapter has no concrete model binding.")
+            return self.resolve_runtime_model_alias(forwarded)
         try:
             return manager.resolve_model_alias(llm_client)
         except ValueError:
             if llm_client is getattr(manager.root_ai, "llm_client", None):
                 return "default"
             return "unregistered"
+
+    def provider_binding(self, client):
+        """Freeze a forwarding adapter's actual provider before a quota claim."""
+        from ..adapters import ManagerDefaultClientAdapter
+        if isinstance(client, ManagerDefaultClientAdapter):
+            if self.manager.generator_handler is not None:
+                client = HandlerClientAdapter("default", self.manager.generator_handler)
+                client._supports_native = self.manager.model_configs.get("default", {}).get("supports_native_tool_calling") is True
+            else:
+                client = self.manager.root_ai.llm_client
+                if isinstance(client, ManagerDefaultClientAdapter):
+                    raise ValueError("The default adapter has no concrete provider.")
+        return self.resolve_runtime_model_alias(client), client
 
     def register_preset(
         self, name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]]
@@ -397,6 +417,10 @@ class RuntimeRegistry:
                 "list_entities", "search_entities", "inspect_entity",
                 "list_agent_inbox", "mark_agent_inbox_read", "open_agent_mail",
                 "submit_governance_choice", "list_governance_requests",
+                "propose_team_formation", "prepare_team_formation_draft", "inspect_team_formation_draft",
+                "publish_team_formation_draft", "create_team_from_formation", "revise_team_formation",
+                "abandon_team_formation", "decide_team_formation_late_join", "inspect_migration_request",
+                "list_health_incidents", "inspect_health_incident", "claim_health_incident", "acknowledge_health_incident",
                 "inspect_team_formation", "respond_team_invitation",
                 "list_private_files", "read_private_file", "write_private_file",
                 "delete_private_file", "move_private_file", "search_memories",
@@ -412,6 +436,9 @@ class RuntimeRegistry:
             if not manager.config.episodic_memory.enabled:
                 for name in {"search_memories", "recall_memory", "keep_memory_in_context", "forget_memory"}:
                     tools.pop(name, None)
+            if not manager.config.enable_dynamic_delegation:
+                for name in {"propose_team_formation", "publish_team_formation_draft", "create_team_from_formation"}:
+                    tools.pop(name, None)
             if manager._activity.current.get() is not None:
                 from ai_team_team.tool.chat import build_chat_tools
                 tools.update(build_chat_tools(manager))
@@ -424,7 +451,9 @@ class RuntimeRegistry:
             or team.depth >= manager.config.max_delegation_depth
         ):
             tools.pop("dispatch_subagent", None)
-            tools.pop("discuss_team_formation_proposal", None)
+        if not manager.config.enable_dynamic_delegation:
+            for name in {"propose_team_formation", "publish_team_formation_draft", "create_team_from_formation"}:
+                tools.pop(name, None)
         if team.parent_team is None and manager.find_parent_team(team) is None:
             tools.pop("delegate_escalation", None)
         if not manager.config.enable_membership_voting:

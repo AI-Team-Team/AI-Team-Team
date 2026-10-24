@@ -15,6 +15,7 @@ from ai_team_team import (
     ApprovalPrincipal,
     ParentApprovalCommunicationConfig,
     StateRestoreError,
+    TokenLimitExceededError,
 )
 from test.governance_client import PersonalGovernanceClient, settle_governance_activity
 from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier
@@ -40,13 +41,13 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def pending(self):
         manager = self.manager
-        first = manager.create_agent_team(manager.root_ai)
-        second = manager.create_agent_team(manager.root_ai)
+        first = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
+        second = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
         result = await manager.broker.request_peer_communication(
             first, second, first.members[0].agent_id, "Persistent public rationale."
         )
         await settle_governance_activity(manager)
-        return result.request_id, next(iter(manager._governance.rounds.values()))
+        return result.request_id, next(iter(manager._governance.cases.values()))
 
     async def test_unread_and_read_pending_choices_restore_independently(self):
         request_id, item = await self.pending()
@@ -56,7 +57,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         await self.manager.save_state()
         state = await self.manager._persistence.read(self.manager.db_path)
         await self.manager._apply_state_snapshot(state)
-        restored = self.manager._governance.rounds[item.round_id]
+        restored = self.manager._governance.cases[item.case_id]
         self.assertFalse(restored.ballots)
         self.assertIsNotNone(self.manager.root_ai.agent_inbox[0]["read_at"])
         self.assertEqual(
@@ -71,15 +72,15 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         token = self.manager._active_tool_agent.set(root)
         try:
             with patch.object(
-                self.manager, "_commit_dirty_state", side_effect=OSError("disk failure")
+                self.manager._records, "commit", side_effect=OSError("disk failure")
             ):
                 with self.assertRaisesRegex(OSError, "disk failure"):
                     await self.manager.submit_governance_choice(
-                        item.round_id, {"approved": True}, actor=root
+                        item.case_id, {"approved": True}, actor=root
                     )
         finally:
             self.manager._active_tool_agent.reset(token)
-        self.assertFalse(self.manager._governance.rounds[item.round_id].ballots)
+        self.assertFalse(self.manager._governance.cases[item.case_id].ballots)
         self.assertEqual(root.message_history, before)
         self.assertFalse(
             any(
@@ -105,7 +106,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
             ("principal", {"kind": "agent", "principal_id": state["teams"][0]["members"][0]}),
             ("voter_agent_ids", ["missing-agent"]),
             ("business_id", "missing-request"),
-            ("round_number", 3),
+            ("electorate_revision", 3),
             ("choice_kind", "model"),
             ("status", "APPROVED"),
             ("created_at", float("nan")),
@@ -113,16 +114,16 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
             ("resolved_at", float("nan")),
         ):
             broken = copy.deepcopy(state)
-            broken["governance_rounds"][0][key] = value
+            broken["governance_cases"][0][key] = value
             cases.append(broken)
         broken = copy.deepcopy(state)
-        broken["agent_inboxes"][root.agent_id][0]["payload"]["round_id"] = "missing-round"
+        broken["agent_inboxes"][root.agent_id][0]["payload"]["case_id"] = "missing-round"
         cases.append(broken)
         broken = copy.deepcopy(state)
         broken["agent_inboxes"][root.agent_id] = []
         cases.append(broken)
         for broken in cases:
-            with self.subTest(state=broken["governance_rounds"][0]):
+            with self.subTest(state=broken["governance_cases"][0]):
                 with self.assertRaises(StateRestoreError):
                     await self.manager._apply_state_snapshot(broken)
                 self.assertIs(self.manager.root_ai, root)
@@ -139,14 +140,14 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         await self.manager.flush_state()
         state = await self.manager._persistence.read(self.manager.db_path)
         self.manager._validate_state_snapshot(state)
-        self.assertEqual(state["governance_rounds"][0]["business_id"], request_id)
+        self.assertEqual(state["governance_cases"][0]["business_id"], request_id)
 
     async def test_authoritative_decisions_without_matching_explicit_choices_are_rejected(self):
         _, item = await self.pending()
         token = self.manager._active_tool_agent.set(self.manager.root_ai)
         try:
             await self.manager.submit_governance_choice(
-                item.round_id, {"approved": True}, actor=self.manager.root_ai
+                item.case_id, {"approved": True}, actor=self.manager.root_ai
             )
         finally:
             self.manager._active_tool_agent.reset(token)
@@ -155,9 +156,9 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         state = await self.manager._persistence.read(self.manager.db_path)
         self.manager._validate_state_snapshot(state)
         broken = copy.deepcopy(state)
-        broken["governance_rounds"] = []
+        broken["governance_cases"] = []
         broken["agent_inboxes"][self.manager.root_ai.agent_id] = []
-        with self.assertRaisesRegex(StateRestoreError, "matching explicit voting round"):
+        with self.assertRaisesRegex(StateRestoreError, "matching explicit voting case"):
             self.manager._validate_state_snapshot(broken)
 
     async def test_sqlite_reader_rejects_conflicting_identity_and_orphaned_ballots(self):
@@ -165,20 +166,20 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         await self.manager.save_state()
         with closing(sqlite3.connect(self.manager.db_path)) as database:
             original = database.execute(
-                "SELECT data FROM governance_cases WHERE case_id=?", (item.round_id,)
+                "SELECT data FROM governance_cases WHERE case_id=?", (item.case_id,)
             ).fetchone()[0]
             damaged = json.loads(original)
-            damaged["round_id"] = "conflicting-round-id"
+            damaged["case_id"] = "conflicting-round-id"
             database.execute(
                 "UPDATE governance_cases SET data=? WHERE case_id=?",
-                (json.dumps(damaged), item.round_id),
+                (json.dumps(damaged), item.case_id),
             )
             database.commit()
         with self.assertRaisesRegex(StateRestoreError, "identity is inconsistent"):
             await self.manager._persistence.read(self.manager.db_path)
         with closing(sqlite3.connect(self.manager.db_path)) as database:
             database.execute(
-                "UPDATE governance_cases SET data=? WHERE case_id=?", (original, item.round_id)
+                "UPDATE governance_cases SET data=? WHERE case_id=?", (original, item.case_id)
             )
             database.execute(
                 "INSERT INTO governance_ballots VALUES (?, ?, ?, ?, ?, ?)",
@@ -199,7 +200,10 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
             database.commit()
 
     async def test_interrupted_failover_restores_expired_mail_without_replaying_choices(self):
-        principal = ApprovalPrincipal(kind="agent", principal_id=self.manager.root_ai.agent_id)
+        self.manager.config.failover_policy = "parent"
+        replacement = PersonalGovernanceClient(respond=False)
+        self.manager.register_llm_client("spare", replacement)
+        team = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
         barrier = AsyncBarrier()
         original_generate = self.client.generate
         checkpoint = os.path.join(self.workspace.name, "interrupted-failover.sqlite")
@@ -213,33 +217,19 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                 with closing(sqlite3.connect(checkpoint)) as target:
                     source.backup(target)
 
+        error = TokenLimitExceededError("Exhausted resource.")
+        error.required_tokens = 1
+        # The original binding remains available for the parent's own pending request.
         with patch.object(self.client, "generate", held_generate):
-            task = asyncio.create_task(
-                self.manager.broker.decision_provider.decide_agent_model(
-                    principal, "Bounded public choice.", ["spare"]
-                )
-            )
+            result = await self.manager.request_model_resource(team.members[0], team, error)
+            self.assertEqual(result.status, "PENDING")
             try:
-                # Freeze a real in-flight checkpoint, not a detached snapshot
-                # that will be written back over the original process's tail.
-                await asyncio.wait_for(barrier.entered.wait(), timeout=120)
+                await asyncio.wait_for(barrier.entered.wait(), 20)
                 await self.manager.save_state()
                 await asyncio.to_thread(freeze_checkpoint)
-                task.cancel()
-                with self.assertRaises(asyncio.CancelledError):
-                    await task
+                await self.manager.close()
             finally:
                 barrier.release()
-                if not task.done():
-                    task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
-        await settle_governance_activity(self.manager, timeout=120)
-        with closing(sqlite3.connect(checkpoint)) as database:
-            checkpoint_sequence = database.execute(
-                "SELECT MAX(sequence) FROM system_memory_events"
-            ).fetchone()[0]
-        self.assertGreater(self.manager._memory._sequence, checkpoint_sequence)
-        await self.manager.close()
 
         client = PersonalGovernanceClient(respond=False)
         self.manager = ATTManager(
@@ -251,7 +241,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.manager.close)
         await self.manager.load_state(checkpoint)
         await settle_governance_activity(self.manager, timeout=120)
-        item = next(iter(self.manager._governance.rounds.values()))
+        item = next(iter(self.manager._governance.cases.values()))
         self.assertEqual(item.status, "EXPIRED")
         self.assertFalse(item.ballots)
         self.assertEqual(len(self.manager.root_ai.agent_inbox), 1)
@@ -264,9 +254,9 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(database.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     async def test_pending_migration_restores_all_personal_ballots_and_progress(self):
-        first = self.manager.create_agent_team(self.manager.root_ai)
-        second = self.manager.create_agent_team(self.manager.root_ai)
-        moving = self.manager.create_agent_team(first)
+        first = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
+        second = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
+        moving = self.manager.create_agent_team(first, parent=first)
         result = await self.manager.negotiate_and_execute_migration(
             moving, second, "Preserve pending migration."
         )
@@ -279,14 +269,14 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
             self.manager.inspect_migration_request(result.request_id).status, "PENDING"
         )
         self.assertEqual(self.manager.teams[moving.team_id].parent_team.team_id, first.team_id)
-        self.assertEqual(len(self.manager._governance.rounds), 3)
-        for item in self.manager._governance.rounds.values():
+        self.assertEqual(len(self.manager._governance.cases), 3)
+        for item in self.manager._governance.cases.values():
             for actor_id in item.voter_agent_ids:
                 actor = self.manager._agents_by_id[actor_id]
                 token = self.manager._active_tool_agent.set(actor)
                 try:
                     await self.manager.submit_governance_choice(
-                        item.round_id, {"approved": True}, actor=actor
+                        item.case_id, {"approved": True}, actor=actor
                     )
                 finally:
                     self.manager._active_tool_agent.reset(token)
@@ -323,7 +313,7 @@ class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(cards), 1)
         self.assertEqual(cards[0].agent_id, self.manager.root_ai.agent_id)
         self.assertIsNone(cards[0].origin_team_id)
-        self.assertEqual(item.status, "APPROVED")
+        self.assertEqual(self.manager._governance.cases[item.case_id].status, "APPROVED")
         await self.manager.save_state()
         state = await self.manager._persistence.read(self.manager.db_path)
         self.manager._validate_state_snapshot(state)

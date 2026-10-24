@@ -99,6 +99,9 @@ class DetachedEquivalenceTests(unittest.TestCase):
         interval = record("membership_intervals", interval_id="interval", team_id="team", agent_id=OWNER,
                           stream_id="stream", join_event_id="join")
         candidate = state((stream, join, interval))
+        creation = record("team_topology_events", event_id="created", team_id="team", creator_agent_id=OWNER,
+            transition="creation", position_revision=1, created_at=1.0)
+        candidate["records"] = (*candidate["records"], creation)
         candidate["teams"] = [{"team_id": "team", "creator_type": "agent", "creator_id": OWNER,
                                 "team_kind": "ordinary", "lifecycle_state": "active", "members": [OWNER]}]
         self.baseline = self.cache.prepare(candidate)

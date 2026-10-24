@@ -69,10 +69,11 @@ class RuntimeAPI:
     def resolve_runtime_model_alias(self, llm_client: Any) -> str:
         return self._runtime.resolve_runtime_model_alias(llm_client)
 
-    async def handle_failover(
+    async def request_model_resource(
         self, agent: Agent, team: AgentTeam, error: TokenLimitExceededError
-    ) -> bool:
-        return await self._failover.handle_failover(agent, team, error)
+    ):
+        """Return a bounded resource-attempt handle without nesting personal activity."""
+        return await self._failover.request(agent, team, error)
 
     def register_preset(
         self, name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]]

@@ -37,6 +37,8 @@ class StatePersistenceTestCase(unittest.IsolatedAsyncioTestCase):
         os.chdir(self.tmpdir)
         self.db_path = os.path.join(self.tmpdir, "att_state.db")
         self.mock_react_client = MagicMock()
+        self.captured_instructions = []
+        calls_by_instruction = {}
 
         async def mock_generate(
             prompt,
@@ -45,17 +47,18 @@ class StatePersistenceTestCase(unittest.IsolatedAsyncioTestCase):
             require_json=False,
             **kwargs,
         ):
+            self.captured_instructions.append(system_instruction)
             if require_json:
                 return (
                     '{"is_healthy": true, '
                     '"reason": "Dialogue approved."}'
                 )
-            return (
-                "Thought: We are doing the task.\n"
-                "Final Answer: Task complete!"
-            )
+            key = system_instruction or ""
+            calls_by_instruction[key] = calls_by_instruction.get(key, 0) + 1
+            return "Final Answer: Task complete!" if calls_by_instruction[key] % 2 else "Action: set_activity_intent(intent={'kind': 'idle'})"
 
         self.mock_react_client.generate = mock_generate
+        self.mock_react_client.supports_native_tool_calling = lambda: False
         self.root_ai = Agent(
             name="Root_AI",
             role="Architect",

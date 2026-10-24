@@ -44,7 +44,7 @@ class StateCoordinator:
             "communication_approvals": set(),
             "communication_agreements": set(),
             "peer_messages": set(),
-            "governance_rounds": set(),
+            "governance_cases": set(),
             "migration_requests": set(),
             "memory_events": set(),
             "memory_segments": set(),
@@ -82,7 +82,7 @@ class StateCoordinator:
             "communication_approvals",
             "communication_agreements",
             "peer_messages",
-            "governance_rounds",
+            "governance_cases",
             "migration_requests",
             "memory_events",
             "memory_segments",
@@ -125,7 +125,7 @@ class StateCoordinator:
             or dirty["communication_approvals"]
             or dirty["communication_agreements"]
             or dirty["peer_messages"]
-            or dirty["governance_rounds"]
+            or dirty["governance_cases"]
             or dirty["migration_requests"]
             or dirty["memory_events"]
             or dirty["memory_segments"]
@@ -169,7 +169,7 @@ class StateCoordinator:
         communication_approvals: Optional[set[str]] = None,
         communication_agreements: Optional[set[str]] = None,
         peer_messages: Optional[set[str]] = None,
-        governance_rounds: Optional[set[str]] = None,
+        governance_cases: Optional[set[str]] = None,
         migration_requests: Optional[set[str]] = None,
         memory_events: Optional[set[str]] = None,
         memory_segments: Optional[set[str]] = None,
@@ -202,7 +202,7 @@ class StateCoordinator:
         dirty["communication_approvals"].update(communication_approvals or set())
         dirty["communication_agreements"].update(communication_agreements or set())
         dirty["peer_messages"].update(peer_messages or set())
-        dirty["governance_rounds"].update(governance_rounds or set())
+        dirty["governance_cases"].update(governance_cases or set())
         dirty["migration_requests"].update(migration_requests or set())
         dirty["memory_events"].update(memory_events or set())
         dirty["memory_segments"].update(memory_segments or set())
@@ -246,18 +246,26 @@ class StateCoordinator:
         with manager._snapshot_lock:
             identifiers = set(manager.teams) if full else team_ids
             identifiers = {identifier for identifier in identifiers
-                           if identifier in manager.teams and manager.teams[identifier].team_kind == "ordinary"}
+                           if identifier in manager.teams and manager.teams[identifier].team_kind == "ordinary"
+                           and not getattr(manager.teams[identifier], "_publication_pending", False)}
             if identifiers:
                 manager._state_version += 1
                 manager._records.capture_memberships(identifiers)
 
-    async def _commit_dirty_state(self, dirty: Dict[str, Any]) -> None:
+    async def _commit_dirty_state(self, dirty: Dict[str, Any], *, operation_id=None, authority_check=None) -> None:
         """Commits one authoritative domain delta and propagates write errors."""
         self.manager._resources.check_authority()
+        dirty = self.manager._formations.commit_dirty(dirty)
+        if self.manager._formations.current_candidate() is not None and operation_id is None:
+            import uuid
+            operation_id = f"FORMATION-{uuid.uuid4().hex}"
         if not self.manager._dirty_state_has_changes(dirty):
             return
         if dirty["agent_inboxes"] and hasattr(self.manager, "_activity"):
-            await self.manager._activity.commit_inbox_delta(dirty)
+            await self.manager._activity.commit_inbox_delta(dirty, operation_id=operation_id, authority_check=authority_check)
+            return
+        if operation_id is not None or authority_check is not None:
+            await self.manager._records.commit((), dirty=dirty, operation_id=operation_id, authority_check=authority_check)
             return
         if not self.manager.db_path:
             self._capture_volatile_relationships(dirty["teams"], full=dirty["full"])
@@ -292,6 +300,7 @@ class StateCoordinator:
         if not target_path:
             return
         await self.manager._activity.sample_countdowns()
+        await self.manager._migration.sample_cooldowns()
         await self.manager.flush_state()
         dirty = self.manager._new_dirty_state(full=full)
         if not full:

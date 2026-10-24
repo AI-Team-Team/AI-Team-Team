@@ -60,16 +60,10 @@ class MemoryStateMixin:
             self.references = {
                 item.reference_id: item for item in parsed_references
             }
-            self._event_ids_by_turn = {}
-            for event in sorted(parsed_events, key=lambda item: item.sequence):
-                if event.turn_id:
-                    self._event_ids_by_turn.setdefault(event.turn_id, []).append(
-                        event.event_id
-                    )
-            self._card_id_by_turn = {
-                card.turn_id: card.memory_id for card in parsed_cards
+            self._card_id_by_invocation = {
+                card.invocation_id: card.memory_id for card in parsed_cards
             }
-            self._recalled_by_turn = {}
+            self._recalled_by_invocation = {}
             self._sequence = max((item.sequence for item in parsed_events), default=0)
             self._fts_sync_active = False
             for segment in self.segments.values():
@@ -96,9 +90,9 @@ class MemoryStateMixin:
             self.cards.pop(identifier, None)
         for identifier in reference_ids:
             self.references.pop(identifier, None)
-        self._card_id_by_turn = {
-            turn_id: memory_id
-            for turn_id, memory_id in self._card_id_by_turn.items()
+        self._card_id_by_invocation = {
+            invocation_id: memory_id
+            for invocation_id, memory_id in self._card_id_by_invocation.items()
             if memory_id not in card_ids
         }
         return {

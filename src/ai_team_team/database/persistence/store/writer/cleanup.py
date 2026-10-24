@@ -20,7 +20,7 @@ from ai_team_team.database.models import (
     LibraryPermissionModel,
     ManagerConfigModel,
     GovernanceBallotModel,
-    GovernanceRoundModel,
+    GovernanceCaseModel,
     GovernanceElectorateModel,
     MigrationRequestModel,
     MemoryCardSourceEventModel,
@@ -45,7 +45,7 @@ class CleanupWriteMixin:
         for model in (
             GovernanceBallotModel,
             GovernanceElectorateModel,
-            GovernanceRoundModel,
+            GovernanceCaseModel,
             MigrationRequestModel,
             RetainedMemoryReferenceModel,
             MemoryCardTagModel,

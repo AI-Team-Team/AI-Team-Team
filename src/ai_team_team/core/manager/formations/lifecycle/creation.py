@@ -63,12 +63,16 @@ class FormationCreationMixin:
             raise ValueError("The formation creator no longer exists.")
         return creator
 
-    def _resolve_request_parent(self, request: TeamFormationRequest) -> Optional[AgentTeam]:
+    def _resolve_request_parent(self, request: TeamFormationRequest) -> Agent | AgentTeam | None:
+        if request.parent_agent_id is not None:
+            from ....communication import ApprovalPrincipal
+            return self.manager._topology.resolve_parent(ApprovalPrincipal(kind="agent", principal_id=request.parent_agent_id))
         if request.parent_team_id is None:
             return None
         parent = self.manager.teams.get(request.parent_team_id)
         if parent is None:
             raise ValueError("The intended parent AgentTeam no longer exists.")
+        self.manager._team_creation.validate_creation_depth(parent)
         return parent
 
     async def _finalize_locked(
@@ -104,7 +108,7 @@ class FormationCreationMixin:
             raise ValueError(
                 "The initiating Agent is no longer a member of the creator AgentTeam."
             )
-        if isinstance(creator, Agent) and parent is not None and all(
+        if isinstance(creator, Agent) and isinstance(parent, AgentTeam) and all(
             member.agent_id != creator.agent_id for member in parent.members
         ):
             raise ValueError(
@@ -133,7 +137,6 @@ class FormationCreationMixin:
         for agent in accepted:
             self._require_active_agent(agent)
 
-        old_runtime = manager._team_creation_snapshot()
         old_request = request.model_copy(deep=True)
         old_invitations = {
             item.agent_id: item.model_copy(deep=True)
@@ -144,10 +147,10 @@ class FormationCreationMixin:
             for agent_id in {request.initiator_agent_id, *request.invitee_agent_ids}
             if agent_id in manager._agents_by_id
         ]
-        old_inboxes = self._copy_inboxes(notified_agents)
         stale_drafts = {}
         team = None
         dirty = manager._new_dirty_state(provisional=True)
+        operation_id = f"FORMATION-CREATE-{request.request_id}"
         if extra_dirty is not None:
             manager._merge_dirty_state(dirty, extra_dirty)
         batch_token = manager._persistence_batch.set(dirty)
@@ -175,6 +178,7 @@ class FormationCreationMixin:
                     parent_override_provided=True,
                     required_creator_member_agent_id=request.initiator_agent_id,
                     record_registration_events=False,
+                    task=request.task,
                 )
                 now = time.time()
                 request.status = TeamFormationStatus.CREATED
@@ -214,25 +218,26 @@ class FormationCreationMixin:
                 )
             finally:
                 manager._persistence_batch.reset(batch_token)
-            await manager._commit_dirty_state(dirty)
+            await manager._commit_dirty_state(dirty, operation_id=operation_id)
         except BaseException:
-            committed = team is not None and any(row.table_name == "chat_streams" and row.values["team_id"] == team.team_id
-                                                 for row in manager._records.snapshot())
+            committed = operation_id in manager._records.receipts
             if committed:
-                team._publication_pending = False
                 raise
             self.requests[request.request_id] = old_request
             for agent_id, invitation in old_invitations.items():
                 self.invitations[(request.request_id, agent_id)] = invitation
             for draft_id, previous in stale_drafts.items():
                 self.drafts[draft_id] = previous
-            self._restore_inboxes(notified_agents, old_inboxes)
             if team is not None:
-                with manager._topology_lock:
-                    manager._rollback_team_creation(old_runtime)
+                team._creation_publication.rollback()
             raise
-
-        team._publication_pending = False
+        finally:
+            creation_committed = operation_id in manager._records.receipts
+            manager._inbox.finish_provisional(dirty, accepted=creation_committed)
+            if creation_committed and team is not None:
+                team._publication_pending = False
+                team._creation_publication = None
+                self.schedule_initial_arrivals(team)
 
         manager._emit_callback(
             "on_system_event",
@@ -254,9 +259,12 @@ class FormationCreationMixin:
             for agent in team.members
             if agent.agent_id not in {member.agent_id for member in accepted}
         }
-        if registration_event_ids:
-            manager._auto_save(memory_events=registration_event_ids)
-        self._schedule_initial_task(request, team)
+        if registration_event_ids and manager.db_path:
+            # These identities already committed. Their immutable Journal
+            # follow-up must not remain in the operation-local candidate batch.
+            journal_dirty = manager._new_dirty_state()
+            journal_dirty["memory_events"].update(registration_event_ids)
+            manager._submit_dirty_state(journal_dirty)
         return FormationOperationResult(
             status="CREATED",
             request_id=request.request_id,
@@ -305,7 +313,6 @@ class FormationCreationMixin:
                 for agent_id in {request.initiator_agent_id, *request.invitee_agent_ids}
                 if agent_id in self.manager._agents_by_id
             ]
-            old_inboxes = self._copy_inboxes(recipients)
             stale_drafts = {}
             now = time.time()
             try:
@@ -335,7 +342,6 @@ class FormationCreationMixin:
                 self.requests[request_id] = old_request
                 for draft_id, previous in stale_drafts.items():
                     self.drafts[draft_id] = previous
-                self._restore_inboxes(recipients, old_inboxes)
                 raise
             self._emit_event(
                 "team_formation_abandoned",

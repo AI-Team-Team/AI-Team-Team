@@ -23,6 +23,7 @@ class CommunicationRequestModel(Base):
     policy_snapshot: Mapped[dict] = mapped_column(JSON)
     approval_principals: Mapped[list] = mapped_column(JSON)
     route_fingerprint: Mapped[str] = mapped_column(String)
+    route_evidence: Mapped[dict] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String)
     decision_reason: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[float] = mapped_column(Float)

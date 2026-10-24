@@ -4,11 +4,13 @@ This document details the lifecycle, execution protocol, spawning gates, and saf
 
 ## 1. Dynamic Spawning & Lineage Hierarchy
 
-Every autonomous task or research query spawns a specialized dynamic Agent Team (AT) inside a tree lineage structure coordinated by the `ATTManager`:
+An Agent may explicitly propose a specialized AgentTeam; ordinary tasks do not automatically create organizations.
 
-* **Level 0 (Root AI)**: The primary coordinating workflow agent (e.g. Root_AI_Level_0).
-* **Level 1 (Child AT)**: Dynamic Agent Teams spawned by Level 0 or its active members to manage specific domains. Must satisfy `config.min_subagent_team_size` (default: $\ge 3$).
-* **Level $N$ (Descendant ATs)**: Dynamic sub-teams recursively launched by higher-level members to run specialized tasks. Depth is strictly constrained by `config.max_delegation_depth`.
+ATTManager tracks an explicit forest rather than assuming every team descends from Root AI:
+
+* **Agent parent**: Any explicitly eligible Agent, including Root AI, can be recorded as an organizational parent.
+* **Independent AT**: A team with no organizational parent, regardless of its creator; membership must satisfy `config.min_subagent_team_size` (default: three).
+* **Attached AT**: A team with an explicit Agent or AgentTeam parent; creation depth is constrained by `config.max_delegation_depth`, and prospective-parent acceptance governs later attachment.
 
 Both individual `Agent` instances and `AgentTeam` instances support dynamic spawning via the unified `launch_att()` method. Every team holds a trackable `team_purpose` to broadcast its objective to the network. Furthermore, dynamic teams support **heterogeneous LLM model routing**, allowing different subagent roles (e.g. Planner, Writer) to be dynamically routed to different model configurations registered in `ATTManager` and resolved through the central generator callback handler.
 
@@ -16,14 +18,14 @@ For a detailed visual of spawning and topology changes, see [Lineage Tree Mutati
 
 ## 2. Dual-Mode Bounded Reasoning Loops & Safe Parsers
 
-Agents in dynamic teams resolve tasks using a pluggable strategy loop based on configuration or client capabilities:
+Agents act through their continuing personal runtime, with Text or Native protocol selected by configuration and explicit client capability.
 
-### Reasoning Strategy Selection
+### Provider Protocol Selection
 
-The ATT framework abstracts reasoning execution into distinct strategies to decouple reasoning from LLM provider details:
+One common continuing-person runtime supports two provider protocols without a separate team execution engine:
 
-1. **Text ReAct Mode (`"text_react"`)**: A classic **Reasoning & Action (ReAct)** loop. The loop alternates between `Thought`, `Action` (tool call), and `Observation` until a `Final Answer` is reached or the step limit is hit (default: 5).
-2. **Native Tool Calling Mode (`"native"`)**: A native structured tool execution loop. The framework gathers tool schemas (derived from functions, Pydantic, or TypedDict), registers them with the LLM, parses the returning native `tool_calls` payloads, executes all tool calls **concurrently in parallel** using `asyncio.gather`, and resumes the loop until the final answer text is generated or `max_tool_rounds` is reached.
+1. **Text ReAct Mode (`"text_react"`)** parses a balanced Python-call or XML Action, validates literal arguments, and feeds the classified observation back to the same personal Working Context.
+2. **Native Tool Calling Mode (`"native"`)** passes provider-neutral `List[Tool]`, normalizes returned calls, executes independent calls concurrently, and retains valid call/result sequencing.
 3. **Auto Mode (`"auto"`)**: Uses the manager's safe capability probe. Only a synchronous literal `True` selects Native Mode; exceptions, awaitables, and other values emit a system event and fall back to Text ReAct.
 
 ### Prompt Sequence Protocol
@@ -39,7 +41,7 @@ The ATT framework abstracts reasoning execution into distinct strategies to deco
    Final Answer: Timeline conflict found: Iris is dead, contradiction exists.
    ```
 
-   * **Failover Prompt Protection**: If an agent hits a token limit during the strategy generation phase, the failover loop actively intercepts the retry phase. To prevent the latest user prompt from being repeatedly stuffed into the context queue during a model swap, the loop safely pops the orphaned prompt (`messages.pop()`) before retrying.
+   * **Continuation boundary**: An ordinary final answer neither stops personal activity nor publishes to team chat; technical request and tool-batch limits create fairness checkpoints, not discussion rounds.
 
 2. **Robust Action & Safe Argument Parser**:
    To ensure high parsing resilience under varying LLM temperatures or when using smaller models, the ReAct parser supports multiple action parsing strategies:
@@ -53,33 +55,42 @@ The ATT framework abstracts reasoning execution into distinct strategies to deco
    Agents may discover collaborators, peer teams, and potential migration parents across ordinary topology branches, while every action still performs its own consent and authorization checks.
    `manager.render_topology_tree()` remains a trusted-host diagnostic; see [Agent and AgentTeam Discovery](Agent_and_AgentTeam_Discovery.md) for public directory fields, ordering, and entity-position pagination.
 
-## 3. Bidirectional Escalation Channel
+## 3. Explicit Escalation
 
-When an active team or agent at a deep delegation level determines that it needs further automated delegation or hits parent-routing gates:
+`delegate_escalation(objective, rationale)` addresses the current AT's actual parent through the configured communication gate.
 
-1. It dispatches a structured escalation message upward to its parent team:
+An independent AT has no implicit Root recipient.
 
-   ```json
-   {
-     "type": "escalation_spawn",
-     "objective": "Task details to be delegated...",
-     "rationale": "Objective details...",
-     "from": "AT-abc123"
-   }
-   ```
+Escalation does not bypass an Agreement requirement, force another person's intent or scope, or start a group discussion.
 
-2. The parent team receives this payload directly into its `message_inbox`.
-3. If the parent team is currently idle, receiving this alert triggers the **Active Wake-up Mechanism** (governed by `config.enable_emergency_wakeup`), which automatically starts a 1-round emergency discussion on the parent team to resolve the issue. If the parent team is already active, the `ATTManager` automatically extracts these inbox alerts at the start of the **very next round** (round-by-round consumption) and prepends them directly into the discussion prompt of all agents.
-4. Sibling agents in the parent team consume the alerts, formulate resolutions or delegate to a sibling node, and relay results back, maintaining flat execution bounds.
+The receiving people can explicitly inspect the addressed reference and choose how to respond through their ordinary activity.
 
-AgentTeam-to-AgentTeam messaging follows the single communication institution in `ATTConfig`, regardless of topology depth. See [Autonomous Communication Governance](flowcharts/Autonomous_Communication_Governance.md) and [Team Governance](Team_Governance.md).
+AgentTeam-to-AgentTeam messaging follows ATTConfig at every actual depth, including the defined independent-side exemptions.
+
+See [Autonomous Communication Governance](flowcharts/Autonomous_Communication_Governance.md) and [Team Governance](Team_Governance.md).
 
 ## 4. Consolidated Autonomy Tools
 
-The available tool set is resolved for every invocation. `dispatch_subagent` and the initial/revision deliberation entry point `discuss_team_formation_proposal` are hidden when dynamic delegation is disabled or the current depth reaches `max_delegation_depth`; existing formation requests and drafts can still be inspected, answered, explicitly published, created, or abandoned. `delegate_escalation` is hidden without a parent, and voting tools follow the live voting configuration. Identity prompts describe only tools that are actually available, so configuration changes and migrations affect the next model call immediately.
+The available tool set is resolved for every invocation.
 
-* **`dispatch_subagent(task: str, team_purpose: str, member_configs: dict = None, existing_member_ids: list[str] = None, system_instructions: str = "", is_public_visible: bool = False, initial_documents: dict = None, initiator_joins: bool = False, unanimous_acceptance_action: str = "require_confirmation", late_join_policy: str = "disabled") -> str`**: All-new delegation creates the child and synchronously runs its discussion. Naming existing Agent IDs or choosing initiator self-membership opens a persistent consent workflow and returns `PENDING_RESPONSES`; ATT creates no team entities or files until an eligible accepted membership commits, and any initial task runs later without holding the initiating Agent's invocation lock.
-* **Formation and Agent inbox tools**: `list_agent_inbox`, `mark_agent_inbox_read`, `inspect_team_formation`, `discuss_team_formation_proposal`, `inspect_team_formation_draft`, `retry_team_formation_draft`, `publish_team_formation_draft`, `revise_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, and `decide_team_formation_late_join` operate from the invocation-scoped Agent identity. Every authorization-bearing action names the exact proposal revision it reviewed, and no tool accepts an acting-Agent override. See [Consensual Existing-Agent Team Formation](Consensual_Team_Formation.md).
+`dispatch_subagent` is hidden when dynamic delegation is disabled or the current depth reaches `max_delegation_depth`.
+
+Creation and publication commands are unavailable when dynamic delegation is disabled; optional candidate validation and existing invitations remain inspectable without granting creation authority.
+
+At maximum depth, a person may still propose an independent AT or an explicitly Agent-parented AT rather than attach another child beneath the current team.
+
+Every ordinary creation path enforces the live parent depth, including direct Host creation, optional draft publication, explicit confirmation, and automatic creation after consent.
+
+Staging and authoritative creation commits revalidate the limit, so a changed configuration or parent position cannot turn an earlier valid candidate into an over-depth AT.
+
+Depth-limit denials are business results, not malformed tool arguments or automatic Agent health faults.
+
+`delegate_escalation` is hidden without a parent, and voting tools follow the live voting configuration.
+
+Identity prompts describe only tools that are actually available, so configuration changes and migrations affect the next model call immediately.
+
+* **`dispatch_subagent(...) -> JSON`**: Creates a child of the current AT or opens its persistent exact-revision consent request, then returns its reference immediately without waiting for child business work. `propose_team_formation` instead offers `organizational_parent="none"`, `"self"`, or `"current_team"`, with independence as its default. An initial task becomes addressed initial mail, not a synchronous discussion or fabricated completion.
+* **Formation and Agent inbox tools**: `list_agent_inbox`, `mark_agent_inbox_read`, `inspect_team_formation`, `prepare_team_formation_draft`, `inspect_team_formation_draft`, `publish_team_formation_draft`, `revise_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, and `decide_team_formation_late_join` operate from the invocation-scoped Agent identity. Every authorization-bearing action names the exact proposal revision it reviewed, and no tool accepts an acting-Agent override. See [Consensual Existing-Agent Team Formation](Consensual_Team_Formation.md).
 * **Entity discovery tools**: `list_entities`, `search_entities`, and `inspect_entity` expose only public Agent and AgentTeam records and remain available independently of delegation depth or optional episodic memory.
 * **`delegate_escalation(objective: str, rationale: str) -> str`**: Escalates task objectives upward in the lineage tree to the direct parent.
 * **`update_team_purpose(new_purpose: str) -> str`**: Updates the purpose string of the caller's team.
@@ -90,11 +101,11 @@ The available tool set is resolved for every invocation. `dispatch_subagent` and
 * **`list_peer_requests(status: str = "pending") -> str`**: Lists communication requests visible to the current endpoint or approval AgentTeam.
 * **`list_peer_agreements(active_only: bool = True) -> str`**: Lists Agreements whose endpoints include the current AgentTeam.
 * **`add_team_member(team_id: str, role_name: str, model_name: str, role_description: str, system_instructions: str) -> str`**: Allows parent teams to administratively add a new member with custom configurations to a child team.
-* **`remove_team_member(team_id: str, agent_name: str) -> str`**: Allows parent teams to administratively remove a member from a child team, enforcing the minimum team size constraint of 3.
+* **`remove_team_member(team_id: str, agent_name: str) -> str`**: Allows parent teams to administratively remove a member from a child team, enforcing the configured minimum team size.
 * **`initiate_membership_vote(action: str, target: str, rationale: str, initiator_type: str = "individual", proposed_details: dict = None) -> str`**: Initiates a democratic membership proposal to add/remove a member.
-* **`cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str`**: Casts a vote ("Agree", "Disagree", or "Abstain") on an active membership proposal. If `public` is set to `False`, the ballot is cast anonymously, hiding the voter's identity in the team discussion context.
+* **`cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str`**: Casts a vote ("Agree", "Disagree", or "Abstain") on an active membership proposal. If `public` is set to `False`, the ballot is cast anonymously, hiding the displayed voter identity while retaining authoritative identity validation.
 * **`retract_membership_vote(proposal_id: str) -> str`**: Allows the initiator of an active proposal to withdraw it.
-* **`request_migration(target_parent_id: str, rationale: str) -> JSON`**: Returns a durable migration request ID and `PENDING` while explicit AgentTeam or Root principals submit personal-email choices under the configured policy; successful approval still requires atomic topology revalidation.
+* **`request_migration(target_parent, rationale) -> JSON`**: Returns a durable request reference while actual principals decide; `target_parent` is an explicit Agent/AgentTeam principal or `None` for voluntary detachment.
 * **`inspect_migration_request(request_id: str) -> JSON`**: Lets the moving, target, or original-parent AgentTeam inspect pending or terminal migration progress.
 * **`create_doc_library(name: str, description: str, is_public: bool) -> str`**: Creates a new document library owned by the caller's team.
 * **`update_library_metadata(lib_id: str, description: Optional[str], is_public: Optional[bool]) -> str`**: Updates metadata or visibility of a library owned by the caller's team.
@@ -112,7 +123,7 @@ The available tool set is resolved for every invocation. `dispatch_subagent` and
 
 `create_agent_team()` validates the creator, team size, new-member configuration, existing active Agent references, duplicate identities, model aliases, initial document paths and bodies, and mutually exclusive fields before any mutation. Existing Agent inputs open invitations; they do not enter the creation transaction until they accept.
 
-Every consent-bearing proposal starts at revision `1`. Material changes create immutable revision history, reset retained invitation attitudes, and require renewed consent; stale callers cannot respond or create from an older revision. Optional detached creator-AgentTeam deliberation can produce a structured draft before publication, and `formation_deliberation_policy="required_when_team_scoped"` makes that path mandatory for team-scoped proposals and revisions.
+Every consent-bearing proposal starts at revision `1`. Material changes create immutable revision history, reset retained invitation attitudes, and require renewed consent; stale callers cannot respond or create from an older revision. An optional validated candidate can be prepared by the initiator during current activity and explicitly published, but is never a compulsory draft or detached synthesis job.
 
 New Agent identities, their Private DocLibs, the Team DocLib, and initial files are created under a detached staging directory after the formation becomes eligible. Accepted existing members retain the same object, UUID, identity fields, model binding, memory, invocation lock, lifecycle state, Agent inbox, and Private DocLib; formation notifications are appended to that existing inbox rather than replacing it.
 
@@ -122,7 +133,9 @@ A failure at validation, construction, or publication restores registries, point
 
 Synchronous delegation admission applies to work that actually waits for an Agent invocation. Existing-Agent formation is asynchronous and does not reserve a dependency merely because an invitation exists; the general wait-for graph still rejects any later synchronous direct or transitive cycle.
 
-A failure in the team's later first discussion does not roll back the successfully created AgentTeam when creation and dependency admission both succeeded. An unsatisfiable Agent wait cycle is not a discussion failure: it is rejected before creation and leaves all Agent, library, filesystem, and topology state unchanged.
+A later personal activity failure does not roll back an already committed AgentTeam.
+
+Nonblocking formation itself creates no model-wait dependency; operations that actually synchronously wait still reject arbitrary transitive wait cycles.
 
 ## 6. Team Governance & Democratic Voting System
 
@@ -131,6 +144,6 @@ To ensure team autonomy and collaborative membership management, the ATT framewo
 * **Optional Activation**: Enabled via `ATTConfig(enable_membership_voting=True)`. By default, it is disabled (`False`).
 * **Proposal Mechanics**: Any agent can call `initiate_membership_vote` to propose adding a new member (defining their role, description, instructions, and model) or removing an existing member.
 * **Unanimous Participation**: The vote remains active and pending in the team's context. A proposal is only resolved and evaluated once **all** active members of the team have explicitly cast their vote (`"Agree"`, `"Disagree"`, or `"Abstain"`).
-* **Consensus Gate**: If all members have voted, the framework calculates the ratio of `"Agree"` votes. A **$\ge 2/3$ majority** of total members is required to approve the proposal. Approved proposals execute their action (creating/appending the new agent or deleting the target agent); if the team is actively running a debate session, the execution is deferred to the end of the current round to prevent message list and execution state misalignment. Rejected proposals are closed without modification.
+* **Consensus Gate**: If all members have voted, the framework calculates the ratio of `"Agree"` votes. A **$\ge 2/3$ majority** of total members is required to approve the proposal. Approved proposals commit their membership effect immediately through the common relationship transaction; no discussion-round boundary delays execution, and removal does not retire the person. Rejected proposals are closed without modification.
 * **Anonymous Voting (Public vs. Private Ballots)**: The `cast_vote` tool accepts an optional `public: bool` parameter (default: `True`). Setting `public=False` enforces voter anonymity: the voter's identity is masked as `"Anonymous Voter"` in the active membership votes queue injected into the team's prompt context, while still allowing the system to verify that all distinct members have voted.
 * **Concurrency Safety (State Locking)**: All democratic voting actions (`initiate`, `cast_vote`, `retract`) mutate the shared `team.proposals` structure. To guarantee memory safety during parallel `asyncio.gather` tool executions (Native Mode), the `AgentTeam` utilizes a lazy-initialized `state_lock` (`asyncio.Lock`). Every structural mutation to the team's proposal queue is strictly wrapped in this asynchronous mutex, preventing race conditions.

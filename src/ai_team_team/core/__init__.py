@@ -10,7 +10,6 @@ from .exceptions import (
     TokenLimitExceededError,
     TransientLLMError,
     AgentInvocationDependencyError,
-    AgentTurnIncompleteError,
     ToolArgumentError,
     ToolBusinessError,
     ToolPermissionError,
@@ -28,8 +27,9 @@ from .config import (
     ExecutionConfig,
     ModelRequestPolicy,
     FileReadConfig,
-    TurnFailurePolicyConfig,
+    HealthSupervisionConfig,
 )
+from .health import HealthSubject, HealthFinding, HealthAssessmentAdmission
 from .chat import ChatOperationResult, ChatReadResult, ChatRelationship, FriendshipRequestView, ChatReminderPage, ChatReminderSummary
 from .execution import ResourceClaim, TaskControlResult, TaskPage, TaskView
 from .activity.contracts.api import ChatMessagePage, ChatMessageSummary
@@ -63,7 +63,7 @@ from .formation import (
     TeamFormationStatus,
     UnanimousAcceptanceAction,
 )
-from .governance import BooleanGovernanceChoice, ModelGovernanceChoice, GovernanceBallot, GovernanceRound, GovernanceSubmissionResult, MigrationRequest, MigrationOperationResult
+from .governance import BooleanGovernanceChoice, ModelGovernanceChoice, GovernanceBallot, GovernanceCase, GovernanceSubmissionResult, MigrationRequest, MigrationOperationResult
 from .discovery import (
     AgentDirectoryRecord,
     AgentTeamDirectoryRecord,
@@ -85,13 +85,10 @@ from .communication import (
     PeerMessage,
 )
 from .response import (
-    AgentTurnResult,
-    AgentTurnStatus,
+    InteractionResult,
+    InteractionStatus,
     AuditResult,
     AuditStatus,
-    DiscussionResult,
-    DiscussionRoundResult,
-    DiscussionStatus,
     LLMResponse,
     OperationalStatus,
     ToolCall,
@@ -105,3 +102,4 @@ from .agent import Agent
 from .team import AgentTeam
 from .broker import NegotiationBroker
 from .manager import ATTManager
+from .manager.failover import ResourceDecisionResult

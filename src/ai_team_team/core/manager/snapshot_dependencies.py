@@ -18,6 +18,17 @@ def capture_execution_dependencies(manager, agent_ids, memory_records):
     execution_ids.update(event["source_execution_id"] for event in memory_records["memory_events"]
                          if event.get("source_execution_id"))
     selected = []
+    invocation_ids = {event["invocation_id"] for event in memory_records["memory_events"] if event.get("invocation_id")}
+    invocation_ids.update(row["invocation_id"] for key in ("memory_segments", "memory_cards") for row in memory_records[key])
+    drafts = manager._formations.drafts.values()
+    for draft in drafts:
+        if draft.initiator_invocation_id is not None:
+            invocation_ids.add(draft.initiator_invocation_id)
+        if draft.source_message_id is not None:
+            selected.append(_require(manager._records.index, ("chat_messages", (draft.source_message_id,)), "formation message source"))
+    for invocation_id in invocation_ids:
+        row = _require(manager._records.index, ("activity_invocations", (invocation_id,)), "memory invocation")
+        selected.append(row)
     for execution_id in execution_ids:
         _require(manager._records.index, ("executions", (execution_id,)), "observation execution")
     for row in manager._records.snapshot():
@@ -68,7 +79,7 @@ def capture_memory_records(manager: Any, dirty: Dict[str, Any]) -> Dict[str, lis
                 _require(memory.events, event_id, "Journal event")
                 event_ids.add(event_id)
             if segment.status is MemoryIndexStatus.INDEXED:
-                memory_id = memory._card_id_by_turn.get(segment.turn_id)
+                memory_id = memory._card_id_by_invocation.get(segment.invocation_id)
                 card = _require(memory.cards, memory_id, "indexed Memory Card")
                 if card.segment_id != segment_id:
                     raise StatePersistenceError(
@@ -147,6 +158,8 @@ def collect_memory_identity_dependencies(
             related_agents = {member.agent_id for member in team.members}
             if isinstance(team.creator, Agent):
                 related_agents.add(team.creator.agent_id)
+            if getattr(team, "_parent_agent_id", None):
+                related_agents.add(team._parent_agent_id)
             pending_agents.extend(related_agents - agent_ids)
             agent_ids.update(related_agents)
             related_teams = set()

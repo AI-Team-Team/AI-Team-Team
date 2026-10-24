@@ -20,7 +20,21 @@ Task-health evidence and personal or team health evidence remain separately attr
 
 Configure health triggers by evidence type rather than introduce a universal health score.
 
-Exact per-evidence thresholds remain configuration-design choices, and no additional business-review or intervention authority follows from confirming D10.
+The confirmed defaults are three consecutive model-protocol failures within a rolling 600-second window, or five consecutive same-category argument failures by the same Agent on the same tool within a rolling 600-second window.
+
+A valid model response resets the corresponding protocol streak, and a successful call resets the corresponding tool streak without resetting unrelated tools or another person's evidence.
+
+Evidence belongs to the immutable Agent identity rather than its current team, and relationship changes do not reset detection state.
+
+Count each logical response or tool invocation once, not each internal retry, duplicate callback, or replayed observer.
+
+Reaching a threshold requests assessment rather than declaring the Agent unhealthy or authorizing permission changes, model replacement, or termination.
+
+Provider timeouts, disconnections, and rate limits are resource-availability evidence, and adapter or framework faults are not automatically attributed to the Agent.
+
+Semantic repetition and suspected garbling detectors are disabled by default and require explicit Host enablement; repetition, special characters, or non-English text alone are insufficient evidence.
+
+The observation window expires detector samples, not incidents or retained evidence, and no additional business-review or intervention authority follows from confirming D10.
 
 Private documents, raw arguments, direct-chat bodies, and personal Working Context are not automatically audit input.
 
@@ -51,6 +65,10 @@ Persist audited subject references and historical auditor identity snapshots wit
 Full save and restore must not recreate abandoned audit teams or make auditors discoverable as ordinary recruits or friends.
 
 The audit service may have technical budgets and deadlines, but cannot implement them as a hidden multi-member round loop.
+
+The configurable total audit deadline defaults to 600 seconds from durable admission, includes queueing and all assessment activity, and is independent of the 120-second parent-failover deadline.
+
+Individual calls cannot renew the total deadline; expiry produces UNKNOWN, stops further assessment, fences unconfirmed external work, and preserves factual evidence while required durable cleanup is allowed to finish.
 
 Long-lived supervisory teams are deferred in [Future Plans](../Todo_Autonomous_Agent_Activity_Messaging_and_Background_Tasks.md#long-lived-preconfigured-supervisory-teams).
 

@@ -8,9 +8,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from .base import Base
 
 
-class GovernanceRoundModel(Base):
+class GovernanceCaseModel(Base):
     __tablename__ = "governance_cases"
-    round_id: Mapped[str] = mapped_column("case_id", String, primary_key=True)
+    case_id: Mapped[str] = mapped_column("case_id", String, primary_key=True)
     principal_team_id: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("teams.team_id", ondelete="RESTRICT"), nullable=True
     )
@@ -37,6 +37,7 @@ class GovernanceElectorateModel(Base):
     voter_agent_id: Mapped[str] = mapped_column(String, ForeignKey("agents.agent_id", ondelete="RESTRICT"), primary_key=True)
     position: Mapped[int] = mapped_column(Integer)
     eligibility: Mapped[dict] = mapped_column(JSON)
+    membership_interval_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("membership_intervals.interval_id", ondelete="RESTRICT"), nullable=True)
     created_version: Mapped[int] = mapped_column(Integer, default=1)
     __table_args__ = (CheckConstraint("position >= 0 AND created_version > 0"), UniqueConstraint("case_id", "position"))
 
@@ -44,7 +45,7 @@ class GovernanceElectorateModel(Base):
 class GovernanceBallotModel(Base):
     __tablename__ = "governance_ballots"
     ballot_id: Mapped[str] = mapped_column(String, primary_key=True)
-    round_id: Mapped[str] = mapped_column(
+    case_id: Mapped[str] = mapped_column(
         "case_id", String
     )
     voter_agent_id: Mapped[str] = mapped_column(

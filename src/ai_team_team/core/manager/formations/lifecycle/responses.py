@@ -80,7 +80,6 @@ class FormationInvitationResponseMixin:
             self.decisions[decision.decision_id] = decision
             attitude_changed = normalized is not old_invitation.attitude
             initiator = self.manager._agents_by_id[request.initiator_agent_id]
-            inbox_copies = self._copy_inboxes((initiator, actor))
             now = time.time()
             invitation.attitude = normalized
             invitation.responded_at = now if normalized is not InvitationAttitude.NO_RESPONSE else None
@@ -114,7 +113,6 @@ class FormationInvitationResponseMixin:
                     self.requests[request_id] = old_request
                     self.invitations[(request_id, actor.agent_id)] = old_invitation
                     self.decisions.pop(decision.decision_id, None)
-                    self._restore_inboxes((initiator, actor), inbox_copies)
                     raise
 
             if (
@@ -142,7 +140,6 @@ class FormationInvitationResponseMixin:
                     self.requests[request_id] = old_request
                     self.invitations[(request_id, actor.agent_id)] = old_invitation
                     self.decisions.pop(decision.decision_id, None)
-                    self._restore_inboxes((initiator, actor), inbox_copies)
                     raise
                 else:
                     self._emit_event(
@@ -169,7 +166,6 @@ class FormationInvitationResponseMixin:
                 self.requests[request_id] = old_request
                 self.invitations[(request_id, actor.agent_id)] = old_invitation
                 self.decisions.pop(decision.decision_id, None)
-                self._restore_inboxes((initiator, actor), inbox_copies)
                 raise
             if attitude_changed:
                 self._emit_event(

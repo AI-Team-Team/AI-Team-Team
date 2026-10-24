@@ -50,7 +50,7 @@ def _write_and_hold(db_path, workspace, ready, release):
             persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("process-model", client)
-        team = manager.create_agent_team(manager.root_ai)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
         await manager.save_state()
         ready.put(team.team_id)
         release.wait(10)
@@ -75,7 +75,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("stable", self.client)
-        manager.create_agent_team(manager.root_ai)
+        manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
         await manager.save_state()
 
         started = threading.Event()
@@ -271,7 +271,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("stable", self.client)
-        manager.create_agent_team(manager.root_ai)
+        manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
         await manager.save_state()
 
         with patch.object(DatabaseStore, "write", side_effect=OSError("disk failed")):
@@ -292,7 +292,7 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("stable", self.client)
-        team = manager.create_agent_team(manager.root_ai)
+        team = manager.create_agent_team(manager.root_ai, parent=manager.root_ai)
         await manager.save_state()
 
         write_started = threading.Event()
@@ -308,30 +308,32 @@ class TestHighHardening(unittest.IsolatedAsyncioTestCase):
             save_task = asyncio.create_task(manager.save_state())
             await asyncio.to_thread(write_started.wait, 5)
             save_task.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(save_task.done())
+            write_release.set()
             with self.assertRaises(asyncio.CancelledError):
                 await save_task
-            write_release.set()
             await manager.flush_state()
 
-        session_started = asyncio.Event()
+        provider_started = asyncio.Event()
 
-        async def hanging_session(*args, **kwargs):
-            session_started.set()
+        async def hanging_provider(**kwargs):
+            provider_started.set()
             await asyncio.Event().wait()
 
-        manager._execute_team_discussion_session = hanging_session
-        discussion = asyncio.create_task(manager.execute_team_discussion(team, "cancel me"))
-        await session_started.wait()
-        discussion.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await discussion
+        self.client.generate = hanging_provider
+        admission = await manager.activate_agent(team.members[0].agent_id)
+        await provider_started.wait()
+        worker = manager._activity.sessions[team.members[0].agent_id].worker
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        self.assertFalse(team.members[0].lock.locked())
+        self.assertFalse(hasattr(team, "discussion_lock"))
 
-        async def successful_session(*args, **kwargs):
-            return "next session"
+        async def idle_provider(**kwargs):
+            return "Action: set_activity_intent(intent={'kind': 'idle'})"
 
-        manager._execute_team_discussion_session = successful_session
-        self.assertEqual(
-            await manager.execute_team_discussion(team, "next"),
-            "next session",
-        )
+        self.client.generate = idle_provider
+        admission = await manager.activate_agent(team.members[0].agent_id)
+        await manager.wait_for_activity_checkpoint(admission.admission_id, intent="idle")
         await manager.close()

@@ -52,7 +52,7 @@ class ModelFileReadingTests(unittest.IsolatedAsyncioTestCase):
             ATTConfig(workspace_root=self.temporary.name),
             persistence_mode="volatile",
         )
-        self.team = self.manager.create_agent_team(self.manager.root_ai)
+        self.team = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
         self.agent = self.team.members[0]
 
     async def asyncTearDown(self):
@@ -136,7 +136,7 @@ class ModelFileReadingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(event_loop_thread, counter_threads)
 
     async def test_read_fails_if_managed_link_acl_is_revoked_in_flight(self):
-        target_team = self.manager.create_agent_team(self.manager.root_ai)
+        target_team = self.manager.create_agent_team(self.manager.root_ai, parent=self.manager.root_ai)
         source_lib_id = self.team.doc_library.lib_id
         target_lib_id = target_team.doc_library.lib_id
         target_team.doc_library.write_file("shared.txt", "private target")
@@ -279,9 +279,8 @@ class ModelFileReadingTests(unittest.IsolatedAsyncioTestCase):
         )
         error = TokenLimitExceededError("exhausted")
         error.required_tokens = 1
-        self.assertTrue(
-            await self.manager.handle_failover(self.agent, self.team, error)
-        )
+        decision = await self.manager.request_model_resource(self.agent, self.team, error)
+        self.assertEqual(decision.status, "APPLIED")
         second = await self.execute_read(
             "read_library_file",
             lib_id=self.team.doc_library.lib_id,

@@ -1,98 +1,62 @@
-import os
-import sys
-import unittest
-from unittest.mock import MagicMock, AsyncMock
+"""Explicit-parent migration tools preserve accepted topology and person identity."""
 
-# Setup paths
-CURRENT_DIR = os.path.dirname(__file__)
-ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
-SRC_DIR = os.path.join(ROOT_DIR, "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
-
-from ai_team_team import ATTManager, Agent, ATTConfig
-from test.governance_client import PersonalGovernanceClient, settle_governance_activity
-import asyncio
 import json
+import tempfile
+import unittest
+
+from ai_team_team import ATTConfig, ATTManager, Agent
+from ai_team_team.core.tool_runtime import ToolExecutor
+from test.governance_client import PersonalGovernanceClient, settle_governance_activity
+
 
 class TestATTMigration(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        import tempfile, os, shutil
-        self._test_old_cwd = os.getcwd()
-        self._test_tmpdir = tempfile.mkdtemp(prefix="att_test_")
-        os.chdir(self._test_tmpdir)
-        self.addCleanup(shutil.rmtree, self._test_tmpdir, ignore_errors=True)
-        self.addCleanup(os.chdir, self._test_old_cwd)
-
-        self.mock_client = PersonalGovernanceClient()
-        self.root_ai = Agent(name="Root_AI", role="Architect", llm_client=self.mock_client)
-        self.manager = ATTManager(root_ai=self.root_ai, persistence_mode="volatile")
-        self.manager.register_llm_client("default", self.mock_client)
+    async def asyncSetUp(self):
+        workspace = tempfile.TemporaryDirectory(prefix="att-migration-tools-")
+        self.addCleanup(workspace.cleanup)
+        client = PersonalGovernanceClient()
+        self.root = Agent("Root", "Architect", client)
+        self.manager = ATTManager(self.root, ATTConfig(workspace_root=workspace.name), persistence_mode="volatile")
+        self.manager.register_llm_client("default", client)
         self.addAsyncCleanup(self.manager.close)
 
-    async def test_negotiate_and_execute_migration(self):
-        """Verify that team migration updates parent-child relationships, dispatches alerts, and enforces count limits."""
-        # Setup tools context
-        self.manager.register_tools_context({"att_manager": self.manager})
-        
-        preset = self.manager.get_preset("generic")
-        t1 = self.manager.create_agent_team(creator=self.root_ai, member_count=3, roles_and_presets=preset["roles"], team_purpose="P1")
-        c1 = t1.members[0].launch_att(self.manager, member_count=3, roles_and_presets=preset["roles"], team_purpose="Child")
-        t2 = self.manager.create_agent_team(creator=self.root_ai, member_count=3, roles_and_presets=preset["roles"], team_purpose="P2")
-        
-        self.assertEqual(c1.parent_team, t1)
-        self.assertEqual(c1.depth, 2)
-        
-        # Setup callback tracking
-        migration_callback_args = []
-        def my_migration_callback(tid, old_pid, new_pid):
-            migration_callback_args.append((tid, old_pid, new_pid))
-        self.manager.on_team_migration = my_migration_callback
-        
-        # Call migration tool
-        res = await c1.tools["request_migration"](t2.team_id, "Need to align with P2 objectives")
-        handle = json.loads(res)
-        self.assertEqual(handle["status"], "PENDING")
-        # Observe completed model/tool receipts and authority finalizers, not
-        # a guessed number of yields or a single-call governance assumption.
-        await settle_governance_activity(self.manager, timeout=120)
-        await self.manager.flush_callbacks()
-        
-        self.assertEqual(self.manager.inspect_migration_request(handle["request_id"]).status, "EXECUTED")
-        self.assertEqual(c1.parent_team, t2)
-        self.assertEqual(c1.depth, 2)
-        self.assertIn(c1, t2.child_teams)
-        self.assertNotIn(c1, t1.child_teams)
-        
-        # Check callback
-        self.assertEqual(len(migration_callback_args), 1)
-        self.assertEqual(migration_callback_args[0], (c1.team_id, t1.team_id, t2.team_id))
-        
-        # Check inbox alerts
-        t1_migration_alerts = [m for m in t1.message_inbox if m.get("type") == "migration_alert"]
-        t2_migration_alerts = [m for m in t2.message_inbox if m.get("type") == "migration_alert"]
-        c1_migration_alerts = [m for m in c1.message_inbox if m.get("type") == "migration_alert"]
-        
-        self.assertEqual(len(t1_migration_alerts), 1)
-        self.assertEqual(len(t2_migration_alerts), 1)
-        self.assertEqual(len(c1_migration_alerts), 1)
-        
-        # Verify migration limit enforcement (max limit is 1)
-        res_limit = await c1.tools["request_migration"](t1.team_id, "Migrate back")
-        self.assertEqual(json.loads(res_limit)["status"], "DENIED")
-        self.assertIn("migration limit", json.loads(res_limit)["reason"])
-        
-    async def test_migration_circular_check(self):
-        """Verify that circular migrations (migrating under own descendant) are blocked."""
-        self.manager.register_tools_context({"att_manager": self.manager})
-        
-        preset = self.manager.get_preset("generic")
-        t1 = self.manager.create_agent_team(creator=self.root_ai, member_count=3, roles_and_presets=preset["roles"], team_purpose="P1")
-        c1 = t1.members[0].launch_att(self.manager, member_count=3, roles_and_presets=preset["roles"], team_purpose="Child")
-        
-        res = await t1.tools["request_migration"](c1.team_id, "Migrate parent under child")
-        self.assertIn("Error", res)
-        self.assertIn("would create a cycle", res)
+    async def request(self, team, target, reason):
+        return await ToolExecutor(team, team.members[0], self.manager).execute(
+            "request_migration", kwargs={"target_parent": {"kind": "agent_team", "principal_id": target.team_id},
+                "rationale": reason}, tools=team.tools)
 
-if __name__ == "__main__":
-    unittest.main()
+    async def test_migration_commits_once_and_notifies_affected_people(self):
+        first = self.manager.create_agent_team(self.root, parent=self.root)
+        moving = first.members[0].launch_att(self.manager, parent=first)
+        second = self.manager.create_agent_team(self.root, parent=self.root)
+        identities = [(person.agent_id, person.role, person.private_doc_library_id) for person in moving.members]
+        events = []
+        self.manager.on_system_event = lambda event, details: events.append((event, details))
+        response = await self.request(moving, second, "Choose the second organization.")
+        handle = json.loads(response.content)
+        self.assertEqual(handle["status"], "PENDING")
+        await settle_governance_activity(self.manager)
+        await self.manager.flush_callbacks()
+        self.assertEqual(self.manager.inspect_migration_request(handle["request_id"]).status, "EXECUTED")
+        self.assertIs(moving.parent_team, second)
+        self.assertIn(moving, second.child_teams)
+        self.assertNotIn(moving, first.child_teams)
+        self.assertEqual([(person.agent_id, person.role, person.private_doc_library_id) for person in moving.members], identities)
+        resolutions = [details for event, details in events if event == "migration_request_resolved"
+            and details["request_id"] == handle["request_id"]]
+        self.assertEqual(len(resolutions), 1)
+        for person in [*first.members, *second.members, *moving.members]:
+            notices = [mail for mail in person.agent_inbox if mail["message_type"] == "organizational_position_changed"
+                and mail["payload"]["team_id"] == moving.team_id]
+            self.assertEqual(len(notices), 1)
+        denied = json.loads((await self.request(moving, first, "Move back immediately.")).content)
+        self.assertEqual(denied["status"], "DENIED")
+        self.assertIn("cooldown", denied["reason"])
+
+    async def test_descendant_attachment_is_rejected_before_creating_any_request(self):
+        parent = self.manager.create_agent_team(self.root, parent=self.root)
+        child = parent.members[0].launch_att(self.manager, parent=parent)
+        result = json.loads((await self.request(parent, child, "Invalid cycle.")).content)
+        self.assertEqual(result["status"], "DENIED")
+        self.assertIn("cycle", result["reason"])
+        self.assertFalse(self.manager._migration.requests)
+        self.assertIs(child.parent_team, parent)

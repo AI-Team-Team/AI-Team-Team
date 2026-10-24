@@ -13,7 +13,7 @@ from ai_team_team import (
     ToolCall,
 )
 from ai_team_team.core.decision import DecisionOutcome
-from test.governance_client import PersonalGovernanceClient, settle_governance_activity
+from test.governance_client import PersonalGovernanceClient, settle_governance_activity, submit_case_ballots
 from test.async_waits import runtime_watchdog, wait_for_runtime
 
 
@@ -39,15 +39,11 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
         await settle_governance_activity(self.manager)
 
     async def request(self, parent=None):
-        sender = self.manager.create_agent_team(parent or self.root)
-        recipient = self.manager.create_agent_team(parent or self.root)
+        sender = self.manager.create_agent_team(parent or self.root, parent=parent or self.root)
+        recipient = self.manager.create_agent_team(parent or self.root, parent=parent or self.root)
         result = await self.manager.broker.request_peer_communication(
             sender, recipient, sender.members[0].agent_id, "Public review request."
         )
-        if parent is not None:
-            await self.manager.execute_team_discussion(
-                parent, "Deliberate normally.", rounds=1, skip_audit=True
-            )
         await self.settle()
         return self.manager.broker.communication_requests[result.request_id]
 
@@ -55,7 +51,7 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
         token = self.manager._active_tool_agent.set(actor)
         try:
             await self.manager.submit_governance_choice(
-                item.round_id, {"approved": True, "reason": actor.name}, actor=actor
+                item.case_id, {"approved": True, "reason": actor.name}, actor=actor
             )
         finally:
             self.manager._active_tool_agent.reset(token)
@@ -69,12 +65,12 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(request.status.value, "PENDING")
         self.assertFalse(self.manager.broker.agreements)
-        self.assertFalse(next(iter(self.manager._governance.rounds.values())).ballots)
+        self.assertFalse(next(iter(self.manager._governance.cases.values())).ballots)
 
-    async def test_authoritative_projection_uses_the_accepted_round_ballots(self):
-        parent = self.manager.create_agent_team(self.root)
+    async def test_authoritative_projection_uses_the_accepted_case_ballots(self):
+        parent = self.manager.create_agent_team(self.root, parent=self.root)
         request = await self.request(parent)
-        item = next(iter(self.manager._governance.rounds.values()))
+        item = next(iter(self.manager._governance.cases.values()))
         with patch.object(self.manager._governance, "schedule_resolution"):
             for actor in parent.members:
                 await self.choose(actor, item)
@@ -83,9 +79,9 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
         await self.manager.broker._complete_approval(
             request.request_id,
             principal,
-            DecisionOutcome("approved", "Incomplete external projection.", round_id=item.round_id),
+            DecisionOutcome("approved", "Incomplete external projection.", case_id=item.case_id),
         )
-        self.assertEqual(request.status.value, "APPROVED")
+        self.assertEqual(self.manager.broker.communication_requests[request.request_id].status.value, "APPROVED")
         self.assertEqual(
             {ballot.voter_agent_id for ballot in self.manager.broker.ballots[request.request_id]},
             set(item.voter_agent_ids),
@@ -96,17 +92,18 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
         self.client.respond = True
         self.manager.config.tool_calling_mode = "native"
         committed = asyncio.Event()
-        original_commit = self.manager._commit_dirty_state
+        original_commit = self.manager._records.commit
 
-        async def pause_after_ballot(dirty):
-            await original_commit(dirty)
-            if dirty["agents"] and dirty["governance_rounds"]:
+        async def pause_after_ballot(*args, **kwargs):
+            result = await original_commit(*args, **kwargs)
+            if str(kwargs.get("operation_id", "")).startswith("BALLOT-"):
                 committed.set()
                 await asyncio.Event().wait()
+            return result
 
-        with patch.object(self.manager, "_commit_dirty_state", side_effect=pause_after_ballot):
-            sender = self.manager.create_agent_team(self.root)
-            recipient = self.manager.create_agent_team(self.root)
+        with patch.object(self.manager._records, "commit", side_effect=pause_after_ballot):
+            sender = self.manager.create_agent_team(self.root, parent=self.root)
+            recipient = self.manager.create_agent_team(self.root, parent=self.root)
             result = await self.manager.broker.request_peer_communication(
                 sender, recipient, sender.members[0].agent_id, "A cancellable explicit choice."
             )
@@ -119,8 +116,8 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
         # The deliberately cancelled invocation is factual history, not a new
         # failure of the already accepted ballot or permission to replay it.
         async with runtime_watchdog(self.manager, label="Cancelled governance finalizers"):
-            while self.manager._emergency_tasks:
-                await asyncio.gather(*tuple(self.manager._emergency_tasks))
+            while self.manager._institutional_tasks:
+                await asyncio.gather(*tuple(self.manager._institutional_tasks))
         self.assertEqual(
             self.manager.broker.communication_requests[result.request_id].status.value, "APPROVED"
         )
@@ -173,7 +170,7 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
 
         self.client.generate = generate
         try:
-            with patch("ai_team_team.core.strategies.native.ToolExecutor.execute", side_effect=execute):
+            with patch("ai_team_team.core.tool_runtime.ToolExecutor.execute", side_effect=execute):
                 with self.assertRaises(StatePersistenceError):
                     await self.manager.execute_agent_interaction(self.root, "Run a native batch.")
             self.assertTrue(stopped.is_set())
@@ -187,8 +184,8 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def test_migration_cannot_start_during_restore_or_after_queued_shutdown(self):
-        sender = self.manager.create_agent_team(self.root)
-        target = self.manager.create_agent_team(self.root)
+        sender = self.manager.create_agent_team(self.root, parent=self.root)
+        target = self.manager.create_agent_team(self.root, parent=self.root)
         self.manager._restore_in_progress = True
         try:
             with self.assertRaises(RuntimeError):
@@ -212,8 +209,8 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.manager._migration.requests)
 
     async def test_communication_cannot_start_during_restore_or_queued_shutdown(self):
-        sender = self.manager.create_agent_team(self.root)
-        recipient = self.manager.create_agent_team(self.root)
+        sender = self.manager.create_agent_team(self.root, parent=self.root)
+        recipient = self.manager.create_agent_team(self.root, parent=self.root)
         self.manager._restore_in_progress = True
         try:
             with self.assertRaises(RuntimeError):
@@ -241,10 +238,10 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.manager.broker.communication_requests)
 
     async def test_pending_outcome_preserves_other_processing_principals(self):
-        left = self.manager.create_agent_team(self.root)
-        right = self.manager.create_agent_team(self.root)
-        sender = self.manager.create_agent_team(left)
-        recipient = self.manager.create_agent_team(right)
+        left = self.manager.create_agent_team(self.root, parent=self.root)
+        right = self.manager.create_agent_team(self.root, parent=self.root)
+        sender = self.manager.create_agent_team(left, parent=left)
+        recipient = self.manager.create_agent_team(right, parent=right)
         result = await self.manager.broker.request_peer_communication(
             sender, recipient, sender.members[0].agent_id, "Two independent authorities."
         )
@@ -255,7 +252,7 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
         await self.manager.broker._complete_approval(
             request.request_id, first, DecisionOutcome("pending", "The email remains unanswered.")
         )
-        self.assertEqual(request.status.value, "PROCESSING")
+        self.assertEqual(self.manager.broker.communication_requests[request.request_id].status.value, "PENDING")
         await self.manager.broker._complete_approval(
             request.request_id, second, DecisionOutcome("pending", "Another unanswered email.")
         )
@@ -263,23 +260,30 @@ class GovernanceReviewTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_migration_failure_restores_original_sibling_order(self):
         self.manager.config.migration_policy = "permissive"
-        parent = self.manager.create_agent_team(self.root)
-        target = self.manager.create_agent_team(self.root)
-        moving = self.manager.create_agent_team(parent)
-        self.manager.create_agent_team(parent)
+        parent = self.manager.create_agent_team(self.root, parent=self.root)
+        target = self.manager.create_agent_team(self.root, parent=self.root)
+        moving = self.manager.create_agent_team(parent, parent=parent)
+        self.manager.create_agent_team(parent, parent=parent)
         children = list(parent.child_teams)
         target_children = list(target.child_teams)
         original_commit = self.manager._commit_dirty_state
 
-        async def fail_topology_commit(dirty):
-            if dirty["teams"]:
-                raise OSError("Topology persistence failed.")
-            await original_commit(dirty)
+        result = await self.manager.negotiate_and_execute_migration(moving, target, "Move safely.")
+        await self.settle()
+        with patch.object(self.manager._governance, "schedule_resolution"):
+            for case in tuple(self.manager._governance.cases.values()):
+                if case.business_id == result.request_id:
+                    await submit_case_ballots(self.manager, case)
 
-        with patch.object(self.manager, "_commit_dirty_state", side_effect=fail_topology_commit):
+        async def fail_topology_commit(*args, **kwargs):
+            if str(kwargs.get("operation_id", "")).startswith("TOPOLOGY-"):
+                raise OSError("Topology persistence failed.")
+            return await original_commit(*args, **kwargs)
+
+        with patch.object(self.manager._records, "commit", side_effect=fail_topology_commit):
             with self.assertRaises(OSError):
-                await self.manager.negotiate_and_execute_migration(moving, target, "Move safely.")
+                await self.manager._migration.complete_request(result.request_id)
         self.assertEqual(parent.child_teams, children)
         self.assertEqual(target.child_teams, target_children)
         self.assertIs(moving.parent_team, parent)
-        self.assertEqual(moving.migration_count, 0)
+        self.assertNotIn(("team_position_cooldowns", (moving.team_id,)), self.manager._records.index)

@@ -12,12 +12,14 @@ def validate_successors_and_ballots(
     approvals: List[Any],
     request_by_id: Dict[str, Any],
     agent_ids: set[str],
+    *,
+    inactive_team_ids=frozenset(),
 ) -> None:
     for request in requests:
         successor_id = request.superseded_by_request_id
         predecessor_id = request.supersedes_request_id
         if request.status is CommunicationRequestStatus.STALE:
-            if successor_id is None:
+            if successor_id is None and not {request.sender_team_id, request.recipient_team_id} & set(inactive_team_ids):
                 raise StateRestoreError(
                     f"Stale communication request {request.request_id!r} has no successor."
                 )

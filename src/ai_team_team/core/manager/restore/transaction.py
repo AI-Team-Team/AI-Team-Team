@@ -31,8 +31,6 @@ class RestoreTransactionMixin:
                 "Cannot restore state while agent invocations or synchronous "
                 "dependency reservations are active."
             )
-        if any(team.is_running for team in manager.teams.values()):
-            raise StateRestoreError("Cannot restore state while a team discussion is active.")
         if any(agent._lock is not None and agent._lock.locked() for agent in manager._agents_by_id.values()):
             raise StateRestoreError("Cannot restore state while an agent invocation is active.")
         if manager._formations.tasks or any(
@@ -48,7 +46,6 @@ class RestoreTransactionMixin:
         if (
             any(not task.done() for task in manager._governance.tasks.values())
             or any(not task.done() for task in manager.broker._approval_tasks.values())
-            or manager._governance.waiters
             or manager._governance.lock.locked()
             or manager._migration.lock.locked()
             or manager._inbox._read_lock.locked()
@@ -166,7 +163,7 @@ class RestoreTransactionMixin:
                     for agent in manager._agents_by_id.values()
                 },
                 "memory": manager._memory.snapshot(),
-                "governance_rounds": manager._governance.snapshot(),
+                "governance_cases": manager._governance.snapshot(),
                 "migration_requests": [item.model_dump(mode="json") for item in manager._migration.requests.values()],
             }
             # The durable commit decision precedes the synchronous registry
@@ -302,7 +299,7 @@ class RestoreTransactionMixin:
                                 )
                             ]
                     old_memory = old_state["memory"]
-                    manager._governance.restore(old_state["governance_rounds"], interrupted=False)
+                    manager._governance.restore(old_state["governance_cases"], interrupted=False)
                     manager._migration.restore(old_state["migration_requests"])
                     manager._memory.restore(
                         old_memory["memory_events"],

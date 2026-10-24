@@ -119,7 +119,25 @@ def build_communication_tools(att_manager: Any, caller_node: Any) -> Dict[str, T
         ]
         return json.dumps(rows, sort_keys=True)
 
+    async def list_peer_messages() -> list[dict[str, Any]]:
+        """List current AT-addressed message references without exposing bodies."""
+        team, _ = _resolve_communication_context(att_manager)
+        return [item.model_dump(mode="json", exclude={"content"})
+            for item in att_manager.broker.peer_messages.values()
+            if team.team_id in {item.sender_team_id, item.recipient_team_id}]
+
+    async def read_peer_message(message_id: str) -> dict[str, Any]:
+        """Read an AT-addressed message with current endpoint membership."""
+        team, _ = _resolve_communication_context(att_manager)
+        item = att_manager.broker.peer_messages.get(message_id)
+        if item is None or team.team_id not in {item.sender_team_id, item.recipient_team_id}:
+            from ..core.exceptions import ToolPermissionError
+            raise ToolPermissionError("The current AgentTeam is not an endpoint of this message.")
+        return item.model_dump(mode="json")
+
     return {
+        "list_peer_messages": Tool("list_peer_messages", "List AT-addressed peer message references.", list_peer_messages),
+        "read_peer_message": Tool("read_peer_message", "Read one AT-addressed peer message; opening mail is not reading its body.", read_peer_message),
         "send_peer_message": Tool(
             "send_peer_message",
             "Sends a message to a peer team's inbox using their Team ID. Arguments: team_id (str), message (str)",

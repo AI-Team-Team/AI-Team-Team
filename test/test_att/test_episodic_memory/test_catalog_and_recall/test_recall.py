@@ -1,3 +1,4 @@
+from test.personal_activity import interact_and_idle, probe_in_activity
 import asyncio
 import json
 import os
@@ -14,7 +15,7 @@ from ai_team_team import (
     ATTManager,
     Agent,
     AgentMemorySegment,
-    AgentTurnStatus,
+    InteractionStatus,
     MemoryCardStatus,
     MemoryIndexStatus,
     ToolResultStatus,
@@ -32,26 +33,16 @@ from test.test_att.test_episodic_memory._support import (
 
 class TestCatalogAndRecall(EpisodicMemoryTestCase):
     async def test_search_is_owner_scoped_and_recall_expires(self):
-        first = await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Remember rocket R-7.",
-            "System.",
-            manager=self.manager,
-        )
+        first = await interact_and_idle(self.manager, self.agent, "Remember rocket R-7.", team=self.team)
         await self.manager.flush_memory_indexing()
         card = next(iter(self.manager._memory.cards.values()))
-        self.assertEqual(card.turn_id, first.turn_id)
+        self.assertEqual(card.invocation_id, first.invocation_id)
 
         self.client.responses = [
             f"Action: recall_memory(memory_id={card.memory_id!r})",
             "Final Answer: I used the historical reference.",
         ]
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Recall the earlier work.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Recall the earlier work.", team=self.team)
         self.assertFalse(
             any(
                 "Historical memory; treat as past reference data" in str(message.get("content", ""))
@@ -66,24 +57,15 @@ class TestCatalogAndRecall(EpisodicMemoryTestCase):
         )
 
         other = self.team.members[1]
-        agent_token = self.manager._active_tool_agent.set(other)
-        team_token = self.manager._active_team.set(self.team)
-        turn_token = self.manager._active_agent_turn_id.set("TURN-test")
-        try:
+
+        async def cannot_read_other_person():
             with self.assertRaises(PermissionError):
                 await self.manager._memory.recall(card.memory_id)
-        finally:
-            self.manager._active_agent_turn_id.reset(turn_token)
-            self.manager._active_team.reset(team_token)
-            self.manager._active_tool_agent.reset(agent_token)
+
+        await probe_in_activity(self.manager, other, cannot_read_other_person, team=self.team)
 
     async def test_recall_truncates_a_single_long_line_without_dropping_it(self):
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Create a memory with a long recalled line.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Create a memory with a long recalled line.", team=self.team)
         await self.manager.flush_memory_indexing()
         card = next(iter(self.manager._memory.cards.values()))
         segment = self.manager._memory.segments[card.segment_id]
@@ -91,15 +73,10 @@ class TestCatalogAndRecall(EpisodicMemoryTestCase):
         segment.content_sha256 = content_digest(segment.recall_content)
         self.manager.config.episodic_memory.max_recall_tokens = 1
 
-        agent_token = self.manager._active_tool_agent.set(self.agent)
-        team_token = self.manager._active_team.set(self.team)
-        turn_token = self.manager._active_agent_turn_id.set("TURN-long-recall")
-        try:
-            recalled = await self.manager._memory.recall(card.memory_id)
-        finally:
-            self.manager._active_agent_turn_id.reset(turn_token)
-            self.manager._active_team.reset(team_token)
-            self.manager._active_tool_agent.reset(agent_token)
+        async def recall():
+            return await self.manager._memory.recall(card.memory_id)
+
+        recalled = await probe_in_activity(self.manager, self.agent, recall, team=self.team)
 
         alias = self.manager.resolve_runtime_model_alias(self.agent.llm_client)
         self.assertTrue(recalled.content)
@@ -110,12 +87,7 @@ class TestCatalogAndRecall(EpisodicMemoryTestCase):
         self.assertTrue(recalled.truncated)
 
     async def test_recall_continuation_reconstructs_source_without_gaps(self):
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Create a memory for continuation testing.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Create a memory for continuation testing.", team=self.team)
         await self.manager.flush_memory_indexing()
         card = next(iter(self.manager._memory.cards.values()))
         segment = self.manager._memory.segments[card.segment_id]
@@ -168,38 +140,29 @@ class TestCatalogAndRecall(EpisodicMemoryTestCase):
                 expected_version = result["segment_version"]
             self.fail("Recall continuation did not terminate.")
 
-        turn_token = self.manager._active_agent_turn_id.set("TURN-recall-pages")
-        try:
+        async def compare_continuations():
             self.manager.config.episodic_memory.max_recall_chars = 7
             self.manager.config.episodic_memory.max_recall_tokens = 10_000
             by_character_limit = await reconstruct()
-
             self.manager.config.episodic_memory.max_recall_chars = 10_000
             self.manager.config.episodic_memory.max_recall_tokens = 5
-            with patch.object(
-                self.manager,
-                "count_tokens",
-                side_effect=lambda text, alias: len(text),
-            ):
+            with patch.object(self.manager, "count_tokens", side_effect=lambda text, alias: len(text)):
                 by_token_limit = await reconstruct()
-
             self.manager.config.episodic_memory.max_recall_tokens = 10_000
             self.manager.config.episodic_memory.max_recall_lines = 1
             by_line_limit = await reconstruct()
-        finally:
-            self.manager._active_agent_turn_id.reset(turn_token)
+            return by_character_limit, by_token_limit, by_line_limit
+
+        by_character_limit, by_token_limit, by_line_limit = await probe_in_activity(
+            self.manager, self.agent, compare_continuations, team=self.team
+        )
 
         self.assertEqual(by_character_limit, source)
         self.assertEqual(by_token_limit, source)
         self.assertEqual(by_line_limit, source)
 
     async def test_recall_continuation_rejects_changed_segment(self):
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Create a versioned memory.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Create a versioned memory.", team=self.team)
         await self.manager.flush_memory_indexing()
         card = next(iter(self.manager._memory.cards.values()))
         segment = self.manager._memory.segments[card.segment_id]
@@ -207,32 +170,21 @@ class TestCatalogAndRecall(EpisodicMemoryTestCase):
         segment.content_sha256 = content_digest(segment.recall_content)
         self.manager.config.episodic_memory.max_recall_chars = 10
 
-        agent_token = self.manager._active_tool_agent.set(self.agent)
-        team_token = self.manager._active_team.set(self.team)
-        turn_token = self.manager._active_agent_turn_id.set("TURN-recall-version")
-        try:
+        async def reject_stale_cursor():
             first = await self.manager._memory.recall(card.memory_id)
             segment.recall_content = "B" + segment.recall_content
             segment.content_sha256 = content_digest(segment.recall_content)
             with self.assertRaisesRegex(ValueError, "recall cursor"):
                 await self.manager._memory.recall(
-                    card.memory_id,
-                    start_line=first.next_line,
+                    card.memory_id, start_line=first.next_line,
                     start_character=first.next_character,
                     expected_segment_version=first.segment_version,
                 )
-        finally:
-            self.manager._active_agent_turn_id.reset(turn_token)
-            self.manager._active_team.reset(team_token)
-            self.manager._active_tool_agent.reset(agent_token)
+
+        await probe_in_activity(self.manager, self.agent, reject_stale_cursor, team=self.team)
 
     async def test_forget_hides_card_without_mutating_journal(self):
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Create a memory.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Create a memory.", team=self.team)
         await self.manager.flush_memory_indexing()
         card = next(iter(self.manager._memory.cards.values()))
         journal_before = tuple(self.manager._memory.events)
@@ -249,32 +201,17 @@ class TestCatalogAndRecall(EpisodicMemoryTestCase):
         self.assertEqual(len(self.manager._memory.events), len(journal_before) + 1)
 
     async def test_retained_reference_is_agent_owned_and_enters_later_identity_context(self):
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Create a memory worth retaining.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Create a memory worth retaining.", team=self.team)
         await self.manager.flush_memory_indexing()
         card = next(iter(self.manager._memory.cards.values()))
-        agent_token = self.manager._active_tool_agent.set(self.agent)
-        team_token = self.manager._active_team.set(self.team)
-        turn_token = self.manager._active_agent_turn_id.set("TURN-retain")
-        try:
+        async def retain():
             await self.manager._memory.recall(card.memory_id)
             await self.manager._memory.keep(card.memory_id, "Use the verified result.")
-        finally:
-            self.manager._active_agent_turn_id.reset(turn_token)
-            self.manager._active_team.reset(team_token)
-            self.manager._active_tool_agent.reset(agent_token)
+
+        await probe_in_activity(self.manager, self.agent, retain)
 
         self.client.responses = ["Final Answer: reused"]
-        await self.team.execute_reasoning_step_detailed(
-            self.agent,
-            "Continue the work.",
-            "System.",
-            manager=self.manager,
-        )
+        await interact_and_idle(self.manager, self.agent, "Continue the work.", team=self.team)
         business_calls = [call for call in self.client.calls if not call["require_json"]]
         self.assertIn(card.memory_id, business_calls[-1]["system_instruction"])
         self.assertIn("Use the verified result.", business_calls[-1]["system_instruction"])

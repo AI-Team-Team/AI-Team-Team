@@ -21,10 +21,12 @@ class FormationAPI:
         try:
             yield
         finally:
-            async with self._runtime_gate:
-                self._active_formation_operations -= 1
-                if task is not None:
-                    self._formation_operation_tasks.discard(task)
+            # Only the runtime event loop owns this accounting. The domain
+            # has already settled or rolled back; release without another
+            # cancellable wait that could strand restore/close admission.
+            self._active_formation_operations -= 1
+            if task is not None:
+                self._formation_operation_tasks.discard(task)
 
     def propose_team_formation(self, **kwargs: Any):
         """Creates a persistent invitation workflow without adding any invitee."""
@@ -102,26 +104,11 @@ class FormationAPI:
             )
         ]
 
-    async def discuss_team_formation_proposal(
-        self,
-        *,
-        actor: Agent,
-        objective: str,
-        request_id: Optional[str] = None,
-    ):
+    async def prepare_team_formation_draft(self, *, actor: Agent, objective: str, candidate, request_id=None, parent=None):
+        """Validate an initiator-supplied artifact without invoking another person."""
         async with self._formation_operation():
-            return await self._formations.discuss_team_formation_proposal(
-                actor=actor,
-                objective=objective,
-                request_id=request_id,
-            )
-
-    async def retry_team_formation_draft(self, draft_id: str, *, actor: Agent):
-        async with self._formation_operation():
-            return await self._formations.retry_team_formation_draft(
-                draft_id,
-                actor=actor,
-            )
+            return await self._formations.prepare_team_formation_draft(
+                actor=actor, objective=objective, candidate=candidate, request_id=request_id, parent=parent)
 
     async def publish_team_formation_draft(self, draft_id: str, *, actor: Agent):
         async with self._formation_operation():

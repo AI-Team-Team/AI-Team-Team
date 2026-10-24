@@ -2,9 +2,9 @@
 
 import asyncio
 
-from ai_team_team.core.exceptions import ToolArgumentError
+from ai_team_team.core.exceptions import ModelProtocolError, ToolArgumentError
 from ai_team_team.core.response import ToolResult, ToolResultStatus
-from ai_team_team.core.strategies.native import _close_interrupted_tool_batch
+from ai_team_team.core.strategies.provider_frames import _close_interrupted_tool_batch
 from ai_team_team.core.strategies.shared import (
     _extract_final_answer,
     _privacy_safe_agent_output,
@@ -36,12 +36,6 @@ class RunnerMixin(ForegroundToolMixin):
                     tokens = [
                         (self.current, self.current.set(session)),
                         (manager._active_team, manager._active_team.set(self.team_for(session))),
-                        (manager._active_discussion_id, manager._active_discussion_id.set(None)),
-                        (
-                            manager._active_agent_turn_id,
-                            manager._active_agent_turn_id.set(session.invocation_id),
-                        ),
-                        (manager._active_round_number, manager._active_round_number.set(None)),
                     ]
                     await self.run_invocation(session, agent)
                 except BaseException as error:
@@ -55,7 +49,8 @@ class RunnerMixin(ForegroundToolMixin):
         except BaseException as error:
             if session.active:
                 await self.interrupt(session, error, window=False)
-            if not isinstance(error, asyncio.CancelledError):
+            from ai_team_team.core.exceptions import RuntimeAdmissionClosedError
+            if not isinstance(error, (asyncio.CancelledError, RuntimeAdmissionClosedError)):
                 manager._emit_callback(
                     "on_system_event",
                     "activity_failed",
@@ -79,6 +74,10 @@ class RunnerMixin(ForegroundToolMixin):
                 self.enqueue(session)
 
     async def interrupt(self, session, error, *, window=True):
+        if session.audit_profile is not None:
+            return await self.interrupt_audit(session, error)
+        from ai_team_team.database.persistence.receipts import settle_commit
+        await settle_commit(asyncio.create_task(self.manager.supervisor.release_claims(session.agent_id)))
         admission = self.manager._records.index.get(
             ("activity_admissions", (session.admission_id,))
         )
@@ -113,27 +112,28 @@ class RunnerMixin(ForegroundToolMixin):
 
     async def run_invocation(self, session, agent):
         manager = self.manager
-        async with self.lock:
-            invocation = capture(
-                manager,
-                "activity_invocations",
+        if session.audit_profile is None:
+            async with self.lock:
+                invocation = capture(
+                    manager,
+                    "activity_invocations",
+                    invocation_id=session.invocation_id,
+                    admission_id=session.admission_id,
+                    agent_id=session.agent_id,
+                    runtime_generation=session.generation,
+                    **scope_fields(session.scope),
+                    context_version=session.context_version,
+                    started_at=self.clock.wall_time(),
+                    interrupted=0,
+                )
+                await self.commit(session, (invocation, self.marker(session)))
+            manager._memory.record_event(
+                "activity_invocation_started",
+                agent=agent,
+                team=self.team_for(session),
                 invocation_id=session.invocation_id,
-                admission_id=session.admission_id,
-                agent_id=session.agent_id,
-                runtime_generation=session.generation,
-                **scope_fields(session.scope),
-                context_version=session.context_version,
-                started_at=self.clock.wall_time(),
-                interrupted=0,
+                inherit_context=False,
             )
-            await self.commit(session, (invocation, self.marker(session)))
-        manager._memory.record_event(
-            "activity_invocation_started",
-            agent=agent,
-            team=self.team_for(session),
-            invocation_id=session.invocation_id,
-            inherit_context=False,
-        )
         _close_interrupted_tool_batch(self.team_for(session), agent, manager)
         if not agent.messages:
             self.append(
@@ -153,20 +153,34 @@ class RunnerMixin(ForegroundToolMixin):
         for _request_index in range(manager.config.activity.model_requests_per_invocation):
             self.check_generation(session)
             tools = manager.get_available_tools(self.team_for(session), agent)
+            if session.audit_profile is not None:
+                tools = manager.supervisor.tools_for(session)
             tools.update(self.control_tools(session))
             from ai_team_team.tool.executions import build_execution_tools
-            tools.update(build_execution_tools(manager))
+            if session.audit_profile is None:
+                tools.update(build_execution_tools(manager))
             await self.prepare_frame(session)
-            response = await self.models.generate(
-                session,
-                client=agent.llm_client,
-                prompt=agent.messages,
-                system_instruction=self.instructions(session, tools, native),
-                system_instruction_factory=lambda: self.instructions(session, tools, native),
-                tools=list(tools.values()) if native else None,
-            )
+            try:
+                response = await self.models.generate(
+                    session,
+                    client=agent.llm_client,
+                    prompt=agent.messages,
+                    system_instruction=self.instructions(session, tools, native),
+                    system_instruction_factory=lambda: self.instructions(session, tools, native),
+                    tools=list(tools.values()) if native else None,
+                    audit_profile=session.audit_profile,
+                )
+            except ModelProtocolError:
+                self.append(session, {"role": "user", "content":
+                    "The last model response violated the tool-call protocol. No malformed call was executed. Correct the structure."},
+                    capture_content=False)
+                async with self.lock:
+                    await self.checkpoint(session)
+                continue
             self.check_generation(session)
             text = response.text or ""
+            if session.audit_profile is None:
+                manager.supervisor.sample_semantic_evidence(session.agent_id, session.last_request_id)
             session.answer = ""
             if native:
                 await self.native_response(session, response, tools)
@@ -192,6 +206,7 @@ class RunnerMixin(ForegroundToolMixin):
             raise ValueError(
                 "Native tool-call identities must be nonblank and unique within a batch."
             )
+        await self.manager.supervisor.observe_model(session, valid=True)
         message = {
             "role": "assistant",
             "content": _privacy_safe_agent_output(agent, response.text or ""),
@@ -243,6 +258,7 @@ class RunnerMixin(ForegroundToolMixin):
         results = await self.execute_batch(executions)
         self.check_generation(session)
         for result in results:
+            await self.manager.supervisor.observe_tool(session, result)
             self.append_observation(session, result, tools, True)
         session.availability = "ready"
 
@@ -269,9 +285,11 @@ class RunnerMixin(ForegroundToolMixin):
                 session, extra=self.claim_records(session, session.last_request_id, "presented")
             )
         if not has_action:
+            await self.manager.supervisor.observe_model(session, valid=True)
             session.answer = _extract_final_answer(text) or text
             self.response_observed(session, answer_ready=True)
             return False
+        action = None
         try:
             action = parse_text_action(text)
             args, kwargs = parse_tool_arguments(action.arguments)
@@ -293,12 +311,15 @@ class RunnerMixin(ForegroundToolMixin):
         except ToolArgumentError as error:
             result = ToolResult(
                 identifier("CALL"),
-                "<action>",
+                action.name if action is not None else "<action>",
                 str(error),
                 status=ToolResultStatus.INVALID_ARGUMENTS,
                 error_kind="action_parse",
             )
         self.check_generation(session)
+        await self.manager.supervisor.observe_model(session, valid=action is not None,
+            error_kind="action_structure" if action is None else None)
+        await self.manager.supervisor.observe_tool(session, result)
         self.append_observation(session, result, tools, False)
         session.availability = "ready"
         return True
@@ -320,9 +341,15 @@ class RunnerMixin(ForegroundToolMixin):
             if session.failure is not None:
                 future.set_exception(session.failure)
             elif presented and (answer_ready or stopping):
-                future.set_result((session.answer, getattr(session.scope, "team_id", None)))
+                future.set_result((
+                    session.answer,
+                    getattr(session.scope, "team_id", None),
+                    session.invocation_id or session.last_checkpoint_invocation_id,
+                ))
 
     async def end_invocation(self, session):
+        if session.audit_profile is not None:
+            return await self.finish_audit_invocation(session)
         async with self.lock:
             invocation_id = session.invocation_id
             previous = (
@@ -381,6 +408,8 @@ class RunnerMixin(ForegroundToolMixin):
                     session.pending_scope = None
                 raise
             self.finish_boundary(session)
+        if session.intent in {"idle", "sleep"}:
+            await self.manager.supervisor.release_claims(session.agent_id)
 
     def finish_boundary(self, session):
         segment_id = getattr(session, "pending_segment_id", None)

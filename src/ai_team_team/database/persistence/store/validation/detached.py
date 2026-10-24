@@ -24,7 +24,9 @@ def source_rows(state):
         "agent_memory_segments": {row["segment_id"]: row for row in state.get("memory_segments", ())},
         "system_memory_events": {row["event_id"]: row for row in state.get("memory_events", ())},
         "agent_inbox": {mail["message_id"]: mail for inbox in state.get("agent_inboxes", {}).values() for mail in inbox},
-        "governance_cases": {row["round_id"]: row for row in state.get("governance_rounds", ())},
+        "governance_cases": {row["case_id"]: row for row in state.get("governance_cases", ())},
+        "governance_ballots": {ballot["ballot_id"]: ballot for row in state.get("governance_cases", ()) for ballot in row["ballots"]},
+        "migration_requests": {row["request_id"]: row for row in state.get("migration_requests", ())},
     }
     result = {}
     for name, rows in sources.items():
@@ -48,6 +50,8 @@ def source_rows(state):
                 values.update(case_id=identity, data=thaw(source),
                     principal_agent_id=principal["principal_id"] if principal["kind"] == "agent" else None,
                     principal_team_id=principal["principal_id"] if principal["kind"] == "agent_team" else None)
+            if name == "migration_requests":
+                values["data"] = thaw(source)
             if name == "teams":
                 values.update(creator_agent_id=source["creator_id"] if source["creator_type"] == "agent" else None,
                     creator_team_id=source["creator_id"] if source["creator_type"] == "team" else None)

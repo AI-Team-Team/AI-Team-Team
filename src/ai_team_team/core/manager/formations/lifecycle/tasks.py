@@ -4,38 +4,12 @@ import asyncio
 import contextvars
 import time
 
-from ....formation import FormationDraftStatus, TeamFormationRequest
+from ....formation import TeamFormationRequest
+from ....exceptions import RuntimeAdmissionClosedError
 from ....team import AgentTeam
 
 
 class FormationTaskMixin:
-    def cancel_for_shutdown(self) -> None:
-        """Freezes running drafts before their external waits are cancelled."""
-        cancelled_ids = set()
-        inbox_ids = set()
-        for draft in self.drafts.values():
-            if draft.status is not FormationDraftStatus.RUNNING:
-                continue
-            draft.status = FormationDraftStatus.CANCELLED
-            draft.reason = (
-                "The manager closed before detached proposal deliberation completed."
-            )
-            draft.updated_at = time.time()
-            cancelled_ids.add(draft.draft_id)
-            initiator = self.manager._agents_by_id.get(draft.initiator_agent_id)
-            if initiator is not None:
-                self._notify_agent(
-                    initiator.agent_id,
-                    "team_formation_draft_cancelled",
-                    {"draft_id": draft.draft_id, "request_id": draft.request_id},
-                )
-                inbox_ids.add(initiator.agent_id)
-        if cancelled_ids:
-            self.manager._auto_save(
-                formation_drafts=cancelled_ids,
-                agent_inboxes=inbox_ids,
-            )
-
     def _track_task(self, coroutine: object) -> asyncio.Task[object]:
         """Starts framework-owned work without inheriting invocation dependencies."""
         loop = asyncio.get_running_loop()
@@ -48,6 +22,9 @@ class FormationTaskMixin:
                 return
             error = completed.exception()
             if error is None:
+                return
+            if isinstance(error, RuntimeAdmissionClosedError):
+                self._emit_event("team_formation_admission_deferred", {"reason": "runtime_admission_closed"})
                 return
             self.manager.logger.error(
                 "Detached team-formation task failed: %s",
@@ -83,14 +60,17 @@ class FormationTaskMixin:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    # The finalizer may have replaced its rejected candidate
+                    # with the prior projection. Never report failure on the
+                    # detached candidate or rewrite an accepted creation.
+                    current = self.requests.get(request.request_id)
+                    if current is None:
+                        return
+                    if current.status.value == "created":
+                        raise
                     old_request = current.model_copy(deep=True)
                     initiator = self.manager._agents_by_id.get(
                         current.initiator_agent_id
-                    )
-                    old_inboxes = (
-                        self._copy_inboxes([initiator])
-                        if initiator is not None
-                        else {}
                     )
                     current.decision_reason = (
                         "Automatic creation could not commit: "
@@ -120,49 +100,44 @@ class FormationTaskMixin:
                         )
                     except Exception:
                         self.requests[current.request_id] = old_request
-                        if initiator is not None:
-                            self._restore_inboxes([initiator], old_inboxes)
                         raise
 
         self._track_task(run())
 
-    def _schedule_initial_task(
-        self,
-        request: TeamFormationRequest,
-        team: AgentTeam,
-    ) -> None:
-        if not request.task:
+    def prepare_initial_instructions(self, team, text):
+        """Capture addressed input, not a required business work-item lifecycle."""
+        for member in team.members:
+            self.manager._inbox.notify(member.agent_id, "team_initial_instruction",
+                {"team_id": team.team_id, "text": text}, message_id=f"INITIAL-{team.team_id}-{member.agent_id}")
+
+    def schedule_initial_arrivals(self, team):
+        if not any(any(mail["message_type"] == "team_initial_instruction" and mail["payload"].get("team_id") == team.team_id
+                       for mail in member.agent_inbox) for member in team.members):
             return
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             return
 
-        async def run() -> None:
-            try:
-                transcript = await self.manager.execute_team_discussion(
-                    team,
-                    request.task or "",
-                    rounds=self.manager.config.subagent_discussion_rounds,
-                )
-                message_type = "team_formation_task_completed"
-                payload = {
-                    "request_id": request.request_id,
-                    "team_id": team.team_id,
-                    "transcript": transcript,
-                }
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                message_type = "team_formation_task_failed"
-                payload = {
-                    "request_id": request.request_id,
-                    "team_id": team.team_id,
-                    "error_type": type(exc).__name__,
-                }
-            initiator = self.manager._agents_by_id.get(request.initiator_agent_id)
-            if initiator is not None:
-                self._notify_agent(initiator.agent_id, message_type, payload)
-                self.manager._auto_save(agent_inboxes={initiator.agent_id})
+        async def admit():
+            from ....activity.contracts import AgentTeamScope
+            for member in tuple(team.members):
+                if self.manager._closing or getattr(team, "_lifecycle_state", "active") != "active":
+                    return
+                if not any(mail["message_type"] == "team_initial_instruction"
+                           and mail["payload"].get("team_id") == team.team_id for mail in member.agent_inbox):
+                    continue
+                async with self.manager._activity.lock:
+                    if self.manager._closing or self.manager._restore_in_progress:
+                        return
+                    records, notices = self.manager._activity.mail_records({member.agent_id})
+                    if records:
+                        dirty = self.manager._new_dirty_state()
+                        dirty["agent_inboxes"].add(member.agent_id)
+                        await self.manager._records.commit(records, dirty=dirty, notifications=notices)
+                    pending = self.manager._activity.pending_notices(member.agent_id)
+                    if pending and member in team.members and not self.manager._closing and not self.manager._restore_in_progress:
+                        await self.manager._activity._activate_locked(member.agent_id,
+                            scope=AgentTeamScope(team_id=team.team_id))
 
-        self._track_task(run())
+        self._track_task(admit())

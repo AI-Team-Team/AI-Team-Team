@@ -12,6 +12,8 @@ from ai_team_team import (
     FormationDraftStatus,
     InvitationAttitude,
     TeamFormationRevisionPatch,
+    TeamFormationDraftCandidate,
+    LateJoinPolicy,
     UnanimousAcceptanceAction,
 )
 
@@ -56,7 +58,6 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
             self.root,
             ATTConfig(
                 workspace_root=self.tmpdir,
-                subagent_discussion_rounds=1,
             ),
             persistence_mode="volatile",
         )
@@ -74,7 +75,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
 
     def _proposal(self):
         return self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"NewAnalyst": {"model": "draft"}},
             existing_members=self.invitees[:2],
             team_purpose="Original purpose",
@@ -201,7 +202,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
         }
         original_commit = self.manager._commit_dirty_state
 
-        async def fail_commit(_dirty):
+        async def fail_commit(_dirty, **_kwargs):
             raise OSError("Injected revision persistence failure.")
 
         self.manager._commit_dirty_state = fail_commit
@@ -258,7 +259,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
         for peer in peers:
             self.manager.register_agent(peer)
         creator_team = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             existing_members=[self.root, *peers],
         )
         unrelated_inbox_item = {
@@ -290,36 +291,31 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
         agent_token = self.manager._active_tool_agent.set(self.root)
         team_token = self.manager._active_team.set(creator_team)
         try:
-            draft = await self.manager.discuss_team_formation_proposal(
+            draft = await self.manager.prepare_team_formation_draft(
                 actor=self.root,
                 objective="Design an incident investigation team.",
+                candidate=TeamFormationDraftCandidate.model_validate_json(json.dumps(self.client.candidate)),
+                parent=creator_team,
             )
         finally:
             self.manager._active_team.reset(team_token)
             self.manager._active_tool_agent.reset(agent_token)
 
-        self.assertEqual(draft.status, FormationDraftStatus.PENDING)
+        self.assertEqual(draft.status, FormationDraftStatus.READY)
         self.assertFalse(self.manager._formations.requests)
         self.assertIn(unrelated_inbox_item, creator_team.message_inbox)
-        await asyncio.gather(*tuple(self.manager._formations.tasks))
         ready = self.manager.get_team_formation_draft(draft.draft_id, actor=self.root)
         self.assertEqual(ready.status, FormationDraftStatus.READY)
         self.assertEqual(
             set(ready.participant_agent_ids),
-            {member.agent_id for member in creator_team.members},
+            {self.root.agent_id},
         )
-        self.assertIsNotNone(ready.source_discussion_id)
+        self.assertIsNone(ready.initiator_invocation_id)
         self.assertEqual(
             ready.candidate.team_purpose,
             "Collaboratively designed purpose",
         )
-        self.assertTrue(
-            any(
-                "Advisory formation design." in prompt
-                and "Design an incident investigation team." in prompt
-                for prompt in self.client.prompts
-            )
-        )
+        self.assertFalse(self.client.prompts)
         self.assertFalse(self.manager._formations.requests)
 
         published = await self.manager.publish_team_formation_draft(
@@ -345,28 +341,33 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    async def test_required_team_deliberation_blocks_direct_publication(self):
-        self.manager.config.formation_deliberation_policy = "required_when_team_scoped"
+    async def test_team_scoped_design_needs_no_compulsory_draft(self):
         creator_team = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"PeerA": {}, "PeerB": {}, "PeerC": {}},
         )
-        with self.assertRaisesRegex(PermissionError, "collaborative draft"):
-            self.manager.create_agent_team(
-                creator_team,
-                member_configs={"NewAnalyst": {"model": "draft"}},
-                existing_members=self.invitees[:2],
-                initiating_agent=creator_team.members[0],
-            )
+        request = self.manager.create_agent_team(
+            creator_team, parent=creator_team,
+            member_configs={"NewAnalyst": {"model": "draft"}},
+            existing_members=self.invitees[:2],
+            initiating_agent=creator_team.members[0],
+        )
+        self.assertEqual(request.status.value, "collecting_responses")
+        self.assertFalse(self.manager._formations.drafts)
+        self.assertTrue(all(
+            self.manager.get_team_formation_invitation(request.request_id, person.agent_id).attitude
+            is InvitationAttitude.NO_RESPONSE for person in self.invitees[:2]
+        ))
+        self.assertFalse(self.client.prompts)
 
     async def test_team_scoped_revision_fails_after_initiator_leaves_creator_team(self):
         creator_team = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"CreatorPeerA": {}, "CreatorPeerB": {}},
             existing_members=[self.root],
         )
         request = self.manager.create_agent_team(
-            creator_team,
+            creator_team, parent=creator_team,
             member_configs={"NewAnalyst": {"model": "draft"}},
             existing_members=self.invitees[:2],
             initiating_agent=self.root,
@@ -393,11 +394,11 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
         for peer in peers:
             self.manager.register_agent(peer)
         creator_team = self.manager.bootstrap_agent_team(
-            self.root,
+            self.root, parent=self.root,
             existing_members=[self.root, *peers],
         )
         request = self.manager.create_agent_team(
-            creator_team,
+            creator_team, parent=creator_team,
             member_configs={"NewAnalyst": {"model": "draft"}},
             existing_members=self.invitees[:2],
             initiating_agent=self.root,
@@ -432,9 +433,10 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
         agent_token = self.manager._active_tool_agent.set(self.root)
         team_token = self.manager._active_team.set(creator_team)
         try:
-            draft = await self.manager.discuss_team_formation_proposal(
+            draft = await self.manager.prepare_team_formation_draft(
                 actor=self.root,
                 objective="Revise the investigation scope collaboratively.",
+                candidate=TeamFormationDraftCandidate.model_validate_json(json.dumps(self.client.candidate)),
                 request_id=request.request_id,
             )
         finally:
@@ -475,7 +477,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
 
     async def test_zero_invitee_auto_creation_has_a_trigger(self):
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"NewA": {}, "NewB": {}},
             initiator_joins=True,
             unanimous_acceptance_action="auto_create",
@@ -485,73 +487,49 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restored.status.value, "created")
         self.assertIn(self.root, self.manager.teams[restored.created_team_id].members)
 
-    async def test_draft_whose_base_changes_before_deliberation_becomes_stale(self):
+    async def test_draft_whose_exact_base_changes_becomes_stale(self):
         request = self._proposal()
-        started = asyncio.Event()
-        release = asyncio.Event()
-        original_synthesize = self.manager._formations._synthesize_draft
-
-        async def delayed_synthesis(draft_id):
-            started.set()
-            await release.wait()
-            return await original_synthesize(draft_id)
-
-        self.manager._formations._synthesize_draft = delayed_synthesis
-        try:
-            draft = await self.manager.discuss_team_formation_proposal(
-                actor=self.root,
-                objective="Consider a revision after a controlled delay.",
-                request_id=request.request_id,
-            )
-            await asyncio.wait_for(started.wait(), timeout=1)
-            await self.manager.revise_team_formation(
-                request.request_id,
-                actor=self.root,
-                base_revision=request.proposal_revision,
-                changes=TeamFormationRevisionPatch(
-                    team_purpose="A revision committed before deliberation begins"
-                ),
-            )
-        finally:
-            release.set()
-            self.manager._formations._synthesize_draft = original_synthesize
-        await asyncio.gather(*tuple(self.manager._formations.tasks))
-
-        stale = self.manager.get_team_formation_draft(
-            draft.draft_id,
-            actor=self.root,
+        candidate = TeamFormationDraftCandidate(
+            member_count=3, preset_name="custom", system_instructions="A personal candidate.",
+            team_purpose="Candidate scope", member_configs={"NewAnalyst": {"model": "draft"}},
+            existing_member_ids=[person.agent_id for person in self.invitees[:2]],
+            is_public_visible=False, initiator_joins=False,
+            unanimous_acceptance_action=UnanimousAcceptanceAction.REQUIRE_CONFIRMATION,
+            late_join_policy=LateJoinPolicy.DISABLED,
         )
+        draft = await self.manager.prepare_team_formation_draft(
+            actor=self.root, objective="Consider an optional revision.",
+            candidate=candidate, request_id=request.request_id,
+        )
+        await self.manager.revise_team_formation(
+            request.request_id, actor=self.root, base_revision=request.proposal_revision,
+            changes=TeamFormationRevisionPatch(team_purpose="A different committed revision"),
+        )
+        stale = self.manager.get_team_formation_draft(draft.draft_id, actor=self.root)
         self.assertEqual(stale.status, FormationDraftStatus.STALE)
-        self.assertIsNone(stale.candidate)
-        with self.assertRaisesRegex(ValueError, "cannot be retried"):
-            await self.manager.retry_team_formation_draft(
-                stale.draft_id,
-                actor=self.root,
-            )
-
-        db_path = os.path.join(self.tmpdir, "stale-before-deliberation.db")
+        self.assertEqual(stale.candidate, candidate)
+        with self.assertRaisesRegex(ValueError, "ready"):
+            await self.manager.publish_team_formation_draft(stale.draft_id, actor=self.root)
+        self.assertFalse(hasattr(self.manager, "retry_team_formation_draft"))
+        db_path = os.path.join(self.tmpdir, "stale-candidate.db")
         await self.manager.save_state(db_path)
         await self.manager.close()
         restored = ATTManager(
             Agent("TemporaryStaleRoot", "Temporary", self.client),
-            ATTConfig(workspace_root=self.tmpdir),
-            persistence_mode="volatile",
+            ATTConfig(workspace_root=self.tmpdir), persistence_mode="volatile",
         )
         restored.register_llm_client("draft", self.client)
         try:
             await restored.load_state(db_path)
-            loaded = restored.get_team_formation_draft(
-                stale.draft_id,
-                actor=restored.root_ai,
-            )
+            loaded = restored.get_team_formation_draft(stale.draft_id, actor=restored.root_ai)
             self.assertEqual(loaded.status, FormationDraftStatus.STALE)
-            self.assertIsNone(loaded.candidate)
+            self.assertEqual(loaded.candidate, candidate)
         finally:
             await restored.close()
 
     async def test_zero_invitee_confirmation_proposal_is_immediately_ready(self):
         request = self.manager.create_agent_team(
-            self.root,
+            self.root, parent=self.root,
             member_configs={"NewA": {}, "NewB": {}},
             initiator_joins=True,
             unanimous_acceptance_action="require_confirmation",
@@ -615,18 +593,18 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
         root = Agent("PersistentRoot", "Architect", client)
         manager = ATTManager(
             root,
-            ATTConfig(workspace_root=workspace, subagent_discussion_rounds=1),
+            ATTConfig(workspace_root=workspace),
             db_path=db_path,
             persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("draft-persist", client)
         manager.bootstrap_agent_team(
-            root,
+            root, parent=root,
             existing_members=[root],
             member_configs={"RootPeerA": {}, "RootPeerB": {}},
         )
         manager.bootstrap_agent_team(
-            root,
+            root, parent=root,
             existing_members=[root],
             member_configs={"RootPeerC": {}, "RootPeerD": {}},
         )
@@ -653,9 +631,10 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
             "late_join_policy": "disabled",
         }
         try:
-            draft = await manager.discuss_team_formation_proposal(
+            draft = await manager.prepare_team_formation_draft(
                 actor=root,
                 objective="Formulate a persistent proposal.",
+                candidate=TeamFormationDraftCandidate.model_validate_json(json.dumps(client.candidate)),
             )
             await asyncio.gather(*tuple(manager._formations.tasks))
             published = await manager.publish_team_formation_draft(
@@ -665,9 +644,10 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(
                 manager.get_team_formation(published.request_id).parent_team_id
             )
-            stale_draft = await manager.discuss_team_formation_proposal(
+            stale_draft = await manager.prepare_team_formation_draft(
                 actor=root,
                 objective="Consider a competing next revision.",
+                candidate=TeamFormationDraftCandidate.model_validate_json(json.dumps(client.candidate)),
                 request_id=published.request_id,
             )
             await asyncio.gather(*tuple(manager._formations.tasks))
@@ -732,7 +712,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
         finally:
             await restored.close()
 
-    async def test_close_persists_cancelled_draft_without_waiting_for_hanging_provider(self):
+    async def test_preparing_candidate_never_invokes_a_hanging_provider(self):
         workspace = os.path.join(self.tmpdir, "cancelled-draft")
         os.makedirs(workspace)
         db_path = os.path.join(workspace, "state.db")
@@ -745,11 +725,19 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
             persistence_mode=("durable" if (db_path) else "volatile"),
         )
         manager.register_llm_client("hanging-draft", client)
-        draft = await manager.discuss_team_formation_proposal(
+        draft = await manager.prepare_team_formation_draft(
             actor=root,
-            objective="This detached synthesis will remain pending.",
+            objective="Validate my design without an extra model call.",
+            candidate=TeamFormationDraftCandidate(
+                member_count=3, preset_name="custom", system_instructions="Validate locally.",
+                team_purpose="Personal design", member_configs={"PeerOne": {}, "PeerTwo": {}},
+                is_public_visible=False, initiator_joins=True,
+                unanimous_acceptance_action=UnanimousAcceptanceAction.REQUIRE_CONFIRMATION,
+                late_join_policy=LateJoinPolicy.DISABLED,
+            ),
         )
-        await asyncio.wait_for(client.started.wait(), timeout=1)
+        self.assertFalse(client.started.is_set())
+        self.assertEqual(draft.status, FormationDraftStatus.READY)
         await asyncio.wait_for(manager.close(), timeout=1)
 
         replacement = DraftClient()
@@ -765,7 +753,7 @@ class TestFormationRevisionsAndDeliberation(unittest.IsolatedAsyncioTestCase):
                 draft.draft_id,
                 actor=restored.root_ai,
             )
-            self.assertEqual(loaded.status, FormationDraftStatus.CANCELLED)
+            self.assertEqual(loaded.status, FormationDraftStatus.READY)
         finally:
             await restored.close()
 

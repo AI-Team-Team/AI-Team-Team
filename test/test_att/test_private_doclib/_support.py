@@ -15,7 +15,7 @@ class DummyClient:
     """Minimal client for Private Agent DocLib tests."""
 
     async def generate(self, prompt, **kwargs):
-        return "ok"
+        return "Action: set_activity_intent(intent={'kind': 'idle'})"
 
 
 class SequenceClient:
@@ -27,7 +27,7 @@ class SequenceClient:
 
     async def generate(self, prompt, **kwargs):
         self.prompt_snapshots.append(repr(prompt))
-        return self.responses.pop(0)
+        return self.responses.pop(0) if self.responses else "Action: set_activity_intent(intent={'kind': 'idle'})"
 
 
 class PrivateAgentDocLibTestCase(unittest.IsolatedAsyncioTestCase):

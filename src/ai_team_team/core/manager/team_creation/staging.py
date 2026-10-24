@@ -54,17 +54,12 @@ class TeamCreationStagingMixin:
             team_kind=team_kind,
         )
         team.manager = manager
-        parent = (
-            parent_override
-            if parent_override_provided
-            else creator
-            if isinstance(creator, AgentTeam)
-            else manager.get_agent_team(creator)
-        )
-        team._parent_team = parent
+        parent = manager._topology.resolve_parent(parent_override)
+        team._parent_team = parent if isinstance(parent, AgentTeam) else None
+        team._parent_agent_id = parent.agent_id if isinstance(parent, Agent) else None
         if isinstance(creator, AgentTeam):
             team.chapter_num = creator.chapter_num
-        elif parent is not None:
+        elif isinstance(parent, AgentTeam):
             team.chapter_num = parent.chapter_num
 
         def client_by_alias(alias: Optional[str]) -> Any:

@@ -1,514 +1,207 @@
-"""Communication approval claims, decisions, and atomic completion."""
+"""Receipt-published approvals backed only by explicit personal ballots."""
 
-from __future__ import annotations
-
-import asyncio
 import time
-from typing import Any, Dict, List, Optional, Sequence
 
 from ..communication import (
-    AgreementDirection,
-    ApprovalPrincipal,
-    CommunicationAgreement,
-    CommunicationApproval,
-    CommunicationApprovalStatus,
-    CommunicationBallot,
-    CommunicationRequest,
-    CommunicationRequestStatus,
-    route_fingerprint,
+    AgreementDirection, CommunicationAgreement, CommunicationApprovalStatus,
+    CommunicationRequestStatus, route_fingerprint,
 )
 from ..config import _parse_communication_config
-from ..decision import DecisionOutcome, TeamDecisionProvider
-from ..team import AgentTeam
+from ..decision import TeamDecisionProvider
 
 
 class BrokerApprovalMixin:
-    def _refresh_pending_request_status(self, request: CommunicationRequest) -> None:
-        """Preserves claims held by other principals when one returns to pending."""
-        request.status = (
-            CommunicationRequestStatus.PROCESSING
-            if any(
-                item.status is CommunicationApprovalStatus.PROCESSING
-                for item in self.approvals_for_request(request.request_id)
-            )
-            else CommunicationRequestStatus.PENDING
-        )
-
-    async def _claim_approval(
-        self, request_id: str, principal: ApprovalPrincipal
-    ) -> Optional[CommunicationApproval]:
-        async with self._locked_state():
-            request = self.communication_requests.get(request_id)
-            key = f"{request_id}:{principal.key}"
-            approval = self.communication_approvals.get(key)
-            if (
-                request is None
-                or approval is None
-                or request.status
-                not in {
-                    CommunicationRequestStatus.PENDING,
-                    CommunicationRequestStatus.PROCESSING,
-                }
-                or approval.status is not CommunicationApprovalStatus.PENDING
-            ):
-                return None
-            approval.status = CommunicationApprovalStatus.PROCESSING
-            request.status = CommunicationRequestStatus.PROCESSING
-        self.manager._auto_save(
-            communication_requests={request_id},
-            communication_approvals={request_id},
-        )
+    async def _claim_approval(self, request_id, principal):
+        request = self.communication_requests.get(request_id)
+        approval = self.communication_approvals.get(f"{request_id}:{principal.key}")
+        if (request is None or approval is None
+                or request.status not in {CommunicationRequestStatus.PENDING, CommunicationRequestStatus.PROCESSING}
+                or approval.status not in {CommunicationApprovalStatus.PENDING, CommunicationApprovalStatus.PROCESSING}):
+            return None
+        # This is a local scheduling claim, not authority or a nested model call.
         return approval
 
-    async def _process_agent_approval(
-        self, request_id: str, principal: ApprovalPrincipal
-    ) -> None:
-        approval = await self._claim_approval(request_id, principal)
-        if approval is None:
+    async def _process_principal_approval(self, request_id, principal):
+        if await self._claim_approval(request_id, principal) is None:
             return
         request = self.communication_requests[request_id]
-        try:
-            outcome = await self.decision_provider.decide_agent_boolean(
-                principal, self._request_prompt(request, principal), request_id=request_id
-            )
-        except asyncio.CancelledError:
-            await asyncio.shield(
-                self._complete_approval(
-                    request_id,
-                    principal,
-                    DecisionOutcome(
-                        "pending", "Agent governance decision was cancelled."
-                    ),
-                )
-            )
-            raise
-        except Exception as exc:
-            outcome = DecisionOutcome(
-                "pending", f"Agent governance decision failed: {exc}"
-            )
-        await self._complete_approval(request_id, principal, outcome)
-
-    async def process_team_approvals_from_transcript(
-        self,
-        team: AgentTeam,
-        request_ids: Sequence[str],
-        transcript: str,
-        members: Sequence[Any],
-    ) -> None:
-        principal = ApprovalPrincipal(
-            kind="agent_team", principal_id=team.team_id
+        outcome = await self.decision_provider.decide_principal_boolean(
+            principal, request_id, self._request_prompt(request, principal), business_kind="communication"
         )
-        for request_id in request_ids:
-            approval = await self._claim_approval(request_id, principal)
-            if approval is None:
-                continue
-            request = self.communication_requests[request_id]
-            try:
-                outcome = await self.decision_provider.ballot_team_boolean(
-                    principal,
-                    request_id,
-                    self._request_prompt(request, principal),
-                    transcript,
-                    members,
-                )
-            except asyncio.CancelledError:
-                await asyncio.shield(
-                    self._complete_approval(
-                        request_id,
-                        principal,
-                        DecisionOutcome(
-                            "pending",
-                            "AgentTeam governance decision was cancelled.",
-                        ),
-                    )
-                )
-                raise
-            except Exception as exc:
-                outcome = DecisionOutcome(
-                    "pending", f"AgentTeam governance decision failed: {exc}"
-                )
+        if outcome.status != "pending":
             await self._complete_approval(request_id, principal, outcome)
 
-    def _remove_request_notifications(self, request_id: str) -> set[str]:
-        changed = set()
-        for team in self.manager.teams.values():
-            with team.inbox_lock:
-                retained = [
-                    message
-                    for message in team.message_inbox
-                    if not (
-                        message.get("type")
-                        == "communication_approval_request"
-                        and message.get("request_id") == request_id
-                    )
-                ]
-                if len(retained) != len(team.message_inbox):
-                    team.message_inbox = retained
-                    changed.add(team.team_id)
-        return changed
-
-    def _remove_principal_notification(
-        self, request_id: str, principal: ApprovalPrincipal
-    ) -> set[str]:
-        if principal.kind != "agent_team":
-            return set()
-        team = self.manager.teams.get(principal.principal_id)
-        if team is None:
-            return set()
-        with team.inbox_lock:
-            retained = [
-                message
-                for message in team.message_inbox
-                if not (
-                    message.get("type")
-                    == "communication_approval_request"
-                    and message.get("request_id") == request_id
-                )
-            ]
-            if len(retained) == len(team.message_inbox):
-                return set()
-            team.message_inbox = retained
-        return {team.team_id}
-
-    def _create_agreement_locked(
-        self, request: CommunicationRequest
-    ) -> CommunicationAgreement:
+    def _create_agreement_locked(self, request):
+        existing = self.active_agreement_for_request(
+            request.sender_team_id, request.recipient_team_id, request.direction
+        )
+        if existing is not None:
+            return existing, set()
         agreement = CommunicationAgreement(
-            source_team_id=request.sender_team_id,
-            target_team_id=request.recipient_team_id,
-            direction=request.direction,
-            created_from_request_id=request.request_id,
+            source_team_id=request.sender_team_id, target_team_id=request.recipient_team_id,
+            direction=request.direction, created_from_request_id=request.request_id,
             policy_snapshot=dict(request.policy_snapshot),
         )
+        changed = {agreement.agreement_id}
         if agreement.direction is AgreementDirection.BIDIRECTIONAL:
-            endpoints = {
-                agreement.source_team_id,
-                agreement.target_team_id,
-            }
-            for existing in self.agreements.values():
-                if (
-                    existing.active
-                    and {
-                        existing.source_team_id,
-                        existing.target_team_id,
-                    }
-                    == endpoints
-                ):
-                    existing.active = False
-                    existing.revoked_at = time.time()
-                    existing.revoke_reason = (
-                        "Superseded by a bidirectional agreement."
-                    )
-                    existing.superseded_by_agreement_id = agreement.agreement_id
+            pair = {agreement.source_team_id, agreement.target_team_id}
+            for key, prior in tuple(self.agreements.items()):
+                if prior.active and {prior.source_team_id, prior.target_team_id} == pair:
+                    replacement = prior.model_copy(deep=True)
+                    replacement.active = False
+                    replacement.revoked_at = time.time()
+                    replacement.revoke_reason = "Superseded by a bidirectional agreement."
+                    replacement.superseded_by_agreement_id = agreement.agreement_id
+                    self.agreements[key] = replacement
+                    changed.add(key)
         self.agreements[agreement.agreement_id] = agreement
-        return agreement
+        return agreement, changed
 
-    async def _complete_approval(
-        self,
-        request_id: str,
-        principal: ApprovalPrincipal,
-        outcome: DecisionOutcome,
-    ) -> None:
-        async with self._transaction_lock:
-            async with self.manager._governance.lock:
-                await self._complete_approval_transaction(
-                    request_id, principal, outcome
-                )
+    def route_changed(self, request):
+        sender = self.manager.teams.get(request.sender_team_id)
+        recipient = self.manager.teams.get(request.recipient_team_id)
+        if any(team is None or getattr(team, "_lifecycle_state", "active") != "active"
+               for team in (sender, recipient)):
+            return True
+        policy = _parse_communication_config(request.policy_snapshot)
+        return route_fingerprint(self.approval_path(sender, recipient, policy),
+            self.approval_route_evidence(sender, recipient, policy)) != request.route_fingerprint
 
-    async def _complete_approval_transaction(
-        self,
-        request_id: str,
-        principal: ApprovalPrincipal,
-        outcome: DecisionOutcome,
-    ) -> None:
-        if outcome.status not in {"pending", "approved", "denied"}:
-            outcome = DecisionOutcome(
-                "pending", "The decision provider did not return a recognized explicit decision."
-            )
-        if outcome.status in {"approved", "denied"}:
-            voting_round = self.manager._governance.rounds.get(outcome.round_id)
-            if (
-                voting_round is None
-                or voting_round.business_kind != "communication"
-                or voting_round.business_id != request_id
-                or voting_round.principal != principal
-                or voting_round.status.lower() != outcome.status
-                or not self.manager._governance.electorate_valid(voting_round)
-                or self.manager._governance.latest("communication", request_id, principal) is not voting_round
-            ):
-                outcome = DecisionOutcome("pending", "The explicit voting round is missing, superseded, or no longer eligible.")
-            else:
-                # The round is the authority, not an independently supplied
-                # summary or projection that can omit or alter accepted votes.
-                outcome = TeamDecisionProvider.outcome(voting_round)
-        successor: Optional[CommunicationRequest] = None
-        new_agreement: Optional[CommunicationAgreement] = None
-        changed_agreements: set[str] = set()
-        request_before: Optional[CommunicationRequest] = None
-        approvals_before: Dict[str, CommunicationApproval] = {}
-        ballots_before: List[CommunicationBallot] = []
-        agreements_before: Dict[str, CommunicationAgreement] = {}
-        request_notifications_before: Dict[
-            str, List[Dict[str, Any]]
-        ] = {}
-        invalidated_inboxes: set[str] = set()
-        rounds_before = {}
-        async with self._locked_state():
-            request = self.communication_requests.get(request_id)
-            approval = self.communication_approvals.get(
-                f"{request_id}:{principal.key}"
-            )
-            if request is None or approval is None:
+    def stale_candidate(self, request, dirty):
+        """Never reuse a changed route's ballots, even if it later changes back."""
+        request.status = CommunicationRequestStatus.STALE
+        request.decision_reason = "The relevant organizational route changed."
+        request.resolved_at = time.time()
+        for prior in self.approvals_for_request(request.request_id):
+            if prior.status in {CommunicationApprovalStatus.PENDING, CommunicationApprovalStatus.PROCESSING}:
+                approval = prior.model_copy(deep=True)
+                approval.status = CommunicationApprovalStatus.CANCELLED
+                approval.reason = "The originating route became stale."
+                approval.resolved_at = request.resolved_at
+                self.communication_approvals[approval.key] = approval
+        dirty["communication_requests"].add(request.request_id)
+        dirty["communication_approvals"].add(request.request_id)
+        sender = self.manager.teams.get(request.sender_team_id)
+        recipient = self.manager.teams.get(request.recipient_team_id)
+        if any(team is None or getattr(team, "_lifecycle_state", "active") != "active"
+               for team in (sender, recipient)):
+            return None
+        successor = self._new_request_locked(sender, recipient, request.initiated_by_agent_id,
+            request.rationale, _parse_communication_config(request.policy_snapshot),
+            supersedes_request_id=request.request_id)
+        request.superseded_by_request_id = successor.request_id
+        if not successor.approval_principals:
+            successor.status = CommunicationRequestStatus.APPROVED
+            successor.decision_reason = "Both endpoints are now explicitly independent; no authority or channel is required."
+            successor.resolved_at = time.time()
+        dirty["communication_requests"].add(successor.request_id)
+        dirty["communication_approvals"].add(successor.request_id)
+        return successor
+
+    def schedule_route_review(self):
+        for request in tuple(self.communication_requests.values()):
+            if request.status in {CommunicationRequestStatus.PENDING, CommunicationRequestStatus.PROCESSING}:
+                self._track_task(f"route:{request.request_id}", self.review_route(request.request_id))
+
+    async def review_route(self, request_id):
+        manager = self.manager
+        async with self._transaction_lock, manager._governance.lock, manager._topology.transition_lock, manager._activity.lock:
+            original = self.communication_requests.get(request_id)
+            if (original is None or original.status not in {
+                    CommunicationRequestStatus.PENDING, CommunicationRequestStatus.PROCESSING}
+                    or not self.route_changed(original)):
                 return
-            if (
-                approval.status is not CommunicationApprovalStatus.PROCESSING
-                or request.status
-                not in {
-                    CommunicationRequestStatus.PENDING,
-                    CommunicationRequestStatus.PROCESSING,
-                }
-            ):
+            operation_id = f"STALE-{request_id}"
+            successor = None
+            with self.stage() as candidate:
+                request = original.model_copy(deep=True)
+                self.communication_requests[request_id] = request
+                dirty = manager._new_dirty_state()
+                successor = self.stale_candidate(request, dirty)
+                try:
+                    await manager._records.commit((), dirty=dirty, broker_state=candidate, operation_id=operation_id)
+                finally:
+                    if operation_id in manager._records.receipts:
+                        self.cancel_obsolete_cases(request_id)
+                        if successor is not None:
+                            self._schedule_initial_approvals(successor)
+
+    def cancel_obsolete_cases(self, request_id):
+        for case in tuple(self.manager._governance.cases.values()):
+            if case.business_kind == "communication" and case.business_id == request_id and case.status == "PENDING":
+                self.manager._governance.track(f"expire:{case.case_id}",
+                    self.manager._governance.expire(case.case_id, "The originating request is resolved or stale."))
+
+    async def _complete_approval(self, request_id, principal, outcome):
+        manager = self.manager
+        async with self._transaction_lock, manager._governance.lock, manager._topology.transition_lock, manager._activity.lock:
+            original = self.communication_requests.get(request_id)
+            approval = self.communication_approvals.get(f"{request_id}:{principal.key}")
+            if original is None or approval is None or original.status not in {
+                    CommunicationRequestStatus.PENDING, CommunicationRequestStatus.PROCESSING}:
                 return
-            request_before = request.model_copy(deep=True)
-            approvals_before = {
-                item.key: item.model_copy(deep=True)
-                for item in self.approvals_for_request(request_id)
-            }
-            ballots_before = [
-                item.model_copy(deep=True)
-                for item in self.ballots.get(request_id, [])
-            ]
-            agreements_before = {
-                key: value.model_copy(deep=True)
-                for key, value in self.agreements.items()
-            }
-            for team in self.manager.teams.values():
-                with team.inbox_lock:
-                    notifications = [
-                        dict(message)
-                        for message in team.message_inbox
-                        if message.get("type")
-                        == "communication_approval_request"
-                        and message.get("request_id") == request_id
-                    ]
-                if notifications:
-                    request_notifications_before[team.team_id] = notifications
-            retained_ballots = [
-                ballot
-                for ballot in self.ballots.get(request_id, [])
-                if ballot.principal != principal
-            ]
-            self.ballots[request_id] = retained_ballots + list(
-                outcome.ballots
-            )
-            approval.reason = outcome.reason
+            case = manager._governance.latest("communication", request_id, principal)
+            if (case is None or case.case_id != outcome.case_id or not manager._governance.electorate_valid(case)):
+                return
+            outcome = TeamDecisionProvider.outcome(case)
             if outcome.status == "pending":
-                approval.status = CommunicationApprovalStatus.PENDING
-                approval.resolved_at = None
-                request.status = CommunicationRequestStatus.PENDING
-            elif outcome.status == "denied":
-                approval.status = CommunicationApprovalStatus.DENIED
-                approval.resolved_at = time.time()
-                request.status = CommunicationRequestStatus.DENIED
-                request.decision_reason = outcome.reason
-                request.resolved_at = time.time()
-                for other in self.approvals_for_request(request_id):
-                    if other.status in {
-                        CommunicationApprovalStatus.PENDING,
-                        CommunicationApprovalStatus.PROCESSING,
-                    }:
-                        other.status = CommunicationApprovalStatus.CANCELLED
-                        other.reason = "The request was denied by another principal."
-                        other.resolved_at = time.time()
-            else:
-                approval.status = CommunicationApprovalStatus.APPROVED
-                approval.resolved_at = time.time()
-                approvals = self.approvals_for_request(request_id)
-                for decided in approvals:
-                    if decided.status is not CommunicationApprovalStatus.APPROVED:
-                        continue
-                    voting_round = self.manager._governance.latest("communication", request_id, decided.principal)
-                    if (
-                        voting_round is None
-                        or voting_round.status != "APPROVED"
-                        or not self.manager._governance.electorate_valid(voting_round)
-                    ):
-                        decided.status = CommunicationApprovalStatus.PENDING
-                        decided.reason = "The electorate changed; another explicit round is required."
-                        decided.resolved_at = None
-                invalidated_inboxes.update(self._enqueue_request_notifications(request))
-                if all(
-                    item.status is CommunicationApprovalStatus.APPROVED
-                    for item in approvals
-                ):
-                    policy = _parse_communication_config(
-                        request.policy_snapshot
-                    )
-                    sender = self.manager.teams.get(request.sender_team_id)
-                    recipient = self.manager.teams.get(
-                        request.recipient_team_id
-                    )
-                    current_path = (
-                        self.approval_path(sender, recipient, policy)
-                        if sender is not None and recipient is not None
-                        else []
-                    )
-                    if (
-                        sender is None
-                        or recipient is None
-                        or route_fingerprint(current_path)
-                        != request.route_fingerprint
-                    ):
-                        request.status = CommunicationRequestStatus.STALE
-                        request.decision_reason = (
-                            "The relevant topology route changed during approval."
-                        )
-                        request.resolved_at = time.time()
-                        if sender is not None and recipient is not None:
-                            successor = self._new_request_locked(
-                                sender,
-                                recipient,
-                                request.initiated_by_agent_id,
-                                request.rationale,
-                                policy,
-                                supersedes_request_id=request.request_id,
-                            )
-                            request.superseded_by_request_id = (
-                                successor.request_id
-                            )
-                    else:
-                        request.status = CommunicationRequestStatus.APPROVED
-                        request.decision_reason = "All required principals approved."
-                        request.resolved_at = time.time()
-                        before = {
-                            agreement.agreement_id
-                            for agreement in self.agreements.values()
-                            if agreement.active
-                        }
-                        new_agreement = self._create_agreement_locked(request)
-                        changed_agreements = before | {new_agreement.agreement_id}
+                return
+            operation_id = f"APPROVAL-{case.case_id}"
+            successor, agreement = None, None
+            with self.stage() as candidate:
+                request = original.model_copy(deep=True)
+                self.communication_requests[request_id] = request
+                dirty = manager._new_dirty_state()
+                dirty["communication_requests"].add(request_id)
+                dirty["communication_approvals"].add(request_id)
+                if self.route_changed(request):
+                    successor = self.stale_candidate(request, dirty)
                 else:
-                    request.status = CommunicationRequestStatus.PENDING
-
-            if request.status in {
-                CommunicationRequestStatus.PENDING,
-                CommunicationRequestStatus.PROCESSING,
-            }:
-                self._refresh_pending_request_status(request)
-
-            terminal = request.status in {
-                CommunicationRequestStatus.APPROVED,
-                CommunicationRequestStatus.DENIED,
-                CommunicationRequestStatus.STALE,
-            }
-            if terminal:
-                for voting_round in self.manager._governance.rounds.values():
-                    if voting_round.business_kind == "communication" and voting_round.business_id == request_id and voting_round.status == "PENDING":
-                        rounds_before[voting_round.round_id] = voting_round.model_copy(deep=True)
-                        voting_round.status = "CANCELLED"
-                        voting_round.reason = "The originating communication request is resolved or stale."
-                        voting_round.resolved_at = time.time()
-            changed_inboxes = (
-                self._remove_request_notifications(request_id)
-                if terminal
-                else self._remove_principal_notification(
-                    request_id, principal
-                )
-                if outcome.status == "approved"
-                else set()
-            )
-            changed_inboxes.update(invalidated_inboxes)
-            if successor is not None:
-                changed_inboxes.update(
-                    self._enqueue_request_notifications(successor)
-                )
-
-        dirty = self.manager._new_dirty_state()
-        dirty["communication_requests"].add(request_id)
-        dirty["communication_approvals"].add(request_id)
-        dirty["communication_agreements"].update(changed_agreements)
-        dirty["inboxes"].update(changed_inboxes)
-        dirty["governance_rounds"].update(rounds_before)
-        if successor is not None:
-            dirty["communication_requests"].add(successor.request_id)
-            dirty["communication_approvals"].add(successor.request_id)
-        try:
-            await self.manager._commit_dirty_state(dirty)
-        except Exception:
-            self.manager._governance.rounds.update(rounds_before)
-            async with self._locked_state():
-                if request_before is not None:
-                    self.communication_requests[request_id] = request_before
-                if successor is not None:
-                    self.communication_requests.pop(successor.request_id, None)
-                for item in list(self.approvals_for_request(request_id)):
-                    self.communication_approvals.pop(item.key, None)
-                self.communication_approvals.update(approvals_before)
-                restored_request = self.communication_requests.get(request_id)
-                restored_approval = self.communication_approvals.get(
-                    f"{request_id}:{principal.key}"
-                )
-                if (
-                    restored_approval is not None
-                    and restored_approval.status
-                    is CommunicationApprovalStatus.PROCESSING
-                ):
-                    restored_approval.status = CommunicationApprovalStatus.PENDING
-                    restored_approval.resolved_at = None
-                if restored_request is not None and restored_request.status in {
-                    CommunicationRequestStatus.PENDING,
-                    CommunicationRequestStatus.PROCESSING,
-                }:
-                    self._refresh_pending_request_status(restored_request)
-                if successor is not None:
-                    for item in list(
-                        self.approvals_for_request(successor.request_id)
-                    ):
-                        self.communication_approvals.pop(item.key, None)
-                self.ballots[request_id] = ballots_before
-                self.agreements = agreements_before
-                rollback_request_ids = {request_id}
-                if successor is not None:
-                    rollback_request_ids.add(successor.request_id)
-                for team in self.manager.teams.values():
-                    with team.inbox_lock:
-                        team.message_inbox = [
-                            message
-                            for message in team.message_inbox
-                            if not (
-                                message.get("type")
-                                == "communication_approval_request"
-                                and message.get("request_id")
-                                in rollback_request_ids
-                            )
-                        ]
-                        team.message_inbox.extend(
-                            request_notifications_before.get(
-                                team.team_id, []
-                            )
-                        )
-            raise
-        self.manager._emit_callback(
-            "on_system_event",
-            "communication_approval_updated",
-            {
-                "request_id": request_id,
-                "principal": principal.model_dump(mode="json"),
-                "status": outcome.status,
-                "reason": outcome.reason,
-            },
-        )
-        if successor is not None:
-            self._schedule_initial_approvals(successor)
-        if new_agreement is not None:
-            self.manager._emit_callback(
-                "on_system_event",
-                "communication_agreement_created",
-                {
-                    "agreement_id": new_agreement.agreement_id,
-                    "request_id": request_id,
-                    "source_team_id": new_agreement.source_team_id,
-                    "target_team_id": new_agreement.target_team_id,
-                    "direction": new_agreement.direction.value,
-                },
-            )
+                    decided = approval.model_copy(deep=True)
+                    decided.case_id = case.case_id
+                    decided.status = (CommunicationApprovalStatus.APPROVED if outcome.status == "approved"
+                        else CommunicationApprovalStatus.DENIED)
+                    decided.reason, decided.resolved_at = outcome.reason, time.time()
+                    self.communication_approvals[decided.key] = decided
+                    self.ballots[request_id] = [
+                        ballot for ballot in self.ballots.get(request_id, ()) if ballot.principal != principal
+                    ] + list(outcome.ballots)
+                    if outcome.status == "denied":
+                        request.status = CommunicationRequestStatus.DENIED
+                        request.decision_reason, request.resolved_at = outcome.reason, time.time()
+                        for other in self.approvals_for_request(request_id):
+                            if other.status in {CommunicationApprovalStatus.PENDING, CommunicationApprovalStatus.PROCESSING}:
+                                item = other.model_copy(deep=True)
+                                item.status, item.reason, item.resolved_at = (
+                                    CommunicationApprovalStatus.CANCELLED, "Another principal explicitly denied.", time.time())
+                                self.communication_approvals[item.key] = item
+                    else:
+                        approvals = self.approvals_for_request(request_id)
+                        for item in approvals:
+                            voted = manager._governance.latest("communication", request_id, item.principal)
+                            if item.status is CommunicationApprovalStatus.APPROVED and (
+                                    voted is None or voted.status != "APPROVED" or not manager._governance.electorate_valid(voted)):
+                                item = item.model_copy(deep=True)
+                                item.status, item.reason, item.resolved_at = CommunicationApprovalStatus.PENDING, "A new electorate case is required.", None
+                                item.case_id = None
+                                self.ballots[request_id] = [ballot for ballot in self.ballots.get(request_id, ())
+                                    if ballot.principal != item.principal]
+                                self.communication_approvals[item.key] = item
+                        if all(item.status is CommunicationApprovalStatus.APPROVED for item in self.approvals_for_request(request_id)):
+                            request.status = CommunicationRequestStatus.APPROVED
+                            request.decision_reason, request.resolved_at = "All required principals explicitly approved.", time.time()
+                            agreement, changed = self._create_agreement_locked(request)
+                            dirty["communication_agreements"].update(changed)
+                try:
+                    await manager._records.commit((), dirty=dirty, broker_state=candidate, operation_id=operation_id)
+                finally:
+                    if operation_id in manager._records.receipts:
+                        if request.status not in {CommunicationRequestStatus.PENDING, CommunicationRequestStatus.PROCESSING}:
+                            self.cancel_obsolete_cases(request_id)
+                        if successor is not None:
+                            self._schedule_initial_approvals(successor)
+            manager._emit_callback("on_system_event", "communication_approval_updated",
+                {"request_id": request_id, "principal": principal.model_dump(mode="json"), "status": outcome.status})
+            if agreement is not None:
+                manager._emit_callback("on_system_event", "communication_agreement_created",
+                    {"request_id": request_id, "agreement_id": agreement.agreement_id})

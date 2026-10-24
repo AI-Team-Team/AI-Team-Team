@@ -11,7 +11,7 @@ This document provides a technical overview of the internal classes, properties,
 
 Represents an individual AI specialist equipped with role definitions and generator client integration.
 
-One instance may be shared across teams. Its `lock` serializes complete model turns, `message_history` projects the sanitized cross-team Journal for host compatibility, and manager `ContextVar` values provide the active team and discussion.
+One instance may be shared across teams. Its `lock` serializes all model-window mutations, `message_history` projects the sanitized cross-team Journal for host compatibility, and manager `ContextVar` values provide the selected scope and personal invocation.
 
 * **Constructor**:
 
@@ -27,7 +27,7 @@ One instance may be shared across teams. Its `lock` serializes complete model tu
 
 ### `AgentTeam`
 
-Represents a dynamic team of at least 3 agents ($N \ge 3$) executing discussions, debates, and tasks.
+Represents a dynamic team of membership satisfying `min_subagent_team_size`, default three, whose members act through their own continuing runtimes.
 
 * **Constructor**:
 
@@ -42,12 +42,8 @@ Represents a dynamic team of at least 3 agents ($N \ge 3$) executing discussions
 * **Methods**:
   * `launch_att(...) -> AgentTeam`: Allows the active team to recursively spawn a child team.
   * `receive_message(message: Dict[str, Any])`: Appends incoming signals or parent alerts to the team's inbox queue.
-  * `execute_reasoning_step(agent: Agent, prompt: str, system_instruction: str, max_steps: int = 5, manager: Optional[ATTManager] = None) -> str`
-        Routes the reasoning step to Native or Text ReAct and returns a completed answer or stable incomplete placeholder.
-  * `execute_reasoning_step_detailed(...) -> AgentTurnResult`
-        Returns structured provenance, completion state, privacy-safe failure metadata, and `ToolFailureSummary` values. Native calls remain concurrent, but a failed parallel batch consumes at most one argument-correction opportunity.
-  * `execute_react_step(agent: Agent, prompt: str, system_instruction: str, max_steps: int = 5, manager: Optional[ATTManager] = None) -> str`
-        Text-compatible convenience wrapper around `execute_reasoning_step`.
+
+No AgentTeam method executes a compulsory all-member discussion or reasoning turn.
 
 ### `ATTManager`
 
@@ -65,7 +61,13 @@ Master orchestrator managing the overall ATT topology, dynamic presets, tool reg
 
 `create_agent_team()` returns an immediate AgentTeam only for all-new membership. Existing Agent inputs return a persistent `TeamFormationRequest`; accepted identities are revalidated before the staged commit, and membership stores only the team/Agent relationship. `bootstrap_agent_team()` is the explicit audited host-only provisioned-topology bypass and is not registered as a tool.
 
-Formation consent is revision-scoped. `revise_team_formation()` commits immutable material snapshots and resets retained invitations, while `discuss_team_formation_proposal()` schedules detached advisory creator-Team work whose validated draft must be explicitly published by the initiating Agent. `formation_deliberation_policy="required_when_team_scoped"` blocks direct team-scoped proposal and revision publication.
+Formation consent is revision-scoped.
+
+`revise_team_formation()` commits material snapshots and resets retained invitations.
+
+`prepare_team_formation_draft()` optionally validates the initiator's supplied candidate without invoking a model, and publication remains explicit.
+
+There is no compulsory draft, detached team deliberation, or synthesis worker.
 
 Synchronous and asynchronous callbacks share one ordered background dispatcher; callback failures are logged and never alter core transaction outcomes.
 
@@ -110,18 +112,18 @@ Per-callback observation tasks isolate self-cancellation from the ordered dispat
     Validates all-new creation before mutation or opens a consent request without creating team entities when existing identities participate.
   * `bootstrap_agent_team(...) -> AgentTeam`
     Performs explicit trusted-host topology provisioning, preserves every Agent-owned field, and emits a durable administrative audit event.
-  * `inspect_team_formation`, `discuss_team_formation_proposal`, `get_team_formation_draft`, `retry_team_formation_draft`, `publish_team_formation_draft`, `revise_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, `decide_team_formation_late_join`
-    Coordinate detached advisory drafts, immutable revision history, exact-revision invitation attitudes, live eligibility, accepted-subset creation, abandonment, and explicitly initiated late joining under per-draft and per-request locks.
+  * `inspect_team_formation`, `prepare_team_formation_draft`, `get_team_formation_draft`, `publish_team_formation_draft`, `revise_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, `decide_team_formation_late_join`
+    Coordinate optional supplied candidates, immutable revision history, exact-revision invitation attitudes, live eligibility, accepted-subset creation, abandonment, and explicitly initiated late joining under per-draft and per-request locks.
   * `list_agent_inbox` / `mark_agent_inbox_read`
     Read and acknowledge identity-owned persistent notifications independently of any AgentTeam inbox.
   * `suppress_auto_save() -> AsyncContextManager`
     Nested, task-local batching context that merges dirty deltas and submits one write when the outer scope exits.
-  * `await execute_team_discussion(team: AgentTeam, prompt: str, rounds: int = 2) -> str`
-    Executes a multi-agent debate session under the team's serial session lock. Normal and emergency sessions share the lock; separate teams remain concurrent.
-  * `await execute_team_discussion_detailed(...) -> DiscussionResult`
-    Returns per-round turns, transcript, dual-axis audit, and `COMPLETED` or `PARTIAL`. Isolated member failures do not cancel peers or prevent the member from rejoining the next round.
+  * `await execute_agent_interaction(agent, prompt, *, team=None) -> InteractionResult`
+    Observes one personal answer without publishing it, stopping continuing activity, or treating it as a ballot.
+  * `activate_agent(agent_id, scope=None)` / `wait_for_activity_checkpoint(admission_id, intent=None)`
+    Admit personal activity and observe accepted fairness or intent boundaries.
   * `find_parent_team(target: AgentTeam) -> Optional[AgentTeam]`
-    Locates the parent team in the active team topology using child references and creator pointers.
+    Locates the parent team in the active team topology using the explicit parent index without creator or membership inference.
   * `check_library_access(team_id: str, lib_id: str, path: str, required_permission: str) -> bool`
     Evaluates if a team is granted `READ` or `WRITE` access to a Document Library path based on prefix segments.
   * `list_private_files`, `read_private_file`, `write_private_file`, `delete_private_file`, `move_private_file`, `publish_private_file`
@@ -136,7 +138,7 @@ Per-callback observation tasks isolate self-cancellation from the ordered dispat
     Applies case-insensitive OR substring matching to public fields before sorting and pagination.
   * `inspect_entity(entity_type, entity_id) -> AgentDirectoryRecord | AgentTeamDirectoryRecord`
     Resolves one latest public record by stable Agent or AgentTeam ID, using the same eligibility boundary.
-  * `await negotiate_and_execute_migration(team: AgentTeam, target_parent: AgentTeam, rationale: str) -> MigrationOperationResult`
+  * `await negotiate_and_execute_migration(team: AgentTeam, target_parent: Agent | AgentTeam | ApprovalPrincipal | None, rationale: str) -> MigrationOperationResult`
     Arbitrates dynamic team reorganizations and updates parental references.
   * `await save_state(path: Optional[str] = None, full: bool = True)`
     Queues and waits for a full snapshot, or a configuration delta when `full=False`.
@@ -145,15 +147,17 @@ Per-callback observation tasks isolate self-cancellation from the ordered dispat
   * `await flush_state()`
     Waits for all queued incremental commits.
   * `await flush_memory_indexing()` / `await retry_memory_index(segment_id)`
-    Coordinates optional background card indexing without making a business turn depend on indexing success.
+    Coordinates optional background card indexing without making personal activity depend on indexing success.
   * `list_memory_index_failures(...)` / `restore_forgotten_memory(...)` / `list_agent_history(...)`
     Exposes trusted-host diagnostics and recovery while keeping the Journal unavailable to Agent tools.
   * `await close()`
     Rejects new work, cancels external LLM waits, flushes accepted writes, and closes the single writer lease, engines, and sessions.
   * `await flush_callbacks()`
     Waits for the ordered observational callback queue.
-  * `acknowledge_unknown_alert(...)` / `clear_unknown_alerts(...)`
-    Explicitly acknowledges durable, fingerprinted UNKNOWN audit alerts.
+  * `request_health_assessment`, `wait_for_health_assessment`, `cancel_health_assessment`
+    Admit fresh scoped audits and observe retained results under a total deadline.
+  * `inspect_health_incident`, `claim_health_incident`, `acknowledge_health_incident`, `handle_health_incident`, `clear_health_incidents`
+    Inspect retained evidence and explicitly handle the current incident occurrence generation.
 
 ### `ATTConfig`
 
@@ -164,44 +168,22 @@ Configuration options for tuning the ATT multi-agent framework.
 * **Constructor**:
 
   ```python
+  from ai_team_team import ATTConfig, HealthSupervisionConfig, ParentApprovalCommunicationConfig
+
   config = ATTConfig(
-      enable_dynamic_delegation: bool = True,
-      max_delegation_depth: int = 2,
-      min_subagent_team_size: int = 3,
-      subagent_discussion_rounds: int = 2,
-      react_max_steps: int = 5,
-      inbox_summarize_threshold_chars: int = 1500,
-      model_registry: Optional[dict] = None,
-      max_migrations_per_team_discussion: int = 1,
-      enable_membership_voting: bool = False,
-      llm_max_retries: int = 3,
-      llm_retry_backoff_factor: float = 1.5,
-      enable_memory_compression: bool = True,
-      max_memory_turns: int = 20,
-      file_read: FileReadConfig = FileReadConfig(),
-      episodic_memory: EpisodicMemoryConfig = EpisodicMemoryConfig(),
-      communication: CommunicationConfig = PermissiveCommunicationConfig(),
-      migration_policy: str = "ancestor_approval",
-      enable_emergency_wakeup: bool = True,
-      emergency_discussion_rounds: int = 1,
-      tool_calling_mode: str = "auto",
-      max_tool_rounds: int = 5,
-      max_tool_argument_retries: int = 3,
-      max_tool_execution_retries: int = 2,
-      tool_execution_retry_policy: str = "never",
-      tool_execution_retry_backoff_factor: float = 0.5,
-      text_tool_schema_mode: str = "compact",
-      tool_prompt_modes: Optional[dict] = None,
-      turn_failure_policy: TurnFailurePolicyConfig = TurnFailurePolicyConfig(),
-      operational_status_decision_mode: str = "framework",
-      operational_degraded_escalation_mode: str = "none",
-      model_token_limits: Optional[dict] = None,
-      model_max_output_tokens: Optional[dict] = None,
-      default_max_output_tokens: int = 1024,
-      audit_unknown_escalation_mode: str = "wake",
-      audit_unknown_soft_threshold: int = 100,
-      agent_private_data_policy: str = "archive",
-      parent_failover_timeout_seconds: float = 120
+      communication=ParentApprovalCommunicationConfig(request_delivery="queue"),
+      health=HealthSupervisionConfig(
+          protocol_failure_threshold=3,
+          tool_argument_failure_threshold=5,
+          observation_window_seconds=600,
+          audit_timeout_seconds=600,
+      ),
+      working_context_message_limit=20,
+      migration_policy="ancestor_approval",
+      allow_unilateral_detachment=True,
+      migration_cooldown_downtime="include",
+      failover_policy="parent",
+      parent_failover_timeout_seconds=120,
   )
   ```
 
@@ -216,7 +198,7 @@ Owns durable communication requests, approvals, ballots, Agreements, and peer-de
 * `revoke_agreement(agreement_id, actor_team_id, reason) -> CommunicationOperationResult`
       Enforces endpoint-only revocation.
 * `approval_path(sender, recipient, policy=None) -> List[ApprovalPrincipal]`
-      Resolves ordered `agent_team` and Root `agent` principals without selecting an Agent to act for a team.
+      Resolves actual `agent_team` and `agent` principals with independent-side exemptions without selecting an Agent to act for a team.
 
 ### `DiscoveryService`
 
@@ -226,49 +208,47 @@ Capture runs without suspension under the topology lock; filtering, deterministi
 
 Agent-facing wrappers are asynchronous without suspension so `Tool` does not dispatch live-object capture to a worker thread, and the service never borrows Agent invocation locks or updates depth caches.
 
-Text ReAct, Native, personal interactions, and formation deliberation advertise the same available discovery tools instead of injecting full global directories.
+Text ReAct, Native, personal interactions, and voluntary formation activity advertise the same available discovery tools instead of injecting full global directories.
 
 Counts and range metadata describe one capture, while separate pages may observe different live registries without a version protocol.
 
 See [Agent and AgentTeam Discovery](../Agent_and_AgentTeam_Discovery.md) for the public result models and exact privacy, lifecycle, and pagination contracts.
 
-### `TeamDecisionProvider`
+### `TeamDecisionProvider` and `GovernanceService`
 
-Publishes personal-inbox governance rounds for explicit principals rather than making standalone generic ballot model calls.
+The decision provider prepares exact governance cases and personal mail rather than running inference itself.
 
-AgentTeam deliberation uses the normal discussion lock and freezes the electorate; complete discussion publishes durable personal emails and releases the session before awaiting responses.
+Each case freezes a real principal, eligible Agent IDs, electorate revision, strict choice schema, and business reference.
 
-Each Agent receives a detached ordinary notice through its continuing instructions, memory, and invocation lock, and may explicitly use `open_agent_mail` and `submit_governance_choice` or leave the email unanswered.
+Complete explicit ballots are required before strict majority supplies authority, independently of email read receipts.
 
-`GovernanceService` validates eligibility, immutable per-round choices, complete participation, and strict majority independently of email read receipts.
+`GovernanceCase`, `GovernanceBallot`, and `GovernanceSubmissionResult` expose immutable case identity and choices.
 
-Root uses its own Agent context without an artificial AgentTeam, and model-selection rounds are bounded by the original failover attempt's deadline and cancellation.
+An Agent parent acts through its own inbox and continuing personal activity; Root has no special representative fallback.
 
-`GovernanceRound`, `GovernanceBallot`, and `GovernanceSubmissionResult` expose round identity, frozen voters, accepted public choices, and idempotent submission results.
-
-`MigrationRequest` and `MigrationOperationResult` expose durable asynchronous migration progress while preserving final topology revalidation.
+`MigrationRequest` retains exact route evidence, while parent resource attempts retain their independent total deadline and expire after interruption.
 
 ### `SupervisionService` and supervisory AgentTeams
 
-`ATTManager.supervisor` is a `SupervisionService`, not a separate team implementation.
+The service provisions a fresh real privileged AT through common staged creation for each admitted assessment.
 
-Each audit creates a registered, root-created `AgentTeam(team_kind="supervisory")` with fresh Agents through staged team creation, runs its discussion through the standard coordinator, commits audit evidence, and dissolves the team through managed lifecycle machinery.
+Its scoped people use the same personal scheduler, provider service, ToolExecutor, quota ledger, and writer.
 
-The live supervisory team, its Agents, and its DocLibs are excluded from state snapshots; the System Memory Journal retains completed audit evidence.
+Only explicit structured findings from every predefined auditor may form a strict-majority result.
 
-Supervisory Agents do not retain memory across audits and have no ordinary tool view.
+The total default 600-second deadline includes queueing and is separate from parent failover.
 
-* **Methods**:
-  * `audit_team_dialog(team: AgentTeam, transcript: str) -> AuditResult`
-    Returns independent content and runtime health. `AuditResult.status` is `HEALTHY`, `UNHEALTHY`, or `UNKNOWN`; `operational_status` is `HEALTHY`, `DEGRADED`, or `UNKNOWN` and follows the configured framework/supervisor authority mode.
-  * `report_anomaly(failed_team: AgentTeam, reason: str, manager: ATTManager)`
-    Escalates failure alerts recursively up ancestors or directly to the Level 0 Root AI.
+Scoped evidence remains retained, but temporary identities are removed and never restored or reused.
+
+Typed streak detectors, stable incidents, occurrence events, explicit claims, and current-generation acknowledgement remain separate from model findings and operational availability.
+
+See [Supervisory Team](../Supervisory_Team.md) and the [Phase 5 profile](autonomous_activity/Phase_5.md) for evidence and authority boundaries.
 
 ### `Tool` and `ToolExecutor`
 
 `Tool` owns the provider-neutral callable contract, validated JSON Schema, prompt rendering metadata, examples, and `retry_safe` declaration. Automatic schemas support `Annotated`, `Literal`, Enum, Pydantic models, `TypedDict`, containers, unions, and nesting. Portable `TypedDict` annotations across Python 3.11–3.13 must come from `typing_extensions`; incompatible standard-library definitions fail during tool registration with an actionable error. Registration validates handwritten schemas against Draft 2020-12.
 
-`ToolExecutor.execute()` is shared by Text and Native strategies. It binds the invocation signature, applies strict Pydantic JSON validation, validates the original argument object against the generated or handwritten Draft 2020-12 schema, runs the auditor and callable under Agent/AgentTeam ContextVars, and returns `ToolResult` with a structured status, error kind, and attempt count. It recognizes typed `ToolArgumentError`, `ToolPermissionError`, `ToolBusinessError`, and `RetryableToolError`; custom result strings are never classified by prefix.
+`ToolExecutor.execute()` is shared by Text and Native protocols. It binds the invocation signature, applies strict Pydantic JSON validation, validates the original argument object against the generated or handwritten Draft 2020-12 schema, runs the auditor and callable under Agent/AgentTeam ContextVars, and returns `ToolResult` with a structured status, error kind, and attempt count. It recognizes typed `ToolArgumentError`, `ToolPermissionError`, `ToolBusinessError`, and `RetryableToolError`; custom result strings are never classified by prefix.
 
 Native provider interfaces receive `Optional[List[Tool]]`. The provider adapter converts `Tool.json_schema` into its SDK's concrete function-calling shape and converts responses back to `LLMResponse` and `ToolCall`.
 
@@ -321,24 +301,25 @@ Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/
 ### Migration Policies
 
 * **`BaseMigrationPolicy`**: Delegates `authorize_migration(team, target_parent, manager, rationale) -> MigrationOperationResult` to the manager's durable migration service; a policy instance cannot override `ATTConfig`.
-* **`PermissiveMigrationPolicy`**: Uses configured permissive authorization without ballots and still enforces topology admission and revalidation.
+* **`PermissiveMigrationPolicy`**: Uses no ordinary path approvals but still requires explicit target-parent acceptance and final topology revalidation.
 * **`AncestorApprovalMigrationPolicy`**: Resolves explicit current-parent, target-parent, and Least Common Ancestor principals when configured (default strategy).
-* **`LineagePathMigrationPolicy`**: Resolves every explicit AgentTeam/Root Agent principal along the affected lineage path when configured.
+* **`LineagePathMigrationPolicy`**: Resolves every explicit AgentTeam/Agent principal along the affected lineage path when configured.
 
 ## Database Schema & ORM Models
 
-SQLAlchemy models and relational activity tables mapping schema 14 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
+SQLAlchemy models and relational activity tables mapping schema 15 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
 * **`AgentModel`, `AgentMessageModel`, and `AgentInboxModel`**: Use immutable `agent_id` primary/foreign keys and persist lifecycle profiles, bounded Working Context, and identity-addressed notifications.
 * **`SystemMemoryEventModel`**: Stores the append-only host Journal without an Agent foreign key so confirmed identity deletion can retain historical snapshots.
 * **`AgentMemorySegmentModel`, `AgentMemoryCardModel`, `MemoryCardTagModel`, `MemoryCardSourceEventModel`, and `RetainedMemoryReferenceModel`**: Store Agent-owned deterministic segments, searchable card metadata, source provenance, and explicit compact Working Context retention.
-* **`TeamModel`**: Tracks active topologies, migration counts, and UUID-backed creator/member references.
+* **`TeamModel`**: Tracks explicit parent positions, independent creator provenance, lifecycle, and UUID-backed membership references.
 * **`TeamInboxModel` & `TeamProposalModel`**: Persists child escalations, peer messages, and democratic proposal votes.
-* **`TeamFormationRequestModel`, `TeamFormationInvitationModel`, `TeamFormationRevisionModel`, `TeamFormationInvitationDecisionModel`, and `TeamFormationDraftModel`**: Persist the current proposal projection, current invitations, immutable material revision snapshots, append-only exact-revision attitudes, detached collaborative drafts, accepted founding records, completion choices, and late-join state.
+* **`TeamFormationRequestModel`, `TeamFormationInvitationModel`, `TeamFormationRevisionModel`, `TeamFormationInvitationDecisionModel`, and `TeamFormationDraftModel`**: Persist the current proposal projection, current invitations, immutable material revision snapshots, append-only exact-revision attitudes, optional initiator-authored candidates, accepted founding records, completion choices, and late-join state.
 * **`CommunicationRequestModel`, `CommunicationApprovalModel`, `CommunicationBallotModel`**: Persist the request lifecycle, ordered explicit principals, and member ballots.
 * **`CommunicationAgreementModel` & `PeerMessageModel`**: Persist directional endpoint channels, revocation state, and idempotent delivery lifecycle.
-* **`GovernanceRoundModel`, `GovernanceBallotModel`, and `MigrationRequestModel`**: Persist frozen personal-email rounds, append-only explicit choices, and revalidated asynchronous migration requests.
+* **`GovernanceCaseModel`, `GovernanceElectorateModel`, `GovernanceBallotModel`, and `MigrationRequestModel`**: Persist exact cases, eligible people, append-only choices, and revalidated migration authority.
+* **Institutional activity tables**: Retain topology revisions, parent acceptances, cooldowns, resource attempts, typed health observations, incidents, scoped audit activity, findings, and final evidence.
 * **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel` & `DocLibLinkModel`**: Persists library kind, mutually exclusive team/agent ownership, lifecycle, ACL segments, physical document contents, and managed team-library link targets.
 
 ### Registered Execution Service

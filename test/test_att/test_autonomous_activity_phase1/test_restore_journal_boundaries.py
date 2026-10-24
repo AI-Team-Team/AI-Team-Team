@@ -77,7 +77,7 @@ class RestoreJournalBoundaryTests(unittest.IsolatedAsyncioTestCase):
         changes = (
             ("payload", {"changed": True}),
             ("sequence", state["memory_events"][-1]["sequence"] + 10),
-            ("discussion_id", "changed-context"),
+            ("invocation_id", "changed-context"),
             ("redacted", True),
         )
         for field, value in changes:

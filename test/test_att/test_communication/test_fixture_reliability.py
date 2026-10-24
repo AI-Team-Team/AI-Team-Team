@@ -15,8 +15,8 @@ class TestCommunicationWaits(CommunicationTestCase):
     async def _create_request(self, *, rationale="wait regression", db_path=None, manager=None):
         if manager is None:
             manager = self.manager(ParentApprovalCommunicationConfig(), db_path=db_path)
-        sender = manager.create_agent_team(self.root, member_count=3)
-        recipient = manager.create_agent_team(self.root, member_count=3)
+        sender = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        recipient = manager.create_agent_team(self.root, parent=self.root, member_count=3)
         result = await manager.broker.request_peer_communication(
             sender, recipient, sender.members[0].agent_id, rationale
         )
@@ -63,10 +63,10 @@ class TestCommunicationWaits(CommunicationTestCase):
         self.client.respond = False
         manager, request = await self._create_request()
         await self.wait_for_governance_idle(request)
-        round_id = manager._governance.latest(
+        case_id = manager._governance.latest(
             "communication", request.request_id, request.approval_principals[0]
-        ).round_id
-        key = f"resolve:{round_id}"
+        ).case_id
+        key = f"resolve:{case_id}"
         failure = RuntimeError("earlier resolution failed")
 
         async def fail():
@@ -95,17 +95,17 @@ class TestCommunicationWaits(CommunicationTestCase):
         self.client.respond = False
         manager, request = await self._create_request()
         await self.wait_for_governance_idle(request)
-        round_id = manager._governance.latest(
+        case_id = manager._governance.latest(
             "communication", request.request_id, request.approval_principals[0]
-        ).round_id
+        ).case_id
         failure = TimeoutError("independent worker timeout")
 
         async def fail():
             raise failure
 
         with self.assertLogs(manager.logger, level="ERROR"):
-            manager._governance.track(f"resolve:{round_id}", fail())
-            task = manager._governance.tasks[f"resolve:{round_id}"]
+            manager._governance.track(f"resolve:{case_id}", fail())
+            task = manager._governance.tasks[f"resolve:{case_id}"]
             await self._await_task_cleanup(task)
 
         with self.assertRaises(TimeoutError) as caught:
@@ -119,9 +119,9 @@ class TestCommunicationWaits(CommunicationTestCase):
         self.client.respond = False
         manager, request = await self._create_request()
         await self.wait_for_governance_idle(request)
-        round_id = manager._governance.latest(
+        case_id = manager._governance.latest(
             "communication", request.request_id, request.approval_principals[0]
-        ).round_id
+        ).case_id
         entered = asyncio.Event()
         release = asyncio.Event()
 
@@ -129,8 +129,8 @@ class TestCommunicationWaits(CommunicationTestCase):
             entered.set()
             await release.wait()
 
-        manager._governance.track(f"resolve:{round_id}", blocked())
-        task = manager._governance.tasks[f"resolve:{round_id}"]
+        manager._governance.track(f"resolve:{case_id}", blocked())
+        task = manager._governance.tasks[f"resolve:{case_id}"]
         try:
             await asyncio.wait_for(entered.wait(), timeout=10)
             with self.assertRaisesRegex(AssertionError, "workers did not settle"):
@@ -148,9 +148,9 @@ class TestCommunicationWaits(CommunicationTestCase):
         self.client.respond = False
         manager, request = await self._create_request()
         await self.wait_for_governance_idle(request)
-        round_id = manager._governance.latest(
+        case_id = manager._governance.latest(
             "communication", request.request_id, request.approval_principals[0]
-        ).round_id
+        ).case_id
         entered = asyncio.Event()
         release = asyncio.Event()
         failure = RuntimeError("worker failed while its sibling was blocked")
@@ -164,9 +164,9 @@ class TestCommunicationWaits(CommunicationTestCase):
             raise failure
 
         with self.assertLogs(manager.logger, level="ERROR"):
-            manager._governance.track(f"resolve:{round_id}", blocked())
-            sibling = manager._governance.tasks[f"resolve:{round_id}"]
-            key = f"mail:{round_id}:{self.root.agent_id}"
+            manager._governance.track(f"resolve:{case_id}", blocked())
+            sibling = manager._governance.tasks[f"resolve:{case_id}"]
+            key = f"mail:{case_id}:{self.root.agent_id}"
             manager._governance.track(key, fail())
             failed = manager._governance.tasks[key]
             try:
@@ -217,19 +217,19 @@ class TestCommunicationWaits(CommunicationTestCase):
     async def test_staged_approval_is_not_ready_until_authoritative_commit_finishes(self):
         db_path = os.path.join(self.workspace, "commit-barrier.db")
         manager = self.manager(ParentApprovalCommunicationConfig(), db_path=db_path)
-        sender = manager.create_agent_team(self.root, member_count=3)
-        recipient = manager.create_agent_team(self.root, member_count=3)
+        sender = manager.create_agent_team(self.root, parent=self.root, member_count=3)
+        recipient = manager.create_agent_team(self.root, parent=self.root, member_count=3)
         entered = asyncio.Event()
         release = asyncio.Event()
-        original_commit = manager._commit_dirty_state
+        original_commit = manager._records.commit
 
-        async def gated_commit(dirty):
-            if dirty["communication_agreements"]:
+        async def gated_commit(records, **kwargs):
+            if kwargs.get("dirty", {}).get("communication_agreements"):
                 entered.set()
                 await release.wait()
-            return await original_commit(dirty)
+            return await original_commit(records, **kwargs)
 
-        with patch.object(manager, "_commit_dirty_state", gated_commit):
+        with patch.object(manager._records, "commit", gated_commit):
             try:
                 result = await manager.broker.request_peer_communication(
                     sender, recipient, sender.members[0].agent_id, "commit barrier"
@@ -237,7 +237,7 @@ class TestCommunicationWaits(CommunicationTestCase):
                 request = manager.broker.communication_requests[result.request_id]
                 async with asyncio.timeout(10.0):
                     await entered.wait()
-                self.assertEqual(request.status.value, "APPROVED")
+                self.assertEqual(request.status.value, "PENDING")
 
                 with self.assertRaisesRegex(AssertionError, '"transaction_busy": true'):
                     await self.wait_for_status(request, "APPROVED", timeout=0.02)
@@ -288,7 +288,7 @@ class TestCommunicationCleanup(unittest.IsolatedAsyncioTestCase):
                         root_ai=Agent(f"Root-{index}", "Root governor", self.client),
                     )
                     managers.append(manager)
-                    manager.create_agent_team(manager.root_ai, member_count=3)
+                    manager.create_agent_team(manager.root_ai, parent=manager.root_ai, member_count=3)
                     await manager.save_state()
                     original_close = manager.close
 

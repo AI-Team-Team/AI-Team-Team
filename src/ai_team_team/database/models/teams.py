@@ -47,6 +47,7 @@ class TeamModel(Base):
     chapter_num: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     parent_team_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("teams.team_id", ondelete="RESTRICT"), nullable=True)
     parent_agent_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("agents.agent_id", ondelete="RESTRICT"), nullable=True)
+    position_revision: Mapped[int] = mapped_column(Integer, default=1)
     lifecycle_state: Mapped[str] = mapped_column(String, default="active")
     state_version: Mapped[int] = mapped_column(Integer, default=1)
     creator_agent_id: Mapped[Optional[str]] = mapped_column(
@@ -88,6 +89,7 @@ class TeamModel(Base):
 
     __table_args__ = (
         CheckConstraint("parent_agent_id IS NULL OR parent_team_id IS NULL"),
+        CheckConstraint("position_revision > 0"),
         CheckConstraint("lifecycle_state IN ('active', 'dissolved') AND state_version > 0"),
         CheckConstraint(
             "team_kind = 'ordinary'",
@@ -149,6 +151,9 @@ class TeamFormationRequestModel(Base):
         String, ForeignKey("teams.team_id", ondelete="RESTRICT"), nullable=True
     )
     task: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    parent_agent_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("agents.agent_id", ondelete="RESTRICT"), nullable=True
+    )
     member_count: Mapped[int] = mapped_column(Integer)
     roles_and_presets: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     preset_name: Mapped[str] = mapped_column(String)
@@ -184,6 +189,7 @@ class TeamFormationRequestModel(Base):
             "status IN ('collecting_responses', 'ready_for_confirmation', 'created', 'abandoned')",
             name="ck_team_formation_status",
         ),
+        CheckConstraint("parent_agent_id IS NULL OR parent_team_id IS NULL"),
         CheckConstraint(
             "is_public_visible IN (0, 1)",
             name="ck_team_formation_public_visible_boolean",
@@ -315,11 +321,12 @@ class TeamFormationDraftModel(Base):
         ForeignKey("teams.team_id", ondelete="RESTRICT"),
         nullable=True,
     )
-    deliberation_team_id: Mapped[Optional[str]] = mapped_column(
+    parent_team_id: Mapped[Optional[str]] = mapped_column(
         String,
         ForeignKey("teams.team_id", ondelete="RESTRICT"),
         nullable=True,
     )
+    parent_agent_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("agents.agent_id", ondelete="RESTRICT"), nullable=True)
     request_id: Mapped[Optional[str]] = mapped_column(
         String,
         ForeignKey("team_formation_requests.request_id", ondelete="CASCADE"),
@@ -332,7 +339,6 @@ class TeamFormationDraftModel(Base):
     participant_agent_ids: Mapped[list] = mapped_column(JSON)
     source_message_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("chat_messages.message_id", ondelete="RESTRICT"), nullable=True)
     initiator_invocation_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("activity_invocations.invocation_id", ondelete="RESTRICT"), nullable=True)
-    checkpoint_context: Mapped[dict] = mapped_column(JSON, default=dict)
     candidate: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     reason: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[float] = mapped_column(Float)
@@ -341,10 +347,9 @@ class TeamFormationDraftModel(Base):
     __table_args__ = (
         CheckConstraint(
             "(creator_kind = 'agent' AND creator_agent_id IS NOT NULL "
-            "AND creator_team_id IS NULL AND deliberation_team_id IS NULL) OR "
+            "AND creator_team_id IS NULL) OR "
             "(creator_kind = 'agent_team' AND creator_agent_id IS NULL "
-            "AND creator_team_id IS NOT NULL "
-            "AND deliberation_team_id = creator_team_id)",
+            "AND creator_team_id IS NOT NULL)",
             name="ck_team_formation_draft_creator",
         ),
         CheckConstraint(
@@ -355,7 +360,7 @@ class TeamFormationDraftModel(Base):
             name="ck_team_formation_draft_exact_base",
         ),
         CheckConstraint(
-            "status IN ('pending', 'running', 'ready', 'failed', 'cancelled', 'stale', 'published')",
+            "status IN ('ready', 'stale', 'published')",
             name="ck_team_formation_draft_status",
         ),
         CheckConstraint(

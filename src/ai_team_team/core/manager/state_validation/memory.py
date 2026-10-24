@@ -51,8 +51,8 @@ def validate_memory_state(
     segment_ids = _unique((item.segment_id for item in segments), "memory segments")
     memory_ids = _unique((item.memory_id for item in cards), "Memory Cards")
     _unique((item.reference_id for item in references), "memory references")
-    _unique((item.turn_id for item in segments), "memory segment turns")
-    _unique((item.turn_id for item in cards), "Memory Card turns")
+    _unique((item.invocation_id for item in segments), "memory segment invocations")
+    _unique((item.invocation_id for item in cards), "Memory Card invocations")
 
     event_map: Dict[str, SystemMemoryEvent] = {item.event_id: item for item in events}
     segment_map = {item.segment_id: item for item in segments}
@@ -80,11 +80,10 @@ def validate_memory_state(
                 raise StateRestoreError(
                     f"Memory segment {segment.segment_id!r} references missing event {event_id!r}."
                 )
-            same_boundary = (event.invocation_id == segment.invocation_id if segment.invocation_id is not None
-                             else event.turn_id == segment.turn_id)
+            same_boundary = (event.invocation_id == segment.invocation_id)
             if event.agent_id != segment.agent_id or not same_boundary:
                 raise StateRestoreError(
-                    f"Memory segment {segment.segment_id!r} crosses an Agent or turn boundary."
+                    f"Memory segment {segment.segment_id!r} crosses an Agent or invocation boundary."
                 )
             source_events.append(event)
         if [event.sequence for event in source_events] != sorted(
@@ -93,8 +92,8 @@ def validate_memory_state(
             raise StateRestoreError(
                 f"Memory segment {segment.segment_id!r} has out-of-order source events."
             )
-        start_kind = "activity_invocation_started" if segment.invocation_id is not None else "agent_turn_started"
-        finish_kind = "activity_invocation_finished" if segment.invocation_id is not None else "agent_turn_finished"
+        start_kind = "activity_invocation_started"
+        finish_kind = "activity_invocation_finished"
         started = [event for event in source_events if event.event_type == start_kind]
         finished = [event for event in source_events if event.event_type == finish_kind]
         if len(started) != 1 or len(finished) != 1:
@@ -103,21 +102,21 @@ def validate_memory_state(
             )
         if source_events[0] is not started[0] or source_events[-1] is not finished[0]:
             raise StateRestoreError(
-                f"Memory segment {segment.segment_id!r} has invalid turn boundaries."
+                f"Memory segment {segment.segment_id!r} has invalid invocation boundaries."
             )
         expected_source_ids = [
             event.event_id
             for event in sorted(events, key=lambda item: item.sequence)
             if event.agent_id == segment.agent_id
-            and (event.invocation_id == segment.invocation_id if segment.invocation_id is not None else event.turn_id == segment.turn_id)
+            and (event.invocation_id == segment.invocation_id)
             and started[0].sequence <= event.sequence <= finished[0].sequence
         ]
         if segment.source_event_ids != expected_source_ids:
             raise StateRestoreError(
-                f"Memory segment {segment.segment_id!r} omits or adds turn events."
+                f"Memory segment {segment.segment_id!r} omits or adds invocation events."
             )
-        terminal_status = finished[0].payload.get("intent" if segment.invocation_id is not None else "status")
-        allowed = {"continuing", "idle", "sleep"} if segment.invocation_id is not None else {"completed", "incomplete"}
+        terminal_status = finished[0].payload.get("intent")
+        allowed = {"continuing", "idle", "sleep"}
         if terminal_status not in allowed:
             raise StateRestoreError(
                 f"Memory segment {segment.segment_id!r} has an invalid terminal status."
@@ -125,10 +124,9 @@ def validate_memory_state(
         for boundary_event in (started[0], finished[0]):
             if (
                 boundary_event.team_id != segment.origin_team_id
-                or boundary_event.discussion_id != segment.discussion_id
             ):
                 raise StateRestoreError(
-                    f"Memory segment {segment.segment_id!r} has inconsistent turn provenance."
+                    f"Memory segment {segment.segment_id!r} has inconsistent invocation provenance."
                 )
         rendered = render_recall_content(source_events)
         if rendered != segment.recall_content or content_digest(rendered) != segment.content_sha256:
@@ -146,10 +144,6 @@ def validate_memory_state(
             raise StateRestoreError(
                 f"Memory Card {card.memory_id!r} has an invalid Agent owner."
             )
-        if card.turn_id != source_segment.turn_id:
-            raise StateRestoreError(
-                f"Memory Card {card.memory_id!r} crosses a turn boundary."
-            )
         if card.invocation_id != source_segment.invocation_id:
             raise StateRestoreError(f"Memory Card {card.memory_id!r} crosses an invocation boundary.")
         if source_segment.status is not MemoryIndexStatus.INDEXED:
@@ -158,7 +152,6 @@ def validate_memory_state(
             )
         if (
             card.origin_team_id != source_segment.origin_team_id
-            or card.discussion_id != source_segment.discussion_id
         ):
             raise StateRestoreError(
                 f"Memory Card {card.memory_id!r} has inconsistent provenance."

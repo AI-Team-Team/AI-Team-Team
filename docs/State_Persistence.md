@@ -1,4 +1,4 @@
-# State Persistence and Multi-Turn Memory
+# State Persistence and Personal Memory
 
 ATT persists mutable runtime state to a versioned SQLite database through a single asynchronous writer.
 
@@ -6,7 +6,7 @@ The public persistence API is asynchronous:
 
 ```python
 async with ATTManager(root_ai, config, db_path="att.db") as manager:
-    # Build teams and run discussions.
+    # Build organizations and admit personal activity.
     await manager.save_state()          # Full snapshot and commit.
     await manager.flush_state()         # Wait for queued deltas.
 
@@ -31,6 +31,8 @@ The [Phase 1 engineering profile](dev/autonomous_activity/Phase_1.md) describes 
 The [Phase 3 messaging profile](dev/autonomous_activity/Phase_3.md) activates incompatible schema 13 for explicit publications, exact chat command keys, private read/detail controls, historical views, friendship periods, and recipient-owned reminder evidence.
 
 The [Phase 4 execution profile](dev/autonomous_activity/Phase_4.md) activates incompatible schema 14 for explicit and detached execution, immutable declaration and source provenance, protected input/result references, factual cancellation, and owner-only result recovery without replay.
+
+The [Phase 5 institutional profile](dev/autonomous_activity/Phase_5.md) activates incompatible schema 15 for exact governance cases, explicit-parent topology and acceptance, resource attempts, and event-driven health evidence.
 
 The [Phase 2 personal runtime](dev/autonomous_activity/Phase_2.md) atomically checkpoints the sanitized personal window, Journal dependencies, notification claims, and activity progress.
 
@@ -58,7 +60,7 @@ A delta rewrites only the selected rows.
 
 Replacing one Agent's persisted Working Context does not rewrite another Agent's messages, Journal events, Memory Cards, or retained references.
 
-Memory deltas include the referenced cards, segments, and immutable source Journal events in the same transaction, even when a background indexer runs before the originating discussion's auto-save batch is submitted.
+Memory deltas include the referenced cards, segments, and immutable source Journal events in the same transaction, even when a background indexer runs before the originating personal checkpoint is submitted.
 
 Missing owner identities, provenance teams and their parent/creator dependencies, Private DocLibs, and built-in team DocLibs are inserted as dependencies without rewriting existing Agent-owned state, team topology, or library contents.
 
@@ -73,7 +75,7 @@ async with manager.suppress_auto_save():
     ...
 ```
 
-The implementation uses `ContextVar`, so concurrent team discussions do not share suppression state.
+The implementation uses `ContextVar`, so concurrent personal activities do not share suppression state.
 
 The outermost scope submits one merged delta.
 
@@ -111,10 +113,11 @@ The database stores:
 - all active and inactive agents by immutable UUID, lifecycle state, private-library ownership, bounded Working Context, and persistent identity-addressed inbox messages;
 - append-only System Memory Journal events with identity snapshots and source provenance, plus optional Agent-owned segments, Memory Cards, normalized tags, retained references, and FTS5 search data;
 - ordinary teams with role-neutral `team_id ↔ agent_id` membership rows linked to historical intervals, explicit parent references, AgentTeam inboxes, and proposals;
-- consensual formation request projections, normalized content and revision fingerprints, immutable revision snapshots, append-only exact-revision invitation decisions, detached collaborative drafts, creation choices, late-join state, and resulting team references;
+- consensual formation request projections, normalized content and revision fingerprints, immutable revision snapshots, append-only exact-revision invitation decisions, optional initiator-authored candidates, creation choices, late-join state, and resulting team references;
 - communication requests, ordered approvals, member ballots, directional Agreements, and peer-delivery records;
 - team and direct Markdown chat sources, append-only revisions and withdrawal evidence, independently owned personal views, captured reminder previews, exact operation receipts, preferences, and friendship requests and relationship generations;
-- identified governance cases with frozen electorates, immutable explicit personal-email ballots, and asynchronous migration requests;
+- identified governance cases with frozen electorates, immutable explicit personal-email ballots, asynchronous migration requests, explicit parent acceptance, position events, cooldowns, and bounded resource-decision attempts;
+- typed health observations and detector states, stable incidents and their occurrence/claim histories, temporary audit runs and participant snapshots, scoped provider/execution/chat evidence, individual findings, and final results;
 - document-library metadata, ACLs, managed cross-library links, paths, and file contents.
 
 An incremental membership change rewrites the affected team's `team_members` rows without rewriting an already persisted Agent record, Working Context, Journal, Memory Catalog, model binding, lifecycle state, or Private DocLib.
@@ -135,7 +138,9 @@ An accepted historical friendship request remains accepted after its relationshi
 
 Each audit's supervisory AgentTeam and fresh auditors are fully registered in the running Manager but deliberately omitted from state snapshots, including full saves taken during an audit.
 
-The completed audit's source transcript, debate, and result remain in the System Memory Journal after the temporary team, auditors, and DocLibs are removed.
+Immutable admitted evidence, scoped provider/execution/chat records, findings, and results remain in audit-specific tables after the temporary team, auditors, and DocLibs are removed.
+
+These records do not merge privileged audit windows into ordinary personal Journals or episodic-memory ownership.
 
 Insert-only dependency records satisfy identity and provenance references when registered Agents or teams have not yet been written to the database.
 
@@ -165,13 +170,14 @@ await manager.load_state("att.db")
 
 Restoration is transactional.
 
-- ATT validates every Agent UUID, identity inbox message, formation request, contiguous revision history, invitation decision, detached draft and publication provenance, member, creator, parent, model alias, DocLib owner, permission, communication principal and state combination, Agreement, peer delivery, Journal sequence, memory ownership and provenance edge, deterministic segment digest, file path, and managed link before publishing anything.
+- ATT validates every Agent UUID, identity inbox message, formation request, contiguous revision history, invitation decision, optional candidate and exact invocation provenance, member, creator, parent, model alias, DocLib owner, permission, communication principal and state combination, Agreement, peer delivery, Journal sequence, memory ownership and provenance edge, deterministic segment digest, file path, and managed link before publishing anything.
 - Multiple membership rows resolve to the same restored Agent object and do not carry team-role metadata.
 - Every agent must own exactly one canonical `PDL-<agent_id>` private library; private libraries must be non-public, have no team ACL or managed links, and match the owner's lifecycle state.
-- Persisted communication `PROCESSING` states reset to `PENDING` after validation, and a formation draft interrupted in `RUNNING` returns to `PENDING` with an explicit retry-required reason.
-- Personal governance emails, eligible voters, round histories, complete tallies, and authoritative communication or migration outcomes are cross-validated; email read state never supplies a missing ballot.
-- Pending failover rounds become `EXPIRED` because their original resource invocation did not survive the process interruption; the retained email and choice history are not deleted.
-- `load_state()` fails closed while foreground formation, governance submission, migration commit, or detached formation/governance work is active, so restored registries cannot race ongoing authoritative operations.
+- Persisted communication `PROCESSING` states reset to `PENDING` after validation; optional candidates have no detached job to replay.
+- Personal governance emails, eligible voters, case histories, complete tallies, and authoritative communication or migration outcomes are cross-validated; email read state never supplies a missing ballot.
+- Pending failover cases become `EXPIRED` because their original resource invocation did not survive the process interruption; the retained email and choice history are not deleted.
+- `load_state()` fails closed while personal, formation, governance, migration, resource, or audit work is live, so restored registries cannot race ongoing authoritative operations.
+- Interrupted audit runs become unknown retained evidence without recreating auditors; incident claims return to pending attention.
 
 Before staging or publication, restore drains accepted writes and verifies that its candidate Journal contains every event already committed to the destination database with its original sequence and contents.
 
@@ -193,16 +199,24 @@ Runtime tools and callbacks already registered on the host remain runtime-owned.
 
 ## Memory compression
 
-When an agent exceeds `max_memory_turns`, ATT summarizes older messages for the active model window while preserving the initial instruction, recent high-fidelity messages, and native tool-call/result boundaries.
+When an Agent exceeds `working_context_message_limit`, ATT derives a compact Working Context while preserving complete recent exchanges and their source references.
 
-The complete sanitized cross-team history remains in the append-only System Memory Journal, while only the compressed Working Context is restored into `agent.messages`.
+The complete sanitized history remains in the append-only System Memory Journal.
 
-One shared agent keeps a single identity and memory; calls are serialized by the agent lock, while `ContextVar` records identify the active team and discussion for prompts and team-sensitive tools.
+One shared Agent keeps the same identity, model binding, and personal memory across memberships; invocation ContextVars identify actual scope without creating a team-specific person.
 
-The optional [Selective Episodic Memory](Selective_Episodic_Memory.md) catalog creates one background-indexed card per completed or incomplete business Agent turn and never changes ownership when team memberships change.
+Optional [Selective Episodic Memory](Selective_Episodic_Memory.md) indexes committed personal invocation segments, including personal scope, without changing ownership when relationships change.
+
+A first partial checkpoint includes causal invocation, chat, execution, identity, and library prerequisites.
+
+Exact-case governance mail is inserted only if missing, so a later ballot checkpoint cannot overwrite an independent read receipt.
+
+Authoritative inbox replacements and insert-only prerequisites can safely coexist in one coalesced delta.
+
+Position-history prerequisites include the corresponding cooldown records, and stale metadata cannot rewrite a newer accepted parent edge.
 
 ## Schema policy
 
-- The current persistence schema version is `14`.
-- Compatibility with schema `13` and earlier SQLite layouts is intentionally unsupported.
+- The current persistence schema version is `15`.
+- Compatibility with schema `14` and earlier SQLite layouts is intentionally unsupported.
 - Create a new database when upgrading.
