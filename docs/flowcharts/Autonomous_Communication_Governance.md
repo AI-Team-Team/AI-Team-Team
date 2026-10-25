@@ -168,7 +168,7 @@ sequenceDiagram
     else Every voter submitted valid choice and strict majority false
         Cases-->>Broker: DENIED
     else Missing, invalid, tied or changed eligibility
-        Cases-->>Broker: No authority; preserve pending business request
+        Cases-->>Broker: No authority granted, business request remains pending
     end
 ```
 
