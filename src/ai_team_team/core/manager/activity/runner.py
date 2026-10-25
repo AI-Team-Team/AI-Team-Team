@@ -17,7 +17,7 @@ from ai_team_team.core.strategies.shared import (
 from ai_team_team.core.text_action import parse_text_action, parse_tool_arguments
 
 from .tools import ForegroundToolMixin
-from .values import ModelUnavailable, capture, identifier, scope_fields
+from .values import ModelUnavailable, ScopeUnavailable, capture, identifier, scope_fields
 
 
 class RunnerMixin(ForegroundToolMixin):
@@ -38,6 +38,8 @@ class RunnerMixin(ForegroundToolMixin):
                         (manager._active_team, manager._active_team.set(self.team_for(session))),
                     ]
                     await self.run_invocation(session, agent)
+                except ScopeUnavailable:
+                    await self.end_invocation(session)
                 except BaseException as error:
                     _close_interrupted_tool_batch(self.team_for(session), agent, manager)
                     await self.interrupt(session, error)
@@ -65,17 +67,18 @@ class RunnerMixin(ForegroundToolMixin):
             for variable, token in reversed(tokens):
                 variable.reset(token)
             session.running = False
-            if session.failure is not None:
-                self.response_observed(session)
-                for future, _intent in tuple(self.waiters.get(session.admission_id, ())):
-                    if not future.done():
-                        future.set_exception(session.failure)
+            self.fail_observers(session)
             if session.active and not self.closing:
                 self.enqueue(session)
 
     async def interrupt(self, session, error, *, window=True):
         if session.audit_profile is not None:
             return await self.interrupt_audit(session, error)
+        owner = self.manager._agents_by_id.get(session.agent_id)
+        if owner is not None and owner.lifecycle_state == "dead":
+            session.failure, session.active, session.availability = error, False, "closing"
+            self.response_observed(session)
+            return
         from ai_team_team.database.persistence.receipts import settle_commit
         await settle_commit(asyncio.create_task(self.manager.supervisor.release_claims(session.agent_id)))
         admission = self.manager._records.index.get(
@@ -177,16 +180,24 @@ class RunnerMixin(ForegroundToolMixin):
                 async with self.lock:
                     await self.checkpoint(session)
                 continue
-            self.check_generation(session)
+            scope_lost = False
+            try:
+                self.check_generation(session)
+            except ScopeUnavailable:
+                # A lawfully received answer remains this person's memory;
+                # losing AT authority prevents effects, not factual retention.
+                scope_lost = True
             text = response.text or ""
             if session.audit_profile is None:
                 manager.supervisor.sample_semantic_evidence(session.agent_id, session.last_request_id)
             session.answer = ""
             if native:
-                await self.native_response(session, response, tools)
+                await self.native_response(session, response, tools, scope_lost=scope_lost)
                 had_batch = bool(response.tool_calls)
             else:
-                had_batch = await self.text_response(session, text, tools)
+                had_batch = await self.text_response(session, text, tools, scope_lost=scope_lost)
+            if scope_lost:
+                raise ScopeUnavailable()
             async with self.lock:
                 await self.checkpoint(session)
             if had_batch:
@@ -197,7 +208,7 @@ class RunnerMixin(ForegroundToolMixin):
                 break
         await self.end_invocation(session)
 
-    async def native_response(self, session, response, tools):
+    async def native_response(self, session, response, tools, *, scope_lost=False):
         agent = self.require_agent(session.agent_id)
         calls = response.tool_calls
         if any(
@@ -231,7 +242,11 @@ class RunnerMixin(ForegroundToolMixin):
         }
         executions = []
         for call in calls:
-            if (
+            if scope_lost:
+                executions.append(asyncio.sleep(0, result=ToolResult(call.call_id, call.name,
+                    "The original AgentTeam scope ended; this call was not executed. Continue in a valid personal scope.",
+                    status=ToolResultStatus.DENIED, error_kind="scope_ended")))
+            elif (
                 duplicated
                 and call.name in {"set_activity_intent", "set_operation_scope"}
                 or not isinstance(call.arguments, dict)
@@ -256,13 +271,13 @@ class RunnerMixin(ForegroundToolMixin):
                 )
         session.availability = "waiting_tool"
         results = await self.execute_batch(executions)
-        self.check_generation(session)
         for result in results:
             await self.manager.supervisor.observe_tool(session, result)
             self.append_observation(session, result, tools, True)
         session.availability = "ready"
+        self.check_generation(session)
 
-    async def text_response(self, session, text, tools):
+    async def text_response(self, session, text, tools, *, scope_lost=False):
         agent = self.require_agent(session.agent_id)
         import re
 
@@ -294,7 +309,9 @@ class RunnerMixin(ForegroundToolMixin):
             action = parse_text_action(text)
             args, kwargs = parse_tool_arguments(action.arguments)
             session.availability = "waiting_tool"
-            result = (
+            result = ToolResult(identifier("CALL"), action.name,
+                "The original AgentTeam scope ended; this call was not executed. Continue in a valid personal scope.",
+                status=ToolResultStatus.DENIED, error_kind="scope_ended") if scope_lost else (
                 await self.execute_batch(
                     [
                         self.execute_tool(
@@ -316,12 +333,12 @@ class RunnerMixin(ForegroundToolMixin):
                 status=ToolResultStatus.INVALID_ARGUMENTS,
                 error_kind="action_parse",
             )
-        self.check_generation(session)
         await self.manager.supervisor.observe_model(session, valid=action is not None,
             error_kind="action_structure" if action is None else None)
         await self.manager.supervisor.observe_tool(session, result)
         self.append_observation(session, result, tools, False)
         session.availability = "ready"
+        self.check_generation(session)
         return True
 
     def response_observed(self, session, *, answer_ready=False, stopping=False):
@@ -423,6 +440,8 @@ class RunnerMixin(ForegroundToolMixin):
         if not self.closing:
             if session.intent == "sleep":
                 self.arm_timer(session, max(0, session.sleep_deadline - self.clock.monotonic()))
+                if any(self.notice_can_wake(notice) for notice in self.pending_notices(session.agent_id)):
+                    self.schedule_activation(session.agent_id, notification_only=True)
             elif session.intent == "idle" and self.pending_notices(session.agent_id):
                 self.schedule_activation(session.agent_id, notification_only=True)
         self.response_observed(session, stopping=session.intent in {"idle", "sleep"})

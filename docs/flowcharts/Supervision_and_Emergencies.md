@@ -4,19 +4,23 @@ Health detection requests inspection rather than deciding that a person is unhea
 
 ```mermaid
 flowchart TD
-    Evidence["Typed observation or explicit Host evidence"] --> Kind{"Evidence kind"}
+    Evidence["Typed runtime observation or confirmed guard evidence"] --> Kind{"Evidence kind"}
+    Host["Explicit Host assessment request with authorized evidence"] --> Admission
     Kind -- "Confirmed permission/integrity fault" --> Protect["Apply deterministic protection immediately"]
     Protect --> Incident["Persist or merge stable incident"]
-    Kind -- "Protocol failure" --> Protocol["Three consecutive failures in 600 seconds"]
-    Kind -- "Same-tool argument category" --> Tool["Five consecutive failures in 600 seconds"]
+    Kind -- "Protocol failure" --> Protocol["Default: three consecutive failures in 600 seconds"]
+    Kind -- "Same-tool argument category" --> Tool["Default: five consecutive failures in 600 seconds"]
     Kind -- "Semantic suspicion" --> Semantic{"Host enabled detector and authorized evidence?"}
     Kind -- "Silence, waiting, denial, provider outage" --> NoBlame["No automatic Agent-health accusation"]
     Semantic -- "No" --> NoBlame
-    Semantic -- "Yes" --> Threshold["Retain authorized detector evidence"]
-    Protocol --> Threshold
+    Semantic -- "Yes" --> Detector["Run Host detector on explicitly authorized evidence"]
+    Detector -- "Literal true" --> Admission
+    Detector -- "Other result" --> NoBlame
+    Protocol --> Threshold["Commit threshold observation and detector state"]
     Tool --> Threshold
-    Threshold --> Incident
-    Threshold --> Admission["Admit fresh real privileged audit AT"]
+    Threshold --> InitialIncident["Commit threshold incident before audit admission"]
+    InitialIncident --> Admission["Admit fresh real privileged audit AT"]
+    InitialIncident -. "Recorded incident metadata" .-> Event
     Admission --> Deadline["Total 600-second default deadline includes queueing"]
     Deadline --> Runtime["Same personal scheduler, provider service, ToolExecutor and quota ledger"]
     Runtime --> Findings["Each predefined auditor explicitly submits own structured finding"]
@@ -26,11 +30,13 @@ flowchart TD
     Majority --> Result["HEALTHY, UNHEALTHY or UNKNOWN"]
     Unknown --> Retain
     Result --> Retain["Commit scoped evidence and dissolve temporary identities"]
-    Retain -- "Attention required" --> Incident
+    Retain -- "Non-healthy or operationally degraded result" --> Incident
     Incident --> Delivery{"Configured attention"}
     Delivery -- "none" --> Event["Metadata-only system event"]
-    Delivery -- "queue" --> Mail["Addressed attention, no forced activation"]
-    Delivery -- "wake" --> Personal["Request ordinary personal activity, no scope or intent override"]
+    Delivery -- "queue or wake" --> Handler{"Actual organizational handler exists?"}
+    Handler -- "No" --> Event
+    Handler -- "Yes, queue" --> Mail["Addressed attention, no forced activation"]
+    Handler -- "Yes, wake" --> Personal["Request ordinary personal activity, no scope or intent override"]
     Mail --> Claim["Explicit current-authority claim"]
     Personal --> Claim
     Claim --> Handled{"Explicit current-generation acknowledgement?"}
@@ -41,7 +47,7 @@ flowchart TD
 
 A valid provider response resets the protocol streak, while a successful call resets the same tool's argument streak.
 
-The 600-second observation window never becomes an incident TTL.
+The configured observation window, 600 seconds by default, never becomes an incident TTL.
 
 Audit findings grant no implicit repair, membership, file, permission, or model authority.
 

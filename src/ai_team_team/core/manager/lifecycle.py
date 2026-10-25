@@ -158,6 +158,9 @@ class LifecycleService:
             # never external LLM or executor waits.
             results = await asyncio.gather(*tuple(manager._publication_tasks), return_exceptions=True)
             publication_error = next((result for result in results if isinstance(result, BaseException)), None)
+        if manager._agent_registry.death_tasks:
+            results = await asyncio.gather(*tuple(manager._agent_registry.death_tasks.values()), return_exceptions=True)
+            publication_error = publication_error or next((result for result in results if isinstance(result, BaseException)), None)
         # A restore finalizer reconstructs local activity indexes. Never sample
         # or close a mixture of the old indexes and newly published records.
         activity_error = None

@@ -24,9 +24,9 @@ class TopologyService:
         self.transition_lock = asyncio.Lock()
         self._reserved: dict[str, object] = {}
 
-    def is_agent_pending(self, agent_id):
+    def is_agent_pending(self, agent_id, *, include_lifecycle=True):
         """Staging membership never grants a new person's runtime authority."""
-        return any(getattr(team, "_publication_pending", False)
+        return (include_lifecycle and agent_id in self.manager._agent_registry.lifecycle_pending) or any(getattr(team, "_publication_pending", False)
             and agent_id in getattr(team, "_provisional_agent_ids", ())
             for team in self.manager.teams.values())
 

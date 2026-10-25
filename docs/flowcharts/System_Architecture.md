@@ -1,6 +1,8 @@
 # ATT System Architecture
 
-This overview shows the common personal runtime, explicit organizational forest, coordination surfaces, and durable authority boundaries.
+This technical map expands the [README overview](../../README.md#-system-architecture) with subsystem dependencies, authority boundaries, and the main paths between personal activity, institutions, knowledge, and persistence.
+
+Module-specific state machines and failure handling remain in the linked subsystem guides.
 
 ```mermaid
 flowchart TB
@@ -23,7 +25,8 @@ flowchart TB
         Position["Accepted Position Changes<br/>target consent, cycle checks, cooldown"]
         Private["One Private DocLib per Person"]
         Shared["Team DocLibs and Live Path ACLs"]
-        People --> Membership --> Forest
+        People -->|member identities| Membership
+        Forest -->|team identities| Membership
         People --> Private
         Forest --> Shared
         People --> Discovery
@@ -43,10 +46,12 @@ flowchart TB
         Background["Same-Owned Background Tasks<br/>detachment, health, explicit result reads"]
         Inbox --> Activity --> Lock --> Boundary
         Boundary --> Model --> Boundary
-        Boundary --> Tools --> Executor
-        Executor --> Background
+        Boundary -->|tool calls| Executor
+        Executor -->|coordinated invocation| Tools
+        Tools -->|typed result| Executor
+        Executor -->|eligible background execution or detachment| Background
         Background -->|addressed result reference| Inbox
-        Tools -->|complete batch| Boundary
+        Executor -->|accepted foreground observation or task handle| Boundary
         Boundary -->|continuing yield| Activity
     end
 
@@ -63,7 +68,9 @@ flowchart TB
         Cases --> Peer
         Cases --> Position
         Cases --> Resource
-        Health --> Audit --> Incidents
+        Health -->|threshold: retain incident before audit admission| Incidents
+        Health -->|threshold assessment after incident commit| Audit
+        Audit -->|non-healthy or operationally degraded result| Incidents
         Health -->|confirmed integrity fault: immediate protection| Incidents
     end
 
@@ -72,7 +79,8 @@ flowchart TB
         Journal["Append-Only Sanitized Journal"]
         Catalog["Optional Episodic Catalog<br/>isolated indexing, owner-only recall"]
         Files["Token-Gated Reads and Explicit Publication<br/>live ACLs and managed links"]
-        Journal --> Catalog --> Window
+        Journal -->|optional indexing| Catalog
+        Catalog -->|explicit transient recall| Window
         Private --> Files
         Shared --> Files
     end
@@ -80,7 +88,7 @@ flowchart TB
     subgraph Durability["Durability, Recovery, and Observation"]
         Delta["Immutable Entity and Domain Deltas"]
         Writer["One Exclusive Coalescing Writer"]
-        Database[(SQLite Schema 15)]
+        Database[(SQLite Schema 16)]
         Restore["Validated Staging and Atomic Recovery<br/>causal references, no external replay"]
         Events["Ordered Metadata-Only System Events"]
         Delta --> Writer --> Database --> Restore
@@ -90,6 +98,7 @@ flowchart TB
     Manager --> People
     Manager --> Forest
     Manager --> Activity
+    Manager -->|explicit Host assessment request| Audit
     Tools --> Formation
     Tools --> Chat
     Tools --> Contact
@@ -97,21 +106,25 @@ flowchart TB
     Tools --> Position
     Tools --> Cases
     Tools --> Files
+    Formation -->|addressed revision invitations| Inbox
     Cases -->|addressed voluntary voting mail| Inbox
     Peer -->|message references| Inbox
     Chat -->|authorized notices| Inbox
-    Model -->|resource remedy handle| Resource
+    Model -->|configured parent failover only| Resource
     Resource -->|authorized binding change| Model
     Position -->|affected-person notices| Inbox
-    Incidents -->|queue or wake attention; no forced decision| Inbox
+    Incidents -->|actual handler: queue or wake attention| Inbox
+    Incidents -->|no designated organizational handler| Events
     Audit -->|restricted profile| Activity
     Model -->|typed protocol evidence| Health
     Tools -->|classified operation evidence| Health
     Boundary --> Window
     Boundary --> Journal
     Window --> Model
+    Catalog -.->|deliberately retained compact references in instructions| Model
     Files -->|explicit authorized observation| Window
     Membership --> Delta
+    Formation --> Delta
     Forest --> Delta
     Boundary --> Delta
     Executor --> Delta
@@ -151,8 +164,27 @@ flowchart TB
 
 - Colored outer boxes identify major subsystems, not separate Agent identities or inference engines.
 - Membership and organizational parenthood are independent relationships.
+- Execution registration and resource coordination precede ToolExecutor invocation; results and task handles retain their separate meanings.
+- Membership changes preserve Agent-owned identity, memory, model binding, and private documents.
 - Publications, personal mail, ballots, and background results retain distinct authority and read-state semantics.
-- Governance and fresh temporary audit teams use the common runtime, with specialized data and tool restrictions rather than a second execution loop.
+- Governance and Team Formation retain their own rules, authorization, and durable state while using the common personal runtime.
+- Fresh temporary audit teams use that same runtime with restricted evidence and tools.
+- Threshold incidents are retained before audit admission, and incident attention reaches the actual designated authority or the Host.
+- Episodic recall is explicit and transient; deliberately retained compact references enter model instructions.
 - Runtime publication follows an exact accepted receipt; restore validates staged state before exposing it.
+
+## Subsystem Guides
+
+| Topic | Detailed documentation |
+| --- | --- |
+| Identity, ownership, and discovery | [Core objects](../Core_Objects_Model.md), [Agent and AgentTeam discovery](../Agent_and_AgentTeam_Discovery.md) |
+| Formation and topology | [Consensual Team Formation](../Consensual_Team_Formation.md), [lineage mutations](Lineage_Tree_Mutations.md) |
+| Personal activity and lifecycle | [Personal runtime](../dev/autonomous_activity/Phase_2.md), [sleep, recovery, and retained lifecycle](../dev/autonomous_activity/Phase_6.md) |
+| Governance and peer communication | [Team Governance](../Team_Governance.md), [communication flowcharts](Autonomous_Communication_Governance.md) |
+| Conversations and personal contact controls | [Personal conversations](Personal_Conversations.md) |
+| Tools and background execution | [Tooling and execution](Tooling_and_Execution.md), [background tasks](Background_Tasks.md) |
+| Memory and document access | [Selective episodic memory](Selective_Episodic_Memory.md), [file reading and DocLib authorization](Gated_Reading.md) |
+| Health supervision and incidents | [Supervision and emergencies](Supervision_and_Emergencies.md) |
+| Persistence and recovery | [Persistence contract](../State_Persistence.md), [persistence flowcharts](State_Persistence.md) |
 
 See the [flowchart index](README.md) for detailed state machines and failure boundaries.

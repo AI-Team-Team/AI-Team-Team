@@ -182,6 +182,7 @@ class PersonalActivityConfig(BaseModel):
     notification_frame_limit: Annotated[int, Field(ge=1)] = 20
     minimum_sleep_minutes: Annotated[int, Field(ge=1)] = 5
     maximum_sleep_minutes: Annotated[int, Field(ge=1)] = 2880
+    countdown_checkpoint_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 30.0
     tool_cooldown_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 600.0
     cooldown_downtime: Literal["include", "exclude"] = "include"
     llm: ModelRequestPolicy = Field(default_factory=ModelRequestPolicy)

@@ -22,26 +22,37 @@ flowchart TD
     Preflight --> Load["await load_state(path)"]
     Load --> Version["Validate schema version"]
     Version --> Aliases["Read persisted model aliases"]
-    Aliases --> Bindings{"All aliases have a direct client\nor generator handler?"}
+    Aliases --> Bindings{"All active Agent aliases have a direct client\nor generator handler?"}
     Bindings -- "No" --> Error["Raise StateRestoreError with all aliases"]
-    Bindings -- "Yes" --> Validate["Validate UUID references and exactly one private DocLib per agent"]
+    Bindings -- "Yes" --> Validate["Validate UUID references and exactly one private DocLib per Agent"]
     Validate --> Privacy["Reject private public flags, team ACLs, links, and lifecycle mismatch"]
     Privacy --> Stage["Build detached manager and temporary DocLib trees"]
     Stage --> Pointers["Rebuild parent/child pointers and recompute depth"]
     Pointers --> Runtime["Rebind built-in and registered runtime tools"]
-    Runtime --> Publish["Publish DocLib directories and swap live registries"]
-    Publish --> Ready["Manager ready"]
+    Runtime --> Recovery["Settle required interruption facts in detached state"]
+    Recovery --> Prepared["Persist prepared manifest and exact before-images"]
+    Prepared --> Files["Publish gated DocLib directories"]
+    Files --> Receipt["Commit required recovery facts and publication decision"]
+    Receipt --> Publish["Synchronously switch live registries and runtime indexes"]
+    Publish --> Ready["Schedule eligible owners and timers after publication"]
     Validate -- "Invalid" --> Error
     Privacy -- "Invalid" --> Error
     Stage -- "Failure" --> Rollback["Discard staging; live manager and files unchanged"]
-    Publish -- "Failure" --> Rollback
+    Recovery -- "Failure" --> Rollback
+    Files -- "Failure" --> Inverse["Restore exact prior records and DocLib trees"]
+    Receipt -- "Failure" --> Inverse
+    Publish -- "Failure" --> Inverse
+    Inverse --> Rollback
 ```
 
 - SQLite uses foreign keys, WAL, and an explicit busy timeout.
 - A second manager or process fails its non-blocking writer lease immediately.
-- Schema 15 stores Agent inboxes, exact governance cases and frozen electorates, append-only explicit ballots, durable migration requests, consensual formation revisions, invitation decisions, optional initiator-authored candidates, autonomous communication records, separated Working Context, the append-only Journal, the optional episodic-memory catalog, source provenance, retained references, and the FTS5 index.
+- Schema 16 retains personal, institutional, memory, chat, and execution history and adds suppression lifecycle, source-count summary coverage, and recoverable before-images for required publication changes.
 - Restore cross-validates personal emails against cases and voters, resets communication processing states, and expires interrupted failover attempts without treating read receipts as ballots or deleting historical choices.
 - Audit-scoped supervisory teams and auditors stay live only during their audit; snapshots exclude their identities and DocLibs, while audit-specific tables retain scoped evidence and results.
 - Position events include parent acceptance and cooldown prerequisites; stale projections cannot replace accepted parent edges.
 - Health observations, incidents, occurrence generations, scoped audit requests, findings, and results validate before publication.
+- Sleep and timed reminder preferences resume saved monotonic remainders from restoration start; expired safeguards dispatch only after publication.
+- Affected active owners wake without replaying old external work, while unaffected sleepers and retained dead identities do not activate.
+- Dead identities retain historical creators, messages, and private artifacts and cannot be reactivated.
 - It intentionally does not migrate old databases.

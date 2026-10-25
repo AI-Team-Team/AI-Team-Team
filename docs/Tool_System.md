@@ -205,6 +205,14 @@ It does not invoke a separate summarizer that changes personal identity or silen
 
 The Agent explicitly chooses idle or finite sleep through `set_activity_intent`.
 
+`set_notification_suppression(preference)`, `list_notification_suppressions(active_only=True)`, and `remove_notification_suppression(preference_id)` control only the invoking person's ordinary reminders.
+
+Preferences may be permanent or timed and select all ordinary arrivals, a source Agent, or an active ordinary AgentTeam without granting any access to that source.
+
+Timed preferences use the same Host-configurable positive day, hour, and minute bounds as sleep, and protected system notices and the finite sleep deadline remain effective.
+
+Ending suppression produces eligible source counts without titles, previews, bodies, read changes, or replay of covered individual reminders, and any remaining preference still filters the summary.
+
 Classified ordinary tool failures become personal observations, and a failed provider may enter a resource-unavailable state without terminating other people.
 
 Cancellation, shutdown, persistence failures, and integrity faults retain their distinct propagation and settlement boundaries.
@@ -292,6 +300,12 @@ Managed-link bindings and actual physical paths are revalidated at resource acce
 Accepted stop requests survive observer cancellation, while an operation that has already returned finishes local result settlement without being misreported as cancelled.
 
 Stop-hook framework errors remain observable through cancellation and shutdown even when the external stop outcome is uncertain or a synchronous hook finishes after its grace period.
+
+Executors declaring `suspension="provider"` supply `async suspend(execution_id)` and must return literal `True` to acknowledge suspension during lifecycle shutdown.
+
+A suspension request alone is not a paused outcome, and a missing acknowledgement falls back to termination without inventing a terminal execution state or automatic resumption.
+
+See [Phase 6](dev/autonomous_activity/Phase_6.md) for retained owner death, resource fencing, countdown recovery, and exact publication boundaries.
 
 Heartbeat and progress timeout decisions serialize with accepted samples and retain crossed deadlines during slow observation commits, preventing stale stalls and lost monitor wakeups.
 

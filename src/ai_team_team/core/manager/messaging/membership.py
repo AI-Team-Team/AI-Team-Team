@@ -103,17 +103,24 @@ class MembershipMixin:
             dirty["_relationships_supplied"] = True
             from .base import identity
             operation_id = operation_id or identity("MEMBERSHIP")
+            from ..activity.lifecycle_notices import membership_notices
+            protected, protected_ids, event_ids = membership_notices(manager, set(opened) ^ set(identifiers),
+                team_ids=(team.team_id,), source_id=operation_id, reason="membership_changed")
+            dirty["memory_events"].update(event_ids)
             mail_ids, notice_ids = [], ()
             try:
                 for owner, kind, payload in mail_specs:
                     mail_ids.append((owner, manager._inbox.notify(owner, kind, payload)))
                     dirty["agent_inboxes"].add(owner)
                 arrivals, notice_ids = manager._activity.mail_records(dirty["agent_inboxes"])
-                return await manager._records.commit((*records, *arrivals), dirty=dirty, notifications=notice_ids,
+                notice_ids = (*notice_ids, *protected_ids)
+                return await manager._records.commit((*records, *arrivals, *protected), dirty=dirty, notifications=notice_ids,
                     operation_id=operation_id, team_memberships={team.team_id: identifiers},
                     agent_registrations=registrations, team_proposals={team.team_id: proposals} if proposals is not None else None)
             finally:
                 if operation_id not in manager._records.receipts:
+                    for event_id in event_ids:
+                        manager._memory.discard_unpersisted_event(event_id)
                     for owner, mail_id in mail_ids:
                         agent = manager._agents_by_id[owner]
                         with agent.inbox_lock:

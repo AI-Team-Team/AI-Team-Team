@@ -153,12 +153,16 @@ class TopologyLifecycleTests(ChatTestCase):
                 denied = await manager.negotiate_and_execute_migration(moving, target, "Provisional target")
                 self.assertEqual(denied.status, "DENIED")
                 target._publication_pending = False
+                from test.test_att.test_agent_activity._support import idle
+                from test.test_att.test_autonomous_activity_phase0._fixtures import ModelStep
+                manager.llm_clients["fixture"].steps.extend(ModelStep(idle()) for _ in target.members)
                 await manager.close_team_conversation(target.team_id)
                 for source, destination in ((moving, target), (target, moving)):
                     denied = await manager.negotiate_and_execute_migration(source, destination, "Dissolved endpoint")
                     self.assertEqual(denied.status, "DENIED")
                     self.assertIsNone(source.parent_team)
                 self.assertFalse(manager._migration.requests)
+                await settle_governance_activity(manager)
                 await manager.save_state(path)
                 await manager.load_state(path)
 

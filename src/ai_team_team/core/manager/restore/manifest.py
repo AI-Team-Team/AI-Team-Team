@@ -26,20 +26,33 @@ async def prepare_manifest(manager, staged, managed_root, state):
         "staged_files": list(entries), "recovery_operation_id": f"recovery-{identifier}",
         "status": "prepared", "prepared_at": time.time(), "resolved_at": None, "state_version": 1,
     })
-    await commit_manifest(manager, manifest)
-    staged._records._merge((manifest,))
+    # Detached validators see the complete candidate decision, while the real
+    # database receives only the prepared manifest until its final transaction.
+    staged._records._merge((DomainRecord.capture("publication_manifests", {
+        **thaw(manifest.values), "status": "published", "resolved_at": time.time(),
+    }),))
     annotations, events, plan = derive_recovery(staged, manifest.values["checkpoint_id"], identifier)
-    manager._publication_annotations = annotations, events
     staged._recovery_plan = plan
+    from .preparation import prepare_domain_recovery
+    delta = await prepare_domain_recovery(manager, staged, state, annotations, events,
+        restoration_start=getattr(manager, "_restoration_start", manager._activity.clock.monotonic()))
+    path = getattr(manager, "_restore_source_path", None) or manager.db_path
+    before = await manager._persistence.capture_recovery_images(path, delta) if path else []
+    manifest = DomainRecord.capture("publication_manifests", {**thaw(manifest.values), "recovery_before": before})
+    manager._publication_recovery_delta = delta
+    await commit_manifest(manager, manifest)
+    staged._records.restore((*[row for row in staged._records.snapshot() if row.identity != manifest.identity], manifest))
     return manifest
 
 
 async def commit_manifest(manager, manifest, *, annotations=(), events=(), rollback=False):
     path = getattr(manager, "_restore_source_path", None) or manager.db_path
     if path:
+        delta = getattr(manager, "_publication_recovery_delta", {}) if manifest.values["status"] == "published" else {}
         snapshot = {"full": False, "state_version": max(1, manager._state_version),
+                    **delta,
                     "configs": {"publication_generation": manifest.values["target_generation"]} if manifest.values["status"] == "published" else None,
-                    "records": (manifest, *annotations), "memory_events": events,
+                    "records": (manifest, *delta.get("records", ()), *annotations), "memory_events": delta.get("memory_events", events),
                     "_publication_rollback": manifest.values["publication_id"] if rollback else None,
                     "_publication_operation": True}
         await settle_commit(asyncio.wrap_future(manager._persistence.submit(path, snapshot)))
@@ -47,7 +60,7 @@ async def commit_manifest(manager, manifest, *, annotations=(), events=(), rollb
 
 async def resolve_manifest(manager, manifest, status):
     values = thaw(manifest.values)
-    values.update(status=status, resolved_at=time.time(), state_version=manifest.version + (2 if status == "rolled_back" else 1))
+    values.update(status=status, resolved_at=max(time.time(), values["prepared_at"]), state_version=manifest.version + (2 if status == "rolled_back" else 1))
     resolved = DomainRecord.capture("publication_manifests", values)
     annotations, events = getattr(manager, "_publication_annotations", ((), ()))
     await commit_manifest(manager, resolved, annotations=annotations if status == "published" else (),

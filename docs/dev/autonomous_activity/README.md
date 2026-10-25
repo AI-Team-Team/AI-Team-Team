@@ -12,9 +12,11 @@ Phase 3 adds [team conversations and personal direct chat](Phase_3.md), includin
 
 Phase 4 adds [registered execution and background detachment](Phase_4.md), with resource coordination, protected owner-only results, independent task dimensions, factual stopping, and schema 14.
 
-Phase 5 implements [round-free institutional execution and health supervision](Phase_5.md) with explicit organizational parents, personal-mail cases, independent resource attempts, restricted common-runtime audits, and schema 15.
+Phase 5 adds [round-free institutional execution and health supervision](Phase_5.md) with explicit organizational parents, personal-mail cases, independent resource attempts, restricted common-runtime audits, and schema 15.
 
-Phase 5 implementation and local acceptance checks are complete; Phase 6 lifecycle and recovery integration, Phase 7 broader documentation work, and Phase 8 extended reliability acceptance remain separate work.
+Phase 6 adds [sleep, recovery, and retained lifecycle integration](Phase_6.md) and [schema 16](Schema_16.md); Phase 7 broader documentation work and Phase 8 extended reliability acceptance remain separate work.
+
+Phase 6 implementation and local acceptance checks are complete.
 
 The Autonomous Agent Runtime coordinates personal activity, scheduling, provider calls, and invocation-scoped execution.
 
@@ -30,7 +32,7 @@ This directory records their engineering contracts and phase-specific verificati
 
 All D01 through D15 decisions remain confirmed, and no institution is reopened by these specifications.
 
-The running persistence schema is now `15`; schema 14 and earlier are rejected without migration.
+The running persistence schema is now `16`; schema 15 and earlier are rejected without migration.
 
 ## Deliverables
 
@@ -39,6 +41,7 @@ The running persistence schema is now `15`; schema 14 and earlier are rejected w
 - [Schema 13](Schema_13.md): chat command receipts, personal preferences, explicit reply references, and authoritative conversation projections.
 - [Schema 14](Schema_14.md): captured executor contracts, protected source provenance, Host execution origin, timing evidence, and unique input/result records.
 - [Schema 15](Schema_15.md): electorate-bound cases, explicit topology evidence, resource attempts, scoped audit findings, and durable health handling.
+- [Schema 16](Schema_16.md): suppression lifecycle, source-count summary coverage, and recovery before-images.
 - [Replacement inventory](Replacement_Inventory.md): ownership and disposition of round-dependent code and documentation.
 - [Machine-readable line inventory](round_dependencies.json): every selected source occurrence, including exports, tests, callbacks, diagrams, and examples.
 - [Built-in effect declarations](tool_effects.json): the reviewed target registration contracts, not permissions already installed in `Tool`.
@@ -49,6 +52,7 @@ The running persistence schema is now `15`; schema 14 and earlier are rejected w
 - [Phase 3 implementation](Phase_3.md): deliberate publications, historical membership visibility, direct relationships, read and withdrawal evidence, and isolated personal reminders.
 - [Phase 4 implementation](Phase_4.md): execution ownership, explicit and threshold detachment, resource coordination, results, controls, and supported health evidence.
 - [Phase 5 implementation](Phase_5.md): retained institutional mechanisms using common Agent execution, complete round removal, and completed local adversarial verification.
+- [Phase 6 implementation](Phase_6.md): sleep guarantees, reminder suppression, staged recovery settlement, and terminal retained death.
 
 ## Green and Red Checks
 

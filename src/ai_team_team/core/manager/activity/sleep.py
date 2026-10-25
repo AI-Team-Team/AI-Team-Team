@@ -1,12 +1,57 @@
-"""Finite live wake safeguards; complete suppression recovery is a later gate."""
+"""Finite monotonic wake safeguards independent of changing team authority."""
 
 import asyncio
 import contextvars
 
-from .values import capture, identifier
+from .values import ModelUnavailable, capture, identifier
 
 
 class SleepMixin:
+    async def expire_blocked_sleep(self, session):
+        """An unavailable provider cannot extend a voluntary sleep deadline."""
+        if session.intent != "sleep" or session.sleep_deadline is None or session.sleep_deadline > self.clock.monotonic():
+            return
+        async with self.lock:
+            if self.sessions.get(session.agent_id) is not session:
+                return
+            previous = session.intent, session.availability
+            session.intent, session.availability = "continuing", "unavailable"
+            expired = capture(self.manager, "sleep_plans", sleep_id=session.sleep_id, status="expired")
+            try:
+                await self.commit(session, (expired, self.marker(session)))
+            finally:
+                if self.manager._records.index.get(expired.identity) != expired:
+                    session.intent, session.availability = previous
+
+    def invalid_sleep_conditions(self, *, team_memberships=None, team_lifecycles=None, agent_lifecycles=None):
+        if not (team_memberships or team_lifecycles or agent_lifecycles):
+            return ()
+        result = []
+        for row in self.manager._records.snapshot():
+            if row.table_name != "sleep_conditions" or row.values["invalidated"]:
+                continue
+            values = row.values
+            owner = self.manager._records.index[("sleep_plans", (values["sleep_id"],))].values["agent_id"]
+            invalid = False
+            if values["source_kind"] == "agent_team":
+                team_id = values["source_team_id"]
+                if team_id in (team_memberships or {}):
+                    invalid = owner not in team_memberships[team_id]
+                invalid |= (team_lifecycles or {}).get(team_id) == "dissolved"
+            elif values["source_kind"] == "agent":
+                invalid = values["source_agent_id"] in (agent_lifecycles or {}) and agent_lifecycles[values["source_agent_id"]] != "active"
+            if invalid:
+                result.append(capture(self.manager, "sleep_conditions", condition_id=values["condition_id"], invalidated=1))
+        return result
+
+    def wake_scope(self, session):
+        from ai_team_team.core.activity.contracts import PersonalScope
+        try:
+            return self.validate_scope(session.agent_id, session.scope)
+        except PermissionError:
+            self.require_agent(session.agent_id)
+            return PersonalScope()
+
     def sleep_records(self, session, intent):
         session.sleep_id = identifier("SLEEP")
         duration = intent.countdown.total_seconds
@@ -67,7 +112,13 @@ class SleepMixin:
         return False
 
     def arm_timer(self, session, delay, *, recovery=False):
+        if self.sessions.get(session.agent_id) is not session or session.generation != self.generation:
+            return
         deadline = self.clock.monotonic() + max(0, delay)
+        if session.intent == "sleep" and session.sleep_deadline is not None:
+            # A provider recovery boundary cannot replace the latest voluntary
+            # wake. At that boundary sleep ends even if modeling remains blocked.
+            deadline = min(deadline, session.sleep_deadline)
         previous = self.timers.pop(session.agent_id, None)
         if previous is not None and previous is not asyncio.current_task():
             previous.cancel()
@@ -75,16 +126,28 @@ class SleepMixin:
         async def wake():
             try:
                 await self.clock.sleep(max(0, deadline - self.clock.monotonic()))
-                if self.closing or self.manager._agents_by_id.get(session.agent_id) is None:
-                    return
-                live = self.models.live.get(session.agent_id)
-                if live is not None and not live.done():
-                    # Do not overlap a cancellation-resistant local provider.
-                    live.add_done_callback(lambda _done: self.schedule_activation(session.agent_id))
-                    return
-                await self.activate(session.agent_id, scope=session.scope)
+                await self.restore_finished.wait()
+                with self.countdown_handoff():
+                    if self.sessions.get(session.agent_id) is not session:
+                        return
+                    if self.closing or self.manager._agents_by_id.get(session.agent_id) is None:
+                        return
+                    live = self.models.live.get(session.agent_id)
+                    if live is not None and not live.done():
+                        await self.expire_blocked_sleep(session)
+                        # Do not overlap a cancellation-resistant local provider.
+                        live.add_done_callback(lambda _done: self.schedule_activation(session.agent_id))
+                        return
+                    await self.activate(session.agent_id, scope=self.wake_scope(session))
             except asyncio.CancelledError:
                 raise
+            except ModelUnavailable as error:
+                with self.countdown_handoff():
+                    await self.expire_blocked_sleep(session)
+                    if error.recoverable and error.earliest is not None and not self.closing:
+                        self.arm_timer(session, max(0, error.earliest - self.clock.wall_time()), recovery=True)
+                    self.manager._emit_callback("on_system_event", "activity_timer_deferred",
+                        {"agent_id": session.agent_id, "error_type": "ModelUnavailable", "recovery": recovery})
             except Exception as error:
                 self.manager._emit_callback(
                     "on_system_event",
@@ -103,6 +166,7 @@ class SleepMixin:
             wake(), context=contextvars.Context(), name=f"att-wake-{session.agent_id}"
         )
         self.timers[session.agent_id] = task
+        self.ensure_countdown_sampler()
 
     async def sample_sleep(self, session):
         if session.sleep_id and session.sleep_deadline is not None:
@@ -121,6 +185,7 @@ class SleepMixin:
                 if session.intent == "sleep":
                     await self.sample_sleep(session)
             await self.sample_cooldowns()
+            await self.sample_suppression()
 
     def cooldown_remaining(self, row):
         values = row.values

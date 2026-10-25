@@ -1,1 +1,1 @@
-"""Phase 4 execution ownership and adversarial lifecycle tests."""
+"""Execution ownership, background tasks, and adversarial lifecycle tests."""

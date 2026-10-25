@@ -7,6 +7,15 @@ from .values import capture
 
 
 class CheckpointMixin:
+    def fail_observers(self, session):
+        """Observer termination does not depend on a queued worker ever running."""
+        if session.failure is None:
+            return
+        self.response_observed(session)
+        for future, _intent in tuple(self.waiters.get(session.admission_id, ())):
+            if not future.done():
+                future.set_exception(session.failure)
+
     def marker(self, session, **changes):
         previous = self.manager._records.index.get(("agent_activities", (session.agent_id,)))
         values = (

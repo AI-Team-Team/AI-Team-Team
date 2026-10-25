@@ -87,9 +87,7 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             clean_path = att_manager.normalize_library_path(path)
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        with att_manager._resources.mutation():
-            att_manager.library_permissions.setdefault(lib_id, {}).setdefault(clean_path, {})[target_team_id] = permission
-        att_manager._auto_save(permissions={lib_id})
+        await att_manager._library_service.change_permission(caller_team, lib_id, clean_path, target_team_id, permission)
         return f"Successfully granted '{permission}' permission for path '{clean_path}' in library '{lib_id}' to team '{target_team_id}'."
 
     async def revoke_library_permission(lib_id: str, path: str, target_team_id: str) -> str:
@@ -110,11 +108,8 @@ def build_library_tools(att_manager: Any, caller_node: Any) -> Dict[str, Tool]:
             clean_path = att_manager.normalize_library_path(path)
         except PermissionError as exc:
             raise ToolPermissionError(str(exc)) from exc
-        with att_manager._resources.mutation():
-            permissions = att_manager.library_permissions.get(lib_id, {}).get(clean_path, {})
-            removed = permissions.pop(target_team_id, None) is not None
+        removed = await att_manager._library_service.change_permission(caller_team, lib_id, clean_path, target_team_id, None)
         if removed:
-            att_manager._auto_save(permissions={lib_id})
             return f"Successfully revoked permissions for path '{clean_path}' in library '{lib_id}' for team '{target_team_id}'."
         return f"No permissions found for path '{clean_path}' in library '{lib_id}' for team '{target_team_id}'."
 

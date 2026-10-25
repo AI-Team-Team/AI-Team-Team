@@ -18,16 +18,18 @@ from .queries import QueryMixin
 from .outcomes import OutcomeMixin
 from .health import HealthMixin
 from .evidence import EvidenceMixin
+from .lifecycle import ExecutionLifecycleMixin
 from .resources import ResourceCoordinator, conflict
 from .values import CallableExecutor, ExecutionContext
 
 
-class ExecutionService(AuditExecutionMixin, DispatchMixin, ControlMixin, QueryMixin, OutcomeMixin, HealthMixin, EvidenceMixin):
+class ExecutionService(ExecutionLifecycleMixin, AuditExecutionMixin, DispatchMixin, ControlMixin, QueryMixin, OutcomeMixin, HealthMixin, EvidenceMixin):
     def __init__(self, manager):
         self.manager = manager
         self.jobs = {}
         self.tasks = set()
         self.finalizers = set()
+        self.finalizer_owners = {}
         self.bindings = {"callable": CallableExecutor()}
         self.current = contextvars.ContextVar(f"att_execution_{id(manager)}", default=None)
         self.resource_job = contextvars.ContextVar(f"att_execution_resources_{id(manager)}", default=None)
@@ -101,6 +103,9 @@ class ExecutionService(AuditExecutionMixin, DispatchMixin, ControlMixin, QueryMi
         self.bindings[name] = executor
 
     def validate_binding(self, tool):
+        if tool.execution_contract.suspension == "provider" and not inspect.iscoroutinefunction(
+                getattr(self.bindings.get(tool.executor), "suspend", None)):
+            raise ValueError("A provider suspension declaration requires async suspend(execution_id).")
         binding = self.bindings.get(tool.executor)
         if binding is None:
             raise ValueError(f"Executor {tool.executor!r} is not registered.")
@@ -190,14 +195,15 @@ class ExecutionService(AuditExecutionMixin, DispatchMixin, ControlMixin, QueryMi
             session.prepared_chat_reads.pop(job.execution_id, None)
             self.release_job(job)
 
-    def validate_bindings(self, job, *, library=None, method=None, paths=()):
+    def validate_bindings(self, job, *, library=None, method=None, paths=(), settling=False):
         """Validate aliases and the actual physical footprint at one resource boundary."""
         owner = self.manager._agents_by_id.get(job.context.agent_id)
         if owner is None or owner.lifecycle_state != "active":
             raise PermissionError("The captured execution owner is no longer active.")
         from ai_team_team.core.exceptions import ToolBusinessError
         try:
-            claims, sources = self.resolve_resources(job.context, job.tool, job.args, job.kwargs, owner=owner)
+            claims, sources = self.resolve_resources(job.context, job.tool, job.args, job.kwargs,
+                owner=owner, settling=settling)
         except (PermissionError, ToolPermissionError, ToolBusinessError, FileNotFoundError, KeyError, ValueError) as error:
             raise PermissionError("The captured resource binding is no longer authorized.") from error
         if claims != job.claims or sources != job.sources:
@@ -245,6 +251,8 @@ class ExecutionService(AuditExecutionMixin, DispatchMixin, ControlMixin, QueryMi
             self.wakeup.clear()
             blocked = []
             for job in tuple(self.ready):
+                if job.context.agent_id in self.manager._agent_registry.lifecycle_pending:
+                    continue
                 if job.cancellation_requested:
                     self.ready.remove(job)
                     continue
@@ -277,13 +285,23 @@ class ExecutionService(AuditExecutionMixin, DispatchMixin, ControlMixin, QueryMi
                 and (self.closing or job.context.generation == self.manager._resources.generation)):
             job.late_settlement_started = True
             task = asyncio.create_task(self.settle_thread_result(job), context=contextvars.Context(), name="att-late-executor-result")
-            self.finalizers.add(task)
-            task.add_done_callback(self.finalizer_finished)
+            self.track_finalizer(job, task)
         elif not job.late_settlement_started:
             self.clear_inputs(job)
 
+    def track_finalizer(self, job, task):
+        """Local returned-outcome work remains attributable to its retained owner."""
+        self.finalizers.add(task)
+        self.finalizer_owners[task] = job.context.agent_id
+        task.add_done_callback(self.finalizer_finished)
+
+    def pending_owner_outcomes(self, owner):
+        return tuple(task for task, agent_id in self.finalizer_owners.items()
+                     if agent_id == owner and not task.done())
+
     def finalizer_finished(self, task):
         self.finalizers.discard(task)
+        self.finalizer_owners.pop(task, None)
         if not task.cancelled() and task.exception() is not None:
             self.remember_error(task.exception())
 

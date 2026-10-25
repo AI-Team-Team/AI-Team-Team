@@ -8,6 +8,14 @@ from ...agent import Agent
 
 
 class AgentAPI:
+    def preview_agent_death(self, agent_id: str) -> dict[str, Any]:
+        from ..agent_lifecycle.death import preview
+        return preview(self, agent_id)
+
+    async def mark_agent_dead(self, agent_id: str, *, confirm: bool = False) -> dict[str, Any]:
+        from ..agent_lifecycle.death import mark_dead
+        return await mark_dead(self, agent_id, confirm=confirm)
+
     def register_agent(self, agent: Agent, *, auto_save: bool = True) -> Agent:
         """Registers one stable Agent identity and its private DocLib."""
         return self._agent_registry.register(agent, auto_save=auto_save)

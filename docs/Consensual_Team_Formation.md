@@ -18,7 +18,9 @@ The trusted host-only `manager.bootstrap_agent_team(...)` API is the explicit ex
 
 Every registered Agent owns one persistent `agent_inbox` in addition to any AgentTeam inboxes. Formation invitations and results are delivered to the Agent identity because the same Agent may participate in several AgentTeams and no team should own that Agent's personal decision.
 
-The unread Agent inbox is included in that Agent's next model context together with tools for listing and acknowledging messages.
+The runtime presents eligible invitation notifications as bounded references at personal checkpoints.
+
+Agents can inspect the referenced mail explicitly with `open_agent_mail`; notification presentation, mail read receipts, and invitation attitudes remain independent.
 
 Audit-scoped supervisory Agents are registered for the lifetime of their managed supervisory AgentTeam, but they do not receive ordinary business tools or invitations; their identities are removed after the audit while audit evidence remains durable.
 
@@ -32,6 +34,7 @@ await manager.mark_agent_inbox_read(agent_id, message_ids=None)
 Agent-facing tools never accept an acting Agent ID. They derive the identity from the current invocation context:
 
 - `list_agent_inbox(unread_only=True)`
+- `open_agent_mail(message_id)`
 - `mark_agent_inbox_read(message_ids=None)`
 - `inspect_team_formation(request_id)`
 - `propose_team_formation(proposal, organizational_parent="none")`
@@ -166,7 +169,7 @@ Cancelling candidate publication before acceptance leaves the candidate ready an
 
 The same receipt boundary applies to revisions, invitation responses, abandonment, and late joining, so pre-acceptance cancellation does not change the published revision, public attitude, or lifecycle state.
 
-Persistence schema 15 stores Agent inbox messages, current formation projections, immutable revision snapshots, append-only invitation decisions, detached drafts, timestamps, completion policy, late-join policy, and the resulting team reference.
+Persistence schema 16 stores Agent inbox messages, current formation projections, immutable revision snapshots, append-only invitation decisions, detached drafts, timestamps, completion policy, late-join policy, and the resulting team reference.
 
 Restore validates complete contiguous revision history, exact fingerprints and material fields, creator provenance, decision-to-revision membership, draft publication provenance, and every related identity reference in detached staging; malformed data raises `StateRestoreError` without changing the current manager or its Agent inboxes and DocLibs.
 

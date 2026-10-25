@@ -122,4 +122,5 @@ publication_manifests = table("publication_manifests",
     identifier("publication_id", primary=True), identifier("checkpoint_id"), integer("previous_generation"),
     integer("target_generation"), document("staged_files"), identifier("recovery_operation_id"),
     choice("status", "prepared published rolled_back"), timestamp("prepared_at"), timestamp("resolved_at", nullable=True),
+    document("recovery_before", nullable=True),
     checks=("previous_generation > 0", "target_generation > previous_generation"))

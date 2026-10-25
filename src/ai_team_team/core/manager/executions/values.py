@@ -44,6 +44,7 @@ class Job:
     result: Any = None
     error: Any = None
     cancellation_requested: bool = False
+    suspended: bool = False
     pending_threads: set = field(default_factory=set)
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     control_id: str | None = None

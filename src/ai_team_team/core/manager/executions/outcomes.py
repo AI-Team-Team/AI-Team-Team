@@ -15,8 +15,7 @@ class OutcomeMixin:
             job.result = result
             job.outcome_task = asyncio.create_task(self.accept_result(job, result),
                 context=contextvars.Context(), name=f"att-execution-outcome-{job.execution_id}")
-            self.finalizers.add(job.outcome_task)
-            job.outcome_task.add_done_callback(self.finalizer_finished)
+            self.track_finalizer(job, job.outcome_task)
         return await settle_commit(job.outcome_task)
 
     async def accept_result(self, job, result):
@@ -61,6 +60,9 @@ class OutcomeMixin:
             agent_id=owner, source_kind="execution", execution_id=job.execution_id, classification="ordinary",
             deduplication_key=f"execution:{job.execution_id}:{event_key}", arrival_generation=arrival,
             created_at=self.clock.wall_time())
+        agent = self.manager._agents_by_id.get(owner)
+        if agent is not None and agent.lifecycle_state != "active" and marker is not None:
+            return (notice, capture(self.manager, "agent_activities", agent_id=owner, arrival_generation=arrival)), (notice_id,)
         return (notice, self.manager._activity.marker(session, arrival_generation=arrival)), (notice_id,)
 
     async def commit_outcome(self, records, *, notifications=(), dirty=None, authority_check=None):
@@ -131,7 +133,7 @@ class OutcomeMixin:
                         owner = self.manager._agents_by_id.get(job.context.agent_id)
                         if owner is None or owner.lifecycle_state != "active" or not self.source_authorized(previous, owner, committing=True):
                             raise PermissionError("Source permission changed before the result was accepted.")
-                        self.validate_bindings(job)
+                        self.validate_bindings(job, settling=True)
                 await self.commit_outcome((*records, *notices), notifications=ids, dirty=self.artifact_dirty(job),
                                           authority_check=authorize_result)
             finally:

@@ -36,6 +36,9 @@ class VolatileMembershipTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_export_then_public_removal_keeps_unrelated_commits_valid(self):
         manager, path, client = make_manager(self, volatile=True)
+        # Recovery now correctly wakes the intentionally open fixture activity;
+        # keep this relationship-only test blocked before provider dispatch.
+        manager.config.model_token_limits["fixture"] = 0
         parent = self.create_team(manager, size=3)
         team = self.create_team(manager, parent)
         person = team.members[0]

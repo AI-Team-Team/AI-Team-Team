@@ -140,8 +140,7 @@ class BackgroundDiscoveryTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCas
                 async def wait_for_commit(*args, **kwargs):
                     saving.set()
                     await release.wait()
-                    if state == "archived":
-                        return await original_commit(*args, **kwargs)
+                    return await original_commit(*args, **kwargs)
 
                 def observer(event, payload):
                     if event == "directory_snapshot":
@@ -153,9 +152,7 @@ class BackgroundDiscoveryTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCas
                     if state == "archived"
                     else self.manager.reactivate_agent(person.agent_id, "default")
                 )
-                boundary = self.manager._records if state == "archived" else self.manager
-                method = "commit" if state == "archived" else "flush_state"
-                with patch.object(boundary, method, side_effect=wait_for_commit):
+                with patch.object(self.manager._records, "commit", side_effect=wait_for_commit):
                     task = asyncio.create_task(operation)
                     try:
                         async with asyncio.timeout(5):
@@ -163,7 +160,7 @@ class BackgroundDiscoveryTests(DiscoveryFixture, unittest.IsolatedAsyncioTestCas
                             self.manager._emit_callback("on_system_event", "directory_snapshot", {})
                             await self.manager.flush_callbacks()
                         self.assertEqual(len(pages), 1)
-                        expected_count = 1 if state == "archived" else 2
+                        expected_count = 2 if state == "archived" else 1
                         self.assertEqual(pages[0].total_results, expected_count)
                     finally:
                         release.set()

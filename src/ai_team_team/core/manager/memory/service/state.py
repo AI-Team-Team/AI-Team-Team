@@ -55,6 +55,7 @@ class MemoryStateMixin:
         ]
         with self._lock:
             self.events = {item.event_id: item for item in parsed_events}
+            self.provisional_events.clear()
             self.segments = {item.segment_id: item for item in parsed_segments}
             self.cards = {item.memory_id: item for item in parsed_cards}
             self.references = {

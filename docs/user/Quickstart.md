@@ -180,7 +180,7 @@ ATT derives and validates each tool's parameter schema from its callable, while 
 
 Text ReAct actions use safe Python literal and keyword syntax:
 
-- `Action: search_kb(query="Iris character profile", limit=3)`
+- `Action: search_knowledge_base(query="Iris character profile", limit=3)`
 - `Action: query_db(sql_command="SELECT * FROM characters")`
 
 Malformed, truncated, ambiguous, or schema-invalid arguments are rejected without executing the tool.
@@ -195,7 +195,7 @@ def audit_search(query: str, limit: int = 3) -> tuple[bool, str]:
         return False, "Query is too short"
     return True, "Approved"
 
-manager.register_tool_auditor("search_kb", audit_search)
+manager.register_tool_auditor("search_knowledge_base", audit_search)
 ```
 
 ### Registering Committee Presets
@@ -350,11 +350,13 @@ manager.register_model("gpt-5.6-sol", {
 
 ## 🤖 10. Model Registry and Global Generator Callback
 
-ATT features a unified model registry allowing dynamic teams to assign different members to different model configurations based on task complexity (e.g. using a fast model for basic tasks and a strong model for planning). All LLM requests are resolved through a centralized global generator callback handler.
+ATT features a unified model registry allowing new Agent identities to select registered model configurations at creation.
+
+Requests use the Agent's bound client, which may be a directly registered client or an adapter backed by the global generator handler.
 
 ### Registering Models & Callback Handlers
 
-Instead of passing raw API keys or client instances directly to the framework, register your model configuration details and provide a single callback function to execute the generation requests:
+For the generator-handler integration, register model configuration details and provide a callback that owns provider credentials and SDK routing:
 
 ```python
 # 1. Register model configurations (metadata/descriptions for the AI)

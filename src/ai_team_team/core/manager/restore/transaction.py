@@ -19,6 +19,7 @@ class RestoreTransactionMixin:
         manager = self.manager
         from ..facade import ATTManager
 
+        manager._agent_registry.assert_restore_ready()
         manager._activity.assert_restore_ready()
         manager._executions.assert_restore_ready()
 
@@ -122,6 +123,7 @@ class RestoreTransactionMixin:
             for team in staged.teams.values():
                 _ = team.depth
 
+            manager._agent_registry.assert_restore_ready()
             if not manager._resources.blocked:
                 manager._resources.begin_publication()
             publication_gate = True
@@ -246,7 +248,7 @@ class RestoreTransactionMixin:
                         staged_memory["memory_references"],
                     )
                     manager.tools_context["att_manager"] = manager
-                    manager._governance.restore(staged._governance.snapshot())
+                    manager._governance.restore(staged._governance.snapshot(), interrupted=False)
                     manager._migration.restore(item.model_dump(mode="json") for item in staged._migration.requests.values())
                     manager.token_budget.reset_reservations()
                 except Exception:
@@ -311,6 +313,8 @@ class RestoreTransactionMixin:
             for old_agent in old_state["agents_by_id"].values():
                 if manager._agents_by_id.get(old_agent.agent_id) is not old_agent:
                     old_agent._manager = None
+            manager._activity.install_restored_state(staged._activity, manifest.values["target_generation"])
+            manager.supervisor.results = dict(staged.supervisor.results)
             committed = True
             source_path = getattr(manager, "_restore_source_path", None)
             if source_path is not None:
@@ -344,6 +348,7 @@ class RestoreTransactionMixin:
             if journal is not None:
                 journal.release()
             manager._publication_annotations = (), ()
+            manager._publication_recovery_delta = {}
             if publication_gate:
                 manager._resources.finish_publication(committed=committed,
                     generation=manifest.values["target_generation"] if committed else None)

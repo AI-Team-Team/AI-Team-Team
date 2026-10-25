@@ -32,6 +32,10 @@ class ModelUnavailable(LLMGenerationError):
         self.resource_attempt_id = resource_attempt_id
 
 
+class ScopeUnavailable(Exception):
+    """End a complete invocation before admitting personal scope without AT authority."""
+
+
 @dataclass
 class Session:
     agent_id: str
@@ -61,6 +65,7 @@ class Session:
     pending_chat_read_acknowledgements: list = field(default_factory=list)
     audit_profile: dict | None = None
     audit_finished: Any = None
+    provider_owner_id: str | None = None
 
 
 def capture(manager, table: str, **values) -> DomainRecord:

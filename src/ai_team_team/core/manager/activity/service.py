@@ -23,6 +23,7 @@ from .notifications import NotificationMixin
 from .recovery import ActivityRecoveryMixin
 from .runner import RunnerMixin
 from .sleep import SleepMixin
+from .suppression import SuppressionMixin
 from .values import ModelUnavailable, Session, SystemClock, capture, identifier, scope_fields
 
 
@@ -30,7 +31,7 @@ _CLOCK_ANCHORED_TABLES = frozenset({
     "activity_admissions", "model_requests", "model_availability", "sleep_plans",
     "executions", "tool_cooldowns", "memory_index_requests", "audit_model_requests",
     "audit_runs", "resource_decisions", "team_position_cooldowns",
-    "health_observations", "health_detector_states",
+    "health_observations", "health_detector_states", "notification_suppression",
 })
 
 
@@ -43,6 +44,7 @@ class PersonalActivityService(
     NotificationMixin,
     RunnerMixin,
     SleepMixin,
+    SuppressionMixin,
     ActivityRecoveryMixin,
 ):
     """Runtime queues are disposable indexes over committed personal evidence."""
@@ -66,10 +68,16 @@ class PersonalActivityService(
         self.tool_tasks = set()
         self.activating = {}
         self.timers = {}
+        self.suppression_timers = {}
+        self.suppression_deadlines = {}
+        self.countdown_sampler = None
+        self.countdown_handoffs = set()
         self.cooldown_deadlines = {}
         self.scheduler = None
         self.closing = False
         self.recovery_required = False
+        self.restore_finished = asyncio.Event()
+        self.restore_finished.set()
         self.fatal_errors = []
         self.models = ModelRequestService(self)
 
@@ -88,17 +96,68 @@ class PersonalActivityService(
             from ...exceptions import RuntimeAdmissionClosedError
             raise RuntimeAdmissionClosedError("Personal activity admission is closed.")
 
-    def require_agent(self, agent_id):
+    def require_agent(self, agent_id, *, allow_pending_lifecycle=False):
+        """Only trusted returned-result settlement may pass a provisional death fence."""
         agent = self.manager._agents_by_id.get(agent_id)
-        if agent is None or agent.lifecycle_state != "active" or self.manager._topology.is_agent_pending(agent_id):
+        current = self.current.get()
+        pending = self.manager._topology.is_agent_pending(agent_id, include_lifecycle=not allow_pending_lifecycle) and not (
+            current is not None and current.agent_id == agent_id and current.active)
+        if agent is None or agent.lifecycle_state != "active" or pending:
             raise PermissionError("Personal activity requires an active registered Agent.")
         if self.manager.supervisor.is_supervisory_agent(agent_id):
             self.require_audit_profile(agent_id)
         return agent
 
-    def validate_scope(self, agent_id, scope):
+    def stop_dead_owner(self, owner):
+        sessions = {id(session): session for session in self.admissions.values() if session.agent_id == owner}
+        current = self.sessions.get(owner)
+        if current is not None:
+            sessions[id(current)] = current
+        for session in sessions.values():
+            session.active = False
+            session.failure = asyncio.CancelledError("The owner's retained death ended personal activity.")
+            session.availability = "closing"
+            self.fail_observers(session)
+            worker = getattr(session, "worker", None)
+            if worker is not None:
+                worker.cancel()
+        timer = self.timers.pop(owner, None)
+        if timer is not None:
+            timer.cancel()
+        self.models.cancel_owner(owner)
+        for row in self.manager._records.snapshot():
+            if row.table_name == "notification_suppression" and row.values["agent_id"] == owner:
+                self.cancel_suppression_timer(row.values["preference_id"])
+
+    def suspend_inactive_timers(self, owner):
+        timer = self.timers.pop(owner, None)
+        if timer is not None:
+            timer.cancel()
+        for row in self.manager._records.snapshot():
+            if row.table_name == "notification_suppression" and row.values["agent_id"] == owner:
+                self.cancel_suppression_timer(row.values["preference_id"])
+
+    def resume_owner_activity(self, owner):
+        agent = self.manager._agents_by_id.get(owner)
+        if (self.closing or self.manager._closing or self.manager._restore_in_progress
+                or agent is None or agent.lifecycle_state != "active" or self.manager._topology.is_agent_pending(owner)):
+            return
+        session = self.sessions.get(owner)
+        if session is not None and session.intent == "sleep" and session.sleep_deadline is not None:
+            self.arm_timer(session, max(0, session.sleep_deadline - self.clock.monotonic()))
+        if session is not None and session.intent == "continuing" and not session.active:
+            self.resume_continuation(session)
+        for row in self.manager._records.snapshot():
+            if (row.table_name == "notification_suppression" and row.values["agent_id"] == owner
+                    and row.values["status"] == "active" and not row.values["permanent"]):
+                self.arm_suppression(row)
+        for notice in self.pending_notices(owner):
+            self.schedule_notice(notice.values["notification_id"])
+        self.ensure_countdown_sampler()
+
+    def validate_scope(self, agent_id, scope, *, allow_pending_lifecycle=False):
         scope = TypeAdapter(OperationScope).validate_python(scope)
-        agent = self.require_agent(agent_id)
+        agent = self.require_agent(agent_id, allow_pending_lifecycle=allow_pending_lifecycle)
         if self.manager.supervisor.is_supervisory_agent(agent_id):
             profile = self.require_audit_profile(agent_id)
             if scope.kind != "agent_team" or scope.team_id != profile["temporary_team_id"]:
@@ -118,11 +177,25 @@ class PersonalActivityService(
                 )
         return scope
 
-    def check_generation(self, session):
+    def check_generation(self, session, *, validate_scope=True):
         self.manager._resources.check_authority()
         if self.closing or self.manager._closing or session.generation != self.generation:
             raise asyncio.CancelledError("The personal runtime generation is no longer active.")
-        self.validate_scope(session.agent_id, session.scope)
+        owner = self.manager._agents_by_id.get(session.agent_id)
+        if owner is None or owner.lifecycle_state != "active":
+            raise asyncio.CancelledError("The personal activity owner is no longer active.")
+        try:
+            if validate_scope:
+                self.validate_scope(session.agent_id, session.scope)
+        except PermissionError:
+            self.require_agent(session.agent_id)
+            if session.scope.kind != "agent_team" or session.audit_profile is not None:
+                raise
+            session.pending_scope = PersonalScope()
+            if self.current.get() is session and session.invocation_id is not None:
+                from .values import ScopeUnavailable
+                raise ScopeUnavailable()
+            session.scope, session.pending_scope = PersonalScope(), None
         if session.audit_profile is not None and self.clock.wall_time() >= session.audit_profile["deadline"]:
             raise TimeoutError("The total health-assessment deadline elapsed.")
 
@@ -485,7 +558,9 @@ class PersonalActivityService(
 
     def assert_restore_ready(self):
         if (
-            self.workers
+            self.countdown_handoffs
+            or self.lock.locked()
+            or self.workers
             or self.dispatch_tasks
             or self.models.tasks
             or self.tool_tasks
@@ -499,8 +574,10 @@ class PersonalActivityService(
         self.closing = True
         if self.scheduler:
             self.scheduler.cancel()
-        for task in tuple(self.timers.values()) + tuple(self.dispatch_tasks):
+        for task in tuple(self.timers.values()) + tuple(self.suppression_timers.values()) + tuple(self.dispatch_tasks):
             task.cancel()
+        if self.countdown_sampler is not None:
+            self.countdown_sampler.cancel()
         self.models.close()
         for task in tuple(self.workers):
             task.cancel()
@@ -527,6 +604,7 @@ class PersonalActivityService(
             if uncertain:
                 await self.manager._records.commit(uncertain, allow_closing=True)
             await self.sample_cooldowns()
+            await self.sample_suppression()
         for session in self.sessions.values():
             if session.intent == "sleep":
                 await self.sample_sleep(session)
@@ -542,7 +620,7 @@ class PersonalActivityService(
         await asyncio.gather(
             *(
                 task
-                for task in (self.scheduler, *self.timers.values(), *self.dispatch_tasks)
+                for task in (self.scheduler, self.countdown_sampler, *self.timers.values(), *self.suppression_timers.values(), *self.dispatch_tasks)
                 if task is not None
             ),
             return_exceptions=True,

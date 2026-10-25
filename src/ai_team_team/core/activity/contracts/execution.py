@@ -24,6 +24,7 @@ class ToolExecutionContract(ContractRecord):
     required_scope: Literal["personal", "agent_team", "either"]
     mutation_safety: Literal["none", "managed_lease", "isolated", "trusted_host"] = "none"
     cancellation: Literal["none", "cooperative", "provider", "isolated"] = "none"
+    suspension: Literal["none", "provider"] = "none"
     health_signals: tuple[Literal["heartbeat", "progress", "provider"], ...] = ()
     heartbeat_timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     progress_timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)

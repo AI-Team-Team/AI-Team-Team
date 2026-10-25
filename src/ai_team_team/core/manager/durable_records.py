@@ -126,7 +126,7 @@ class DurableRecordService:
                 and row.values["leave_event_id"] is None))
         return dependency_closure(merge_records(prerequisites, captured), candidate)
 
-    async def commit(self, records, *, operation_id=None, notifications=(), dirty=None, allow_closing=False, agent_contexts=None, team_memberships=None, team_lifecycles=None, agent_registrations=None, team_proposals=None, team_parents=None, agent_models=None, broker_state=None, team_inboxes=None, governance_state=None, migration_state=None, read_compensations=(), authority_check=None, record_factory=None, bind_acceptance_time=None):
+    async def commit(self, records, *, operation_id=None, notifications=(), dirty=None, allow_closing=False, agent_contexts=None, team_memberships=None, team_lifecycles=None, agent_registrations=None, team_proposals=None, team_parents=None, agent_models=None, broker_state=None, team_inboxes=None, governance_state=None, migration_state=None, read_compensations=(), authority_check=None, record_factory=None, bind_acceptance_time=None, agent_lifecycles=None, permission_changes=None):
         """Commit a domain delta without flushing unrelated queued changes.
 
         Notification dispatch contains IDs and transition metadata only. A
@@ -134,6 +134,11 @@ class DurableRecordService:
         after a successful accepted operation.
         """
         manager = self.manager
+        from .agent_lifecycle.publication import validate_changes, library_state
+        lifecycle_aliases = validate_changes(manager, agent_lifecycles)
+        lifecycle_aliases.update({owner: alias for owner, (alias, _client) in (agent_models or {}).items() if owner in lifecycle_aliases})
+        if agent_lifecycles and (dirty is None or not set(agent_lifecycles).issubset(dirty["agents"])):
+            raise ValueError("Agent lifecycle publication requires an authoritative Agent delta.")
         manager._resources.check_authority()
         formation_publication = manager._formations.prepare_publication(dirty)
         if agent_contexts and (dirty is None or not set(agent_contexts).issubset(dirty["agents"])):
@@ -158,6 +163,8 @@ class DurableRecordService:
         if registrations and (dirty is None or not set(registrations).issubset(dirty["agents"])
                 or not {item.library_id for item in registrations.values()}.issubset(dirty["libraries"])):
             raise ValueError("Identity publication requires authoritative Agent and private library deltas.")
+        records = (*records, *manager._activity.invalid_sleep_conditions(team_memberships=team_memberships,
+            team_lifecycles=team_lifecycles, agent_lifecycles=agent_lifecycles))
         records = tuple(DomainRecord.capture(record.table_name, record.values) for record in records)
         if record_factory is not None and (records or notifications or read_compensations):
             raise ValueError("An admission-time record factory cannot replace supplied records or delivery references.")
@@ -239,6 +246,9 @@ class DurableRecordService:
                     dirty["_creation_teams"] = checkpoint_dirty.get("_creation_teams", ())
                 dirty["configs"] = True
                 agents, teams, source_libraries = set(), set(), set()
+                for lib_id, permissions in (permission_changes or {}).items():
+                    source_libraries.add(lib_id)
+                    teams.update(target for targets in permissions.values() for target in targets)
                 for record in captured:
                     if record.table_name == "executions":
                         source_libraries.update(reference["lib_id"] for reference in record.values["source_references"] or ()
@@ -283,6 +293,9 @@ class DurableRecordService:
                     dirty["_staged_libraries"] = {item.library_id: item.library for item in registrations.values()}
                 validation_candidate = None
                 if not manager.db_path:
+                    memory_state = manager._memory.snapshot()
+                    memory_state["memory_events"].extend(manager._memory.provisional_events[event_id].model_dump(mode="json")
+                        for event_id in dirty["memory_events"] if event_id in manager._memory.provisional_events)
                     scoped_auditors = {member.agent_id for team in manager.teams.values()
                                        if team.team_kind == "supervisory" for member in team.members}
                     hidden_teams = {team.team_id for team in manager.teams.values()
@@ -290,17 +303,17 @@ class DurableRecordService:
                     scoped_auditors.update(owner for team_id in hidden_teams
                         for owner in manager.teams[team_id]._provisional_agent_ids)
                     state = {
-                        "agents": [{"agent_id": agent.agent_id, "name": agent.name, "lifecycle_state": agent.lifecycle_state} for agent in {**manager._agents_by_id, **dirty.get("_staged_agents", {})}.values() if agent.agent_id not in scoped_auditors],
+                        "agents": [{"agent_id": agent.agent_id, "name": agent.name, "lifecycle_state": (agent_lifecycles or {}).get(agent.agent_id, agent.lifecycle_state)} for agent in {**manager._agents_by_id, **dirty.get("_staged_agents", {})}.values() if agent.agent_id not in scoped_auditors],
                         "libraries": [{"lib_id": lib.lib_id, "name": lib.name, "library_kind": lib.library_kind,
                             "owner_agent_id": lib.owner_agent_id, "owner_team_id": lib.owner_team_id,
-                            "lifecycle_state": lib.lifecycle_state, "description": lib.description,
+                            "lifecycle_state": library_state(agent_lifecycles, lib), "description": lib.description,
                             "is_public_visible": lib.is_public_visible} for lib in manager.libraries.values()
                             if lib.owner_agent_id not in scoped_auditors and lib.owner_team_id not in hidden_teams],
                         "teams": [{"team_id": team.team_id, "position_revision": team._position_revision + (1 if team.team_id in (team_parents or {}) else 0), "team_kind": "ordinary", "lifecycle_state": (team_lifecycles or {}).get(team.team_id, getattr(team, "_lifecycle_state", "active")), "parent_team_id": (team_parents or {}).get(team.team_id, {}).get("parent_team_id", team.parent_team.team_id if team.parent_team else None), "parent_agent_id": (team_parents or {}).get(team.team_id, {}).get("parent_agent_id", getattr(team, "_parent_agent_id", None)), "creator_type": "agent" if hasattr(team.creator, "agent_id") else "team", "creator_id": getattr(team.creator, "agent_id", getattr(team.creator, "team_id", None)), "members": (team_memberships or {}).get(team.team_id, tuple(member.agent_id for member in team.members))} for team in manager.teams.values() if team.team_kind == "ordinary" and team.team_id not in hidden_teams],
                         "agent_inboxes": {agent.agent_id: [mail for mail in agent.agent_inbox
                             if manager._inbox.is_capturable(mail["message_id"])] for agent in manager._agents_by_id.values()
                             if agent.agent_id not in scoped_auditors},
-                        **manager._memory.snapshot(),
+                        **memory_state,
                         "governance_cases": manager._governance.snapshot(),
                         "migration_requests": [item.model_dump(mode="json") for item in manager._migration.requests.values()],
                         "records": merge_records(self.snapshot(), captured, read_compensations=read_compensations),
@@ -335,6 +348,11 @@ class DurableRecordService:
                         if formation_publication is not None:
                             dirty["_formation_state"] = formation_publication.projection()
                         snapshot = manager._capture_state_snapshot(dirty)
+                        if permission_changes:
+                            snapshot["permissions"] = {**thaw(snapshot["permissions"]), **permission_changes}
+                        if agent_lifecycles:
+                            snapshot["agents"] = [{**row, "lifecycle_state": agent_lifecycles.get(row["agent_id"], row["lifecycle_state"])} for row in snapshot["agents"]]
+                            snapshot["libraries"] = [{**row, "lifecycle_state": library_state(agent_lifecycles, manager.libraries[row["lib_id"]])} for row in snapshot["libraries"]]
                         if agent_contexts:
                             # Capture the candidate only in its accepted value
                             # snapshot, never on a live person before receipt.
@@ -363,13 +381,14 @@ class DurableRecordService:
                 try:
                     return await self._settle_publication(future, receipt, records, operation_id, notifications,
                         validation_candidate, team_memberships, team_lifecycles, registrations, team_proposals, team_parents, agent_models, broker_state, team_inboxes, governance_state, migration_state, read_compensations, formation_publication,
-                        time_template if manager.db_path else None, bind_acceptance_time)
+                        time_template if manager.db_path else None, bind_acceptance_time, agent_lifecycles, lifecycle_aliases, permission_changes,
+                        frozenset(dirty["memory_events"]))
                 finally:
                     with manager._snapshot_lock:
                         self.publishing_proposals.difference_update(team_proposals or ())
 
     async def _settle_publication(self, future, receipt, records, operation_id, notifications,
-            validation_candidate, team_memberships, team_lifecycles, registrations, team_proposals, team_parents, agent_models, broker_state, team_inboxes, governance_state, migration_state, read_compensations, formation_publication, time_template, bind_acceptance_time):
+            validation_candidate, team_memberships, team_lifecycles, registrations, team_proposals, team_parents, agent_models, broker_state, team_inboxes, governance_state, migration_state, read_compensations, formation_publication, time_template, bind_acceptance_time, agent_lifecycles, lifecycle_aliases, permission_changes, memory_event_ids):
         manager = self.manager
         accepted = None
 
@@ -425,6 +444,7 @@ class DurableRecordService:
                             for item in registrations.values():
                                 item.publish()
                             self._merge(records, read_compensations=read_compensations)
+                            manager._memory.publish_events(memory_event_ids)
                             for owner, (alias, client) in (agent_models or {}).items():
                                 manager._agents_by_id[owner].llm_client = client
                                 manager._agents_by_id[owner]._model_alias = alias
@@ -437,15 +457,22 @@ class DurableRecordService:
                                 manager.teams[team_id].members = [manager._agents_by_id[owner] for owner in member_ids]
                             for team_id, lifecycle in (team_lifecycles or {}).items():
                                 manager.teams[team_id]._lifecycle_state = lifecycle
+                            if agent_lifecycles:
+                                from .agent_lifecycle.publication import publish_changes
+                                publish_changes(manager, agent_lifecycles, lifecycle_aliases)
+                            if permission_changes:
+                                manager.library_permissions.update(permission_changes)
                     finally:
                         manager._topology_lock.release()
                         manager._resources._lock.release()
 
                 publication = None
-                if team_memberships or team_lifecycles or registrations or team_proposals or team_parents or agent_models or broker_state is not None or team_inboxes or governance_state is not None or migration_state is not None or formation_publication is not None:
+                if permission_changes or agent_lifecycles or team_memberships or team_lifecycles or registrations or team_proposals or team_parents or agent_models or broker_state is not None or team_inboxes or governance_state is not None or migration_state is not None or formation_publication is not None:
                     publication = asyncio.create_task(asyncio.to_thread(publish))
                 else:
-                    self._merge(records, read_compensations=read_compensations)
+                    with manager._snapshot_lock:
+                        manager._memory.publish_events(memory_event_ids)
+                        self._merge(records, read_compensations=read_compensations)
                 try:
                     if publication is not None:
                         await settle_commit(publication)

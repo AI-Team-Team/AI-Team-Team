@@ -10,8 +10,9 @@ The `ATTManager` is the public orchestration facade exported by the `ai_team_tea
 
 - **`teams (Dict[str, AgentTeam])`**: A flat hash map tracking every active team in the lineage hierarchy by their unique `team_id`.
 - **`agents (Dict[str, Agent])`**: Compatibility index of active agents by unique display name.
-- **`_agents_by_id (Dict[str, Agent])`**: Authoritative registry of active, retained, and archived identities by immutable UUID.
+- **`_agents_by_id (Dict[str, Agent])`**: Authoritative registry of active, retained, archived, and dead identities by immutable UUID.
 - **`model_configs (Dict[str, Any])`**: The centralized registry decoupling model identities from underlying provider configurations.
+- **`config.working_context_message_limit (int)`**: Recent-message target used when context compression is enabled; compaction preserves retained history and Agent identity.
 - **`tools_context (Dict[str, Any])`**: A shared memory space injected into ReAct tools containing references like `{"att_manager": self}`.
 - **Invocation Context (`ContextVar`)**: Carries the active Agent, selected operation scope, and personal invocation ID through nested model and tool calls without caching a shared agent to one owner team.
 - **Persistence Coordinator**: Holds one cross-process writer lease, one active delta, and one coalesced pending delta. Snapshot materialization and SQLite work execute off the event loop.
@@ -31,13 +32,15 @@ The `ATTManager` is the public orchestration facade exported by the `ai_team_tea
 
 ## 2. `AgentTeam`: The Dynamic Group Unit
 
-An `AgentTeam` represents an organization in an explicit forest. Its membership must satisfy `config.min_subagent_team_size`, whose default is three.
+An `AgentTeam` represents an organization in an explicit forest.
+
+Ordinary creation and membership removal enforce `config.min_subagent_team_size`, whose default is three; Host-confirmed terminal death may leave a surviving team below that minimum.
 
 Membership is role-neutral and contains only the relationship between a `team_id` and an `agent_id`. The same `Agent` object may appear in several `team.members` lists; joining or leaving one team does not redefine the Agent or affect any other membership.
 
 ### Structural Pointers
 
-- **`organizational_parent`**: The actual Agent, AgentTeam, or `None`; creator provenance does not select it.
+- **`organizational_parent (ApprovalPrincipal | None)`**: Reference to the explicit `agent` or `agent_team` parent, or `None` for independence; creator provenance does not select it.
 - **`parent_team (Optional[AgentTeam])`**: The AgentTeam parent pointer, when the organizational parent is a team.
 - **`is_independent (bool)`**: True only when no organizational parent is recorded.
 - **`child_teams (List[AgentTeam])`**: References to dynamic sub-teams.
@@ -45,7 +48,8 @@ Membership is role-neutral and contains only the relationship between a `team_id
 
 ### Concurrency & Mutation State
 
-- **`state_lock (asyncio.Lock)`**: The asynchronous mutex that protects the team's structural integrity. Any ReAct operation that mutates `self.members`, `self.proposals`, or `self.status_map` MUST acquire this lock via `async with team.state_lock:` to prevent race conditions during `asyncio.gather()` parallel tool executions.
+- **`state_lock (asyncio.Lock)`**: The asynchronous mutex protecting structural membership and proposal transactions during concurrent activity.
+- **`_status_lock (threading.RLock)`**: Independent synchronous protection for the display-only `status_map`, accessed through `set_status()` and `status_snapshot()`.
 - **`message_inbox (List[Dict[str, Any]])`**: AT-addressed durable references, separate from team chat and every person's model window.
 - **`proposals (Dict[str, Dict])`**: Active democratic voting proposals (e.g., adding/removing members).
 
@@ -58,11 +62,10 @@ The `Agent` encapsulates a single identity and ReAct execution profile.
 - **`llm_client (LLMClientProto)`**: The attached adapter handling prompt formatting and parsing.
 - **`agent_id (str)`**: Immutable canonical UUID used by persistence, team membership, creators, governance identities, and private ownership.
 - **`private_doc_library_id (str)`**: Read-only identifier for the one persistent `PDL-<agent_id>` workspace. The raw library object is intentionally not exposed on `Agent`.
-- **`lifecycle_state (str)`**: `active`, `retained`, or `archived`; inactive identities leave the active name index and do not require a model binding during restore.
+- **`lifecycle_state (str)`**: `active`, `retained`, `archived`, or terminal `dead`; inactive identities leave the active name index and do not require a model binding during restore.
 - **`messages (List[Dict])`**: The bounded high-fidelity model window.
 - **`message_history (List[Dict])`**: A host-facing compatibility view of the Agent's sanitized Journal message events; it is not loaded into the model-visible `messages` window after restore.
 - **`lock (asyncio.Lock)`**: Serializes all model work for this identity when the same agent participates in several teams.
-- **`working_context_message_limit (int)`**: A recent-message target for derived context compaction; retained Journal facts and stable identity are not replaced by a different team-specific memory.
 
 ### ReAct Compilation
 

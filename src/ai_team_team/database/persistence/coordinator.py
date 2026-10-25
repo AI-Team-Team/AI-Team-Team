@@ -147,6 +147,14 @@ class PersistenceCoordinator:
             return  # An absent or empty target has no committed Journal.
         self._store(resolved).validate_restore_journal(events)
 
+    async def capture_recovery_images(self, db_path, delta):
+        """Read exact pre-publication values on the existing single writer."""
+        from .store.recovery_images import capture_images
+        self.claim(db_path)
+        await self.flush()
+        return await settle_commit(asyncio.get_running_loop().run_in_executor(
+            self._executor, lambda: capture_images(self._store(db_path), delta)))
+
     async def search_memory_card_ids(
         self, db_path: str, agent_id: str, query: str, limit: int
     ) -> list[str]:

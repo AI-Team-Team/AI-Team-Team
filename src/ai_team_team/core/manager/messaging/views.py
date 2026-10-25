@@ -114,6 +114,8 @@ class ViewMixin:
         index = self.manager._records.index
         groups = {}
         views = {}
+        summary_only = set()
+        covered = self.manager._activity.covered_notice_ids()
         notices_by_message = {}
         for notice in index.values():
             if notice.table_name == "agent_notifications" and notice.values["agent_id"] == actor.agent_id:
@@ -133,6 +135,8 @@ class ViewMixin:
             notices = notices_by_message.get(item.message_id, ())
             if notices and all(self.manager._activity.suppressed(notice) for notice in notices):
                 continue
+            if notices and max(notices, key=lambda notice: notice.values["arrival_generation"]).values["notification_id"] in covered:
+                summary_only.add(item.message_id)
             views[item.message_id] = row
             groups.setdefault((key, stream.values["team_id"] is not None), []).append(item)
         lines, references = [], []
@@ -150,6 +154,8 @@ class ViewMixin:
                 shown, total = [], 0
                 maximum = self.manager.config.conversations.summary_preview_limit
                 for item in items:
+                    if item.message_id in summary_only:
+                        continue
                     captured = reminders.get(item.message_id, ()) if item.withdrawn else ()
                     total += len(captured) or 1
                     if len(shown) >= maximum:

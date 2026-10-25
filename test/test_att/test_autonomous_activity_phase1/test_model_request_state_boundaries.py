@@ -55,7 +55,14 @@ class ModelRequestStateTests(unittest.IsolatedAsyncioTestCase):
         await manager.save_state()
         await manager.load_state(path)
         for record in records:
-            self.assertEqual(manager._records.index[record.identity], record)
+            restored = manager._records.index[record.identity]
+            if record.values["outcome"] == "pending":
+                unsent = record.values["dispatch_state"] == "unsent"
+                self.assertEqual(restored.values["dispatch_state"], "confirmed_unsent" if unsent else "unknown_sent")
+                self.assertEqual(restored.values["outcome"], "cancelled" if unsent else "uncertain")
+                self.assertEqual(restored.version, record.version + 1)
+            else:
+                self.assertEqual(restored, record)
         self.assertEqual(client.requests, [])
 
     async def test_corrupt_pairs_are_rejected_before_restore_publication(self):

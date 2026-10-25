@@ -31,6 +31,7 @@ class MemoryService(
     def __init__(self, manager: "ATTManager") -> None:
         self.manager = manager
         self.events: Dict[str, SystemMemoryEvent] = {}
+        self.provisional_events: Dict[str, SystemMemoryEvent] = {}
         self.segments: Dict[str, AgentMemorySegment] = {}
         self.cards: Dict[str, AgentMemoryCard] = {}
         self.references: Dict[str, RetainedMemoryReference] = {}

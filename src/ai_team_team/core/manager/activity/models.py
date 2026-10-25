@@ -28,6 +28,7 @@ class ModelRequestService:
         self.activity = activity
         self.manager = activity.manager
         self.live = {}
+        self.owners = {}
         self.tasks = set()
         self.jitter = random.uniform
         self.admitted_requests = 0
@@ -127,10 +128,12 @@ class ModelRequestService:
             name=f"att-provider-{session.agent_id}",
         )
         self.live[session.agent_id] = task
+        self.owners[task] = session.provider_owner_id or session.agent_id
         self.tasks.add(task)
 
         def finished(done):
             self.tasks.discard(done)
+            self.owners.pop(done, None)
             if self.live.get(session.agent_id) is done:
                 self.live.pop(session.agent_id, None)
             if not done.cancelled():
@@ -376,7 +379,7 @@ class ModelRequestService:
                     session.availability = "waiting_model"
                     sent = True
                     response = await self.bounded_call(session, client, kwargs, timeout)
-                    self.check_request(session, maintenance_segment, audit_profile)
+                    self.check_request(session, maintenance_segment, audit_profile, received=True)
                 if isinstance(response, str):
                     response = LLMResponse(text=response)
                 if not isinstance(response, LLMResponse):
@@ -488,6 +491,9 @@ class ModelRequestService:
                             )
                 if isinstance(error, asyncio.CancelledError):
                     raise
+                from .values import ScopeUnavailable
+                if isinstance(error, ScopeUnavailable):
+                    raise
                 from ai_team_team.core.exceptions import (
                     StatePersistenceError,
                     StateRestoreError,
@@ -579,7 +585,7 @@ class ModelRequestService:
             resource_attempt_id=resource_attempt_id,
         ) from failure
 
-    def check_request(self, session, segment, audit_profile=None):
+    def check_request(self, session, segment, audit_profile=None, *, received=False):
         if audit_profile is not None:
             team = self.manager.teams.get(audit_profile["temporary_team_id"])
             if (
@@ -595,7 +601,7 @@ class ModelRequestService:
                 raise TimeoutError("The audit request deadline has elapsed.")
             return
         if segment is None:
-            self.activity.check_generation(session)
+            self.activity.check_generation(session, validate_scope=not received)
             return
         if (
             self.activity.closing
@@ -613,6 +619,7 @@ class ModelRequestService:
         session = Session(
             f"index:{segment.segment_id}", f"index:{segment.segment_id}", self.activity.generation
         )
+        session.provider_owner_id = agent.agent_id
         response = await self.generate(
             session,
             client=agent.llm_client,
@@ -627,3 +634,8 @@ class ModelRequestService:
     def close(self):
         for task in tuple(self.tasks):
             task.cancel()
+
+    def cancel_owner(self, agent_id):
+        for task, owner in tuple(self.owners.items()):
+            if owner == agent_id:
+                task.cancel()

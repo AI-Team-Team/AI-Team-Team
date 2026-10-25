@@ -324,12 +324,12 @@ Revocation does not delete historical requests, approvals, ballots, Agreements, 
 
 ## 12. Persistence, Restore, and Shutdown
 
-Schema 15 retains exact governance cases, frozen electorate bindings, personal mail, explicit ballots, captured organization paths, Agreements, and peer-delivery records.
+Schema 16 retains exact governance cases, frozen electorate bindings, personal mail, explicit ballots, captured organization paths, Agreements, and peer-delivery records.
 
 ```mermaid
 flowchart TD
     Open["Acquire exclusive writer lease"] --> Preflight["Read schema version before writable connection or DDL"]
-    Preflight --> Version{"Schema 15?"}
+    Preflight --> Version{"Schema 16?"}
     Version -- "No" --> Reject["Reject without modifying database"]
     Version -- "Yes" --> Stage["Read detached state and stage DocLib files"]
     Stage --> Validate["Validate principals, endpoints, eligibility, mail, ballots, route evidence, successors, Agreements and deliveries"]

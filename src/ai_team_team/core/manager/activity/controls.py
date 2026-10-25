@@ -6,6 +6,7 @@ from ai_team_team.core.activity.contracts import (
     OperationScope,
     SleepIntent,
     ToolExecutionContract,
+    SuppressionPreference,
 )
 from ai_team_team.core.exceptions import ToolArgumentError, ToolPermissionError
 from ai_team_team.tool import Tool
@@ -24,7 +25,11 @@ class ControlMixin:
                 raise ToolPermissionError(
                     "Activity controls require the current registered person."
                 )
-            self.check_generation(session)
+            from .values import ScopeUnavailable
+            try:
+                self.check_generation(session)
+            except ScopeUnavailable as error:
+                raise ToolPermissionError("The original AgentTeam scope ended before this control was accepted.") from error
 
         def set_activity_intent(intent: ActivityIntent):
             """Choose idle or finite sleep; ordinary answers otherwise continue activity."""
@@ -74,6 +79,21 @@ class ControlMixin:
             session.pending_scope = scope
             return {"status": "PENDING_BOUNDARY", "scope": scope.model_dump(mode="json")}
 
+        async def set_notification_suppression(preference: SuppressionPreference):
+            """Suppress ordinary reminders permanently or for a bounded countdown; sources remain delivered and unread."""
+            current()
+            return await self.set_suppression(preference, actor=self.manager._active_tool_agent.get())
+
+        def list_notification_suppressions(active_only: bool = True):
+            """List only your own ordinary-reminder suppression preferences."""
+            current()
+            return self.list_suppressions(actor=self.manager._active_tool_agent.get(), active_only=active_only)
+
+        async def remove_notification_suppression(preference_id: str):
+            """Remove your preference and summarize eligible unread information by source and count only."""
+            current()
+            return await self.remove_suppression(preference_id, actor=self.manager._active_tool_agent.get())
+
         contract = ToolExecutionContract(
             effects=("self_modification",),
             background_allowed=False,
@@ -86,8 +106,11 @@ class ControlMixin:
             for name, func in (
                 ("set_activity_intent", set_activity_intent),
                 ("set_operation_scope", set_operation_scope),
+                ("set_notification_suppression", set_notification_suppression),
+                ("list_notification_suppressions", list_notification_suppressions),
+                ("remove_notification_suppression", remove_notification_suppression),
             )
         }
         if session.audit_profile is not None:
-            tools.pop("set_operation_scope")
+            tools = {"set_activity_intent": tools["set_activity_intent"]}
         return tools

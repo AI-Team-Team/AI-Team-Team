@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from ai_team_team.core.exceptions import StateRestoreError
 from ai_team_team.database.models import ACTIVITY_TABLES, ManagerConfigModel
@@ -40,11 +40,20 @@ def _reconcile_journal(store, session, root):
     if row is not None and row["staged_files"] != journal.entries:
         raise StateRestoreError("Publication journal contradicts its durable manifest.")
     if row is None or row["status"] != "published" or journal.status == "rollback":
-        journal.rollback()
+        # Pysqlite's legacy read transactions do not start a real SQLite
+        # transaction; a deferred-FK pragma set before the implicit first DML
+        # would be reset by that BEGIN. Start the inverse explicitly.
+        if not session.connection().connection.driver_connection.in_transaction:
+            session.execute(text("BEGIN IMMEDIATE"))
+        session.execute(text("PRAGMA defer_foreign_keys = ON"))
         from .publication_rollback import discard_provisional_records
         discard_provisional_records(session, journal.publication_id)
         if row is not None and row["status"] != "rolled_back":
             session.execute(table.update().where(predicate).values(status="rolled_back", state_version=row["state_version"] + 1, resolved_at=time.time()))
+        from .records import validate_database
+        validate_database(session)
+        journal.mark_rollback()
+        journal.rollback()
         # Provisional additions must be removed even when a previous attempt
         # already recorded rollback but crashed before journal cleanup.
         session.commit()

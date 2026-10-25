@@ -128,6 +128,12 @@ This phase completes recovery coverage already required in Phases 1 through 5 ra
 
 Gate: crash, restore failure, unaffected sleep, affected sleep, late result, unacknowledged cancellation, and repeated-load tests all preserve factual evidence and single-person activity.
 
+Phase 6 implementation and local acceptance completed on 2026-10-25 with Python 3.13.17 on macOS, including 1101 full-suite tests, 67 focused lifecycle and recovery tests, the five frozen runtime specifications, type and lint checks, distribution builds, and installed-wheel verification.
+
+The implementation boundaries, schema 16, and verification evidence are recorded in [Sleep, Recovery, and Retained Lifecycle](../../dev/autonomous_activity/Phase_6.md).
+
+Cross-version and operating-system CI verification, broader Phase 7 documentation replacement, and Phase 8 extended reliability acceptance remain separate responsibilities.
+
 ## Phase 7: Documentation and public contract replacement
 
 - Update README architecture and philosophy paragraphs only where the runtime contract changed.

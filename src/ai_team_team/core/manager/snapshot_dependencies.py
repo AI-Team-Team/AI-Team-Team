@@ -88,7 +88,8 @@ def capture_memory_records(manager: Any, dirty: Dict[str, Any]) -> Dict[str, lis
                 card_ids.add(memory_id)
 
         # Journal events remain immutable and may safely be included in later deltas.
-        events = [memory.events[event_id] for event_id in event_ids if event_id in memory.events]
+        events = [memory.events.get(event_id) or memory.provisional_events[event_id]
+                  for event_id in event_ids if event_id in memory.events or event_id in memory.provisional_events]
         return {
             "memory_events": [
                 event.model_dump(mode="json")

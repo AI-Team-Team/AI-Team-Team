@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ._support import ActivityTestCase
+from ai_team_team.core.manager.restore import preparation
 
 
 class RestoreSaveExclusionTests(ActivityTestCase):
@@ -73,18 +74,18 @@ class RestoreSaveExclusionTests(ActivityTestCase):
         stored = await self.manager._persistence.read(path, reconcile=False)
         self.assertEqual(json.loads(stored["configs"]["att_config"])["activity"]["model_requests_per_invocation"], 5)
 
-    async def test_postpublication_recovery_rejects_even_another_export_path(self):
+    async def test_detached_recovery_rejects_even_another_export_path(self):
         path = await self.durable_checkpoint()
         entered, release = asyncio.Event(), asyncio.Event()
-        original = self.manager._activity.after_restore
+        original = preparation.prepare_domain_recovery
         export = str(Path(self.workspace.name) / "obsolete-export.sqlite")
 
-        async def recover(**kwargs):
+        async def recover(*args, **kwargs):
             entered.set()
             await release.wait()
-            return await original(**kwargs)
+            return await original(*args, **kwargs)
 
-        with patch.object(self.manager._activity, "after_restore", recover):
+        with patch.object(preparation, "prepare_domain_recovery", recover):
             loading = asyncio.create_task(self.manager.load_state(path))
             try:
                 await asyncio.wait_for(entered.wait(), 10)

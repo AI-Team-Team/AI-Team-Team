@@ -102,6 +102,10 @@ class NotificationMixin:
                 for row in self.manager._records.snapshot()
                 if row.table_name == "notification_claims" and row.values["status"] == "presented"
             }
+        if notice.values["notification_id"] in self.covered_notice_ids():
+            return False
+        if self.summary_event(notice) is not None and not self.summary_counts(notice):
+            return False
         return (notice.values["notification_id"] not in presented
                 and self.manager._messaging.can_present(notice) and not self.suppressed(notice))
 
@@ -116,30 +120,16 @@ class NotificationMixin:
         return session is None or session.intent != "sleep" or self.matches_sleep(session, notice)
 
     def suppressed(self, notice):
-        if notice.values["classification"] != "ordinary":
-            return False
-        for preference in self.manager._records.snapshot():
-            if (
-                preference.table_name != "notification_suppression"
-                or preference.values["agent_id"] != notice.values["agent_id"]
-            ):
-                continue
-            values = preference.values
-            if not values["permanent"] and values["remaining_seconds"] <= 0:
-                continue
-            if values["scope"] == "all":
-                return True
-            source = self.notice_source(notice)
-            if values["scope"] == "agent" and source == ("agent", values["source_agent_id"]):
-                return True
-            if values["scope"] == "agent_team" and source == (
-                "agent_team",
-                values["source_team_id"],
-            ):
-                return True
-        return False
+        return self.suppressed_except(notice)
 
     def notice_source(self, notice):
+        if notice.values["mail_id"]:
+            owner = self.manager._agents_by_id.get(notice.values["agent_id"])
+            mail = next((item for item in owner.agent_inbox if item["message_id"] == notice.values["mail_id"]), None) if owner else None
+            if mail is not None and mail["message_type"] == "peer_message_arrived":
+                message = self.manager.broker.peer_messages.get(mail["payload"].get("message_id"))
+                if message is not None and mail["message_id"] == f"PEER-{message.message_id}-{notice.values['agent_id']}":
+                    return "agent_team", message.sender_team_id
         if notice.values["chat_message_id"]:
             message = self.manager._records.index[
                 ("chat_messages", (notice.values["chat_message_id"],))
@@ -245,6 +235,9 @@ class NotificationMixin:
     def schedule_notice(self, notice_id):
         notice = self.manager._records.index[("agent_notifications", (notice_id,))]
         agent_id = notice.values["agent_id"]
+        owner = self.manager._agents_by_id.get(agent_id)
+        if owner is None or owner.lifecycle_state != "active":
+            return
         if self.closing or self.manager._restore_in_progress:
             return
         if self.manager._topology.is_agent_pending(agent_id):
@@ -274,7 +267,7 @@ class NotificationMixin:
                         return
                     previous = self.sessions.get(agent_id)
                     scope = (
-                        previous.scope
+                        self.wake_scope(previous)
                         if previous is not None and previous.intent in {"continuing", "sleep"}
                         else None
                     )
@@ -440,6 +433,10 @@ class NotificationMixin:
                             "Use task inspection and result tools deliberately; presentation is not acknowledgement.")
                     elif item["source_kind"] == "system_event":
                         event = self.manager._memory.events.get(item["source_id"])
+                        if event is not None and event.event_type == "notification_summary":
+                            notice = self.manager._records.index[("agent_notifications", (item["notification_id"],))]
+                            for group in self.summary_counts(notice):
+                                lines.append(f"{group['source_kind']} {group['source_id'] or ''}: {group['count']} unread items; summary only.")
                         if event is not None and event.event_type == "health_incident":
                             lines.append(f"Technical health incident {event.payload['incident_id']} requires explicit handling. "
                                 "Use inspect_health_incident, then claim and acknowledge the exact generation if authorized. "

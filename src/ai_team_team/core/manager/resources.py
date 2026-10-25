@@ -91,6 +91,8 @@ class ResourceGate:
             if decision is None or decision.values["status"] != "published" or decision.values["target_generation"] != self.generation:
                 raise RuntimeError("An unresolved publication must be recovered before managed resource access.")
         actor = self.manager._active_tool_agent.get()
+        if actor is not None and not accepted and actor.agent_id in self.manager._agent_registry.lifecycle_pending:
+            raise PermissionError("New resource operations are fenced during this owner's lifecycle transition.")
         if actor is not None and (self.manager._agents_by_id.get(actor.agent_id) is not actor or actor.lifecycle_state != "active"):
             raise PermissionError("The captured resource owner is no longer active.")
 

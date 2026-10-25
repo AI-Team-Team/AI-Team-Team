@@ -72,7 +72,6 @@ class StateAPI:
 
     async def load_state(self, path: str) -> None:
         """Restores a versioned state snapshot without blocking the event loop."""
-        restoration_start = self._activity.clock.monotonic()
         async with self._runtime_gate:
             if self._closing:
                 raise RuntimeError("ATTManager is closing and cannot restore state.")
@@ -80,8 +79,7 @@ class StateAPI:
                 raise StateRestoreError("Another state restoration is already in progress.")
             if self._topology.transition_pending:
                 raise StateRestoreError("Cannot restore state while a topology transition is awaiting commit.")
-            if self._agent_registry.pending:
-                raise StateRestoreError("Cannot restore state while Agent registrations are awaiting membership commit.")
+            self._agent_registry.assert_restore_ready()
             if self._messaging.read_deliveries:
                 raise StateRestoreError("Cannot restore state while a chat read delivery or its receipt cleanup is pending.")
             if self.supervisor.active_tasks or self.supervisor.finalizers:
@@ -99,7 +97,10 @@ class StateAPI:
             if not os.path.exists(path):
                 raise FileNotFoundError(f"State database file '{path}' not found.")
             self._restore_in_progress = True
+            restoration_start = self._activity.clock.monotonic()
             self._restore_source_path = path
+            self._restoration_start = restoration_start
+            self._activity.restore_finished.clear()
             try:
                 self._resources.begin_publication()
                 await self._memory.suspend_for_restore()
@@ -125,9 +126,11 @@ class StateAPI:
 
     def _finish_restore_protection(self) -> None:
         self._restore_source_path = None
+        self.__dict__.pop("_restoration_start", None)
         if self._resources.blocked:
             self._resources.finish_publication(committed=False)
         self._restore_in_progress = False
+        self._activity.restore_finished.set()
         self._restore_finalizer = None
         if self._memory._restore_suspended and not self._activity.recovery_required:
             self._memory.resume_after_restore()
@@ -139,11 +142,7 @@ class StateAPI:
             async with self._runtime_gate:
                 await self._apply_state_snapshot(state)
                 self.db_path = path
-            async with self._activity.lock:
-                await self._activity.after_restore(restoration_start=restoration_start)
-                self._executions.reset_after_restore()
-            await self._failover.interrupt_pending()
-            await self.supervisor.interrupt_restored_assessments()
+            self._executions.reset_after_restore()
             for row in self._records.snapshot():
                 if row.table_name == "team_position_cooldowns" and row.values["accounting_mode"] == "remaining":
                     self._migration.cooldown_deadlines[row.values["team_id"]] = restoration_start + row.values["remaining_seconds"]
@@ -162,7 +161,6 @@ class StateAPI:
             for team in self.teams.values():
                 if team.team_kind == "ordinary" and getattr(team, "_lifecycle_state", "active") == "active":
                     self._formations.schedule_initial_arrivals(team)
-            self._auto_save(governance_cases={item.case_id for item in self._governance.cases.values() if item.status == "EXPIRED"})
 
     @asynccontextmanager
     async def agent_invocation(self, agent: Agent, *, allow_runtime: bool = False):

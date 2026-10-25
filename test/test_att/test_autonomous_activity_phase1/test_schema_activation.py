@@ -25,6 +25,7 @@ REQUIRED_TABLES = {
     "notification_claims",
     "chat_reminder_previews",
     "notification_suppression",
+    "notification_summary_items",
     "sleep_plans",
     "sleep_conditions",
     "direct_relationships",

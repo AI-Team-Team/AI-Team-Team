@@ -34,8 +34,9 @@ class TestPrivateAgentDocLib(PrivateAgentDocLibTestCase):
         creator = Agent("Creator", "Lead", self.client)
         self.manager.register_agent(creator)
         self.manager.create_agent_team(creator, parent=creator)
-        with self.assertRaises(ValueError):
-            await self.manager.retire_agent(creator.agent_id)
+        await self.manager.retire_agent(creator.agent_id)
+        self.assertEqual(creator.lifecycle_state, "archived")
+        await self.manager.reactivate_agent(creator.agent_id, "default")
 
         busy = Agent("Busy", "Worker", self.client)
         self.manager.register_agent(busy)

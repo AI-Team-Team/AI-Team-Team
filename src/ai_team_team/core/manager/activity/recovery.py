@@ -1,10 +1,41 @@
-"""Post-publication personal admission, never external execution replay."""
+"""Detached interruption settlement and post-publication personal admission."""
 
 from .persisted_context import restored_activity_scope
 from .values import Session, capture
 
 
 class ActivityRecoveryMixin:
+    def install_restored_state(self, staged, generation):
+        """The synchronous publication tail contains no IO or external dispatch."""
+        from ai_team_team.core.exceptions import StateRestoreError
+        for session in self.sessions.values():
+            for _mail_id, future in tuple(session.interaction_waiters):
+                if not future.done():
+                    future.set_exception(StateRestoreError("Restore replaced the observed activity generation."))
+        for waiters in self.waiters.values():
+            for future, _intent in waiters:
+                if not future.done():
+                    future.set_exception(StateRestoreError("Restore replaced the observed activity generation."))
+        for task in self.timers.values():
+            task.cancel()
+        for task in self.suppression_timers.values():
+            task.cancel()
+        self.suppression_timers.clear()
+        if self.countdown_sampler is not None:
+            self.countdown_sampler.cancel()
+        self.countdown_sampler = None
+        self.timers.clear()
+        self.sessions = staged.sessions
+        for session in self.sessions.values():
+            session.generation = generation
+        self.admissions.clear()
+        self.checkpoints.clear()
+        self.waiters.clear()
+        self.cooldown_deadlines = staged.cooldown_deadlines
+        self.suppression_deadlines = staged.suppression_deadlines
+        self._restored_actions = staged._restored_actions
+        self.recovery_required = False
+
     async def after_restore(self, *, restoration_start):
         from ai_team_team.core.exceptions import StateRestoreError
 
@@ -29,6 +60,7 @@ class ActivityRecoveryMixin:
         self.checkpoints.clear()
         self.cooldown_deadlines.clear()
         self._restored_actions = []
+        self.restore_suppression_deadlines(restoration_start)
         records = self.manager._records.snapshot()
         for row in records:
             if row.table_name == "tool_cooldowns" and row.values["accounting_mode"] == "remaining":
@@ -36,7 +68,7 @@ class ActivityRecoveryMixin:
                     restoration_start + row.values["remaining_seconds"]
                 )
         tracked = {
-            row.values["agent_id"] for row in records if row.table_name == "agent_activities"
+            row.values["agent_id"] for row in records if row.table_name in {"agent_activities", "model_requests", "activity_invocations", "activity_admissions"}
         }
         reset = []
         requests = {
@@ -121,8 +153,8 @@ class ActivityRecoveryMixin:
                     )
                 )
         if reset:
-            # This is post-publication bookkeeping. It cannot contaminate a
-            # prepared generation's rollback with updates to existing facts.
+            # Settle required facts only in the detached manager. Publication
+            # includes these changes and their exact rollback before-images.
             await self.manager._records.commit(reset, allow_closing=True)
             records = self.manager._records.snapshot()
         affected = set(
@@ -133,7 +165,7 @@ class ActivityRecoveryMixin:
                 continue
             owner = row.values["agent_id"]
             agent = self.manager._agents_by_id.get(owner)
-            if agent is None or agent.lifecycle_state != "active":
+            if agent is None:
                 continue
             scope = restored_activity_scope(agent.last_context, owner, records)
             session = Session(
@@ -160,44 +192,37 @@ class ActivityRecoveryMixin:
             if sleep is not None:
                 session.sleep_id = sleep.values["sleep_id"]
                 session.sleep_deadline = restoration_start + sleep.values["remaining_seconds"]
-            self._restored_actions.append((session, owner in affected))
+            if agent.lifecycle_state == "active":
+                self._restored_actions.append((session, owner in affected))
         self.recovery_required = False
+
+    def resume_continuation(self, session):
+        """Resource availability gates modeling without extending finite sleep."""
+        owner = session.agent_id
+        try:
+            agent = self.require_agent(owner)
+            alias = self.manager.resolve_runtime_model_alias(agent.llm_client)
+            availability = self.manager._records.index.get(("model_availability", (owner, alias)))
+            if availability is not None and availability.values["status"] == "remediation_required":
+                return
+            if availability is not None and availability.values["earliest_admission_at"] is not None:
+                delay = max(0, availability.values["earliest_admission_at"] - self.clock.wall_time())
+                self.arm_timer(session, delay, recovery=True)
+            else:
+                self.schedule_activation(owner)
+        except Exception as error:
+            self.manager._emit_callback("on_system_event", "activity_recovery_deferred",
+                {"agent_id": owner, "error_type": type(error).__name__})
 
     def resume_after_restore(self):
         """Publish queue/timer handoffs only after every local index is coherent."""
+        self.resume_suppression_timers()
         actions, self._restored_actions = self._restored_actions, []
         for session, affected in actions:
             owner = session.agent_id
-            agent = self.manager._agents_by_id[owner]
+            if session.intent == "sleep" and session.sleep_id is not None:
+                self.arm_timer(session, max(0, session.sleep_deadline - self.clock.monotonic()))
             if affected or session.intent == "continuing":
-                try:
-                    alias = self.manager.resolve_runtime_model_alias(agent.llm_client)
-                    availability = self.manager._records.index.get(
-                        ("model_availability", (owner, alias))
-                    )
-                    if (
-                        availability is not None
-                        and availability.values["status"] == "remediation_required"
-                    ):
-                        continue
-                    if (
-                        availability is not None
-                        and availability.values["earliest_admission_at"] is not None
-                    ):
-                        delay = max(
-                            0, availability.values["earliest_admission_at"] - self.clock.wall_time()
-                        )
-                        self.arm_timer(session, delay, recovery=True)
-                    else:
-                        self.schedule_activation(owner)
-                except Exception as error:
-                    self.manager._emit_callback(
-                        "on_system_event",
-                        "activity_recovery_deferred",
-                        {"agent_id": owner, "error_type": type(error).__name__},
-                    )
-            elif session.intent == "sleep":
-                if session.sleep_id is not None:
-                    self.arm_timer(session, max(0, session.sleep_deadline - self.clock.monotonic()))
+                self.resume_continuation(session)
             for notice in self.pending_notices(owner):
                 self.schedule_notice(notice.values["notification_id"])

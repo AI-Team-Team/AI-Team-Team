@@ -268,7 +268,7 @@ self.assertIn(
 )
 ```
 
-The current schema is 14; schema 13 and earlier databases must be rejected before DDL.
+The current schema is 16; schema 15 and earlier databases must be rejected before DDL.
 
 ### Reliability
 
@@ -279,6 +279,24 @@ Reliability changes should cover:
 - Durable UNKNOWN alert states, callback ordering and isolation, and hanging-provider shutdown behavior.
 
 The suite's `test/test_att/test_high_hardening/` package contains reference patterns for these cases.
+
+Tests are grouped by behavior: `test/test_att/test_agent_activity/` covers countdowns, notification suppression, and invocation scope; `test/test_att/test_agent_lifecycle/` covers retained death; `test/test_att/test_background_tasks/` covers provider suspension and owner shutdown; and `test/test_att/test_state_persistence/` covers corruption, crash recovery, and exact publication rollback.
+
+Use the logical clock for finite sleep and timed suppression rather than real waiting, and test affected sleeping owners, never-activated owners, unaffected sleepers, inactive identities, and repeated loads separately.
+
+Lifecycle boundary tests include restore while death waits for a team lock, pre-fence task admission, rejected death across timer expiry, resumed protected arrivals, and successful death without reactivation.
+
+Hold returned personal, team-scoped, and synchronous-thread results at local preparation while death begins, and preserve their factual outcomes without bypassing a concurrent source ACL revocation or waiting for another owner's result.
+
+Release a countdown's activity lock immediately before restore admission to cover the unlocked waiter handoff, and verify sleep, timed suppression, and checkpoint sampling retain ownership until their local work finishes.
+
+Reject or cancel restoration while dormant countdowns expire, and require their original deadlines to resume after rollback with exactly one post-publication activation on success.
+
+Exhaust scheduler capacity before admitting a person, then confirm death settles every checkpoint and personal-interaction observer even when no worker started, including cancelled observers and earlier owned admissions.
+
+Recovery wake tests combine interrupted ownership with both Host-remediation blocks and later provider retry boundaries, including restoration that consumes the saved sleep remainder.
+
+The crash regression terminates a subprocess after the required recovery commit and verifies the exact inverse records and restrictive foreign-key graph before another restore can publish.
 
 ### Volatile Relationship History
 

@@ -26,11 +26,12 @@ def digest(value):
 
 
 class DispatchMixin:
-    def resolve_resources(self, context, tool, args, kwargs, *, owner=None):
+    def resolve_resources(self, context, tool, args, kwargs, *, owner=None, settling=False):
         if owner is None:
             owner = self.check(context, team_required=tool.execution_contract.required_scope == "agent_team")
         elif tool.execution_contract.required_scope == "agent_team":
-            self.manager._activity.validate_scope(owner.agent_id, context.scope)
+            self.manager._activity.validate_scope(owner.agent_id, context.scope,
+                allow_pending_lifecycle=settling)
         bound = tool._signature.bind(*thaw(args), **thaw(kwargs))
         bound.apply_defaults()
         claims, sources = (), ()
@@ -65,6 +66,8 @@ class DispatchMixin:
         return tuple(sorted(set(physical), key=lambda item: (item.namespace, item.resource_id, item.path, item.access, item.subtree))), sources
 
     async def admit(self, context, tool, args, kwargs, *, call_id, visibility="foreground", description="", labels=(), enqueue=True):
+        if context.agent_id in self.manager._agent_registry.lifecycle_pending:
+            raise PermissionError("New execution admission is fenced during the owner's lifecycle transition.")
         tool = copy.copy(tool)
         owner = self.check(context, team_required=tool.execution_contract.required_scope == "agent_team")
         self.validate_binding(tool)
@@ -85,7 +88,7 @@ class DispatchMixin:
         try:
             await self.commit_admission(job, owner, admission, operation_id, enqueue=enqueue)
         except asyncio.CancelledError:
-            if not enqueue and execution_id in self.jobs:
+            if not enqueue and execution_id in self.jobs and owner.lifecycle_state == "active":
                 with self.manager._resources.settlement():
                     await self.request_cancel(execution_id, actor=owner)
             raise
@@ -94,6 +97,8 @@ class DispatchMixin:
     async def commit_admission(self, job, owner, admission, operation_id, *, enqueue):
         context, tool, execution_id = job.context, job.tool, job.execution_id
         async with owner.lifecycle_lock, self.manager._activity.lock:
+            if owner.agent_id in self.manager._agent_registry.lifecycle_pending:
+                raise PermissionError("The owner's lifecycle changed before execution admission.")
             self.check(context, team_required=tool.execution_contract.required_scope == "agent_team")
             cooling = self.manager._records.index.get(("tool_cooldowns", (owner.agent_id, tool.name)))
             if cooling is not None and self.manager._activity.cooldown_remaining(cooling) > 0:
@@ -141,6 +146,8 @@ class DispatchMixin:
                         return
 
                     async def before_attempt(index):
+                        if job.context.agent_id in self.manager._agent_registry.lifecycle_pending:
+                            raise PermissionError("A new execution attempt cannot start during the owner's lifecycle transition.")
                         self.check(job.context, team_required=job.tool.execution_contract.required_scope == "agent_team")
                         current_claims, _sources = self.resolve_resources(job.context, job.tool, job.args, job.kwargs)
                         if current_claims != job.claims or _sources != job.sources:
@@ -227,7 +234,8 @@ class DispatchMixin:
                 raise job.error
             return job.result
         except asyncio.CancelledError:
-            if not self.closing and not self.manager._closing:
+            owner = self.manager._agents_by_id.get(job.context.agent_id)
+            if not self.closing and not self.manager._closing and owner is not None and owner.lifecycle_state == "active":
                 with self.manager._resources.settlement():
                     await self.request_cancel(job.execution_id, actor=self.manager._agents_by_id[job.context.agent_id])
                 if job.task is not None and not job.task.done():

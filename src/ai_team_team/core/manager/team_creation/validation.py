@@ -91,6 +91,7 @@ class TeamCreationValidationMixin:
             manager._topology.require_available(creator)
         if isinstance(creator, Agent) and (
             creator.lifecycle_state != "active"
+            or manager._topology.is_agent_pending(creator.agent_id)
             or manager._agents_by_id.get(creator.agent_id) is not creator
             or manager.supervisor.is_supervisory_agent(creator.agent_id)
         ):
@@ -226,6 +227,7 @@ class TeamCreationValidationMixin:
         creator = team.creator
         if isinstance(creator, Agent) and (
             creator.lifecycle_state != "active"
+            or manager._topology.is_agent_pending(creator.agent_id)
             or manager._agents_by_id.get(creator.agent_id) is not creator
             or manager.agents.get(creator.name) is not creator
         ):
@@ -241,6 +243,7 @@ class TeamCreationValidationMixin:
             if (
                 required_agent is None
                 or required_agent.lifecycle_state != "active"
+                or manager._topology.is_agent_pending(required_agent.agent_id)
                 or manager.agents.get(required_agent.name) is not required_agent
             ):
                 raise ValueError("The formation initiator changed during team staging.")
@@ -258,6 +261,7 @@ class TeamCreationValidationMixin:
                 manager._agents_by_id.get(agent.agent_id) is not agent
                 or manager.agents.get(agent.name) is not agent
                 or agent.lifecycle_state != "active"
+                or manager._topology.is_agent_pending(agent.agent_id)
             ):
                 raise ValueError(
                     f"Existing Agent {agent.name!r} changed during team staging."

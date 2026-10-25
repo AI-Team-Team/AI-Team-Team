@@ -50,6 +50,8 @@ def derive_recovery(staged, checkpoint_id, publication_id):
         agent = staged._agents_by_id[owner]
         if agent.lifecycle_state != "active":
             continue
+        if row.table_name == "executions" and row.values["outcome_unconfirmed"] and key in existing:
+            continue
         affected.add(owner)
         if key in existing:
             continue

@@ -31,9 +31,12 @@ class MemoryJournalMixin:
         redacted: bool = False,
         persist: bool = True,
         inherit_context: bool = True,
+        staged: bool = False,
     ) -> SystemMemoryEvent:
         """Appends one immutable event and records an append-only persistence delta."""
         manager = self.manager
+        if staged and persist:
+            raise ValueError("A staged Journal event requires explicit authoritative publication.")
         activity = getattr(manager, "_activity", None)
         executing = activity.current.get() if activity is not None else None
         active = executing if (
@@ -58,17 +61,25 @@ class MemoryJournalMixin:
                 redacted=redacted,
                 created_at=time.time(),
             )
-            self.events[event.event_id] = event
+            (self.provisional_events if staged else self.events)[event.event_id] = event
         if persist and executing is not None and agent is not None and agent.agent_id == executing.agent_id:
             executing.pending_event_ids.add(event.event_id)
         elif persist:
             manager._auto_save(memory_events={event.event_id})
         return event
 
+    def publish_events(self, event_ids) -> None:
+        with self._lock:
+            for event_id in event_ids:
+                event = self.provisional_events.pop(event_id, None)
+                if event is not None:
+                    self.events[event_id] = event
+
     def discard_unpersisted_event(self, event_id: str) -> None:
         """Discards an event that was staged but never submitted for persistence."""
         with self._lock:
-            event = self.events.pop(event_id, None)
+            self.provisional_events.pop(event_id, None)
+            self.events.pop(event_id, None)
 
     def record_message(
         self,

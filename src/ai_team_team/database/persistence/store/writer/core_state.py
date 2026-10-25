@@ -35,6 +35,9 @@ class CoreStateWriteMixin:
             previous = session.get(AgentModel, agent["agent_id"])
             if previous is not None and previous.state_version > agent.get("state_version", 1):
                 continue
+            if previous is not None and previous.lifecycle_state == "dead" and agent["lifecycle_state"] != "dead":
+                from ai_team_team.core.exceptions import StatePersistenceError
+                raise StatePersistenceError("Death is terminal; a persisted dead identity cannot be reactivated.")
             session.merge(
                 AgentModel(
                     agent_id=agent["agent_id"],

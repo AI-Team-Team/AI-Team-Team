@@ -53,7 +53,7 @@ class QueryMixin:
         job = self.jobs.get(values["execution_id"])
         available = result is not None and self.result_authorized(row, owner) and (
             result.values["content"]["content"] is not None or job is not None and job.result is not None)
-        controls = any(item.table_name == "execution_controls" and item.values["execution_id"] == values["execution_id"]
+        controls = any(item.table_name == "execution_controls" and item.values["execution_id"] == values["execution_id"] and item.values["operation"] == "stop"
                        for item in self.manager._records.snapshot())
         return TaskView(execution_id=values["execution_id"], owner_agent_id=owner.agent_id,
             scope=AgentTeamScope(team_id=values["scope_team_id"]) if values["scope_kind"] == "agent_team" else PersonalScope(),
@@ -61,7 +61,10 @@ class QueryMixin:
             execution_state=values["status"], health_state=health, attention_state=values["attention"],
             visibility=values["visibility"], outcome_unconfirmed=bool(values["outcome_unconfirmed"]),
             created_at=values["created_at"], started_at=values["started_at"], finished_at=values["finished_at"],
-            cancellation_requested=controls, result_available=bool(available))
+            cancellation_requested=controls, result_available=bool(available),
+            suspended=any(item.table_name == "execution_controls" and item.values["execution_id"] == values["execution_id"]
+                and item.values["operation"] == "suspend" and item.values["acknowledgement"] == "acknowledged" for item in self.manager._records.snapshot())
+                and values["status"] not in {"completed", "failed", "cancelled"})
 
     def inspect(self, execution_id, *, actor=None):
         with self.manager._resources.mutation():
@@ -109,7 +112,9 @@ class QueryMixin:
                     health[key] = record
         rows = [row.values for row in records if row.table_name == "executions"
                 and row.values["agent_id"] == owner.agent_id and row.values["visibility"] != "foreground"]
-        live = {key: sum(row["status"] == key and not row["outcome_unconfirmed"] for row in rows)
+        suspended = {row.values["execution_id"] for row in records if row.table_name == "execution_controls"
+                     and row.values["operation"] == "suspend" and row.values["acknowledgement"] == "acknowledged"}
+        live = {key: sum(row["status"] == key and not row["outcome_unconfirmed"] and row["execution_id"] not in suspended for row in rows)
                 for key in ("queued", "running")}
         uncertain = sum(row["outcome_unconfirmed"] for row in rows)
         attention = sum(row["attention"] == "required" for row in rows)
@@ -118,7 +123,7 @@ class QueryMixin:
         stalled = sum(row["execution_id"] in health and health[row["execution_id"]].values["health"] == "stalled"
                       and row["attention"] != "acknowledged" for row in rows)
         return ("Background tasks: " + ", ".join(f"{value} {key}" for key, value in {**live, **terminal}.items())
-                + f"; {stalled} stalled health, {attention} requiring attention, {uncertain} unconfirmed outcomes.")
+                + f"; {sum(row['execution_id'] in suspended and row['status'] == 'running' for row in rows)} suspended, {stalled} stalled health, {attention} requiring attention, {uncertain} unconfirmed outcomes.")
 
     async def read_result(self, execution_id, *, actor=None, start_line=1, end_line=None,
                           start_character=1, character_count=None, expected_file_version=None):

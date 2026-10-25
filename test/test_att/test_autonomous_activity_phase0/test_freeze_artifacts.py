@@ -38,6 +38,8 @@ class TestFreezeArtifacts(unittest.IsolatedAsyncioTestCase):
         documented.update(re.findall(r"^\| `([^`]+)` \|", extension, flags=re.MULTILINE))
         institutional = (ARTIFACTS / "Schema_15.md").read_text(encoding="utf-8")
         documented.update(re.findall(r"^\| `([^`]+)` \|", institutional, flags=re.MULTILINE))
+        lifecycle = (ARTIFACTS / "Schema_16.md").read_text(encoding="utf-8")
+        documented.update(re.findall(r"^\| `([^`]+)` \|", lifecycle, flags=re.MULTILINE))
         self.assertEqual(REQUIRED_TABLES, documented)
 
     async def test_schema_fixture_reads_committed_physical_metadata_without_llm_calls(self):

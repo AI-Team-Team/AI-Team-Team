@@ -34,6 +34,7 @@ class TaskView(ContractRecord):
     finished_at: float | None = None
     cancellation_requested: bool = False
     result_available: bool = False
+    suspended: bool = False
 
 
 class TaskPage(ContractRecord):
@@ -44,6 +45,6 @@ class TaskPage(ContractRecord):
 
 class TaskControlResult(ContractRecord):
     execution_id: Identifier
-    status: Literal["CANCELLED", "REQUESTED", "UNCONFIRMED", "ALREADY_TERMINAL", "ACKNOWLEDGED"]
+    status: Literal["CANCELLED", "REQUESTED", "UNCONFIRMED", "ALREADY_TERMINAL", "ACKNOWLEDGED", "SUSPENDED"]
     durability: Literal["durable", "volatile"]
     state_version: int = Field(gt=0)

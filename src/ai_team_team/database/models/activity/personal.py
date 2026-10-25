@@ -80,8 +80,15 @@ notification_suppression = table("notification_suppression",
     choice("scope", "all agent agent_team"), reference("source_agent_id", "agents.agent_id", nullable=True),
     reference("source_team_id", "teams.team_id", nullable=True), boolean("permanent"),
     timestamp("remaining_seconds", nullable=True), timestamp("sampled_at"),
+    choice("status", "active expired removed"), timestamp("duration_seconds", nullable=True),
+    timestamp("minimum_seconds", nullable=True), timestamp("maximum_seconds", nullable=True),
     checks=("(scope = 'all' AND source_agent_id IS NULL AND source_team_id IS NULL) OR (scope = 'agent' AND source_agent_id IS NOT NULL AND source_team_id IS NULL) OR (scope = 'agent_team' AND source_team_id IS NOT NULL AND source_agent_id IS NULL)",
-            "(permanent = 1 AND remaining_seconds IS NULL) OR (permanent = 0 AND remaining_seconds IS NOT NULL AND remaining_seconds >= 0)"))
+            "(permanent = 1 AND remaining_seconds IS NULL AND duration_seconds IS NULL AND minimum_seconds IS NULL AND maximum_seconds IS NULL) OR (permanent = 0 AND remaining_seconds IS NOT NULL AND remaining_seconds >= 0 AND duration_seconds IS NOT NULL AND minimum_seconds IS NOT NULL AND maximum_seconds IS NOT NULL AND duration_seconds BETWEEN minimum_seconds AND maximum_seconds AND minimum_seconds > 0 AND maximum_seconds >= minimum_seconds AND remaining_seconds <= duration_seconds)",
+            "permanent = 0 OR status <> 'expired'"))
+notification_summary_items = table("notification_summary_items",
+    reference("summary_id", "agent_notifications.notification_id", primary=True),
+    reference("notification_id", "agent_notifications.notification_id", primary=True, unique=True),
+    append=True, checks=("summary_id <> notification_id",))
 sleep_plans = table("sleep_plans",
     identifier("sleep_id", primary=True), reference("agent_id", "agents.agent_id"),
     timestamp("latest_wake_seconds"), timestamp("remaining_seconds"), timestamp("sampled_at"),

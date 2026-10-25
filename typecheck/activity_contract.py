@@ -1,5 +1,6 @@
 """Consumer typing of frozen values and the implemented personal runtime."""
 
+from typing import Any
 from typing_extensions import assert_type
 
 from ai_team_team import ATTManager, Agent, PersonalActivityConfig, ConversationConfig, ChatMessagePage, ChatReadResult, ChatOperationResult, ChatRelationship
@@ -18,6 +19,7 @@ from ai_team_team.core.activity.contracts import (
     OperationScope,
     PersonalScope,
     SleepIntent,
+    SuppressionPreference,
     ToolExecutionContract,
     WakeDuration,
 )
@@ -64,6 +66,12 @@ async def personal_runtime(manager: ATTManager, person: Agent) -> None:
     edited = await manager.edit_chat_message("message", "Explicit revised source", actor=person)
     assert_type(edited, ChatOperationResult)
     assert_type(manager.inspect_direct_relationship("another-person", actor=person), ChatRelationship)
+    preference = await manager.set_notification_suppression(SuppressionPreference(scope="all"), actor=person)
+    assert_type(preference, dict[str, Any])
+    assert_type(manager.list_notification_suppressions(actor=person), list[dict[str, Any]])
+    assert_type(await manager.remove_notification_suppression("preference", actor=person), dict[str, Any])
+    assert_type(manager.preview_agent_death(person.agent_id), dict[str, Any])
+    assert_type(await manager.mark_agent_dead(person.agent_id, confirm=True), dict[str, Any])
 
 
 async def task_runtime(manager: ATTManager, person: Agent) -> None:

@@ -34,13 +34,17 @@ The [Phase 4 execution profile](dev/autonomous_activity/Phase_4.md) activates in
 
 The [Phase 5 institutional profile](dev/autonomous_activity/Phase_5.md) activates incompatible schema 15 for exact governance cases, explicit-parent topology and acceptance, resource attempts, and event-driven health evidence.
 
+The [Phase 6 lifecycle profile](dev/autonomous_activity/Phase_6.md) activates incompatible schema 16 for suppression lifecycle and summary coverage, retained terminal death, and recovery updates with exact rollback before-images.
+
 The [Phase 2 personal runtime](dev/autonomous_activity/Phase_2.md) atomically checkpoints the sanitized personal window, Journal dependencies, notification claims, and activity progress.
 
 Open Native exchanges are excluded from saved model windows while their issued execution evidence remains retained.
 
 Model requests and quota claims commit before dispatch; sent requests with unknown usage remain conservatively charged after cancellation or recovery.
 
-Explicit saves sample finite sleep and downtime-excluded cooldown remainders, while restore anchors their remaining durations at restoration start.
+Explicit saves sample finite sleep, timed suppression, and downtime-excluded cooldown remainders, while restore anchors their remaining durations at restoration start.
+
+A batched countdown sampler also checkpoints sleep and timed suppression without requiring explicit saves, with scheduling and commit delay included in the sampling error.
 
 Restore does not replay an external tool, reconnect to it, or poll it for a fabricated result.
 
@@ -172,12 +176,21 @@ Restoration is transactional.
 
 - ATT validates every Agent UUID, identity inbox message, formation request, contiguous revision history, invitation decision, optional candidate and exact invocation provenance, member, creator, parent, model alias, DocLib owner, permission, communication principal and state combination, Agreement, peer delivery, Journal sequence, memory ownership and provenance edge, deterministic segment digest, file path, and managed link before publishing anything.
 - Multiple membership rows resolve to the same restored Agent object and do not carry team-role metadata.
-- Every agent must own exactly one canonical `PDL-<agent_id>` private library; private libraries must be non-public, have no team ACL or managed links, and match the owner's lifecycle state.
+- Every Agent must own exactly one canonical `PDL-<agent_id>` private library; private libraries must be non-public, have no team ACL or managed links, and match the owner's lifecycle state, with dead identities retaining a retained or archived library.
 - Persisted communication `PROCESSING` states reset to `PENDING` after validation; optional candidates have no detached job to replay.
 - Personal governance emails, eligible voters, case histories, complete tallies, and authoritative communication or migration outcomes are cross-validated; email read state never supplies a missing ballot.
 - Pending failover cases become `EXPIRED` because their original resource invocation did not survive the process interruption; the retained email and choice history are not deleted.
 - `load_state()` fails closed while personal, formation, governance, migration, resource, or audit work is live, so restored registries cannot race ongoing authoritative operations.
+- Admitted Agent lifecycle tasks also exclude restore before their locks are acquired and until their cleanup finishes.
+- Admitted countdown handoffs and personal runtime mutations exclude restore through lock waits and receipt settlement; dormant timers resume their original deadlines after a rejected restoration.
 - Interrupted audit runs become unknown retained evidence without recreating auditors; incident claims return to pending attention.
+- Required request, quota, execution, resource, and audit interruption updates settle in detached staging and commit with the publication decision before switching live registries.
+- Publication before-images restore affected existing SQL records as well as remove new provisional alerts when registry publication fails.
+- Dead identities retain history and private ownership without live model bindings, normal discovery, automatic activation, or Host reactivation.
+
+A restored sleep safeguard retains its own deadline while a model is unavailable, independently of later provider retry or Host remediation boundaries.
+
+Candidate lifecycle, permission, and summary Journal events remain separate from published history until their own receipt, so an unrelated full export cannot retain a later rejected transition.
 
 Before staging or publication, restore drains accepted writes and verifies that its candidate Journal contains every event already committed to the destination database with its original sequence and contents.
 
@@ -217,6 +230,6 @@ Position-history prerequisites include the corresponding cooldown records, and s
 
 ## Schema policy
 
-- The current persistence schema version is `15`.
-- Compatibility with schema `14` and earlier SQLite layouts is intentionally unsupported.
+- The current persistence schema version is `16`.
+- Compatibility with schema `15` and earlier SQLite layouts is intentionally unsupported.
 - Create a new database when upgrading.

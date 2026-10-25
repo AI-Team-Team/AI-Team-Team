@@ -39,7 +39,21 @@ class ArchiveMixin:
         dirty["teams"].add(team_id)
         dirty["teams"].update(parent_changes)
         dirty["_relationships_supplied"] = True
-        receipt = await manager._records.commit(records, dirty=dirty, operation_id=identity("DISSOLUTION"),
-            team_memberships={team_id: ()}, team_lifecycles={team_id: "dissolved"}, team_parents=parent_changes)
+        from ..activity.lifecycle_notices import membership_notices
+        notices, ids, events = membership_notices(manager, (member.agent_id for member in team.members),
+            team_ids=(team_id,), source_id=event.values["event_id"], reason="team_dissolved")
+        dirty["memory_events"].update(events)
+        operation = identity("DISSOLUTION")
+        try:
+            receipt = await manager._records.commit((*records, *notices), dirty=dirty, operation_id=operation,
+                team_memberships={team_id: ()}, team_lifecycles={team_id: "dissolved"}, team_parents=parent_changes,
+                notifications=ids)
+        finally:
+            if operation in manager._records.receipts:
+                for notice in ids:
+                    manager._activity.schedule_notice(notice)
+            else:
+                for event_id in events:
+                    manager._memory.discard_unpersisted_event(event_id)
         manager._emit_callback("on_system_event", "team_conversation_closed", {"team_id": team_id})
         return receipt

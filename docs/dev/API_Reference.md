@@ -16,31 +16,52 @@ One instance may be shared across teams. Its `lock` serializes all model-window 
 * **Constructor**:
 
   ```python
-  agent = Agent(name: str, role: str, llm_client: Optional[Any] = None, role_description: str = "", system_instructions: str = "", agent_id: Optional[str] = None)
+  from ai_team_team import Agent
+
+  agent = Agent(
+      name="Researcher",
+      role="Analyst",
+      llm_client=None,
+      role_description="Evaluates evidence.",
+      system_instructions="",
+      agent_id=None,
+  )
   ```
 
 * **Methods**:
   * `launch_att(...) -> AgentTeam | TeamFormationRequest`
-        Creates an all-new child immediately or opens persistent consent when existing Agents or initiator self-membership are requested. No invitation mutates Agent-owned identity or runtime state.
+    Creates an all-new AgentTeam or opens persistent consent when existing Agents or initiator self-membership are requested, with independence by default and an explicit optional `parent=`.
+
+    No invitation mutates Agent-owned identity or runtime state.
 
 `agent_id` is an immutable canonical UUID. `_private_doc_library_id` and `_model_alias` are manager-owned persistence fields; public code reads only `private_doc_library_id`.
 
 ### `AgentTeam`
 
-Represents a dynamic team of membership satisfying `min_subagent_team_size`, default three, whose members act through their own continuing runtimes.
+Represents a dynamic team whose members act through their own continuing runtimes; manager creation enforces `min_subagent_team_size`, default three.
 
 * **Constructor**:
 
   ```python
-  team = AgentTeam(creator: Any, preset_name: str, team_purpose: str = "Unspecified team purpose")
+  from ai_team_team import Agent, AgentTeam
+
+  creator = Agent(name="Creator", role="Coordinator")
+  team = AgentTeam(
+      creator=creator,
+      preset_name="generic",
+      team_purpose="Review evidence.",
+      team_kind="ordinary",
+  )
   ```
+
+Use the Manager's creation or formation APIs to publish a registered team.
 
 * **Properties**:
   * `parent_team -> Optional[AgentTeam]`: Resolves the parent team in the lineage tree.
   * `depth -> int`: Returns memoized lineage depth. A migration recursively invalidates this cache for the moved team and every descendant.
   * `state_lock -> asyncio.Lock`: Asynchronous mutex safeguarding proposal structural mutations during parallel Native tool executions.
 * **Methods**:
-  * `launch_att(...) -> AgentTeam`: Allows the active team to recursively spawn a child team.
+  * `launch_att(...) -> AgentTeam | TeamFormationRequest`: Creates a child of the calling team or returns a consent request when existing Agents or initiator membership are included.
   * `receive_message(message: Dict[str, Any])`: Appends incoming signals or parent alerts to the team's inbox queue.
 
 No AgentTeam method executes a compulsory all-member discussion or reasoning turn.
@@ -80,7 +101,15 @@ Per-callback observation tasks isolate self-cancellation from the ordered dispat
 * **Constructor**:
 
   ```python
-  manager = ATTManager(root_ai: Agent, config: Optional[ATTConfig] = None, db_path: Optional[str] = None, *, persistence_mode: str = "durable")
+  from ai_team_team import ATTConfig, ATTManager, Agent
+
+  root_agent = Agent(name="Root_AI", role="Coordinator")
+  manager = ATTManager(
+      root_ai=root_agent,
+      config=ATTConfig(workspace_root="att_workspace"),
+      db_path="att_state.db",
+      persistence_mode="durable",
+  )
   ```
 
 * **Methods**:
@@ -98,6 +127,8 @@ Per-callback observation tasks isolate self-cancellation from the ordered dispat
     Resolves private ownership without exposing a raw private-library capability on `Agent`.
   * `await retire_agent(...)` / `await reactivate_agent(...)`
     Applies strict retain/archive/delete lifecycle rules and explicit model rebinding.
+  * `preview_agent_death(agent_id)` / `await mark_agent_dead(agent_id, confirm=True)`
+    Host-only retained terminal death closes current memberships, preserves creator provenance, and fences owned work without replacing identity or Root.
   * `register_preset(name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]])`
     Registers custom dynamic committee presets.
   * `get_preset(name: str) -> dict`
@@ -278,7 +309,16 @@ Represents a `team` or `agent_private` document store with path traversal protec
 * **Constructor**:
 
   ```python
-  lib = DocumentLibrary(lib_id: str, name: str, owner_team_id: str, description: str = "", is_public_visible: bool = False, root_dir: Optional[str] = None)
+  from ai_team_team import DocumentLibrary
+
+  lib = DocumentLibrary(
+      lib_id="DL-example",
+      name="Example Library",
+      owner_team_id="AT-example",
+      description="Shared project documents.",
+      is_public_visible=False,
+      root_dir="att_workspace/example_library",
+  )
   ```
 
 * **Properties**:
@@ -307,7 +347,7 @@ Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/
 
 ## Database Schema & ORM Models
 
-SQLAlchemy models and relational activity tables mapping schema 15 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
+SQLAlchemy models and relational activity tables mapping schema 16 are grouped in the [`models`](../../src/ai_team_team/database/models/) package:
 
 * **`ManagerConfigModel`**: Key-value stores for serialized configuration payloads and Root AI targets.
 * **`AgentModel`, `AgentMessageModel`, and `AgentInboxModel`**: Use immutable `agent_id` primary/foreign keys and persist lifecycle profiles, bounded Working Context, and identity-addressed notifications.
@@ -336,6 +376,10 @@ Both direct model invocation and personal interaction enforce that boundary befo
 
 Runtime bindings implement `async execute(call)` and optional declared stop hooks; persisted names never authorize replay or automatic reconnection during restore.
 
+Bindings declaring provider suspension also implement `async suspend(execution_id)`, and only literal `True` supplies acknowledgement.
+
+Suspension is retained control evidence rather than a sixth execution state, with unacknowledged outcomes reported separately.
+
 Stop protocol tasks retain fatal framework errors from immediate and late hooks for propagation through cancellation and shutdown without treating the error as proof of an external stop.
 
 Timeout observations and accepted heartbeat/progress samples use the same activity lock, and monitor scheduling retains a deadline crossed during an awaited observation commit.
@@ -343,6 +387,8 @@ Timeout observations and accepted heartbeat/progress samples use the same activi
 `ResourceClaim` describes protected read/write footprints, including directory descendants and physical link targets, with synchronous physical path locks as a final publication boundary.
 
 See the [Phase 4 implementation profile](autonomous_activity/Phase_4.md) and [schema 14](autonomous_activity/Schema_14.md).
+
+The [Phase 6 profile](autonomous_activity/Phase_6.md) and [schema 16](autonomous_activity/Schema_16.md) add lifecycle stopping, suppression coverage, and staged recovery updates with before-image rollback.
 
 ### Database Session Factory
 

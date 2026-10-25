@@ -7,12 +7,14 @@ from .factory import LibraryFactoryMixin
 from .model_reads import ModelReadMixin
 from .private_files import PrivateFileMixin
 from .team_files import TeamFileMixin
+from .permissions import LibraryPermissionMixin
 
 if TYPE_CHECKING:
     from ..facade import ATTManager
 
 
 class LibraryService(
+    LibraryPermissionMixin,
     LibraryAccessMixin,
     ModelReadMixin,
     TeamFileMixin,
@@ -22,4 +24,6 @@ class LibraryService(
     """Owns ACL-aware team and private DocLib runtime operations."""
 
     def __init__(self, manager: "ATTManager") -> None:
+        import asyncio
         self.manager = manager
+        self.permission_lock = asyncio.Lock()

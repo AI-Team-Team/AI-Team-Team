@@ -10,6 +10,7 @@ from ai_team_team.database.models import ACTIVITY_TABLES
 
 from ..adapters import HandlerClientAdapter, ManagerDefaultClientAdapter
 from ..agent import Agent
+from ..exceptions import StateRestoreError
 
 if TYPE_CHECKING:
     from ..manager import ATTManager
@@ -23,7 +24,19 @@ class AgentRegistry:
         self.active_by_name: Dict[str, Agent] = {}
         self.by_id: Dict[str, Agent] = {}
         self.pending = {}
+        self.lifecycle_pending = set()
+        self.death_tasks = {}
         self._name_snapshot = frozenset()
+
+    def assert_restore_ready(self) -> None:
+        """A lifecycle owns its identity while waiting, committing, and settling."""
+        with self.manager._topology_lock:
+            if self.pending:
+                raise StateRestoreError("Cannot restore state while Agent registrations are awaiting membership commit.")
+            if (self.lifecycle_pending or any(not task.done() for task in self.death_tasks.values())
+                    or any(getattr(agent, "_lifecycle_lock", None) is not None and agent._lifecycle_lock.locked()
+                           for agent in self.by_id.values())):
+                raise StateRestoreError("Cannot restore state while an Agent lifecycle transition is active.")
 
     def name_reserved(self, name: str) -> bool:
         """An advisory staging read must not wait for the publication lock."""
@@ -205,10 +218,13 @@ class AgentRegistry:
         if memberships:
             raise ValueError("Agent still belongs to teams: " + ", ".join(sorted(memberships)))
         creator_teams = [team.team_id for team in manager.teams.values() if team.creator is agent]
-        if creator_teams:
+        if creator_teams and selected == "delete":
             raise ValueError("Agent still creates teams: " + ", ".join(sorted(creator_teams)))
         if agent.lock.locked():
             raise ValueError("Agent has an active model invocation.")
+        session = manager._activity.sessions.get(agent_id)
+        if session is not None and session.active:
+            raise ValueError("Agent has admitted personal activity.")
         if any(row.table_name == "executions" and row.values["agent_id"] == agent_id
                and row.values["status"] in {"queued", "running"} for row in manager._records.snapshot()):
             raise ValueError("Agent owns live or unconfirmed executions; resolve them before retirement.")
@@ -288,16 +304,7 @@ class AgentRegistry:
         lib_id = self.get_private_library_id(agent_id)
         library = manager.libraries[lib_id]
         if selected in {"retain", "archive"}:
-            alias = manager.resolve_model_alias(agent.llm_client)
-            old_alias = agent._model_alias
             state = "retained" if selected == "retain" else "archived"
-            old_client = agent.llm_client
-            with manager._resources._lock, manager._topology_lock:
-                agent._model_alias = alias
-                agent.lifecycle_state = state
-                library.lifecycle_state = state
-                self.active_by_name.pop(agent.name, None)
-                agent.llm_client = None
             lifecycle_event = None
             try:
                 lifecycle_event = manager._memory.record_event(
@@ -306,6 +313,7 @@ class AgentRegistry:
                     payload={"lifecycle_state": state},
                     persist=False,
                     inherit_context=False,
+                    staged=True,
                 )
                 parent_loss, parent_changes = manager._topology.parent_loss_records(agent, lifecycle_event.event_id)
                 dirty = manager._new_dirty_state()
@@ -314,7 +322,8 @@ class AgentRegistry:
                 dirty["memory_events"].add(lifecycle_event.event_id)
                 dirty["teams"].update(parent_changes)
                 await manager._records.commit(parent_loss, dirty=dirty,
-                    operation_id=f"RETIRE-{lifecycle_event.event_id}", team_parents=parent_changes)
+                    operation_id=f"RETIRE-{lifecycle_event.event_id}", team_parents=parent_changes,
+                    agent_lifecycles={agent_id: state})
             except BaseException:
                 if lifecycle_event is not None and f"RETIRE-{lifecycle_event.event_id}" in manager._records.receipts:
                     raise
@@ -322,13 +331,10 @@ class AgentRegistry:
                     manager._memory.discard_unpersisted_event(
                         lifecycle_event.event_id
                     )
-                with manager._resources._lock, manager._topology_lock:
-                    agent.lifecycle_state = "active"
-                    library.lifecycle_state = "active"
-                    agent.llm_client = old_client
-                    agent._model_alias = old_alias
-                    self.active_by_name[agent.name] = agent
                 raise
+            finally:
+                if lifecycle_event is not None and f"RETIRE-{lifecycle_event.event_id}" in manager._records.receipts:
+                    manager._activity.suspend_inactive_timers(agent_id)
             manager._emit_callback(
                 "on_system_event",
                 "agent_lifecycle_changed",
@@ -434,6 +440,8 @@ class AgentRegistry:
             raise KeyError(f"Unknown agent ID {agent_id!r}.")
         if agent.lifecycle_state == "active":
             raise ValueError("Agent is already active.")
+        if agent.lifecycle_state not in {"retained", "archived"}:
+            raise ValueError("Only retained or archived Agents can be reactivated; death is terminal.")
         if self.active_by_name.get(agent.name) not in {None, agent}:
             raise ValueError(f"Agent name {agent.name!r} is already active.")
         if model_alias == "default":
@@ -455,15 +463,6 @@ class AgentRegistry:
             raise ValueError(f"Model alias {model_alias!r} has no runtime binding.")
         lib_id = self.get_private_library_id(agent_id)
         library = manager.libraries[lib_id]
-        old_state = agent.lifecycle_state
-        old_library_state = library.lifecycle_state
-        old_alias = agent._model_alias
-        with manager._resources._lock, manager._topology_lock:
-            agent.llm_client = client
-            agent._model_alias = model_alias
-            agent.lifecycle_state = "active"
-            library.lifecycle_state = "active"
-            self.active_by_name[agent.name] = agent
         lifecycle_event = None
         try:
             lifecycle_event = manager._memory.record_event(
@@ -472,25 +471,28 @@ class AgentRegistry:
                 payload={"lifecycle_state": "active"},
                 persist=False,
                 inherit_context=False,
+                staged=True,
             )
-            manager._auto_save(
-                agents={agent_id},
-                libraries={lib_id},
-                memory_events={lifecycle_event.event_id},
-            )
-            await manager.flush_state()
-        except Exception:
+            dirty = manager._new_dirty_state()
+            dirty["agents"].add(agent_id)
+            dirty["libraries"].add(lib_id)
+            dirty["memory_events"].add(lifecycle_event.event_id)
+            await manager._records.commit((), dirty=dirty,
+                operation_id=f"REACTIVATE-{lifecycle_event.event_id}", agent_lifecycles={agent_id: "active"},
+                agent_models={agent_id: (model_alias, client)})
+        except BaseException:
+            if lifecycle_event is not None and f"REACTIVATE-{lifecycle_event.event_id}" in manager._records.receipts:
+                raise
             if lifecycle_event is not None:
                 manager._memory.discard_unpersisted_event(
                     lifecycle_event.event_id
                 )
-            with manager._resources._lock, manager._topology_lock:
-                self.active_by_name.pop(agent.name, None)
-                agent.llm_client = None
-                agent._model_alias = old_alias
-                agent.lifecycle_state = old_state
-                library.lifecycle_state = old_library_state
             raise
+        finally:
+            if lifecycle_event is not None and f"REACTIVATE-{lifecycle_event.event_id}" in manager._records.receipts:
+                manager._memory.resume_pending()
+                manager._activity.resume_owner_activity(agent_id)
+                manager._topology.schedule_notices()
         manager._emit_callback(
             "on_system_event",
             "agent_lifecycle_changed",
@@ -500,6 +502,4 @@ class AgentRegistry:
                 "library_id": lib_id,
             },
         )
-        manager._memory.resume_pending()
-        manager._topology.schedule_notices()
         return agent

@@ -12,7 +12,11 @@ ATTManager tracks an explicit forest rather than assuming every team descends fr
 * **Independent AT**: A team with no organizational parent, regardless of its creator; membership must satisfy `config.min_subagent_team_size` (default: three).
 * **Attached AT**: A team with an explicit Agent or AgentTeam parent; creation depth is constrained by `config.max_delegation_depth`, and prospective-parent acceptance governs later attachment.
 
-Both individual `Agent` instances and `AgentTeam` instances support dynamic spawning via the unified `launch_att()` method. Every team holds a trackable `team_purpose` to broadcast its objective to the network. Furthermore, dynamic teams support **heterogeneous LLM model routing**, allowing different subagent roles (e.g. Planner, Writer) to be dynamically routed to different model configurations registered in `ATTManager` and resolved through the central generator callback handler.
+Both individual `Agent` instances and `AgentTeam` instances support dynamic spawning via the unified `launch_att()` method.
+
+Agents inspect each team's purpose and progress through explicit discovery queries.
+
+New Agent identities support **heterogeneous LLM model routing** through stable aliases backed by directly registered clients or the generator handler.
 
 For a detailed visual of spawning and topology changes, see [Lineage Tree Mutations](flowcharts/Lineage_Tree_Mutations.md).
 
@@ -85,16 +89,16 @@ Staging and authoritative creation commits revalidate the limit, so a changed co
 
 Depth-limit denials are business results, not malformed tool arguments or automatic Agent health faults.
 
-`delegate_escalation` is hidden without a parent, and voting tools follow the live voting configuration.
+`delegate_escalation` is hidden when the current team has no AgentTeam parent, including when its parent is an Agent; voting tools follow the live voting configuration.
 
 Identity prompts describe only tools that are actually available, so configuration changes and migrations affect the next model call immediately.
 
 * **`dispatch_subagent(...) -> JSON`**: Creates a child of the current AT or opens its persistent exact-revision consent request, then returns its reference immediately without waiting for child business work. `propose_team_formation` instead offers `organizational_parent="none"`, `"self"`, or `"current_team"`, with independence as its default. An initial task becomes addressed initial mail, not a synchronous discussion or fabricated completion.
 * **Formation and Agent inbox tools**: `list_agent_inbox`, `mark_agent_inbox_read`, `inspect_team_formation`, `prepare_team_formation_draft`, `inspect_team_formation_draft`, `publish_team_formation_draft`, `revise_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, and `decide_team_formation_late_join` operate from the invocation-scoped Agent identity. Every authorization-bearing action names the exact proposal revision it reviewed, and no tool accepts an acting-Agent override. See [Consensual Existing-Agent Team Formation](Consensual_Team_Formation.md).
 * **Entity discovery tools**: `list_entities`, `search_entities`, and `inspect_entity` expose only public Agent and AgentTeam records and remain available independently of delegation depth or optional episodic memory.
-* **`delegate_escalation(objective: str, rationale: str) -> str`**: Escalates task objectives upward in the lineage tree to the direct parent.
+* **`delegate_escalation(objective: str, rationale: str) -> str`**: Sends a help request to the direct parent AgentTeam through the configured peer gate and returns the delivery result without nested parent execution.
 * **`update_team_purpose(new_purpose: str) -> str`**: Updates the purpose string of the caller's team.
-* **`update_team_status(purpose: str, progress: str) -> str`**: Allows a team to dynamically update its globally broadcasted purpose and progress metrics.
+* **`update_team_status(purpose: str, progress: str) -> str`**: Updates the current team's purpose and progress, which other Agents may inspect through explicit discovery.
 * **`request_peer_communication(team_id: str, rationale: str) -> str`**: Requests a durable channel under the configured parent- or lineage-approval institution. The caller cannot override policy, direction, sender, or principals.
 * **`send_peer_message(team_id: str, message: str) -> str`**: Durably sends from the invocation-scoped AgentTeam. Approval institutions require an active Agreement; permissive mode does not.
 * **`revoke_peer_agreement(agreement_id: str, reason: str) -> str`**: Lets either endpoint AgentTeam revoke a channel.

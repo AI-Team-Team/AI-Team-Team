@@ -18,7 +18,7 @@ from .institutions import validate_institutions
 
 SOURCE_COLUMNS = {
     "agents": ("agent_id", "lifecycle_state"),
-    "libraries": ("lib_id", "library_kind", "owner_team_id", "owner_agent_id"),
+    "libraries": ("lib_id", "library_kind", "owner_team_id", "owner_agent_id", "lifecycle_state"),
     "teams": ("team_id", "lifecycle_state", "parent_team_id", "parent_agent_id", "position_revision"),
     "team_members": ("team_id", "agent_id", "interval_id"),
     "agent_messages": ("agent_id", "invocation_id", "source_execution_id", "source_chat_message_id"),
@@ -96,7 +96,20 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
     for team in sources["teams"]:
         if team["lifecycle_state"] == "active" and team["parent_team_id"] is not None:
             require(source("teams", team["parent_team_id"])["lifecycle_state"] == "active", "a current AgentTeam parent cannot be dissolved")
+        if team["lifecycle_state"] == "active" and team["parent_agent_id"] is not None:
+            require(source("agents", team["parent_agent_id"])["lifecycle_state"] == "active", "a current Agent parent cannot be inactive or dead")
+    live_members = current_memberships if current_memberships is not None else {
+        (row["team_id"], row["agent_id"]) for row in sources["team_members"]}
+    for team_id, owner in live_members:
+        require(source("agents", owner)["lifecycle_state"] == "active" and source("teams", team_id)["lifecycle_state"] == "active", "current membership requires an active person and team")
+    for library in sources["libraries"]:
+        if library["library_kind"] == "agent_private":
+            owner = source("agents", library["owner_agent_id"])
+            require(library["lifecycle_state"] in {"retained", "archived"} if owner["lifecycle_state"] == "dead"
+                    else library["lifecycle_state"] == owner["lifecycle_state"], "private-library lifecycle does not match its retained owner")
     for row in rows["activity_admissions"]:
+        if row["disposition"] == "admitted":
+            require(source("agents", row["agent_id"])["lifecycle_state"] == "active", "live admission belongs to an inactive identity")
         if row["scope_kind"] == "agent_team":
             require(any(interval["team_id"] == row["scope_team_id"] and interval["agent_id"] == row["agent_id"]
                         for interval in rows["membership_intervals"]), "admission scope has no membership evidence")
@@ -115,6 +128,14 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
         if row["admission_id"] is not None:
             admission = get("activity_admissions", row["admission_id"])
             require(admission["agent_id"] == row["agent_id"], "activity admission owner mismatch")
+    sleeping = {row["agent_id"]: row for row in rows["sleep_plans"] if row["status"] == "active"}
+    markers = {row["agent_id"]: row for row in rows["agent_activities"]}
+    for owner, marker in markers.items():
+        if source("agents", owner)["lifecycle_state"] == "active" and marker["intent"] == "sleep":
+            require(owner in sleeping, "sleeping person lacks a finite wake safeguard")
+    for owner in sleeping:
+        require(source("agents", owner)["lifecycle_state"] != "dead", "dead identity retains an active sleep plan")
+        require(owner in markers and markers[owner]["intent"] == "sleep", "active sleep plan lacks its personal intent")
     for row in rows["notification_frames"]:
         invocation = get("activity_invocations", row["invocation_id"])
         require(row["agent_id"] == invocation["agent_id"], "frame owner mismatch")
@@ -295,6 +316,18 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
     for row in rows["sleep_conditions"]:
         if row["execution_id"]:
             require(get("executions", row["execution_id"])["agent_id"] == get("sleep_plans", row["sleep_id"])["agent_id"], "sleep condition execution owner mismatch")
+    for row in rows["notification_summary_items"]:
+        summary = get("agent_notifications", row["summary_id"])
+        notice = get("agent_notifications", row["notification_id"])
+        require(summary["agent_id"] == notice["agent_id"] and summary["classification"] == notice["classification"] == "ordinary", "summary coverage owner or classification mismatch")
+        require(summary["system_event_id"] is not None and source("system_memory_events", summary["system_event_id"])["event_type"] == "notification_summary", "summary coverage lacks its ordinary summary source")
+        event = source("system_memory_events", summary["system_event_id"])
+        require(event["agent_id"] == summary["agent_id"] and type(event["payload"]) is dict
+                and set(event["payload"]) == {"preference_id"}, "summary source has invalid ownership or fields")
+        preference = get("notification_suppression", event["payload"]["preference_id"])
+        require(preference["agent_id"] == summary["agent_id"] and preference["status"] != "active", "summary preference has not ended for its owner")
+        require(summary["arrival_generation"] > notice["arrival_generation"], "summary predates its covered arrival")
+        require(notice["system_event_id"] is None or source("system_memory_events", notice["system_event_id"])["event_type"] != "notification_summary", "recursive summary coverage")
     for row in rows["agent_notifications"]:
         if row["system_event_id"]:
             owner = source("system_memory_events", row["system_event_id"])["agent_id"]
@@ -368,6 +401,8 @@ def validate_graph(graph, *, current_memberships=None, partial_memberships=False
     validate_health(rows, sources, get, source, require)
     validate_institutions(rows, sources, get, source, require, allow_unreferenced_sources=partial_memberships)
     for row in rows["publication_manifests"]:
+        from ..recovery_images import validate_images
+        validate_images(row["recovery_before"])
         require((row["status"] == "prepared") == (row["resolved_at"] is None), "publication decision timestamp mismatch")
         require(type(row["staged_files"]) is list and all(type(entry) is dict for entry in row["staged_files"]), "publication staging evidence type")
         paths = set()

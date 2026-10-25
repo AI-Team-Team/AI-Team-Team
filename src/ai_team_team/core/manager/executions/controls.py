@@ -36,9 +36,10 @@ class ControlMixin:
         # Cancelling this observer cannot strand a requested stop in the DB.
         return await settle_commit(task)
 
-    async def _request_cancel(self, execution_id, owner, generation):
+    async def _request_cancel(self, execution_id, owner, generation, *, retained_owner=False):
         if (generation != self.manager._resources.generation and not self.closing or self.manager._closed
-                or self.manager._agents_by_id.get(owner.agent_id) is not owner or owner.lifecycle_state != "active"):
+                or self.manager._agents_by_id.get(owner.agent_id) is not owner
+                or owner.lifecycle_state != "active" and not retained_owner):
             raise PermissionError("The captured control owner or runtime is no longer active.")
         job = self.jobs.get(execution_id)
         if job is not None and job.outcome_task is not None:
@@ -57,6 +58,18 @@ class ControlMixin:
                     acknowledgement="requested", requested_at=self.clock.wall_time(), outcome_race={}),))
             job = self.jobs.get(execution_id)
             if job is None:
+                if row.values["status"] == "queued":
+                    await self.commit_outcome((capture(self.manager, "executions", execution_id=execution_id,
+                        status="cancelled", outcome_unconfirmed=0, attention="required",
+                        finished_at=max(self.clock.wall_time(), row.values["created_at"])),
+                        capture(self.manager, "execution_controls", control_id=control_id,
+                            acknowledgement="acknowledged", acknowledged_at=self.clock.wall_time(), outcome_race={"never_dispatched": True})))
+                    return self.control_result(self.manager._records.index[row.identity], "CANCELLED")
+                await self.commit_outcome((capture(self.manager, "executions", execution_id=execution_id,
+                    outcome_unconfirmed=1, attention="required"),))
+                self.manager._emit_callback("on_system_event", "execution_stop_unconfirmed", {
+                    "execution_id": execution_id, "agent_id": owner.agent_id,
+                    "reason": "Unable to stop or cancel; subsequent state unconfirmed"})
                 return self.control_result(row, "UNCONFIRMED")
             job.control_id = control_id
             if job.outcome_task is not None:
@@ -186,6 +199,8 @@ class ControlMixin:
                 if outcome_error is not None:
                     raise outcome_error
                 return
+            if job.suspended:
+                return
             row = self.manager._records.index[("executions", (job.execution_id,))]
             if row.values["status"] in TERMINAL:
                 if isinstance(job.error, asyncio.CancelledError):
@@ -218,7 +233,7 @@ class ControlMixin:
             if job.finished.is_set():
                 continue
             owner = self.manager._agents_by_id[job.context.agent_id]
-            stopping.append(asyncio.create_task(self.request_cancel(job.execution_id, actor=owner),
+            stopping.append(asyncio.create_task(self.stop_for_lifecycle(job.execution_id, owner),
                 context=contextvars.Context(), name=f"att-executor-stop-{job.execution_id}"))
         if stopping:
             outcomes = await settle_commit(asyncio.gather(*stopping, return_exceptions=True))
@@ -238,6 +253,8 @@ class ControlMixin:
                 for job in tuple(self.jobs.values()):
                     row = self.manager._records.index[("executions", (job.execution_id,))]
                     if row.values["status"] not in TERMINAL:
+                        if job.suspended:
+                            continue
                         if row.values["status"] == "queued":
                             await self.cancelled_records(job)
                             job.finished.set()

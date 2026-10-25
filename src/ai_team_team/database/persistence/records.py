@@ -187,7 +187,8 @@ IMMUTABLE_FIELDS = {
     "resource_decisions": "agent_id scope_team_id scope_position_revision exhausted_alias principal_agent_id principal_team_id candidates required_tokens created_at deadline",
     "audit_model_requests": "audit_id scoped_agent_id invocation_id frame_id input_version model_alias attempt_index created_at request_budget sequence_budget",
     "audit_execution_evidence": "audit_id scoped_agent_id tool_name effects runtime_generation attempt_index",
-    "publication_manifests": "checkpoint_id previous_generation target_generation staged_files recovery_operation_id prepared_at",
+    "publication_manifests": "checkpoint_id previous_generation target_generation staged_files recovery_operation_id prepared_at recovery_before",
+    "notification_suppression": "agent_id scope source_agent_id source_team_id permanent duration_seconds minimum_seconds maximum_seconds",
 }
 
 
@@ -201,6 +202,9 @@ def validate_update(previous, later, *, read_compensations=()):
     if previous.table_name == "membership_intervals" and previous.values["leave_event_id"] is not None:
         if later.values["leave_event_id"] != previous.values["leave_event_id"]:
             raise StatePersistenceError("A closed membership interval cannot reopen or change departure.")
+    if previous.table_name == "notification_suppression" and previous.values["status"] != "active":
+        if later.values["status"] != previous.values["status"]:
+            raise StatePersistenceError("An ended notification preference cannot be reactivated.")
     if previous.table_name == "friendship_requests" and previous.values["status"] != "pending":
         if any(previous.values[field] != later.values[field] for field in ("status", "responded_at")):
             raise StatePersistenceError("A resolved friendship decision cannot be rewritten.")
