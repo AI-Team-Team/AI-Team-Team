@@ -154,3 +154,5 @@ Failure, cancellation, and restart release active claims to pending, and explici
 Whole-ATT and root-level attention uses ordered metadata-only `on_system_event` callbacks.
 
 Neither a health finding nor an incident implicitly grants business-repair, file, membership, permission, or model authority.
+
+See [Personal Activity](Personal_Activity.md) for the shared execution mechanism and [Background Tasks](Background_Tasks.md) for factual execution-health signals and stop limitations.

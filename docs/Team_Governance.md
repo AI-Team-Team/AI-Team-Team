@@ -266,3 +266,5 @@ Failure, cancellation, or interrupted recovery releases claims to pending attent
 Root or whole-ATT incidents propagate through `on_system_event`, not a fabricated parent or direct print.
 
 See [Supervisory Team](Supervisory_Team.md) for fresh temporary audit teams, evidence boundaries, deadlines, and aggregate findings.
+
+The [personal activity](Personal_Activity.md), [conversation](Personal_Conversations.md), and [background-task](Background_Tasks.md) guides describe execution and information handling without changing these institutional decision rules.

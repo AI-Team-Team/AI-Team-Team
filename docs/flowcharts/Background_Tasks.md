@@ -23,3 +23,9 @@ Automatic detachment starts from actual execution time, excludes initial queuein
 The original provider call receives one observation, while later results use personal notification rather than a second tool reply.
 
 Source and mutation permissions remain live, and interruption recovery never automatically replays or reconnects a historical execution.
+
+Execution state, health, owner attention, suspension acknowledgement, and an unconfirmed external outcome remain independent dimensions.
+
+Reading a completed result does not acknowledge attention, and a stop request does not prove an external executor stopped.
+
+See [Background Tasks](../Background_Tasks.md) for affirmative registration, cooldowns, ordered resource claims, serialized overwrites, retained-result policy, and a complete offline example.

@@ -1,4 +1,4 @@
-"""Host-facing entry points reserved for the common personal runtime."""
+"""Host-facing protocol for the implemented common personal runtime."""
 
 from typing import Any, Literal, Mapping, Protocol
 
@@ -31,7 +31,7 @@ class ChatMessagePage(ContractRecord):
 
 
 class ActivityRuntimeAPI(Protocol):
-    """Host contract; personal methods are implemented before the later chat service."""
+    """Typed personal admission, observation, mail, and authorized chat queries."""
 
     def register_runtime_clock(self, clock: RuntimeClock) -> None: ...
 

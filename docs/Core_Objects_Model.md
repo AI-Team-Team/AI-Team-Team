@@ -75,6 +75,8 @@ An ordinary answer is not automatic team publication, a reply, a ballot, task co
 
 The Agent explicitly chooses idle or finite sleep; scheduler boundaries are not discussion rounds.
 
+See [Personal Activity](Personal_Activity.md) for the distinctions among admission, answer, checkpoint, intent, and resource availability.
+
 Governance and restricted temporary audit profiles use the same runtime rather than invoking a second model execution engine.
 
 Private documents are deliberate artifacts, not hidden reasoning. They enter a model observation only after the owner explicitly invokes `read_private_file`, and enter a team library only after explicit publication.
@@ -82,3 +84,5 @@ Private documents are deliberate artifacts, not hidden reasoning. They enter a m
 Selective Episodic Memory is optional and Agent-owned by immutable UUID, so team membership changes cannot copy, clear, relabel, or reassign its Journal events, Memory Cards, indexing jobs, or retained references.
 
 An Agent's `role`, description, instructions, model binding, memory, lifecycle state, invocation lock, and Private DocLib belong to the Agent identity rather than to any membership. Invocation-scoped team facts are carried through `ContextVar` values and are never persisted as a team-specific Agent identity.
+
+Successful restore preserves the persistent person but reconstructs Python objects; the Host reacquires current references rather than reusing pre-restore Agent or configuration objects.

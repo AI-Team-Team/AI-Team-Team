@@ -19,7 +19,7 @@
 >
 > It introduces schema 16; databases using schema 15 or earlier are no longer supported.
 >
-> Broader documentation and extended reliability acceptance remain separate phases.
+> Phase 7 provides current-runtime guides, executable examples, and checked public documentation contracts; extended reliability acceptance remains Phase 8 work.
 >
 > See the [Design Blueprints](docs/blueprints/README.md) for the design, implementation phases, and deferred features.
 
@@ -166,13 +166,11 @@ Persistence uses one exclusive writer manager per SQLite state database and coal
 
 Durable sessions require an explicit database path; the Host may explicitly choose a volatile session without restart recovery.
 
-The [Phase 1 persistence foundations](docs/dev/autonomous_activity/Phase_1.md) install incompatible schema 12, immutable record deltas, exact commit receipts, recoverable directory publication, and stale-worker fencing while the later runtime replacement remains in progress.
+The current [personal activity](docs/Personal_Activity.md), [conversation](docs/Personal_Conversations.md), and [background-task](docs/Background_Tasks.md) guides describe these implemented contracts.
 
-The [Phase 2 personal runtime](docs/dev/autonomous_activity/Phase_2.md) adds per-person admission, continuing activity, explicit idle or finite sleep, captured scopes, durable notification frames, and bounded model requests with persistent quota claims.
+[Persistence and recovery](docs/State_Persistence.md) use incompatible schema 16, exact commit receipts, validated publication, and stale-worker fencing.
 
-The [Phase 3 conversation service](docs/dev/autonomous_activity/Phase_3.md) adds explicit team and direct publications, friendship and contact controls, frozen personal archives, independent read state, and schema 13 without automatically broadcasting model answers.
-
-The [Phase 4 execution service](docs/dev/autonomous_activity/Phase_4.md) tracks one execution across foreground waiting and background detachment, coordinates conflicting resources, and delivers protected results to the same owner without creating another model-driven copy of that person.
+The [engineering profiles](docs/dev/autonomous_activity/README.md) retain the earlier phases' implementation and verification history without making their historical schemas the current format.
 
 ### Failure Semantics Follow the Type of Decision
 
@@ -247,7 +245,7 @@ ATT represents dynamic multi-agent topologies as recursive lineages with explici
 ### 🧬 Topology & Lineage Control
 
 * **[Tree-like Lineage Spawning](docs/Dynamic_Delegation.md)**: Spawns recursive child agent teams (`AgentTeam`) at runtime to arbitrary depths, strictly bounded by depth limits to prevent stack overflow.
-* **[Autonomous Member Configs](docs/Dynamic_Delegation.md#1-dynamic-spawning-&-lineage-hierarchy)**: Defines dynamic child memberships mapping role presets, custom system instructions, and LLM aliases to shape custom agent personalities.
+* **[Autonomous Member Configs](docs/Dynamic_Delegation.md#1-dynamic-spawning--lineage-hierarchy)**: Defines initial roles, custom system instructions, and model aliases for new Agent identities; joining an existing person never redefines those fields.
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Permits active teams to request parent-hierarchy migrations, arbitrated by modular strategies with loop/cycle detection and parent notification logs.
 * **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Provides a trusted-host ASCII map of ordinary teams, purposes, status, and progress without automatically inserting the full map into Agent prompts.
 * **[Agent and AgentTeam Discovery](docs/Agent_and_AgentTeam_Discovery.md)**: Lets Agents explicitly list public directory records, search case-insensitive OR keywords, and inspect stable IDs, using inclusive entity-position ranges with a default page of 30 and no implicit collaborator selection or authority grant.
@@ -265,7 +263,7 @@ ATT represents dynamic multi-agent topologies as recursive lineages with explici
 
 ### 🗳️ Governance & Inter-Team Communication
 
-* **[Democratic Voting System](docs/Dynamic_Delegation.md#5-team-governance-&-democratic-voting-system)**: Features an asynchronous voting pipeline to add or remove members, requiring unanimous participation and a $\ge 2/3$ agreement majority.
+* **[Democratic Voting System](docs/Dynamic_Delegation.md#5-team-governance--democratic-voting-system)**: Features an asynchronous voting pipeline to add or remove members, requiring unanimous participation and a $\ge 2/3$ agreement majority.
 * **Anonymous Voting**: Enforces voter anonymity via `cast_vote(..., public=False)` which masks voter names as `"Anonymous Voter"` in the team prompt context.
 * **[Autonomous AgentTeam Communication](docs/Team_Governance.md)**: `ATTConfig.communication` selects permissive, parent-approval, or lineage-approval governance. AgentTeams own requests and agreements; Agents act only from invocation-scoped team authority. No member order or creator identity grants communication authority.
 
@@ -403,6 +401,8 @@ The complete setup and first-use guide has moved to the [Quickstart Guide](docs/
 
 The Quickstart now covers manager configuration, LLM integration, model and Agent registration, persistence, custom tools, callbacks, personal activity, explicit conversations, migration, governed communication, Native tool calling, and DocLib usage.
 
+Its [complete offline example](docs/user/Quickstart.md#a-complete-offline-example) exercises Native or Text ReAct, explicit idle, and restoration of the same identity without provider credentials.
+
 ## ⚙️ Advanced Configuration
 
 The complete and current `ATTConfig` reference has moved to the [Public API Reference](docs/user/API_Reference.md).
@@ -413,7 +413,7 @@ The reference includes every top-level option, nested policy configuration, toke
 
 The [Design Blueprints](docs/blueprints/README.md) collect the autonomous Agent activity blueprint, implementation plan, and deferred features.
 
-They describe the target architecture and implementation boundaries; Phases 0–4 supply the foundational services, Phase 5 integrates institutions and removes the old engine, and later phases remain separate work.
+They describe the target architecture and implementation boundaries; Phases 0–6 provide the implemented runtime and institutions, Phase 7 consolidates current documentation and examples, and Phase 8 retains extended reliability acceptance.
 
 ## 📊 Architecture & Control Flow Diagrams
 

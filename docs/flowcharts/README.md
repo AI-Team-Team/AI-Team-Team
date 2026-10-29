@@ -14,6 +14,7 @@ This directory contains technical flowcharts and Mermaid sequence diagrams for t
 8. **[Supervision & Emergencies](Supervision_and_Emergencies.md)**: Shows typed evidence thresholds, fresh restricted audit ATs on the common runtime, and persistent incident handling.
 9. **[Registered Execution & Background Tasks](Background_Tasks.md)**: Shows admission, same-execution detachment, owner-only results, notifications, and cancellation evidence.
 10. **[Personal Conversations and Relationship Authority](Personal_Conversations.md)**: Shows explicit team and direct publications, contact controls, independent read state, and frozen departure archives.
+11. **[Continuing Personal Activity](Personal_Activity.md)**: Shows one-person admission, captured batches, explicit intent, fair checkpoints, and independent resource availability.
 
 ## Unified High-Level Flow Overview
 

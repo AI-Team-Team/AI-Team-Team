@@ -16,6 +16,8 @@ Foreground execution evidence now commits before each real attempt, including op
 
 The [Phase 4 execution service](dev/autonomous_activity/Phase_4.md) owns explicitly background and automatically detached operations independently of the foreground observer, with canonical resource exclusion and factual cancellation.
 
+Use [Personal Activity](Personal_Activity.md), [Personal Conversations](Personal_Conversations.md), and [Background Tasks](Background_Tasks.md) for current integration behavior; numbered phase profiles retain engineering history.
+
 Provider-neutral request and tool contracts keep the common personal runtime independent of concrete model SDKs.
 
 ```text
@@ -88,12 +90,11 @@ Compact mode recursively shows names, required fields, types, defaults, and nest
 
 Unlike the sequential execution loop of the text ReAct mode, the native strategy runs independent tool requests **concurrently in parallel** to minimize network latency.
 
-```python
-# Concurrently gather all tool executions in parallel
-results = await asyncio.gather(*[
-    executor.execute(call.name, kwargs=call.arguments) for call in response.tool_calls
-])
-```
+The runner waits for every required observation in a captured Native batch before applying scope or intent changes.
+
+Each call passes through registered execution admission and resource coordination rather than invoking a custom callable directly from a gather loop.
+
+Cancellation fences outstanding sibling authority and settles accepted local commits without indefinitely waiting for an external provider.
 
 Text and Native protocols share the same executor for invocation-scoped Agent/AgentTeam context, auditing, validation, retry, callback metadata, and result conversion.
 
@@ -112,6 +113,22 @@ Invalid arguments return typed observations for voluntary correction without ter
 Repeated same-category invalid calls feed the configured health detector, whose threshold requests assessment rather than intervention.
 
 `max_tool_execution_retries` counts extra eligible execution attempts and uses `tool_execution_retry_backoff_factor` for exponential delay.
+
+### Runtime Tool Availability
+
+| Profile | Tool view |
+| --- | --- |
+| Ordinary personal scope | Personal mail, private files, discovery, eligible formation and governance tools, historical chat reads, direct chat, activity controls, task tools, and compatible custom tools. |
+| Ordinary AgentTeam scope | The personal view plus current-team publication, peer communication, shared-file and organizational operations authorized by that membership. |
+| Restricted supervisory scope | Only admitted evidence, scoped audit communication, explicit findings, and idle controls; no ordinary business, private-file, recruitment, or background authority. |
+
+The actual ordinary view is assembled per request, including runtime-added chat tools, activity controls, and task queries beyond the static default-tool registry.
+
+Dynamic delegation, current depth, membership-voting configuration, optional episodic memory, live membership, and audit restrictions further determine visibility.
+
+Host method signatures are not model-tool signatures: a model's `send_team_message(markdown, reply_to=None)` captures its AT and cannot receive a Host `actor` or team override.
+
+The [model-tool reference](user/API_Reference.md#-built-in-react-tools-reference) lists each runtime family's actual parameters separately.
 
 ## 5. Tool Registration & Development
 

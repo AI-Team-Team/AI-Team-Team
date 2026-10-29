@@ -178,3 +178,5 @@ Personal inbox delivery, opening, and read receipts remain independent of all fo
 Marking an invitation read never changes its public attitude, and responding with `accepted`, `declined`, `explicitly_ignored`, or `None` never marks the email read.
 
 Personal-email governance for communication, migration, and failover uses its own choice schemas rather than replacing or reinterpreting this formation vocabulary.
+
+Formation references, personal activity admissions, chat deliveries, and background-task outcomes have separate meanings, described in [Personal Activity](Personal_Activity.md) and [Personal Conversations](Personal_Conversations.md).

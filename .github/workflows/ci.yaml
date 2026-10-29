@@ -79,7 +79,7 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
-      - run: ruff check src test typecheck
+      - run: ruff check src test typecheck examples
       - run: mypy typecheck/consumer_contract.py typecheck/activity_contract.py
 
   wheel-smoke:
@@ -96,3 +96,10 @@ jobs:
       - run: python -m venv wheel-smoke
       - run: wheel-smoke/bin/python -m pip install dist/*.whl
       - run: wheel-smoke/bin/python -c "from ai_team_team import ATTConfig, ATTManager, Agent, Tool; print(ATTConfig(), ATTManager, Agent, Tool)"
+      - name: Exercise installed runtime examples outside the checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          "${{ github.workspace }}/wheel-smoke/bin/python" -c "import sys; from pathlib import Path; import ai_team_team; assert Path(ai_team_team.__file__).is_relative_to(Path(sys.prefix))"
+          "${{ github.workspace }}/wheel-smoke/bin/python" "${{ github.workspace }}/examples/personal_activity.py"
+          "${{ github.workspace }}/wheel-smoke/bin/python" "${{ github.workspace }}/examples/personal_activity.py" --text
+          "${{ github.workspace }}/wheel-smoke/bin/python" "${{ github.workspace }}/examples/background_tasks.py"

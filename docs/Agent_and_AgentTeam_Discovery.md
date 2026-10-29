@@ -135,7 +135,9 @@ Use stable IDs for inspection and subsequent operations rather than treating res
 
 There is no required directory version, persisted pagination snapshot, or separate discovery index.
 
-Persisted Agent and AgentTeam fields remain authoritative, so discovery works immediately after a validated restore using the current schema `12`.
+Persisted Agent and AgentTeam fields remain authoritative, so discovery works immediately after a validated restore using the current schema `16`.
+
+Live discovery excludes inactive people and dissolved teams; authorized frozen conversation archives remain independently inspectable through [personal conversation APIs](Personal_Conversations.md).
 
 ## Deferred Extensions
 

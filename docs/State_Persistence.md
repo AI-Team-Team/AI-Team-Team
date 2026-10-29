@@ -233,3 +233,9 @@ Position-history prerequisites include the corresponding cooldown records, and s
 - The current persistence schema version is `16`.
 - Compatibility with schema `15` and earlier SQLite layouts is intentionally unsupported.
 - Create a new database when upgrading.
+
+For current integration examples and public result semantics, see [Quickstart](user/Quickstart.md), [Personal Activity](Personal_Activity.md), [Personal Conversations](Personal_Conversations.md), and [Background Tasks](Background_Tasks.md).
+
+Successful restoration reconstructs Python Agent, team, and configuration objects while preserving their persistent identities and retained state.
+
+The Host reacquires those objects from the published manager before subsequent operations rather than reusing pre-restore references.

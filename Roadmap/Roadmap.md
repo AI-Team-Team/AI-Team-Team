@@ -4,7 +4,11 @@ This document outlines the design blueprints, architectural optimizations, and n
 
 ## 🎯 Overview
 
-The next iterations focus on sociological architecture and self-evolution: expanding ATT from a strict tree topology into a dynamic, self-restructuring society capable of creating its own tools, managing resources, and hibernating inactive populations.
+The next iterations explore organizational autonomy, tool evolution, resource management, and large-population storage beyond the implemented explicit-parent forest.
+
+Except where marked implemented, these are research proposals rather than current APIs or confirmed permissions.
+
+The [governing autonomous-activity blueprint](../docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md) and current [user guides](../docs/README.md) define the existing system.
 
 ## Next-Gen Evolution Path
 
@@ -22,8 +26,9 @@ The next iterations focus on sociological architecture and self-evolution: expan
 - **Implemented Architecture**:
   - A stable Agent UUID owns exactly one `PDL-<agent_id>` library across all team memberships.
   - Private access is resolved only from invocation-scoped agent identity; team ACLs, public discovery, metadata APIs, and managed links cannot expose a private library.
-  - An AI explicitly reads its own files or copies a selected file into the current team's built-in DocLib. Private content is never automatically inserted into prompts, transcripts, audits, callbacks, or message history.
-  - Retain, archive, reactivate, and confirmed permanent-delete policies provide an auditable lifecycle backed by the current schema 9 persistence and atomic restore validation.
+  - An AI explicitly reads its own files or copies a selected file into the current team's built-in DocLib.
+  - Private content is never automatically inserted into prompts, shared conversations, audits, callbacks, or the Journal.
+  - Retain, archive, reactivate, confirmed permanent deletion, and terminal retained death use the [current persistence contract](../docs/State_Persistence.md) and atomic restore validation.
 
 ### 3. Multi-Parent DAG Topology (Team Subscription Modeling)
 
@@ -35,14 +40,17 @@ The next iterations focus on sociological architecture and self-evolution: expan
 
 ### 4. Dynamic Runtime Restructuring (Merging & Headcount Control)
 
-- **Concept**: Provide high-level administrative endpoints to forcefully reshape the organization chart (e.g., merging overlapping teams, injecting rescue agents) without relying on the slow, democratic member-voting pipelines.
-- **Implementation Strategy**:
-  - Introduce a `manager.merge_teams(target_id, source_id)` API: Safely transfers members, ToolLibs, DocLibs, and active proposals from the source to the target, subsequently garbage collecting the source team.
-  - Introduce direct `add_member` and `remove_member` bypass hooks for the Supervisory Team or Root Admin to forcefully adjust headcount in response to production crises.
+- **Concept**: Explore explicit administrative merging and recovery operations with separately confirmed authority, consent, and rollback rules.
+- **Status**: Unconfirmed research; no `merge_teams()` API or supervisory membership-bypass permission is supplied by this proposal.
+- **Design constraints**: Preserve stable people and their private data, exact institutional decisions, historical memberships and conversations, resource ownership, and atomic publication.
+
+Health findings and Root identity do not themselves authorize membership, file, model, or business changes.
 
 ### 5. Cold Storage & Event-Driven Hibernation
 
 - **Concept**: Support deployments scaling up to tens of thousands of registered AI agents by swapping idle teams out of active memory.
 - **Implementation Strategy**:
-  - Introduce an `.hibernate()` action for idle teams, serializing their entire memory buffer and state to the SQLite store and removing them from the active Python event loop.
-  - Integrate a central Event Bus that triggers a "Wakeup" (`deserialize_and_resume`) only when an external event occurs or a targeted peer message is delivered to their inbox.
+  - Explore reclaiming inactive organizational caches while retaining team records and each person's independently owned persistent state.
+  - Define explicit addressed activation and storage-reconstruction boundaries without creating duplicate people or treating a message as institutional consent.
+
+Any future cold-storage design must preserve Agent-owned memory independently of team storage and distinguish reconstruction from the already implemented personal sleep and wake mechanism.

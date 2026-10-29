@@ -25,6 +25,117 @@ To install directly as a Git dependency in your own project:
 pip install git+https://github.com/AI-Team-Team/AI-Team-Team.git@main
 ```
 
+## A Complete Offline Example
+
+Save the following as `personal_activity.py`, or run `./venv/bin/python examples/personal_activity.py` from the repository after installation.
+
+It uses a scripted provider to demonstrate public contracts without network access or API keys; it does not perform business reasoning.
+
+The Agent returns an ordinary answer and then explicitly chooses idle through the appropriate tool protocol.
+
+The example closes its first writer before reopening the same database and verifies the same persistent Agent UUID with a reconstructed Python object.
+
+Run with `--text` to exercise Text ReAct; the default exercises Native tools.
+
+Temporary workspaces keep this complete example from writing `.att_doc_libs` into the current project.
+
+<!-- runnable: examples/personal_activity.py -->
+
+```python
+"""Run a deterministic personal interaction and restore the same identity offline."""
+
+import argparse
+import asyncio
+import json
+import tempfile
+from pathlib import Path
+from typing import Any
+
+from ai_team_team import ATTConfig, ATTManager, Agent, LLMResponse, Tool, ToolCall
+
+
+class DemoClient:
+    """A scripted provider for contract examples, not a business reasoning model."""
+
+    def __init__(self, native: bool = True, *, answer: bool = True):
+        self.native = native
+        self.answer = answer
+        self.calls = 0
+
+    def supports_native_tool_calling(self) -> bool:
+        return self.native
+
+    def supports_output_token_limit(self) -> bool:
+        return True
+
+    async def generate(
+        self,
+        prompt: str | list[dict[str, Any]],
+        system_instruction: str | None = None,
+        tools: list[Tool] | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float = 0.7,
+        require_json: bool = False,
+    ) -> LLMResponse:
+        self.calls += 1
+        if require_json:
+            raise ValueError("This demo does not provide optional memory-indexing responses.")
+        if self.answer and self.calls == 1:
+            return LLMResponse(text="Final Answer: The demo received its instruction.")
+        if self.native:
+            return LLMResponse(tool_calls=[
+                ToolCall(f"idle-{self.calls}", "set_activity_intent", {"intent": {"kind": "idle"}})
+            ])
+        return LLMResponse(text="Action: set_activity_intent(intent={'kind': 'idle'})")
+
+
+async def run_demo(workspace: Path, *, native: bool = True) -> dict[str, Any]:
+    workspace.mkdir(parents=True, exist_ok=True)
+    state = workspace / "personal.sqlite"
+    client = DemoClient(native)
+    config = ATTConfig(workspace_root=str(workspace), tool_calling_mode="auto")
+    root = Agent("Root", "Coordinator", client)
+    async with ATTManager(root, config, db_path=str(state)) as manager:
+        manager.register_llm_client("demo", client)
+        admission = await manager.activate_agent(root.agent_id)
+        checkpoint = await manager.wait_for_activity_checkpoint(admission.admission_id, intent="idle")
+        owner_id = root.agent_id
+        await manager.save_state()
+
+    restored_client = DemoClient(native, answer=False)
+    async with ATTManager(
+        Agent("RestoreHost", "Coordinator", restored_client),
+        ATTConfig(workspace_root=str(workspace)),
+        db_path=str(state),
+    ) as manager:
+        manager.register_llm_client("demo", restored_client)
+        await manager.load_state(str(state))
+        current_root = manager.root_ai
+        assert current_root.agent_id == owner_id
+        assert current_root is not root
+        assert manager.inspect_agent_activity(owner_id).intent == "idle"
+        assert restored_client.calls == 0
+    return {"intent": checkpoint.intent, "model_calls": client.calls,
+            "same_identity_restored": True, "durability": admission.durability}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--text", action="store_true", help="Use Text ReAct instead of Native tools.")
+    options = parser.parse_args()
+    with tempfile.TemporaryDirectory(prefix="att-personal-example-") as directory:
+        result = asyncio.run(run_demo(Path(directory), native=not options.text))
+    print(json.dumps(result, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Expected summary: `intent="idle"`, `model_calls=2`, `same_identity_restored=true`, and `durability="durable"`.
+
+The following sections are integration fragments that assume their named clients, SDK functions, manager, and asynchronous application context exist.
+
 ## ⚙️ 2. Configure ATT and Create the Manager
 
 Create the Root Agent and `ATTManager` after selecting the framework-wide policies that every AgentTeam will follow:
@@ -33,6 +144,7 @@ Create the Root Agent and `ATTManager` after selecting the framework-wide polici
 from ai_team_team import ATTManager, Agent, ATTConfig, EpisodicMemoryConfig
 
 config = ATTConfig(
+    workspace_root="att_workspace",
     enable_dynamic_delegation=True,
     max_delegation_depth=2,
     min_subagent_team_size=3,
@@ -45,8 +157,11 @@ config = ATTConfig(
     agent_private_data_policy="archive",  # Or "retain" / "delete"
 )
 
-root_agent = Agent(name="Root_AI", role="Architect")
+# Define your provider adapter as described in the next section first.
+root_client = MyLLMClient()
+root_agent = Agent(name="Root_AI", role="Architect", llm_client=root_client)
 manager = ATTManager(root_ai=root_agent, config=config, db_path="att_state.db")
+manager.register_llm_client("root-model", root_client)
 ```
 
 Durable persistence is the default and requires an explicit `db_path`, with asynchronous incremental saving of accepted state changes.
@@ -55,11 +170,16 @@ For an intentionally non-recoverable session, use `ATTManager(root_ai=root_agent
 
 Register the runtime model bindings described below before loading persisted state, because callables and external connections are intentionally not serialized.
 
+Registering a generator handler does not attach it to an existing Root whose client is `None`.
+
+Bind the Root explicitly and register its stable alias before saving or admitting personal work.
+
 ### Stable Client and Agent Registration
 
 A direct client object must have one stable identity binding before related state can be saved, and its `model_name` attribute is accepted as an alias only when the same client object is registered under that name:
 
 ```python
+analysis_client = MyLLMClient()
 manager.register_llm_client("analysis", analysis_client)
 ```
 
@@ -135,7 +255,6 @@ When registering a custom tool, provide precise type hints and a concise descrip
 ATT generates and validates the tool schema from the callable, and Text ReAct prompts display that schema according to `text_tool_schema_mode`.
 
 ```python
-import os
 from typing import List, Optional
 
 from ai_team_team import Tool
@@ -153,10 +272,6 @@ async def my_generator_handler(
     return "Action: set_activity_intent(intent={'kind': 'idle'})"
 
 manager.register_generator_handler(my_generator_handler)
-
-# Restore only after the required runtime handler and client aliases are bound.
-if os.path.exists("att_state.db"):
-    await manager.load_state("att_state.db")
 
 def search_knowledge_base(query: str, limit: int = 3) -> str:
     """Search the project knowledge base."""
@@ -303,15 +418,17 @@ Every AgentTeam follows the single communication institution selected in `ATTCon
 Select an approval-governed institution when communication channels must be authorized:
 
 ```python
-from ai_team_team import ATTConfig, ParentApprovalCommunicationConfig
+from ai_team_team import ParentApprovalCommunicationConfig
 
-config = ATTConfig(
-    communication=ParentApprovalCommunicationConfig(
-        request_delivery="queue",
-        direction="bidirectional",
-    )
+manager.config.communication = ParentApprovalCommunicationConfig(
+    request_delivery="queue",
+    direction="bidirectional",
 )
 ```
+
+Assign to the existing manager's validated configuration when changing a running deployment; constructing an unrelated `ATTConfig` does not update that manager.
+
+Pending requests retain their captured policy, and existing Agreements remain valid until explicitly revoked.
 
 Use `LineageApprovalCommunicationConfig(request_delivery="queue", direction="one_way")` when the recipient and applicable real lineage must approve a one-way channel.
 
@@ -340,13 +457,19 @@ Provider adapters receive `List[Tool]` and are responsible for converting each `
 
 ```python
 # Force native structured tool calling without running the capability probe.
-config.tool_calling_mode = "native"
+manager.config.tool_calling_mode = "native"
 
 # Record native capability for a manager-routed model.
-manager.register_model("gpt-5.6-sol", {
+manager.register_model("handler-native", {
     "supports_native_tool_calling": True,
 })
 ```
+
+Force Native mode only after the selected adapter or handler converts its SDK response into actual `ToolCall` objects.
+
+An `Action: ...` string is Text ReAct output and is not a Native tool call.
+
+The complete offline example exercises both formats with matching capability declarations.
 
 ## 🤖 10. Model Registry and Global Generator Callback
 
@@ -360,16 +483,16 @@ For the generator-handler integration, register model configuration details and 
 
 ```python
 # 1. Register model configurations (metadata/descriptions for the AI)
-manager.register_model("gemini-123", {
+manager.register_model("handler-writing", {
     "model_type": "llm",
-    "model_name": "gemini-3.7-flash",
-    "ai_note": "gemini-3.7-flash - A very impressive large model"
+    "model_name": "writing-backend",
+    "ai_note": "Host-configured route for drafting tasks."
 })
 
-manager.register_model("openai-123", {
+manager.register_model("handler-analysis", {
     "model_type": "llm",
-    "model_name": "gpt-5.6-sol",
-    "ai_note": "gpt-5.6-sol - A very impressive large model"
+    "model_name": "analysis-backend",
+    "ai_note": "Host-configured route for analytical tasks."
 })
 
 # 2. Register a single global callback handler to execute LLM calls
@@ -383,17 +506,16 @@ async def my_generator_handler(
     temperature: float = 0.3,
     require_json: bool = False
 ) -> str:
-    # Look up the registered config to get the real model name
-    config = manager.model_configs.get(model_name)
-    real_name = config.get("model_name") if config else model_name
-
-    if real_name == "gemini-3.7-flash":
-        return await call_gemini_sdk(prompt, system_instruction, tools, max_output_tokens, temperature, require_json)
-    elif real_name == "gpt-5.6-sol":
-        return await call_openai_sdk(prompt, system_instruction, tools, max_output_tokens, temperature, require_json)
-    
-    # Fallback default model
-    return await call_default_sdk(prompt, system_instruction, tools, max_output_tokens, require_json)
+    # The Host supplies these SDK integration functions and output normalization.
+    if model_name == "default":
+        return await call_default_sdk(prompt, system_instruction, tools, max_output_tokens, require_json)
+    registered = manager.model_configs[model_name]
+    real_name = registered["model_name"]
+    if real_name == "writing-backend":
+        return await call_writing_sdk(prompt, system_instruction, tools, max_output_tokens, temperature, require_json)
+    if real_name == "analysis-backend":
+        return await call_analysis_sdk(prompt, system_instruction, tools, max_output_tokens, temperature, require_json)
+    raise ValueError(f"No provider route is configured for {model_name!r}.")
 
 manager.register_generator_handler(my_generator_handler)
 ```
@@ -403,14 +525,14 @@ manager.register_generator_handler(my_generator_handler)
 You can route different agents to different registered model names when spawning a team using the `roles_and_models` mapping:
 
 ```python
-# Spawn a team where Specialist_A uses openai-123, and Specialist_B uses gemini-123
+# Select stable handler aliases for new Agents.
 team = manager.create_agent_team(
     creator=root_agent,
     member_count=3,
     preset_name="generic",
     roles_and_models={
-        "Specialist_A": "openai-123",
-        "Specialist_B": "gemini-123"
+        "Specialist_A": "handler-analysis",
+        "Specialist_B": "handler-writing"
     }
 )
 ```
@@ -426,17 +548,17 @@ Action: dispatch_subagent(
     team_purpose="Reporting",
     member_configs={
         "Planner": {
-            "model": "openai-123",
+            "model": "handler-analysis",
             "role_description": "Designs outline and schedules work",
             "system_instructions": "Focus on clarity and conciseness"
         },
         "Writer": {
-            "model": "gemini-123",
+            "model": "handler-writing",
             "role_description": "Drafts the report sections",
             "system_instructions": "Use rich descriptors and clean prose"
         },
         "Reviewer": {
-            "model": "gemini-123",
+            "model": "handler-writing",
             "role_description": "Checks logic and style consistency",
             "system_instructions": "Be strict on formatting rules"
         }
@@ -456,8 +578,8 @@ alice = manager.register_agent(Agent("Alice", "Researcher", shared_client))
 formation_a = manager.create_agent_team(
     creator=root_agent,
     member_configs={
-        "Planner": {"model": "openai-123"},
-        "Reviewer": {"model": "gemini-123"},
+        "Planner": {"model": "handler-analysis"},
+        "Reviewer": {"model": "handler-writing"},
     },
     existing_members=[alice],
 )
@@ -468,8 +590,8 @@ team_a = manager.teams[created_a.team_id]
 formation_b = manager.create_agent_team(
     creator=root_agent,
     member_configs={
-        "Analyst": {"model": "openai-123"},
-        "Writer": {"model": "gemini-123"},
+        "Analyst": {"model": "handler-analysis"},
+        "Writer": {"model": "handler-writing"},
     },
     existing_member_ids=[alice.agent_id],
 )
@@ -573,9 +695,41 @@ An explicit private read is scoped to that single reasoning invocation. ATT reda
 Persistence APIs are asynchronous, and `flush_state()` waits for all accepted state changes before `close()` releases the writer and other manager resources:
 
 ```python
-await manager.save_state("att_backup.db")
+await manager.save_state()
 await manager.flush_state()
 await manager.close()
 ```
 
 Use `async with ATTManager(...) as manager` when possible so normal scope exit performs the final flush and close automatically.
+
+Passing another path to `save_state(path)` exports a snapshot without changing the current writer's `db_path`.
+
+### Restore in a New Application Lifetime
+
+Close the previous writer before opening its database, then bind every direct-client alias and any handler required by the checkpoint before calling `load_state()`.
+
+This fragment binds the direct aliases introduced above; adapt that list to the actual checkpoint rather than substituting another alias for a missing binding.
+
+```python
+root_client = MyLLMClient()
+manager = ATTManager(
+    Agent("RestoreHost", "Coordinator", root_client),
+    ATTConfig(workspace_root="att_workspace"),
+    db_path="att_state.db",
+)
+manager.register_llm_client("root-model", root_client)
+manager.register_llm_client("analysis", MyLLMClient())
+manager.register_llm_client("shared-agent", MyLLMClient())
+manager.register_generator_handler(my_generator_handler)
+await manager.load_state("att_state.db")
+root_agent = manager.root_ai
+config = manager.config
+```
+
+The persisted Agent UUID and personal state remain the same, while successful restore replaces Python runtime objects.
+
+Reacquire the current Root, configuration, and other active Agents by saved IDs from `manager.agents.values()` before using them again.
+
+Runtime tools, auditors, counters, and observers also need their Host bindings restored; interrupted people may become eligible immediately after publication.
+
+Continue with [Personal Activity](../Personal_Activity.md), [Personal Conversations](../Personal_Conversations.md), and [Background Tasks](../Background_Tasks.md) for current runtime behavior and exact authority boundaries.

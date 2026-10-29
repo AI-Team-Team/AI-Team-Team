@@ -96,6 +96,34 @@ Personal `set_chat_details()` overrides persist independently of the default con
 
 These strict nested models validate both construction and runtime assignment, including individual `llm.model_timeouts` entries.
 
+#### PersonalActivityConfig Fields
+
+| Field | Default | Constraint and meaning |
+| --- | --- | --- |
+| `model_requests_per_invocation` | `5` | Positive integer; technical request-sequence budget before a fair yield. |
+| `tool_batches_per_invocation` | `5` | Positive integer; complete tool-batch budget before a fair yield. |
+| `max_concurrent_activities` | `8` | Positive integer; concurrent personal workers, independent of executor capacity. |
+| `max_concurrent_model_requests` | `8` | Positive integer; shared provider-request capacity, including supported audit and maintenance requests. |
+| `notification_frame_limit` | `20` | Positive integer; newly presented references per frame. |
+| `minimum_sleep_minutes` | `5` | Positive integer; lower bound for sleep and timed suppression. |
+| `maximum_sleep_minutes` | `2880` | Positive integer at least the minimum; upper bound for admitted countdowns. |
+| `countdown_checkpoint_seconds` | `30.0` | Finite positive interval for batched remaining-time samples. |
+| `tool_cooldown_seconds` | `600.0` | Finite positive per-Agent, per-tool cooldown for eligible execution faults. |
+| `cooldown_downtime` | `"include"` | `"include"` counts real downtime; `"exclude"` preserves remaining cooldown. |
+| `llm` | `ModelRequestPolicy()` | Strict request, retry, timeout, and recovery configuration. |
+
+#### ModelRequestPolicy Fields
+
+| Field | Default | Constraint and meaning |
+| --- | --- | --- |
+| `max_retries` | `3` | Nonnegative integer; additional attempts after the initial request. |
+| `backoff_base_seconds` | `1.0` | Finite nonnegative base for exponential jitter. |
+| `backoff_cap_seconds` | `30.0` | Finite nonnegative jitter cap; provider retry instructions remain independent. |
+| `request_timeout_seconds` | `120.0` | Finite positive single-request deadline. |
+| `sequence_timeout_seconds` | `600.0` | Finite positive total budget across provider attempts and waits. |
+| `recovery_delay_seconds` | `60.0` | Finite positive recovery admission delay after eligible exhaustion. |
+| `model_timeouts` | `{}` | Nonblank model aliases mapped to finite positive request timeouts. |
+
 `activity.model_requests_per_invocation=5` bounds request sequences in one fair invocation, and `tool_batches_per_invocation=5` bounds complete batches before a technical yield.
 
 Neither setting makes an Agent idle or completes a business task.
@@ -193,6 +221,38 @@ Advanced episodic memory is optional and disabled by default; disabled mode perf
 
 Policy names, numeric values, construction, runtime assignment, and mutable mapping updates all use strict validation; unknown fields or invalid values raise `ValueError`.
 
+## Runtime Result Models
+
+Host methods return typed Pydantic values, while model tools serialize structured results to stable JSON.
+
+Import activity contracts from `ai_team_team.core.activity.contracts`; `InteractionResult`, chat values, and task-query values are exported from `ai_team_team`.
+
+The fields below include inherited fields and are checked against the actual models by documentation-contract tests.
+
+| Model | Fields | Interpretation |
+| --- | --- | --- |
+| `ActivityAdmission` | `admission_id`, `agent_id`, `status`, `durability` | `QUEUED` accepts scheduling; `COALESCED` retains an existing person's active admission. |
+| `ActivityCheckpoint` | `admission_id`, `agent_id`, `context_version`, `intent` | A committed personal boundary, not business completion. |
+| `ActivityView` | `agent_id`, `admission_id`, `scope`, `intent`, `availability` | Separates personal intent from runtime availability. |
+| `InteractionResult` | `agent_id`, `team_id`, `invocation_id`, `status`, `answer`, `error_kind`, `reason`, `tool_failures` | An observed answer and its provenance; it does not stop or publish personal activity. |
+| `SourceDeliveryReceipt` | `status`, `message_id`, `notification_ids`, `durability`, `state_version` | `DELIVERED` commits a source and references, not reading, reply, or consent. |
+| `BackgroundTaskHandle` | `status`, `execution_id`, `durability`, `state_version` | `BACKGROUND` identifies admitted work, not its outcome. |
+| `TaskView` | `execution_id`, `owner_agent_id`, `scope`, `tool_name`, `description`, `labels`, `execution_state`, `health_state`, `attention_state`, `visibility`, `outcome_unconfirmed`, `created_at`, `started_at`, `finished_at`, `cancellation_requested`, `result_available`, `suspended` | Independent execution, health, attention, and control evidence without a body. |
+| `TaskPage` | `items`, `total_count`, `next_cursor` | Owner-filtered metadata with opaque pagination. |
+| `TaskControlResult` | `execution_id`, `status`, `durability`, `state_version` | Reports cancellation, acknowledgement, uncertainty, suspension, or terminal evidence. |
+| `ChatReadResult` | `status`, `content`, `start_line`, `start_character`, `next_line`, `next_character`, `file_version`, `model_alias`, `content_token_count`, `max_read_tokens`, `token_count_method`, `estimated`, `message_id`, `version`, `withdrawn`, `frozen`, `reply_message_id` | Token-bounded authorized content with independent personal read semantics. |
+| `ChatMessagePage` | `items`, `total_count`, `unread_count`, `next_cursor` | Authorized live or frozen personal views filtered before metadata. |
+| `ChatMessageSummary` | `message_id`, `author_agent_id`, `version`, `title`, `preview`, `unread`, `withdrawn`, `frozen` | A bounded preview, not a read receipt. |
+| `ChatRelationship` | `relationship_id`, `other_agent_id`, `generation`, `friendship`, `blocked_by_self`, `blocked_by_other`, `refusal_by_self`, `refusal_by_other`, `remaining_messages` | Current pair authorization, independent endpoint controls, and the actor's stranger allowance. |
+
+`TaskControlResult.status` accepts `CANCELLED`, `REQUESTED`, `UNCONFIRMED`, `ALREADY_TERMINAL`, `ACKNOWLEDGED`, or `SUSPENDED`.
+
+Suspension and outcome uncertainty do not add states to the five-value execution-state vocabulary.
+
+Cancellation, manager shutdown, persistence faults, and state-integrity faults can propagate as distinct exceptions rather than ordinary result values.
+
+See [Personal Activity](../Personal_Activity.md), [Personal Conversations](../Personal_Conversations.md), and [Background Tasks](../Background_Tasks.md) for the corresponding state and authority contracts.
+
 ## 👤 `Agent`
 
 Represents an individual AI specialist equipped with role definitions.
@@ -280,6 +340,12 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
   Commits addressed personal mail and notification references before scheduling eligible activity; presentation is not reading or consent.
 * **`await clear_agent_model_unavailability(agent_id: str) -> None`**
   Host-only acknowledgement after resource remediation, without resetting quota, switching the model, or bypassing live-request and provider waiting boundaries.
+* **`await set_notification_suppression(preference: SuppressionPreference, *, actor: Agent | None = None) -> dict`**
+  Creates the selected person's permanent or timed ordinary-reminder preference; the Host supplies an explicit active actor.
+* **`list_notification_suppressions(*, actor: Agent | None = None, active_only: bool = True) -> list[dict]`**
+  Inspects only that person's preferences without changing source delivery or read state.
+* **`await remove_notification_suppression(preference_id: str, *, actor: Agent | None = None) -> dict`**
+  Removes an owned preference and atomically records any eligible source-count summary.
 * **`register_runtime_clock(clock: RuntimeClock) -> None`**
   Binds a Host clock before activity, requests, or timers are admitted; ordinary applications use the built-in clock.
 
@@ -322,7 +388,7 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
   Registers a custom utility tool globally and requires explicit `memory_capture="content"` before its observation body may enter episodic recall content.
   Background execution requires an affirmative execution contract, while executor and resource-resolver bindings remain Host-only runtime objects.
   `result_storage="transient"` prevents the task body from being persisted without changing the tool's independent retry declaration.
-* **`register_agent(agent: Agent) -> Agent`**
+* **`register_agent(agent: Agent, *, auto_save: bool = True) -> Agent`**
   Registers one stable identity and creates its unique private DocLib. Direct mutation of `manager.agents` is unsupported.
 * **`get_private_library_id(agent_id: str) -> str`**
   Returns the canonical `PDL-<agent_id>` ID.
@@ -410,6 +476,8 @@ Loading a SQLite checkpoint adopts durable mode after successful publication.
   Transactionally restores a fully validated staged registry after runtime clients or a generator handler have been rebound. Missing or corrupt references raise `StateRestoreError` without changing the live manager or its DocLib files.
 * **`await flush_state()`**
   Waits for all queued incremental writes.
+* **`async with manager.suppress_auto_save()`**
+  Batches ordinary auto-save deltas in a nested task-local context; authoritative domain receipts still settle their own accepted operations.
 * **`await flush_memory_indexing()`**
   Waits for every currently runnable optional episodic-memory index job.
 * **`await retry_memory_index(segment_id: str)`**
@@ -580,8 +648,8 @@ See [Health Supervision](../Supervisory_Team.md) for thresholds, evidence privac
 Protocol definition for integration of custom LLM backends (adapters).
 
 ```python
-from typing import Optional, Protocol
-from ai_team_team import Tool
+from typing import Any, Dict, List, Optional, Protocol, Union
+from ai_team_team import LLMResponse, Tool
 
 class LLMClientProto(Protocol):
     async def generate(
@@ -637,11 +705,67 @@ Removal and expiration summarize eligible unread information by source and count
 
 Protected notices and the sleep safeguard bypass personal suppression; saved remainders resume from restoration start without consuming offline time.
 
-See the [Phase 2 runtime contract](../dev/autonomous_activity/Phase_2.md) for checkpoint, quota, sleep, and incomplete-replacement boundaries.
+#### Personal Activity Tool Signatures
 
-See the [Phase 6 integration contract](../dev/autonomous_activity/Phase_6.md) for complete timer, suppression, recovery, and retained-death behavior.
+| Model tool signature | Result and boundary |
+| --- | --- |
+| `set_activity_intent(intent)` | JSON `PENDING_BOUNDARY`; idle or finite sleep is applied after the complete batch. |
+| `set_operation_scope(scope)` | JSON `PENDING_BOUNDARY`; requires a valid subsequent personal or member-team scope. |
+| `set_notification_suppression(preference)` | Owned preference metadata; source selection grants no access. |
+| `list_notification_suppressions(active_only=True)` | Only the invoking person's preference metadata. |
+| `remove_notification_suppression(preference_id)` | Owned preference metadata after removal and any source-count summary commit. |
 
-These tools are automatically registered and bound to all agent teams by default. ReAct agents can invoke them using standard positional/keyword call syntax:
+See [Personal Activity](../Personal_Activity.md) for current admission, scope, resource availability, timer, and lifecycle behavior.
+
+The [Phase 6 integration record](../dev/autonomous_activity/Phase_6.md) retains implementation and verification evidence.
+
+The actual tool view is assembled for each personal invocation, filtered by scope, configuration, membership, and any restricted audit profile.
+
+Chat, activity-control, and task tools are runtime additions rather than the complete static `get_default_tools()` manifest.
+
+Model tools never accept a Host `actor` override, and same-named Host methods may have different parameters.
+
+### Conversation Model Tools
+
+These tools act for the current person; `send_team_message` is visible only in an ordinary AgentTeam scope and uses that captured team.
+
+| Model tool signature | Result and boundary |
+| --- | --- |
+| `send_team_message(markdown, reply_to=None)` | `SourceDeliveryReceipt` JSON; no team or sender override. |
+| `send_direct_message(agent_id, markdown, reply_to=None)` | `SourceDeliveryReceipt` JSON under live pair admission and allowance. |
+| `list_team_messages(team_id, unread_only=False, query=None, limit=50, cursor=None, include_deleted=False)` | Authorized `ChatMessagePage` JSON, including eligible frozen personal history. |
+| `list_direct_messages(agent_id, unread_only=False, query=None, limit=50, cursor=None, include_deleted=False)` | The current person's direct `ChatMessagePage` JSON. |
+| `read_chat_message(message_id, version=None, start_line=1, end_line=None, start_character=1, character_count=None, expected_file_version=None)` | Token-bounded `ChatReadResult` JSON with read-delivery settlement. |
+| `edit_chat_message(message_id, markdown)` | Author-only `ChatOperationResult` JSON; team edits require current membership and direct edits consume eligible stranger allowance. |
+| `withdraw_chat_message(message_id)` | `ChatOperationResult` JSON; preserves separate personal reminder and frozen-history evidence. |
+| `control_chat_message(message_id, action)` | Personal `mark_read`, `mark_unread`, `delete`, or `restore`; no shared source mutation. |
+| `set_chat_details(team_details=None, direct_details=None)` | `ChatOperationResult` JSON; previews change independently of unread counts. |
+| `inspect_direct_relationship(agent_id)` | `ChatRelationship` JSON with the actor's owned controls and allowance. |
+| `list_friendship_requests()` | JSON `items` containing only requests involving the current person. |
+| `list_chat_reminders(message_id=None, limit=50, cursor=None)` | `ChatReminderPage` JSON; captured previews do not reopen withdrawn sources. |
+| `request_friendship(agent_id)` | `ChatOperationResult` JSON; no friendship without explicit acceptance. |
+| `respond_friendship(request_id, decision)` | Recipient `accept`, `reject`, or `ignore`; sender `cancel`. |
+| `control_direct_relationship(agent_id, action)` | Actor-owned `block`, `unblock`, `remove_friendship`, or `lift_refusal`. |
+
+The Host's `control_chat_message(command, message_id, actor=...)` uses the longer command vocabulary listed in its method reference rather than this tool's short `action` values.
+
+See [Personal Conversations](../Personal_Conversations.md) for titles, revisions, read state, withdrawal, direct relationships, archives, and rejoining.
+
+### Background Task Model Tools
+
+These tools derive owner and scope from the current invocation and cannot select a callable, executor, actor, or retry policy.
+
+| Model tool signature | Result and boundary |
+| --- | --- |
+| `start_background_task(tool_name, arguments, description="", labels=None)` | `BackgroundTaskHandle` JSON after an explicitly allowed operation's admission. |
+| `list_background_tasks(status=None, limit=50, cursor=None)` | Owner-only `TaskPage` JSON without result bodies. |
+| `search_background_tasks(query, status=None, limit=50, cursor=None)` | Metadata search as owner-only `TaskPage` JSON. |
+| `inspect_background_task(execution_id)` | `TaskView` JSON with independent state dimensions. |
+| `read_background_task_result(execution_id, start_line=1, end_line=None, start_character=1, character_count=None, expected_file_version=None)` | Token-bounded `FileReadResult` JSON; does not acknowledge attention. |
+| `cancel_background_task(execution_id)` | `TaskControlResult` JSON; a request is not proof of an external stop. |
+| `acknowledge_background_task(execution_id)` | `TaskControlResult` JSON; no result read, deletion, or outcome change. |
+
+See [Background Tasks](../Background_Tasks.md) for declaration examples, resource serialization, independent dimensions, result policy, and stopping limits.
 
 ### Entity Discovery
 
@@ -822,4 +946,4 @@ Authoritative framework errors in stop hooks propagate from cancellation and `cl
 
 The automatic threshold changes foreground waiting rather than the operation's identity or retry policy, and later outcomes notify only the same owner.
 
-See [Phase 4](../dev/autonomous_activity/Phase_4.md) and the [execution flowchart](../flowcharts/Background_Tasks.md) for admission, resource, privacy, cancellation, and restore boundaries.
+See [Background Tasks](../Background_Tasks.md) and the [execution flowchart](../flowcharts/Background_Tasks.md) for the current contract; [Phase 4](../dev/autonomous_activity/Phase_4.md) retains historical implementation evidence.

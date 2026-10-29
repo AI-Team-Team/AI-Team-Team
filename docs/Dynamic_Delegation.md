@@ -93,6 +93,8 @@ Depth-limit denials are business results, not malformed tool arguments or automa
 
 Identity prompts describe only tools that are actually available, so configuration changes and migrations affect the next model call immediately.
 
+The [personal activity guide](Personal_Activity.md) explains admission and scope boundaries, while [background execution](Background_Tasks.md) retains the same owner without synchronously waiting for child business work.
+
 * **`dispatch_subagent(...) -> JSON`**: Creates a child of the current AT or opens its persistent exact-revision consent request, then returns its reference immediately without waiting for child business work. `propose_team_formation` instead offers `organizational_parent="none"`, `"self"`, or `"current_team"`, with independence as its default. An initial task becomes addressed initial mail, not a synchronous discussion or fabricated completion.
 * **Formation and Agent inbox tools**: `list_agent_inbox`, `mark_agent_inbox_read`, `inspect_team_formation`, `prepare_team_formation_draft`, `inspect_team_formation_draft`, `publish_team_formation_draft`, `revise_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, and `decide_team_formation_late_join` operate from the invocation-scoped Agent identity. Every authorization-bearing action names the exact proposal revision it reviewed, and no tool accepts an acting-Agent override. See [Consensual Existing-Agent Team Formation](Consensual_Team_Formation.md).
 * **Entity discovery tools**: `list_entities`, `search_entities`, and `inspect_entity` expose only public Agent and AgentTeam records and remain available independently of delegation depth or optional episodic memory.

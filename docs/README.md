@@ -12,6 +12,9 @@ To understand specific systems in detail, please refer to the following document
 
 1. **[Quickstart Integration Guide](user/Quickstart.md)**: A step-by-step tutorial on how to install, register custom tools, implement LLM client adapters, and admit continuing personal activity.
 2. **[Public API Reference](user/API_Reference.md)**: A clean, public-only reference for all external integration classes (`ATTManager`, `Agent`, `ATTConfig`, etc.).
+3. **[Continuing Personal Activity](Personal_Activity.md)**: Admission, answers, checkpoints, scope, sleep, reminder preferences, resource availability, and retained lifecycle.
+4. **[Personal and AgentTeam Conversations](Personal_Conversations.md)**: Deliberate Markdown publication, previews, read state, edits, withdrawal, contact controls, and personal archives.
+5. **[Registered Execution and Background Tasks](Background_Tasks.md)**: Whitelist declarations, same-owned detachment, resources, factual outcomes, attention, protected results, and stop limits.
 
 ### 🛠️ System Specifications & Dev Docs
 
@@ -38,6 +41,8 @@ The [Design Blueprints index](blueprints/README.md) separates target behavior, e
 * **[Future Plans](blueprints/Todo_Autonomous_Agent_Activity_Messaging_and_Background_Tasks.md)**: Deferred features outside the initial replacement scope, not an implementation-progress checklist.
 * **[Autonomous Activity Implementation](dev/autonomous_activity/README.md)**: Engineering contracts, phase-specific implementation and verification records, schema profiles, and dependency inventories.
 
+Use the current guides above for integration and the numbered phase profiles for historical implementation evidence.
+
 ## 📊 Visual Flowcharts Directory
 
 For visual diagrams sequencing ATT loops, refer to the flowchart index and specific diagrams:
@@ -53,3 +58,4 @@ For visual diagrams sequencing ATT loops, refer to the flowchart index and speci
 * **[Selective Episodic Memory](flowcharts/Selective_Episodic_Memory.md)**: Visualizes optional indexing, owner-only search and recall, and Journal ownership.
 * **[Registered Execution and Background Tasks](flowcharts/Background_Tasks.md)**: Visualizes execution admission, detachment, protected results, and cancellation evidence.
 * **[Personal Conversations](flowcharts/Personal_Conversations.md)**: Visualizes explicit publication, contact controls, independent read state, and frozen departure archives.
+* **[Continuing Personal Activity](flowcharts/Personal_Activity.md)**: Visualizes personal admission, captured invocation scope, explicit intent, checkpoints, and resource availability.

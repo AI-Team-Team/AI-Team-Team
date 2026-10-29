@@ -5,6 +5,10 @@ This document provides a technical overview of the internal classes, properties,
 > [!NOTE]
 > If you are an external developer integrating the library into your own application, please consult the [Public API Reference](../user/API_Reference.md) instead.
 
+The current usage guides cover [Personal Activity](../Personal_Activity.md), [Personal Conversations](../Personal_Conversations.md), and [Background Tasks](../Background_Tasks.md).
+
+Numbered engineering profiles describe the corresponding implementation stages and historical schema changes.
+
 ## Core Classes
 
 ### `Agent`
@@ -72,7 +76,13 @@ The new personal runtime is composed through `ActivityAPI` and `PersonalActivity
 
 `activate_agent()`, `inspect_agent_activity()`, `wait_for_activity_checkpoint()`, and `deliver_agent_mail()` expose committed admission and observation rather than a transcript-producing discussion.
 
-The [Phase 2 engineering profile](autonomous_activity/Phase_2.md) specifies safe batches, immutable request profiles, local ownership, recovery, and lock ordering.
+The [personal activity guide](../Personal_Activity.md) defines admission, explicit intent, scope changes, and resource availability.
+
+The [Phase 2 engineering profile](autonomous_activity/Phase_2.md) records the underlying safe batches, immutable request profiles, local ownership, and lock ordering, extended by the [Phase 6 recovery profile](autonomous_activity/Phase_6.md).
+
+Public immutable results and model-tool signatures are listed separately from Host APIs in the [user reference](../user/API_Reference.md#runtime-result-models).
+
+Successful restore preserves persisted identities but reconstructs Python objects; Host integrations must reacquire current Agent and configuration references.
 
 `ToolExecutor.execute(before_attempt=...)` accepts a trusted runtime hook for durable evidence after validation and auditing but before each actual executor attempt.
 
@@ -386,7 +396,9 @@ Timeout observations and accepted heartbeat/progress samples use the same activi
 
 `ResourceClaim` describes protected read/write footprints, including directory descendants and physical link targets, with synchronous physical path locks as a final publication boundary.
 
-See the [Phase 4 implementation profile](autonomous_activity/Phase_4.md) and [schema 14](autonomous_activity/Schema_14.md).
+See [Background Tasks](../Background_Tasks.md) for the current registration and control contract.
+
+The [Phase 4 implementation profile](autonomous_activity/Phase_4.md) and [schema 14](autonomous_activity/Schema_14.md) record its initial implementation boundary.
 
 The [Phase 6 profile](autonomous_activity/Phase_6.md) and [schema 16](autonomous_activity/Schema_16.md) add lifecycle stopping, suppression coverage, and staged recovery updates with before-image rollback.
 

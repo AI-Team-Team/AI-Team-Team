@@ -147,6 +147,12 @@ Cross-version and operating-system CI verification, broader Phase 7 documentatio
 
 Gate: examples use actual signatures, each prose sentence is kept on one source line, paragraphs remain separate, and no unrelated documentation restructuring is introduced.
 
+The current guide map, executable-example contract, consumer checks, and local acceptance evidence are recorded in [Documentation and Public Contracts](../../dev/autonomous_activity/Phase_7.md).
+
+Phase 7 documentation and local acceptance completed on 2026-10-26 with 1122 full-suite tests, 21 documentation-contract tests, the frozen contract and runtime specifications, lint and typing checks, distribution builds, and installed-wheel examples.
+
+Schema remains 16, and extended reliability and platform acceptance remain Phase 8 work.
+
 ## Phase 8: Full reliability and quality acceptance
 
 - Run the deterministic contract matrix, randomized interleavings, long slow-writer tests, and process interruption scenarios.

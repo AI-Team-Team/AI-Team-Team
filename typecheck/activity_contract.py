@@ -1,6 +1,6 @@
 """Consumer typing of frozen values and the implemented personal runtime."""
 
-from typing import Any
+from typing import Any, Literal
 from typing_extensions import assert_type
 
 from ai_team_team import ATTManager, Agent, PersonalActivityConfig, ConversationConfig, ChatMessagePage, ChatReadResult, ChatOperationResult, ChatRelationship
@@ -11,6 +11,7 @@ from ai_team_team.core.activity.contracts import (
     ActivityAdmission,
     ActivityCheckpoint,
     ActivityView,
+    ActivityRuntimeAPI,
     ActivityIntent,
     AgentTeamScope,
     CountdownBounds,
@@ -20,6 +21,7 @@ from ai_team_team.core.activity.contracts import (
     PersonalScope,
     SleepIntent,
     SuppressionPreference,
+    SourceDeliveryReceipt,
     ToolExecutionContract,
     WakeDuration,
 )
@@ -48,14 +50,19 @@ CountdownBounds().check(WakeDuration(days=1))
 
 
 async def personal_runtime(manager: ATTManager, person: Agent) -> None:
+    runtime: ActivityRuntimeAPI = manager
+    assert_type(runtime, ActivityRuntimeAPI)
     accepted = await manager.activate_agent(person.agent_id, scope=PersonalScope())
     assert_type(accepted, ActivityAdmission)
+    assert_type(accepted.status, Literal["QUEUED", "COALESCED"])
     assert_type(manager.inspect_agent_activity(person.agent_id), ActivityView)
     checkpoint = await manager.wait_for_activity_checkpoint(accepted.admission_id, intent="idle")
     assert_type(checkpoint, ActivityCheckpoint)
-    await manager.deliver_agent_mail(
+    delivery = await manager.deliver_agent_mail(
         person.agent_id, message_type="note", payload={"note": "Read deliberately."}
     )
+    assert_type(delivery, SourceDeliveryReceipt)
+    assert_type(delivery.durability, Literal["durable", "volatile"])
     await manager.clear_agent_model_unavailability(person.agent_id)
     assert_type(manager.config.activity, PersonalActivityConfig)
     assert_type(manager.config.conversations, ConversationConfig)
@@ -78,6 +85,22 @@ async def task_runtime(manager: ATTManager, person: Agent) -> None:
     handle = await manager.start_background_task("registered_operation", {}, actor=person)
     assert_type(handle, BackgroundTaskHandle)
     assert_type(manager.list_background_tasks(actor=person), TaskPage)
-    assert_type(manager.inspect_background_task(handle.execution_id, actor=person), TaskView)
+    view = manager.inspect_background_task(handle.execution_id, actor=person)
+    assert_type(view, TaskView)
+    assert_type(view.suspended, bool)
+    assert_type(view.outcome_unconfirmed, bool)
     assert_type(await manager.read_background_task_result(handle.execution_id, actor=person), FileReadResult)
     assert_type(await manager.cancel_background_task(handle.execution_id, actor=person), TaskControlResult)
+    assert_type(await manager.acknowledge_background_task(handle.execution_id, actor=person), TaskControlResult)
+
+
+async def host_publication_and_restore(manager: ATTManager, person: Agent, team_id: str) -> None:
+    receipt = await manager.send_team_message(team_id, "# Explicit publication", actor=person, operation_key="documented-command")
+    assert_type(receipt, SourceDeliveryReceipt)
+    await manager.control_chat_message("mark_message_unread", receipt.message_id, actor=person)
+    owner_id = person.agent_id
+    await manager.save_state()
+    if manager.db_path is not None:
+        await manager.load_state(manager.db_path)
+        current = next(agent for agent in manager.agents.values() if agent.agent_id == owner_id)
+        assert_type(current, Agent)

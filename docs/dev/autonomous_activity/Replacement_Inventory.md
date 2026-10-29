@@ -53,7 +53,7 @@ Regenerate the tracked snapshot through normal file editing after an intentional
 | `typecheck/consumer_contract.py`, CI wheel smoke | Replace old exported result references and examples only when their new public runtime is implemented. |
 | README, user/developer APIs, Tool System, Dynamic Delegation, governance and formation docs | Change directly affected runtime examples and terminology without unrelated restructuring. |
 | `docs/flowcharts/` | Replace round/session/transcript/emergency loops with personal admission, explicit publication, execution receipts and incident paths. |
-| `Roadmap/Async_Event_Driven_Collaboration.md` | Reconcile outdated concurrency, automatic broadcast, convergence, actors and business-leader assumptions with the governing confirmed blueprint. |
+| Archived asynchronous-collaboration proposal | Preserve the [original proposal](../../../docs_archive/Async_Event_Driven_Collaboration.md) and its [design evolution](../../../docs_archive/Async_Event_Driven_Collaboration_Evolution.md) as historical records, with current contracts maintained in the user guides. |
 
 ## Review Rules
 

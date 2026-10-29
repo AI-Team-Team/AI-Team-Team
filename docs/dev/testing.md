@@ -1,6 +1,8 @@
 # 🛠️ AI-Team-Team Test Suite Development Guide
 
-The `AI-Team-Team` project has an extensive suite of `unittest` test cases to ensure framework stability. When modifying or contributing to the framework, ensure all existing tests pass and appropriate coverage is added for new features.
+The `AI-Team-Team` project has an extensive suite of `unittest` test cases to ensure framework stability.
+
+When modifying or contributing to the framework, ensure all existing tests pass and appropriate coverage is added for new features.
 
 ## 1. Running Tests
 
@@ -22,9 +24,9 @@ The Ubuntu/Python 3.13 matrix entry measures branch coverage with a 70 percent m
 
 Reports are generated after successful or failed test execution, but not after a failed Coverage installation or a cancelled job.
 
-The quality job runs Ruff and both public mypy contracts, while a separate wheel-smoke job builds, installs, and imports the package.
+The quality job runs Ruff and both public mypy contracts, while a separate wheel-smoke job builds, installs, and imports the package and runs the complete offline examples outside the checkout.
 
-The autonomous-activity replacement has a [Phase 0 contract freeze](autonomous_activity/README.md), [Phase 1 durability gate](autonomous_activity/Phase_1.md), and [Phase 2 personal-runtime gate](autonomous_activity/Phase_2.md), with deterministic fixtures and a separately invoked `spec_*.py` gate for remaining unimplemented services.
+The autonomous-activity replacement has a [contract freeze and implementation index](autonomous_activity/README.md), deterministic adversarial fixtures, and a separately invoked `spec_*.py` gate whose five runtime specifications are now implemented.
 
 Ordinary discovery includes schema activation, publication safety, and the four implemented personal specifications in `test/test_att/test_agent_activity/`.
 
@@ -127,7 +129,7 @@ Passing a lexical inventory alone does not establish those runtime authority bou
 Run the same quality checks locally with:
 
 ```bash
-./venv/bin/ruff check src test typecheck
+./venv/bin/ruff check src test typecheck examples
 ./venv/bin/mypy typecheck/consumer_contract.py typecheck/activity_contract.py
 ./venv/bin/coverage run -m unittest discover -s test
 ./venv/bin/coverage html --fail-under=0
@@ -136,23 +138,73 @@ Run the same quality checks locally with:
 ./venv/bin/python -m build
 ```
 
+### Documentation and Installed Examples
+
+Run the functional documentation-contract package with:
+
+```bash
+./venv/bin/python -m unittest discover -s test/test_att/test_documentation_contracts -t .
+```
+
+It checks current configuration defaults, result-model fields, real model-tool signatures, local guide links, documented test selectors, and complete runnable examples.
+
+A complete Python fence uses an `<!-- runnable: examples/name.py -->` marker and must match the corresponding checked-in source exactly.
+
+Integration fragments without that marker identify their required manager, runtime bindings, actors, and prior objects; they are not executed as standalone scripts.
+
+The complete offline examples run without credentials or network access:
+
+```bash
+./venv/bin/python examples/personal_activity.py
+./venv/bin/python examples/personal_activity.py --text
+./venv/bin/python examples/background_tasks.py
+```
+
+Each script owns a temporary workspace and prints a small structured result.
+
+Tests also execute the exact Markdown source and run the scripts from a temporary working directory, requiring explicit idle, stable restored identity, factual task completion, and separate attention acknowledgement.
+
+The wheel-smoke job repeats all three variants with the installed interpreter outside the checkout and verifies that `ai_team_team` resolves inside that interpreter's environment.
+
+Use asynchronous callbacks for observers that operate on asyncio primitives; synchronous callbacks run on background threads and require a thread-safe handoff to the event loop.
+
+The [Phase 7 profile](autonomous_activity/Phase_7.md) records this documentation boundary without treating it as Phase 8 stress or platform acceptance.
+
 ## 2. Asynchronous Execution
 
-Because the `ATTManager` utilizes standard python `asyncio` routines for core reasoning steps and message handling, the entire test suite must execute asynchronously.
+Tests exercising Manager activity, asynchronous messaging, accepted commits, or shutdown use isolated event loops.
 
-All core tests MUST inherit from `unittest.IsolatedAsyncioTestCase` rather than `unittest.TestCase`.
+Use `unittest.IsolatedAsyncioTestCase` for those tests and ordinary `unittest.TestCase` for pure value, schema, or static documentation checks.
 
 ```python
+import asyncio
+import tempfile
 import unittest
 
+from ai_team_team import ATTConfig, ATTManager, Agent
+from test.test_att.test_autonomous_activity_phase0._fixtures import ModelStep, ScriptedModelClient
+
+
 class TestFeature(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        # Async initializations
-        pass
-        
-    async def test_something_async(self):
-        await self.manager.process_message()
+    async def test_explicit_idle_checkpoint(self):
+        client = ScriptedModelClient(
+            ModelStep("Action: set_activity_intent(intent={'kind': 'idle'})"), native=False,
+        )
+        with tempfile.TemporaryDirectory(prefix="att-test-example-") as workspace:
+            async with ATTManager(
+                Agent("Person", "Researcher", client),
+                ATTConfig(workspace_root=workspace, tool_calling_mode="text_react"),
+                persistence_mode="volatile",
+            ) as manager:
+                manager.register_llm_client("test-idle", client)
+                admission = await manager.activate_agent(manager.root_ai.agent_id)
+                async with asyncio.timeout(30):
+                    checkpoint = await manager.wait_for_activity_checkpoint(admission.admission_id, intent="idle")
+                self.assertEqual(checkpoint.intent, "idle")
+                self.assertEqual(client.unexpected_requests, 0)
 ```
+
+This repository-local example uses the real scripted-client fixture and explicitly selects idle rather than relying on queue emptiness or an ordinary answer.
 
 ## 3. Pathing and Imports
 

@@ -1,12 +1,12 @@
-# Autonomous Activity: Contract Freeze and Durability Foundations
+# Autonomous Activity: Engineering Contracts and Implementation
 
 ## Status
 
-Phase 0 implements value contracts, a dependency inventory, deterministic adversarial fixtures, and an explicitly red runtime specification suite.
+Phase 0 froze value contracts, a dependency inventory, deterministic adversarial fixtures, and an initially red runtime specification suite.
 
 Phase 1 adds the [durability foundations](Phase_1.md), activates schema 12, and makes durable versus volatile operation explicit without implementing the replacement scheduler or claiming later-phase acceptance.
 
-Phase 2 adds the [continuing-person runtime and model boundaries](Phase_2.md), promoting the four frozen personal specifications into ordinary discovery while leaving the background-detachment specification explicitly red.
+Phase 2 adds the [continuing-person runtime and model boundaries](Phase_2.md), promoting the four frozen personal specifications into ordinary discovery; the remaining background specification was completed in Phase 4.
 
 Phase 3 adds [team conversations and personal direct chat](Phase_3.md), including authorized frozen history, explicit read controls, friendship, atomic admission, and schema 13.
 
@@ -14,9 +14,13 @@ Phase 4 adds [registered execution and background detachment](Phase_4.md), with 
 
 Phase 5 adds [round-free institutional execution and health supervision](Phase_5.md) with explicit organizational parents, personal-mail cases, independent resource attempts, restricted common-runtime audits, and schema 15.
 
-Phase 6 adds [sleep, recovery, and retained lifecycle integration](Phase_6.md) and [schema 16](Schema_16.md); Phase 7 broader documentation work and Phase 8 extended reliability acceptance remain separate work.
+Phase 6 adds [sleep, recovery, and retained lifecycle integration](Phase_6.md) and [schema 16](Schema_16.md).
 
-Phase 6 implementation and local acceptance checks are complete.
+Phase 7 adds [public documentation and executable consumer contracts](Phase_7.md) over the implemented runtime without changing institutional authority or schema 16.
+
+Phase 7 documentation and local acceptance checks are complete.
+
+Phase 8 extended reliability acceptance remains separate work.
 
 The Autonomous Agent Runtime coordinates personal activity, scheduling, provider calls, and invocation-scoped execution.
 
@@ -44,8 +48,8 @@ The running persistence schema is now `16`; schema 15 and earlier are rejected w
 - [Schema 16](Schema_16.md): suppression lifecycle, source-count summary coverage, and recovery before-images.
 - [Replacement inventory](Replacement_Inventory.md): ownership and disposition of round-dependent code and documentation.
 - [Machine-readable line inventory](round_dependencies.json): every selected source occurrence, including exports, tests, callbacks, diagrams, and examples.
-- [Built-in effect declarations](tool_effects.json): the reviewed target registration contracts, not permissions already installed in `Tool`.
-- [Contract models](../../../src/ai_team_team/core/activity/contracts/__init__.py): strict immutable values and a host-facing Protocol without an execution engine.
+- [Built-in effect declarations](tool_effects.json): the frozen Phase 0 registration inventory, not a complete current tool list or a permission grant.
+- [Contract models](../../../src/ai_team_team/core/activity/contracts/__init__.py): strict immutable values and the implemented host-facing runtime Protocol.
 - [Fixtures and specifications](../../../test/test_att/test_autonomous_activity_phase0): real Manager identity checks and controlled model, clock, executor, commit, and publication boundaries.
 - [Phase 1 implementation](Phase_1.md): immutable durable records, exact receipts, recoverable publication, mutation leases, and the scope of the initial recovery plan.
 - [Phase 2 implementation](Phase_2.md): one personal admission, fair continuation, explicit controls, notification frames, exact personal checkpoints, and bounded ordinary/audit/maintenance requests.
@@ -53,15 +57,20 @@ The running persistence schema is now `16`; schema 15 and earlier are rejected w
 - [Phase 4 implementation](Phase_4.md): execution ownership, explicit and threshold detachment, resource coordination, results, controls, and supported health evidence.
 - [Phase 5 implementation](Phase_5.md): retained institutional mechanisms using common Agent execution, complete round removal, and completed local adversarial verification.
 - [Phase 6 implementation](Phase_6.md): sleep guarantees, reminder suppression, staged recovery settlement, and terminal retained death.
+- [Phase 7 implementation](Phase_7.md): current user guides, exact API tables, runnable offline examples, installed-wheel checks, and reconciled roadmap boundaries.
 
-## Green and Red Checks
+The current usage guides are [Personal Activity](../../Personal_Activity.md), [Personal Conversations](../../Personal_Conversations.md), and [Background Tasks](../../Background_Tasks.md).
+
+Numbered schema and phase profiles retain their historical activation boundaries; the current database schema is 16.
+
+## Contract and Specification Checks
 
 Run the implemented Phase 0 checks with:
 
 ```bash
 ./venv/bin/python -m unittest discover -s test/test_att/test_autonomous_activity_phase0 -t .
 ./venv/bin/mypy typecheck/consumer_contract.py typecheck/activity_contract.py
-./venv/bin/ruff check src test typecheck
+./venv/bin/ruff check src test typecheck examples
 ```
 
 Run the original replacement specifications separately:
@@ -88,11 +97,11 @@ They do not call old discussion APIs, use a fake replacement runtime, skip missi
 
 Their `spec_*.py` filenames retain the original separately runnable gate, while implemented contracts are also exercised by ordinary `test_*.py` discovery.
 
-Phase 0 completion requires that the green checks pass and that each red failure identifies an unimplemented contract rather than an import error, broken fixture, leaked task, or accidental external request.
+The original Phase 0 acceptance required each red failure to identify an unimplemented contract rather than an import error, broken fixture, leaked task, or accidental external request.
 
-Later phases must run this red gate explicitly and move each completed specification into ordinary discovery when its required runtime and dependencies are implemented.
+Later phases completed those contracts and promoted their coverage into ordinary discovery while retaining the separately runnable gate.
 
-A passing baseline is not evidence that the red specifications or the new architecture pass.
+Both ordinary discovery and the separately invoked specifications remain required verification evidence.
 
 ## Fixture Boundaries
 

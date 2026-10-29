@@ -27,3 +27,5 @@ Ordinary answers, tool observations, personal mail, AT-to-AT Agreements, and Doc
 Source withdrawal exposes a marker in the live source while previously captured unread recipient reminders and authorized frozen archives retain their separate historical evidence.
 
 Rejoining opens a new interval without revealing absence-period messages or updating an earlier frozen archive.
+
+See [Personal Conversations](../Personal_Conversations.md) for current tool and Host signatures, Markdown titles, continuation reads, configurable withdrawal windows, and stranger-message quotas.

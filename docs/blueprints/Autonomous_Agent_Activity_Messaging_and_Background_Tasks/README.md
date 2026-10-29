@@ -30,7 +30,8 @@ These distinctions guide the personal activity, organizational authority, and ch
 
 - [Implementation Plan: Autonomous Agent Activity, Messaging, and Background Tasks](../Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md), which records current decisions, engineering contracts, and implementation phases.
 - [Future Plans](../Todo_Autonomous_Agent_Activity_Messaging_and_Background_Tasks.md), which distinguishes deferred features from the initial replacement scope.
-- [Asynchronous and Event-Driven Agent Collaboration](../../../Roadmap/Async_Event_Driven_Collaboration.md), whose preliminary assumptions are reconsidered here rather than adopted wholesale.
+- [Asynchronous and Event-Driven Agent Collaboration](../../../docs_archive/Async_Event_Driven_Collaboration.md), the preserved original proposal whose preliminary assumptions are reconsidered here rather than adopted wholesale.
+- [Evolution of Asynchronous Collaboration](../../../docs_archive/Async_Event_Driven_Collaboration_Evolution.md), which explains the relationship between that proposal and the current mechanisms.
 
 Confirmed contracts in the implementation plan take precedence over earlier engineering proposals or unresolved choices in this historical blueprint.
 
