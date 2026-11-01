@@ -4,6 +4,8 @@ The `AI-Team-Team` project has an extensive suite of `unittest` test cases to en
 
 When modifying or contributing to the framework, ensure all existing tests pass and appropriate coverage is added for new features.
 
+The [line-ending guide](Line_Endings.md) describes the LF convention, index and working-tree inspection, and conversion of existing project text files.
+
 ## 1. Running Tests
 
 The test suite is located in the `test/` directory. You can run all tests using standard module discovery from the project root:
