@@ -22,6 +22,17 @@ if TYPE_CHECKING:
 
 
 class MemoryIndexingMixin:
+    def _indexing_open(self) -> bool:
+        """Fence queue ownership at shutdown and restore boundaries."""
+        return not (
+            self._closing or self._restore_suspended
+            or self.manager._closing or self.manager._closed
+        )
+
+    def _indexing_available(self) -> bool:
+        """Disabled indexing may drain bookkeeping but cannot start model work."""
+        return self._indexing_open() and self.manager.config.episodic_memory.enabled
+
     def ensure_enabled(self, *, synchronize: bool = True) -> None:
         """Validates optional runtime requirements when the mode is enabled."""
         if not self.manager.config.episodic_memory.enabled:
@@ -54,11 +65,7 @@ class MemoryIndexingMixin:
             connection.close()
 
     def _ensure_workers(self) -> None:
-        if (
-            self._closing
-            or self._restore_suspended
-            or not self.manager.config.episodic_memory.enabled
-        ):
+        if not self._indexing_available():
             return
         active = [task for task in self._workers if not task.done()]
         self._workers = active
@@ -74,11 +81,7 @@ class MemoryIndexingMixin:
             self._workers.append(worker)
 
     def _schedule_segment(self, segment_id: str) -> None:
-        if (
-            self._closing
-            or self._restore_suspended
-            or not self.manager.config.episodic_memory.enabled
-        ):
+        if not self._indexing_available():
             return
         try:
             asyncio.get_running_loop()
@@ -111,7 +114,9 @@ class MemoryIndexingMixin:
     async def _index_worker(self) -> None:
         if self._queue is None:
             raise RuntimeError("The memory-index queue was not initialized.")
-        while True:
+        # Cancellation can lose a race with a returned result. Do not reenter
+        # Queue.get after the owner has closed or suspended indexing.
+        while self._indexing_open():
             segment_id = await self._queue.get()
             try:
                 await self._index_segment(segment_id)
@@ -127,6 +132,8 @@ class MemoryIndexingMixin:
                 self._schedule_pending()
 
     def _schedule_pending(self) -> None:
+        if not self._indexing_available():
+            return
         for segment in sorted(
             self.segments.values(), key=lambda item: (item.created_at, item.segment_id)
         ):
@@ -145,11 +152,7 @@ class MemoryIndexingMixin:
         segment = self.segments.get(segment_id)
         if segment is None or segment.status is not MemoryIndexStatus.PENDING:
             return
-        if (
-            self._closing
-            or self._restore_suspended
-            or not self.manager.config.episodic_memory.enabled
-        ):
+        if not self._indexing_available():
             return
         agent = self.manager._agents_by_id.get(segment.agent_id)
         if agent is None or agent.lifecycle_state != "active" or agent.llm_client is None:
@@ -182,7 +185,7 @@ class MemoryIndexingMixin:
             )
             if self.segments.get(segment_id) is not segment:
                 return
-            if self._closing or not self.manager.config.episodic_memory.enabled:
+            if not self._indexing_available():
                 segment.status = MemoryIndexStatus.PENDING
                 segment.updated_at = time.time()
                 if not self.manager._closing:
@@ -302,7 +305,7 @@ class MemoryIndexingMixin:
         self._schedule_segment(segment_id)
 
     async def flush_indexing(self) -> None:
-        if self._closing:
+        if self._closing or self.manager._closing or self.manager._closed:
             raise RuntimeError("Episodic-memory indexing is closed.")
         if self._restore_suspended:
             raise RuntimeError("Episodic-memory indexing is suspended for state restore.")
@@ -314,6 +317,12 @@ class MemoryIndexingMixin:
             queue = self._queue
             if queue is not None:
                 await queue.join()
+            if self._closing or self.manager._closing or self.manager._closed:
+                raise RuntimeError("Episodic-memory indexing is closed.")
+            if self._restore_suspended:
+                raise RuntimeError("Episodic-memory indexing is suspended for state restore.")
+            if not self.manager.config.episodic_memory.enabled:
+                return
             runnable = any(
                 segment.status is MemoryIndexStatus.PENDING
                 and (agent := self.manager._agents_by_id.get(segment.agent_id)) is not None
@@ -355,14 +364,7 @@ class MemoryIndexingMixin:
         if workers:
             await asyncio.gather(*workers, return_exceptions=True)
 
-        if queue is not None:
-            while True:
-                try:
-                    segment_id = queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-                self._queued_segment_ids.discard(segment_id)
-                queue.task_done()
+        self._drain_index_queue(queue)
 
         self._workers = []
         self._queue = None
@@ -387,6 +389,7 @@ class MemoryIndexingMixin:
             if not worker.done():
                 worker.cancel()
         await asyncio.sleep(0)
+        self._drain_index_queue(self._queue)
         changed = set()
         for segment in self.segments.values():
             if segment.status is MemoryIndexStatus.PROCESSING:
@@ -395,3 +398,14 @@ class MemoryIndexingMixin:
                 changed.add(segment.segment_id)
         if changed:
             self.manager._auto_save(memory_segments=changed)
+
+    def _drain_index_queue(self, queue: asyncio.Queue[str] | None) -> None:
+        """Release undispatched bookkeeping while preserving pending segments."""
+        if queue is not None:
+            while True:
+                try:
+                    segment_id = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                self._queued_segment_ids.discard(segment_id)
+                queue.task_done()

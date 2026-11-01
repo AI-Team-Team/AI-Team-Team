@@ -162,3 +162,5 @@ Schema remains 16, and extended reliability and platform acceptance remain Phase
 - Inspect success-path logs and callback payloads for unintended retry exhaustion, misclassified LLM errors, invalid governance parsing, audit cascades, or private content.
 
 Gate: every new contract and retained invariant has passing coverage, and no project-root `.att_doc_libs` or leaked background runtime resources remain after tests.
+
+The requirement ledger, reproducible workload profiles, source-bound local results, and separate platform gate are tracked in [Reliability and Quality Acceptance](../../dev/autonomous_activity/Phase_8.md).

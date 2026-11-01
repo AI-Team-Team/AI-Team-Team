@@ -41,14 +41,14 @@ Tests below are framework correctness tests rather than acceptance criteria for 
 | Voluntary topology changes | Default unilateral departure without old-parent consent, strict Host permission validation and runtime disablement, cooldown and actor checks, forced-parent-loss distinction, target Agent or AT accepting reattachment, unanswered and denied acceptance leaving topology unchanged, exact-target binding, target retirement or membership-change races, cycle rejection, and no acceptance inferred from friendship or communication channels. |
 | Countdown recovery | Offline time excluded, restoration start used, slow restore expiry, failed publication, bounded checkpoint error, and idempotent timer firing. |
 | Incremental persistence | Every new record group, immutable snapshots, insert-only dependency closure, unrelated rows unchanged, pending-delta coalescing, and commit cancellation. |
-| Schema and ownership | Schema `11` rejection before DDL, unsupported schema unchanged, competing managers and processes, WAL, foreign keys, and busy timeout. |
+| Schema and ownership | Current schema `16`; schema `15` and earlier, unknown future versions, and unsupported layouts rejected before DDL without modifying the database; competing managers and processes, WAL, foreign keys, and busy timeout. |
 | Durability modes | Durable by default, missing-database rejection, explicit volatile selection, explicit receipt durability guarantees, and no silently created project-root database. |
 | Restore corruption | Missing identities, impossible intervals, unauthorized sources, future friendship-request generations or mismatched pair endpoints, invalid sleep plans, dangling execution references, malformed ballots, and broken manifests. |
 | Crash boundaries | Process termination before dispatch, after dispatch, after outcome observation, before result commit, during file publication, and before recovery-notice dispatch. |
 | Recovery policy | Zero automatic external replay, polling, or reconnect; affected-owner wake; unaffected sleep; terminal-history exclusion; and explicit later rerun identity. |
 | Runtime replacement | Old worker writes before result, writes after close, stale callbacks, stale provider responses, failed restore rollback, and safe mutation-lease revocation. |
 | Privacy | No private body or raw parameters in counts, events, callbacks, generic discovery, team publication, or unauthorized audit inputs. |
-| Optional memory | Disabled mode needs no indexer, correct provenance with new invocation IDs, transient recall cleanup, and no personal catalog reset on membership change. |
+| Optional memory | Disabled mode needs no indexer, disabling with an existing backlog releases flush observers without losing pending work, re-enabling resumes retained segments, correct provenance with new invocation IDs, transient recall cleanup, and no personal catalog reset on membership change. |
 | Stress and cleanup | Continuous producers, slow disk, many memberships, bounded scheduling handles, fair admission, callback blocking or failure, temporary workspaces, and no leaked tasks or writers. |
 
 Use `unittest.IsolatedAsyncioTestCase`, deterministic event barriers, and a controllable clock rather than make normal unit tests sleep for 120 seconds.
@@ -63,12 +63,17 @@ The full implementation acceptance commands remain:
 
 ```bash
 ./venv/bin/python -m unittest discover -s test
-./venv/bin/ruff check src test typecheck
-./venv/bin/mypy typecheck/consumer_contract.py
+./venv/bin/ruff check src test typecheck examples scripts
+./venv/bin/mypy typecheck/consumer_contract.py typecheck/activity_contract.py
 ./venv/bin/coverage run -m unittest discover -s test
 ./venv/bin/coverage report
 ./venv/bin/python -m build
+./venv/bin/python -m unittest discover -s test/test_att/test_autonomous_activity_phase0 -t . -p 'spec_*.py'
 ```
+
+Installed-wheel examples must run outside the checkout with verified package origin, including Native personal activity, Text ReAct personal activity, and background result inspection.
+
+The [reliability acceptance record](../../dev/autonomous_activity/Phase_8.md) separates source-bound coverage evidence, local results, extended workloads, and platform verification.
 
 Python 3.11, 3.12, and 3.13 must pass on Linux, macOS, and Windows according to the existing CI matrix.
 

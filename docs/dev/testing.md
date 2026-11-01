@@ -20,11 +20,17 @@ For an individual test package:
 
 The repository CI runs the suite on Python 3.11 through 3.13 across Linux, macOS, and Windows.
 
-The Ubuntu/Python 3.13 matrix entry measures branch coverage with a 70 percent minimum and uploads HTML/XML reports with a 14-day retention period.
+The Ubuntu/Python 3.13 matrix entry enables branch measurement, enforces the 70 percent total coverage threshold, and uploads HTML/XML reports with a 14-day retention period.
 
 Reports are generated after successful or failed test execution, but not after a failed Coverage installation or a cancelled job.
 
 The quality job runs Ruff and both public mypy contracts, while a separate wheel-smoke job builds, installs, and imports the package and runs the complete offline examples outside the checkout.
+
+CI runs the full suite through `scripts.acceptance` to retain per-test outcomes, identify the source inputs, and reject skips, source edits during execution, root-level DocLib creation, and resource-leak warnings.
+
+Separate required reliability jobs run the frozen specifications and extended workloads on Linux, macOS, and Windows with Python 3.13.
+
+The ordinary full-suite matrix continues to cover all nine Python and operating-system combinations.
 
 The autonomous-activity replacement has a [contract freeze and implementation index](autonomous_activity/README.md), deterministic adversarial fixtures, and a separately invoked `spec_*.py` gate whose five runtime specifications are now implemented.
 
@@ -129,7 +135,7 @@ Passing a lexical inventory alone does not establish those runtime authority bou
 Run the same quality checks locally with:
 
 ```bash
-./venv/bin/ruff check src test typecheck examples
+./venv/bin/ruff check src test typecheck examples scripts
 ./venv/bin/mypy typecheck/consumer_contract.py typecheck/activity_contract.py
 ./venv/bin/coverage run -m unittest discover -s test
 ./venv/bin/coverage html --fail-under=0
@@ -137,6 +143,81 @@ Run the same quality checks locally with:
 ./venv/bin/coverage report
 ./venv/bin/python -m build
 ```
+
+### Reliability Evidence and Extended Workloads
+
+The [verification ledger](autonomous_activity/Verification_Coverage.md) maps independently reviewable requirements to exact test selectors.
+
+Mapping a selector does not establish that it ran or passed; the acceptance reports record those facts separately for their actual source digest and environment.
+
+The source digest covers code, test fixtures, documentation, examples, maintenance scripts, configuration, and CI inputs, including the frozen manifests and verification ledger.
+
+Generated package metadata, caches, the Phase 8 results page, and its retained acceptance records are excluded so recording results does not invalidate the inputs being measured.
+
+Use fresh output directories outside the checkout to preserve previous results and avoid treating generated artifacts as tested source.
+
+The following POSIX commands use temporary evidence directories; Windows users select equivalent external paths and the virtual environment's `Scripts/python.exe`.
+
+```bash
+./venv/bin/python -m scripts.acceptance --coverage --output /tmp/att-acceptance/full
+./venv/bin/python -m scripts.acceptance --suite frozen --output /tmp/att-acceptance/frozen
+./venv/bin/python -m scripts.acceptance --suite extended --seeds 8 --operations 96 --output /tmp/att-acceptance/extended
+./venv/bin/python -m scripts.acceptance.summary --output /tmp/att-acceptance/summary.json /tmp/att-acceptance/full/result.json /tmp/att-acceptance/frozen/result.json /tmp/att-acceptance/extended/result.json
+```
+
+Successful tests keep their Python stdout, stderr, and captured logging output in `unittest.log` without printing it to the console.
+
+Failures display their test identity, captured output, and traceback on stderr, including setup, teardown, cleanup, and subtest failures.
+
+Add `-v` or `--verbose` for per-test progress and durations while successful Python output stays in the log.
+
+Add `-q` or `--quiet` for JSON-only console output, with raw failure details retained in the external log.
+
+CI explicitly runs the full suite with `--suite full --all-output`, alongside the frozen specifications and extended reliability jobs, which also use `--all-output`.
+
+The all-output mode continuously streams the complete log to stderr, including passing-test stdout and stderr, test progress, warnings, direct log-descriptor diagnostics, coverage reports, and full failure tracebacks, without redaction or truncation.
+
+Capture redirects operating-system descriptors 1 and 2 as well as Python streams, so native writes and inherited subprocess output stay in the raw log and do not corrupt the JSON stdout summary.
+
+The stdout summary and `result.json` retain their payload-free metadata in every mode, while default human-readable stderr can contain the failed test's raw output and exception message.
+
+All modes preserve complete logs for resource-warning checks, so hiding successful output cannot hide acceptance failures.
+
+Diagnostic counters come from actual Python warning, unraisable-warning, and standard asyncio exception-handler events rather than keyword searches in test output.
+
+Context-inheriting Python children receive the same observers through a temporary startup module, including when their supplied environment changes `PYTHONPATH`, while existing `sitecustomize` behavior is preserved.
+
+Children that explicitly remove the diagnostic context or disable Python startup hooks remain outside this event observation; their standard output is still captured without filtering.
+
+Expected warnings captured by a test remain handled observations, and printing warning examples or logging similar wording does not fabricate a resource incident.
+
+For the ordinary unittest command, `./venv/bin/python -m unittest discover -s test -b -v` buffers successful test output and shows per-test progress, but does not generate the acceptance reports or retain discarded successful output.
+
+The extended suite exercises sixteen continuing people, one identity shared across eight teams, eight seeded relationship histories with repeated restore, and four bursts of four slow-writer producers.
+
+The default writer workload retains 1,536 distinct configuration keys and checks two completion handles, exact eventual persistence, event-loop progress, and ownership release during close.
+
+Increase `--seeds` or `--operations` explicitly for larger workloads without changing runtime policies or adding production deadlines.
+
+These are controlled workload sizes rather than a claim that every possible schedule or a fixed wall-clock soak duration has been tested.
+
+Real process exits at execution, SQLite commit, directory-swap, and recovery-notification boundaries also run in ordinary discovery.
+
+Result metadata includes safe operation traces, numeric workload metrics, and failure stack locations without assertion payloads, locals, or tool arguments.
+
+Raw diagnostic logs remain in the external evidence directory, and CI uploads the complete `unittest.log`, typed diagnostic events, and any `coverage.json` measurement alongside each JSON result so aggregation can verify the retained artifacts.
+
+The aggregate gate requires full, frozen, and extended results for identical source inputs and one environment, including the configured full-suite coverage gate.
+
+Aggregation validates complete per-test statistics, durations, environment identity, and diagnostic counters, and checks instrumented full runs against the repository's configured coverage threshold.
+
+The measured totals and branch mode in `coverage.json` must reconcile with the run percentage and the artifact hash recorded by the producer; success flags alone cannot establish coverage acceptance.
+
+Skipped, incomplete, stale-source, mixed-environment, and failed results cannot become a passing aggregate.
+
+Diagnostics identify a stalled test and its thread stacks without cancelling accepted local persistence commits.
+
+See the [Phase 8 record](autonomous_activity/Phase_8.md) for baseline limitations, fixed defects, local results, and the distinct platform gate.
 
 ### Documentation and Installed Examples
 

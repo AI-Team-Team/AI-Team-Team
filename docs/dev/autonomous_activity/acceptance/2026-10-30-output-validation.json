@@ -1,0 +1,1184 @@
+{
+  "aggregate": {
+    "checks": [
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A01-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A01-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A01-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A01-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A02-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A02-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A02-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A02-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A03-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A03-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A03-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A03-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A04-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A04-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A04-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A04-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A05-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A05-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A05-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A06-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A06-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A06-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A06-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A07-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A07-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A07-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A07-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A08-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A08-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A08-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A08-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A08-05"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A09-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A09-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A09-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A09-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A09-05"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A10-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A10-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A10-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A11-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A11-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A11-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A11-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A11-05"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A11-06"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A11-07"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A12-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A12-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A12-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A13-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A13-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A13-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A14-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A14-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A14-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A14-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A15-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A15-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A15-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A15-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A16-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A16-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A16-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A16-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A17-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A17-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A17-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A17-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A17-05"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A17-06"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A17-07"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A18-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A18-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A18-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A19-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A19-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A19-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A20-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A20-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A20-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A20-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A20-05"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A21-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A21-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A21-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A21-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A21-05"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A22-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A22-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A22-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A23-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A23-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A23-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A23-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A24-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A24-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A24-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A24-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A24-05"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A25-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A25-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A25-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A25-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A25-05"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A26-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A26-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A26-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A26-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A26-05"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A27-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A27-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A27-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A27-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A28-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A28-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A28-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A28-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A28-05"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A28-06"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A28-07"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A29-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A29-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A29-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A29-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A30-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A30-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A30-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A30-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A31-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A31-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A31-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A31-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A31-05"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A32-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A32-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A32-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A32-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A33-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A33-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A33-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A33-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A34-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A34-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A34-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A34-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A35-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A35-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A35-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A35-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A36-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A36-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A36-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A37-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A37-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A37-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A37-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A38-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A38-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A38-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A38-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A39-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A39-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A39-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A39-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A40-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A40-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A40-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A40-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A41-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A41-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A41-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A41-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A42-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A42-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A42-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A42-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A43-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A43-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A43-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A43-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A44-01"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A44-02"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A44-03"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A44-04"
+      },
+      {
+        "coverage": "covered",
+        "execution": "passed",
+        "id": "A44-05"
+      }
+    ],
+    "coverage_gate_passed": true,
+    "environment_compatible": true,
+    "invalid_reports": [],
+    "passed": true,
+    "platform_scope": "Only the environments recorded in the supplied runs.",
+    "required_suites": [
+      "extended",
+      "frozen",
+      "full"
+    ],
+    "source_compatible": true,
+    "source_digest": "f716dde65d7391866961a4d70133eadefe637fd7acafbccc863e4bb57e870c36"
+  },
+  "coverage": {
+    "artifact_sha256": "544f661749cacb933d166775ed5e67a8de3bbc5831a1e02652ff177468d57560",
+    "repository_threshold": 70.0,
+    "totals": {
+      "covered_branches": 6292,
+      "covered_lines": 19332,
+      "excluded_lines": 113,
+      "missing_branches": 1998,
+      "missing_lines": 2584,
+      "num_branches": 8290,
+      "num_partial_branches": 1634,
+      "num_statements": 21916,
+      "percent_branches_covered": 75.89867310012063,
+      "percent_branches_covered_display": "75.90",
+      "percent_covered": 84.83082831225585,
+      "percent_covered_display": "84.83",
+      "percent_statements_covered": 88.20952728600109,
+      "percent_statements_covered_display": "88.21"
+    }
+  },
+  "distributions": [
+    {
+      "bytes": 547406,
+      "file": "ai_team_team-0.1.0-py3-none-any.whl",
+      "sha256": "9ab54fbc2455098763539974ef53f1f0592b4e8035e757c3638c0eb99aff47ab"
+    },
+    {
+      "bytes": 440825,
+      "file": "ai_team_team-0.1.0.tar.gz",
+      "sha256": "e2d2075533ce45e58f5e50fcd556558a710072f52bfda9126cc255412c0fc297"
+    }
+  ],
+  "environment": {
+    "base_commit": "c42c78b5d6f7276b2a43a9f8757908e2dab375cd",
+    "machine": "arm64",
+    "packages": {
+      "jsonschema": "4.26.0",
+      "pydantic": "2.13.5",
+      "sqlalchemy": "2.1.2",
+      "tokenizers": "0.23.2",
+      "typing-extensions": "4.16.0"
+    },
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "python": "3.13.17 (main, Oct 21 2026, 13:48:20) [Clang 21.0.0 (clang-2100.3.34.2)]",
+    "source_digest": "f716dde65d7391866961a4d70133eadefe637fd7acafbccc863e4bb57e870c36",
+    "source_kind": "checkout",
+    "sqlite": "3.54.1",
+    "worktree_dirty": true
+  },
+  "implemented_fixes": [
+    "Capture Python streams, operating-system descriptors, native buffered stdio, and inherited subprocess output without polluting JSON stdout.",
+    "Count actual warning and asyncio events in independent diagnostic scopes, including inheriting Python children, rather than matching words in output.",
+    "Validate complete run evidence and reconcile measured branch coverage, repository policy, counts, and artifact hashes before accepting aggregation."
+  ],
+  "installed_wheel": {
+    "consumer_mypy": "Success: no issues found in 2 source files",
+    "examples": [
+      {
+        "durability": "durable",
+        "intent": "idle",
+        "model_calls": 2,
+        "same_identity_restored": true
+      },
+      {
+        "durability": "durable",
+        "intent": "idle",
+        "model_calls": 2,
+        "same_identity_restored": true
+      },
+      {
+        "admission": "BACKGROUND",
+        "attention": "ACKNOWLEDGED",
+        "durability": "durable",
+        "execution": "completed"
+      }
+    ],
+    "indexing_regressions": true,
+    "isolated_origin": true,
+    "passed": true,
+    "production_modules": 284,
+    "shared_dependencies_read_only": true
+  },
+  "persistence_schema": "16",
+  "previous_record": {
+    "path": "2026-10-30.json",
+    "scope": "Initial acceptance before output and diagnostic fixes.",
+    "sha256": "06f64787d51ac3d928c0f1fd6e96ee21a5f75890e27a201092287a49d4b78948"
+  },
+  "profiles": [
+    {
+      "console_mode": "all",
+      "coverage": false,
+      "elapsed_seconds": 619.774477,
+      "leaks": {
+        "ResourceWarning:": 0,
+        "Task exception was never retrieved": 0,
+        "Task was destroyed but it is pending": 0,
+        "was never awaited": 0
+      },
+      "log_sha256": "b49b24b37410f2af1113beff446d1922e24b445b648095ad26bb126222add905",
+      "numeric_metrics": [],
+      "operation_trace_steps": 32,
+      "passed": true,
+      "profile": "full",
+      "report_sha256": "567f97de526a108d39f39c81819bdef45e1f3bddc6389649b30133675563cf51",
+      "root_doclib_exists": false,
+      "skips": 0,
+      "source_digest": "f716dde65d7391866961a4d70133eadefe637fd7acafbccc863e4bb57e870c36",
+      "source_unchanged": true,
+      "started_at_utc": "2026-10-30T09:54:39.004122+00:00",
+      "suite": "full",
+      "tests": 1189
+    },
+    {
+      "console_mode": "all",
+      "coverage": true,
+      "elapsed_seconds": 1123.967697,
+      "leaks": {
+        "ResourceWarning:": 0,
+        "Task exception was never retrieved": 0,
+        "Task was destroyed but it is pending": 0,
+        "was never awaited": 0
+      },
+      "log_sha256": "1e73ae9ffaafe10eaac8e9d04ae3bdd0c9a9b811864259afce7e69634bfb3182",
+      "numeric_metrics": [],
+      "operation_trace_steps": 32,
+      "passed": true,
+      "profile": "coverage",
+      "report_sha256": "79a005228c0cfa65ee04b7a3804957641f23114e5a2207f86dec2b698712c719",
+      "root_doclib_exists": false,
+      "skips": 0,
+      "source_digest": "f716dde65d7391866961a4d70133eadefe637fd7acafbccc863e4bb57e870c36",
+      "source_unchanged": true,
+      "started_at_utc": "2026-10-30T10:09:29.693845+00:00",
+      "suite": "full",
+      "tests": 1189
+    },
+    {
+      "console_mode": "all",
+      "coverage": false,
+      "elapsed_seconds": 5.776117,
+      "leaks": {
+        "ResourceWarning:": 0,
+        "Task exception was never retrieved": 0,
+        "Task was destroyed but it is pending": 0,
+        "was never awaited": 0
+      },
+      "log_sha256": "43cce890e60440f831e7b2fcf112bc3955d232c3b81385bf8192fc4be458b22b",
+      "numeric_metrics": [],
+      "operation_trace_steps": 0,
+      "passed": true,
+      "profile": "frozen",
+      "report_sha256": "e0a64df76ae2149d2ab7d9822efccb407e2a7536782e5b68181ba0eb57014e27",
+      "root_doclib_exists": false,
+      "skips": 0,
+      "source_digest": "f716dde65d7391866961a4d70133eadefe637fd7acafbccc863e4bb57e870c36",
+      "source_unchanged": true,
+      "started_at_utc": "2026-10-30T10:06:10.914055+00:00",
+      "suite": "frozen",
+      "tests": 5
+    },
+    {
+      "console_mode": "all",
+      "coverage": false,
+      "elapsed_seconds": 43.534964,
+      "leaks": {
+        "ResourceWarning:": 0,
+        "Task exception was never retrieved": 0,
+        "Task was destroyed but it is pending": 0,
+        "was never awaited": 0
+      },
+      "log_sha256": "968da312144aba58f153540c423d4ebb9858ca4044fafcc8072ccad2ff7ca561",
+      "numeric_metrics": [
+        {
+          "owners": 16,
+          "provider_requests": 48,
+          "shared_memberships": 8,
+          "source_admissions": 48
+        },
+        {
+          "schedule_steps": 768,
+          "seeds": 8
+        },
+        {
+          "heartbeat_callbacks": 192,
+          "peak_completion_handles": 2,
+          "retained_config_keys": 1536,
+          "writer_commits": 8
+        }
+      ],
+      "operation_trace_steps": 768,
+      "passed": true,
+      "profile": "extended",
+      "report_sha256": "39adbcf327bf22c339a0b78c795603329eb44d34e718c124953f3fd5bc666262",
+      "root_doclib_exists": false,
+      "skips": 0,
+      "source_digest": "f716dde65d7391866961a4d70133eadefe637fd7acafbccc863e4bb57e870c36",
+      "source_unchanged": true,
+      "started_at_utc": "2026-10-30T10:07:10.774920+00:00",
+      "suite": "extended",
+      "tests": 3
+    }
+  ],
+  "quality": {
+    "consumer_mypy": "passed in both contracts",
+    "documentation_tests": 21,
+    "focused_executor_and_freeze_tests": 51,
+    "ruff": "passed"
+  },
+  "quality_tool_versions": {
+    "build": "1.6.1",
+    "coverage": "7.16.2",
+    "mypy": "2.4.0",
+    "ruff": "0.16.10",
+    "setuptools": "84.0.0",
+    "wheel": "0.48.0"
+  },
+  "recorded_on": "2026-10-30",
+  "scope": {
+    "all_possible_schedules_proven": false,
+    "child_event_observation": "Python children inheriting the diagnostic context and startup hooks; all standard output remains captured.",
+    "new_commit_ci": "pending",
+    "raw_ci_logs_are_unfiltered": true,
+    "supported_python": [
+      "3.11",
+      "3.12",
+      "3.13"
+    ],
+    "supported_systems": [
+      "Linux",
+      "macOS",
+      "Windows"
+    ],
+    "timings_are_controlled_performance_comparisons": false
+  },
+  "status": "local_acceptance_passed_platform_gate_pending"
+}

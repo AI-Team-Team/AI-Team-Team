@@ -1,0 +1,3246 @@
+{
+  "source_matrix": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/18_Verification_Matrix.md",
+  "schema": "16",
+  "checks": [
+    {
+      "id": "A01-01",
+      "area": "Identity",
+      "requirement": "Joining and leaving preserve Agent-owned fields",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase0.test_identity_invariants.TestRelationshipIdentitySnapshots.test_join_shared_memberships_and_leave_preserve_every_owned_field"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase0/test_identity_invariants.py",
+          "line": 48
+        }
+      ]
+    },
+    {
+      "id": "A01-02",
+      "area": "Identity",
+      "requirement": "Shared membership preserves personal memory and private-library ownership",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_episodic_memory.test_persistence_and_privacy.test_identity_lifecycle.TestPersistenceAndPrivacy.test_membership_changes_do_not_touch_agent_memory",
+        "test.test_att.test_private_doclib.test_access_and_publishing.TestPrivateAgentDocLib.test_registration_private_boundary_and_shared_identity"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_episodic_memory/test_persistence_and_privacy/test_identity_lifecycle.py",
+          "line": 30
+        },
+        {
+          "path": "test/test_att/test_private_doclib/test_access_and_publishing.py",
+          "line": 16
+        }
+      ]
+    },
+    {
+      "id": "A01-03",
+      "area": "Identity",
+      "requirement": "Root votes as its own Agent identity",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_failover.TestATTFailover.test_explicit_root_agent_votes_as_itself_not_as_a_team_replacement"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_failover.py",
+          "line": 76
+        }
+      ]
+    },
+    {
+      "id": "A01-04",
+      "area": "Identity",
+      "requirement": "Unaffiliated people enter ordinary formation without identity mutation",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_team_formation.test_consent_and_lifecycle.TestConsensualTeamFormation.test_ordinary_api_only_opens_invitations_and_preserves_agent_identity",
+        "test.test_att.test_discovery.test_scope_and_privacy.DiscoveryScopeTests.test_shared_person_has_one_directory_record_and_unchanged_personal_state"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_team_formation/test_consent_and_lifecycle.py",
+          "line": 95
+        },
+        {
+          "path": "test/test_att/test_discovery/test_scope_and_privacy.py",
+          "line": 120
+        }
+      ]
+    },
+    {
+      "id": "A02-01",
+      "area": "Activity serialization",
+      "requirement": "Concurrent sources coalesce into one personal admission",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase0.spec_personal_activity.SpecPersonalActivity.test_shared_person_admission_coalesces_across_team_scopes"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase0/spec_personal_activity.py",
+          "line": 37
+        }
+      ]
+    },
+    {
+      "id": "A02-02",
+      "area": "Activity serialization",
+      "requirement": "Chat and governance coexist without implicit votes in both protocols and durability modes",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_institutional_chat_interleavings.InstitutionalChatInterleavingTests.test_native_volatile_mail_and_chat_preserve_explicit_authority",
+        "test.test_att.test_agent_activity.test_institutional_chat_interleavings.InstitutionalChatInterleavingTests.test_text_volatile_mail_and_chat_preserve_explicit_authority",
+        "test.test_att.test_agent_activity.test_institutional_chat_interleavings.InstitutionalChatInterleavingTests.test_native_durable_mail_and_chat_preserve_explicit_authority",
+        "test.test_att.test_agent_activity.test_institutional_chat_interleavings.InstitutionalChatInterleavingTests.test_text_durable_mail_and_chat_preserve_explicit_authority"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_institutional_chat_interleavings.py",
+          "line": 109
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_institutional_chat_interleavings.py",
+          "line": 112
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_institutional_chat_interleavings.py",
+          "line": 115
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_institutional_chat_interleavings.py",
+          "line": 118
+        }
+      ]
+    },
+    {
+      "id": "A02-03",
+      "area": "Activity serialization",
+      "requirement": "Other eligible people progress while an independent person waits",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_admission_and_controls.AdmissionAndControlTests.test_different_people_are_not_held_by_a_team_barrier",
+        "test.test_att.test_agent_activity.test_admission_and_controls.AdmissionAndControlTests.test_budget_yields_fairly_without_setting_idle"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_admission_and_controls.py",
+          "line": 84
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_admission_and_controls.py",
+          "line": 54
+        }
+      ]
+    },
+    {
+      "id": "A02-04",
+      "area": "Activity serialization",
+      "requirement": "Cancellation and unavailable local providers retain one owner",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_dispatch_receipt_boundaries.DispatchReceiptBoundaryTests.test_interaction_observer_cannot_cancel_an_already_dispatched_model",
+        "test.test_att.test_agent_activity.test_model_requests.ModelRequestTests.test_timeout_preserves_unknown_usage_and_never_overlaps_a_live_local_request"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_dispatch_receipt_boundaries.py",
+          "line": 132
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_model_requests.py",
+          "line": 151
+        }
+      ]
+    },
+    {
+      "id": "A03-01",
+      "area": "No rounds",
+      "requirement": "A silent member does not prevent another member from reaching idle",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_scope_boundaries.ScopeBoundaryTests.test_a_silent_member_does_not_hold_another_member_at_a_team_barrier"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_scope_boundaries.py",
+          "line": 13
+        }
+      ]
+    },
+    {
+      "id": "A03-02",
+      "area": "No rounds",
+      "requirement": "Ordinary answers continue without automatic publication",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase0.spec_personal_activity.SpecPersonalActivity.test_a_plain_answer_continues_activity_without_publication"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase0/spec_personal_activity.py",
+          "line": 17
+        }
+      ]
+    },
+    {
+      "id": "A03-03",
+      "area": "No rounds",
+      "requirement": "Retired methods, result exports, and configuration cannot remain execution paths",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_public_runtime_contract.PublicRuntimeContractTests.test_round_execution_exports_methods_and_configuration_are_absent",
+        "test.test_att.test_agent_activity.test_public_runtime_contract.PublicRuntimeContractTests.test_public_activity_and_relational_metadata_have_no_round_provenance"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_public_runtime_contract.py",
+          "line": 12
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_public_runtime_contract.py",
+          "line": 25
+        }
+      ]
+    },
+    {
+      "id": "A03-04",
+      "area": "No rounds",
+      "requirement": "Governance retains cases without a team discussion engine",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_communication.InstitutionalCommunicationTests.test_queue_delivers_personal_ballots_without_a_discussion"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_communication.py",
+          "line": 21
+        }
+      ]
+    },
+    {
+      "id": "A04-01",
+      "area": "Notification boundaries",
+      "requirement": "Arrivals during a provider wait enter the following valid frame",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_notifications_and_tools.NotificationAndToolTests.test_mail_arriving_during_model_wait_enters_the_next_request_without_overlap"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_notifications_and_tools.py",
+          "line": 96
+        }
+      ]
+    },
+    {
+      "id": "A04-02",
+      "area": "Notification boundaries",
+      "requirement": "Arrivals during a tool wait enter the following valid frame",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase0.spec_personal_activity.SpecPersonalActivity.test_arrival_during_a_tool_wait_enters_the_immediate_next_valid_frame"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase0/spec_personal_activity.py",
+          "line": 85
+        }
+      ]
+    },
+    {
+      "id": "A04-03",
+      "area": "Notification boundaries",
+      "requirement": "Native batches retain their scope until all observations settle",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_admission_and_controls.AdmissionAndControlTests.test_scope_control_keeps_the_entire_native_batch_in_its_original_team"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_admission_and_controls.py",
+          "line": 101
+        }
+      ]
+    },
+    {
+      "id": "A04-04",
+      "area": "Notification boundaries",
+      "requirement": "Arrivals racing idle/checkpoint receipt cannot be stranded",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_runtime_boundaries.RuntimeBoundaryTests.test_arrival_waiting_at_the_idle_checkpoint_cannot_be_stranded",
+        "test.test_att.test_agent_activity.test_sleep_scope.SleepScopeTests.test_protected_arrival_during_the_sleep_response_is_not_lost_at_the_boundary"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_runtime_boundaries.py",
+          "line": 328
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_sleep_scope.py",
+          "line": 13
+        }
+      ]
+    },
+    {
+      "id": "A05-01",
+      "area": "Presentation semantics",
+      "requirement": "Presented unread mail does not cause repeated admissions or imply reading",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_notifications_and_tools.NotificationAndToolTests.test_presented_unanswered_mail_does_not_reactivate_or_mark_read",
+        "test.test_att.test_agent_activity.test_dispatch_receipt_boundaries.DispatchReceiptBoundaryTests.test_duplicate_trusted_ingress_does_not_wake_a_presented_unread_notice"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_notifications_and_tools.py",
+          "line": 74
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_dispatch_receipt_boundaries.py",
+          "line": 214
+        }
+      ]
+    },
+    {
+      "id": "A05-02",
+      "area": "Presentation semantics",
+      "requirement": "Mail opening and read flags never supply a ballot",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_personal_governance.test_identity_and_mail.PersonalGovernanceTests.test_unanswered_read_email_never_becomes_a_vote"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_personal_governance/test_identity_and_mail.py",
+          "line": 61
+        }
+      ]
+    },
+    {
+      "id": "A05-03",
+      "area": "Presentation semantics",
+      "requirement": "Uncertain provider receipt cannot establish successful usage or presentation",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_critical_hardening.test_discussion_and_token_budget.TestCriticalPersonalBudgets.test_cancellation_keeps_unknown_sent_reservation_without_inventing_usage",
+        "test.test_att.test_agent_activity.test_model_requests.ModelRequestTests.test_timeout_preserves_unknown_usage_and_never_overlaps_a_live_local_request"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_critical_hardening/test_discussion_and_token_budget.py",
+          "line": 53
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_model_requests.py",
+          "line": 151
+        }
+      ]
+    },
+    {
+      "id": "A06-01",
+      "area": "Scope",
+      "requirement": "Shared membership does not supply an ambiguous or borrowed current team",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_high_hardening.test_shared_agent_and_lifecycle.TestHighHardening.test_shared_agent_context_memory_and_serial_calls"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_high_hardening/test_shared_agent_and_lifecycle.py",
+          "line": 70
+        }
+      ]
+    },
+    {
+      "id": "A06-02",
+      "area": "Scope",
+      "requirement": "Unavailable or nonmember scopes fail before a provider request",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_admission_and_controls.AdmissionAndControlTests.test_missing_or_nonmember_scope_fails_without_a_model_request",
+        "test.test_att.test_agent_activity.test_scope_boundaries.ScopeBoundaryTests.test_notification_filter_for_an_external_at_confers_no_membership_or_file_rights"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_admission_and_controls.py",
+          "line": 208
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_scope_boundaries.py",
+          "line": 87
+        }
+      ]
+    },
+    {
+      "id": "A06-03",
+      "area": "Scope",
+      "requirement": "A complete captured batch retains the original scope",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_admission_and_controls.AdmissionAndControlTests.test_scope_control_keeps_the_entire_native_batch_in_its_original_team"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_admission_and_controls.py",
+          "line": 101
+        }
+      ]
+    },
+    {
+      "id": "A06-04",
+      "area": "Scope",
+      "requirement": "Valid publication succeeds in live scope and is explicitly denied after dissolution",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_scope_boundaries.ScopeBoundaryTests.test_the_same_valid_publication_succeeds_while_its_scope_remains_active",
+        "test.test_att.test_agent_activity.test_scope_boundaries.ScopeBoundaryTests.test_dissolution_during_a_provider_wait_closes_the_old_scope_before_tools_execute"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_scope_boundaries.py",
+          "line": 57
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_scope_boundaries.py",
+          "line": 35
+        }
+      ]
+    },
+    {
+      "id": "A07-01",
+      "area": "Team history",
+      "requirement": "Departure freezes revisions and rejoining excludes absence-period sources",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_history_and_reads.HistoryAndReadTests.test_leave_edit_withdraw_rejoin_never_unlocks_an_absence_gap"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_history_and_reads.py",
+          "line": 16
+        }
+      ]
+    },
+    {
+      "id": "A07-02",
+      "area": "Team history",
+      "requirement": "Archived conversations remain inspectable without current posting authority",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_history_and_reads.HistoryAndReadTests.test_archive_closes_membership_and_preserves_inspection_and_personal_controls"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_history_and_reads.py",
+          "line": 130
+        }
+      ]
+    },
+    {
+      "id": "A07-03",
+      "area": "Team history",
+      "requirement": "Hidden source counts, searches, pagination, and reply references fail closed",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_history_and_reads.HistoryAndReadTests.test_list_search_pagination_and_reply_do_not_expose_hidden_sources"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_history_and_reads.py",
+          "line": 103
+        }
+      ]
+    },
+    {
+      "id": "A07-04",
+      "area": "Team history",
+      "requirement": "Membership publication and retirement are atomic relationship changes",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_membership_publication.MembershipPublicationTests.test_join_and_retirement_are_serialized_without_changing_owned_fields",
+        "test.test_att.test_conversations.test_commit_and_restore.CommitAndRestoreTests.test_member_removal_and_message_publication_share_the_same_lock"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_membership_publication.py",
+          "line": 33
+        },
+        {
+          "path": "test/test_att/test_conversations/test_commit_and_restore.py",
+          "line": 49
+        }
+      ]
+    },
+    {
+      "id": "A08-01",
+      "area": "Chat read state",
+      "requirement": "Preview inspection never marks a message read",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_publication.PublicationTests.test_team_source_has_personal_views_and_preview_never_marks_read"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_publication.py",
+          "line": 25
+        }
+      ]
+    },
+    {
+      "id": "A08-02",
+      "area": "Chat read state",
+      "requirement": "Partial reads return only authorized content with versioned continuation",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_history_and_reads.HistoryAndReadTests.test_partial_unicode_read_marks_only_returned_source_and_checks_continuation"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_history_and_reads.py",
+          "line": 51
+        }
+      ]
+    },
+    {
+      "id": "A08-03",
+      "area": "Chat read state",
+      "requirement": "Read observation and its read marker share accepted persistence",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_read_checkpoint_durability.ReadCheckpointDurabilityTests.test_read_marker_and_observation_share_the_same_writer_snapshot",
+        "test.test_att.test_conversations.test_read_checkpoint_durability.ReadCheckpointDurabilityTests.test_cancel_after_observation_acceptance_preserves_both_the_body_and_its_read_fact"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_read_checkpoint_durability.py",
+          "line": 21
+        },
+        {
+          "path": "test/test_att/test_conversations/test_read_checkpoint_durability.py",
+          "line": 46
+        }
+      ]
+    },
+    {
+      "id": "A08-04",
+      "area": "Chat read state",
+      "requirement": "Failures and cancelled siblings do not leave false read facts",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_history_and_reads.HistoryAndReadTests.test_failed_read_commit_does_not_return_body_or_change_read_state",
+        "test.test_att.test_conversations.test_read_delivery.RuntimeReadDeliveryTests.test_cancelled_native_sibling_does_not_mark_a_prepared_body_read"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_history_and_reads.py",
+          "line": 122
+        },
+        {
+          "path": "test/test_att/test_conversations/test_read_delivery.py",
+          "line": 102
+        }
+      ]
+    },
+    {
+      "id": "A08-05",
+      "area": "Chat read state",
+      "requirement": "Explicit unread state and concurrent new revisions remain independent",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_read_delivery.HostReadDeliveryTests.test_cancelled_read_restores_the_exact_previous_watermark_and_unread_override",
+        "test.test_att.test_conversations.test_read_delivery.RuntimeReadDeliveryTests.test_a_new_revision_during_batch_settlement_remains_unread"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_read_delivery.py",
+          "line": 36
+        },
+        {
+          "path": "test/test_att/test_conversations/test_read_delivery.py",
+          "line": 132
+        }
+      ]
+    },
+    {
+      "id": "A09-01",
+      "area": "Message changes",
+      "requirement": "Titles, Unicode, untitled messages, and code fences obey Markdown limits",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_changes_and_notifications.ChangeAndNoticeTests.test_title_limits_unicode_untitled_and_fenced_headings"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_changes_and_notifications.py",
+          "line": 90
+        }
+      ]
+    },
+    {
+      "id": "A09-02",
+      "area": "Message changes",
+      "requirement": "A successful edit renews the withdrawal deadline and failed edits do not",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_changes_and_notifications.ChangeAndNoticeTests.test_successful_edit_renews_window_but_failed_edit_does_not"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_changes_and_notifications.py",
+          "line": 38
+        }
+      ]
+    },
+    {
+      "id": "A09-03",
+      "area": "Message changes",
+      "requirement": "Withdrawal retains separate read and preview history",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_changes_and_notifications.ChangeAndNoticeTests.test_withdrawal_preserves_read_receipts_and_only_personal_reminder_preview",
+        "test.test_att.test_autonomous_activity_phase1.test_withdrawal_projection_boundaries.WithdrawalProjectionTests.test_later_withdrawal_preserves_frozen_views_read_evidence_and_previews"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_changes_and_notifications.py",
+          "line": 55
+        },
+        {
+          "path": "test/test_att/test_autonomous_activity_phase1/test_withdrawal_projection_boundaries.py",
+          "line": 101
+        }
+      ]
+    },
+    {
+      "id": "A09-04",
+      "area": "Message changes",
+      "requirement": "Withdrawn sources cannot be reopened through projection changes",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase1.test_withdrawal_projection_boundaries.WithdrawalProjectionTests.test_confirmed_withdrawal_cannot_be_removed_or_replaced_in_either_mode",
+        "test.test_att.test_autonomous_activity_phase1.test_withdrawal_projection_boundaries.WithdrawalProjectionTests.test_sql_writer_independently_rejects_reopening_a_withdrawn_message"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase1/test_withdrawal_projection_boundaries.py",
+          "line": 16
+        },
+        {
+          "path": "test/test_att/test_autonomous_activity_phase1/test_withdrawal_projection_boundaries.py",
+          "line": 38
+        }
+      ]
+    },
+    {
+      "id": "A09-05",
+      "area": "Message changes",
+      "requirement": "Personal deletion survives editing and restoration is explicit",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_history_and_reads.HistoryAndReadTests.test_personal_delete_survives_edit_and_can_be_explicitly_restored"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_history_and_reads.py",
+          "line": 88
+        }
+      ]
+    },
+    {
+      "id": "A10-01",
+      "area": "Withdrawal window evidence",
+      "requirement": "A 1200-second configured window is legal and retains applied historical evidence",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_changes_and_notifications.ChangeAndNoticeTests.test_window_can_exceed_ten_minutes_and_history_uses_its_applied_value"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_changes_and_notifications.py",
+          "line": 20
+        }
+      ]
+    },
+    {
+      "id": "A10-02",
+      "area": "Withdrawal window evidence",
+      "requirement": "Nonpositive or nonfinite withdrawal configuration is rejected on construction and assignment",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_changes_and_notifications.ChangeAndNoticeTests.test_window_can_exceed_ten_minutes_and_history_uses_its_applied_value"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_changes_and_notifications.py",
+          "line": 20
+        }
+      ]
+    },
+    {
+      "id": "A10-03",
+      "area": "Withdrawal window evidence",
+      "requirement": "Source and withdrawal projection must commit together",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase1.test_withdrawal_projection_boundaries.WithdrawalProjectionTests.test_withdrawal_and_source_projection_must_commit_together"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase1/test_withdrawal_projection_boundaries.py",
+          "line": 50
+        }
+      ]
+    },
+    {
+      "id": "A11-01",
+      "area": "Direct admission",
+      "requirement": "Concurrent edits and sends consume one shared directional allowance",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_relationship_interleavings.RelationshipScheduleTests.test_concurrent_sends_and_edits_share_the_same_directional_allowance"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_relationship_interleavings.py",
+          "line": 14
+        }
+      ]
+    },
+    {
+      "id": "A11-02",
+      "area": "Direct admission",
+      "requirement": "Historical-generation and friendship-era edits charge the current period",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_relationship_interleavings.RelationshipScheduleTests.test_old_generation_and_friendship_era_edits_charge_the_current_period"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_relationship_interleavings.py",
+          "line": 26
+        }
+      ]
+    },
+    {
+      "id": "A11-03",
+      "area": "Direct admission",
+      "requirement": "Failed edits preserve quota, reminders, and the prior withdrawal deadline",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_relationship_interleavings.RelationshipScheduleTests.test_failed_edit_preserves_allowance_reminders_and_withdrawal_deadline"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_relationship_interleavings.py",
+          "line": 41
+        }
+      ]
+    },
+    {
+      "id": "A11-04",
+      "area": "Direct admission",
+      "requirement": "Directional allowance and idempotent sends are atomic",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_publication.PublicationTests.test_direct_send_is_atomic_idempotent_and_directionally_limited"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_publication.py",
+          "line": 10
+        }
+      ]
+    },
+    {
+      "id": "A11-05",
+      "area": "Direct admission",
+      "requirement": "Edits share the current allowance and honor blocks",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_changes_and_notifications.ChangeAndNoticeTests.test_direct_edit_cannot_bypass_stranger_allowance_or_block"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_changes_and_notifications.py",
+          "line": 102
+        }
+      ]
+    },
+    {
+      "id": "A11-06",
+      "area": "Direct admission",
+      "requirement": "Failed persistence does not charge quota or create delivery",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_relationships.RelationshipTests.test_failed_write_does_not_consume_allowance_or_publish_an_arrival"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_relationships.py",
+          "line": 74
+        }
+      ]
+    },
+    {
+      "id": "A11-07",
+      "area": "Direct admission",
+      "requirement": "Mixed generation, edit, replay, and restore histories follow current authority",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_relationship_interleavings.RelationshipScheduleTests.test_seeded_relationship_periods_edits_and_receipt_replays"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_relationship_interleavings.py",
+          "line": 57
+        }
+      ]
+    },
+    {
+      "id": "A12-01",
+      "area": "Friendship and blocks",
+      "requirement": "Either endpoint blocks both delivery directions; only final unblock resets the period",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_relationships.RelationshipTests.test_blocks_are_independently_owned_and_only_final_clear_starts_a_new_period"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_relationships.py",
+          "line": 34
+        }
+      ]
+    },
+    {
+      "id": "A12-02",
+      "area": "Friendship and blocks",
+      "requirement": "Removing absent friendship or cancelling/crossing requests grants no allowance reset",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_relationships.RelationshipTests.test_crossed_requests_are_not_consent_and_cancellation_does_not_reset_allowance"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_relationships.py",
+          "line": 51
+        }
+      ]
+    },
+    {
+      "id": "A12-03",
+      "area": "Friendship and blocks",
+      "requirement": "Accepting during a block race cannot resurrect friendship",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_relationships.RelationshipTests.test_acceptance_racing_block_cannot_restore_friendship_through_block"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_relationships.py",
+          "line": 84
+        }
+      ]
+    },
+    {
+      "id": "A13-01",
+      "area": "Relationship history and current authorization",
+      "requirement": "Accepted old-generation requests survive removal and restore as history",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_relationships.RelationshipTests.test_historical_acceptance_survives_removal_and_restore_without_restoring_authority"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_relationships.py",
+          "line": 16
+        }
+      ]
+    },
+    {
+      "id": "A13-02",
+      "area": "Relationship history and current authorization",
+      "requirement": "Recipient refusal remains owned and requires explicit lifting",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_relationships.RelationshipTests.test_refusal_is_recipient_owned_and_requires_explicit_lifting"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_relationships.py",
+          "line": 63
+        }
+      ]
+    },
+    {
+      "id": "A13-03",
+      "area": "Relationship history and current authorization",
+      "requirement": "Generated relationship histories preserve ownership and current authorization",
+      "coverage": "covered",
+      "selectors": [
+        "test.reliability.stress_relationships.ExtendedRelationshipTests.test_seeded_relationship_histories_survive_repeated_restore"
+      ],
+      "sources": [
+        {
+          "path": "test/reliability/stress_relationships.py",
+          "line": 12
+        }
+      ]
+    },
+    {
+      "id": "A14-01",
+      "area": "Tool contracts",
+      "requirement": "Unknown and foreground-only tools cannot be dispatched in background",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_admission_and_results.AdmissionTests.test_invalid_unknown_and_foreground_only_tools_never_dispatch"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_admission_and_results.py",
+          "line": 40
+        }
+      ]
+    },
+    {
+      "id": "A14-02",
+      "area": "Tool contracts",
+      "requirement": "Auditor denial creates no actual execution attempt",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_admission_and_results.AdmissionTests.test_auditor_denial_is_not_an_execution_attempt"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_admission_and_results.py",
+          "line": 57
+        }
+      ]
+    },
+    {
+      "id": "A14-03",
+      "area": "Tool contracts",
+      "requirement": "Strict nested validation precedes execution and auditing",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_tool_execution_hardening.test_action_parsing_and_schema.TestToolExecutionHardening.test_strict_schema_validation_prevents_execution",
+        "test.test_att.test_tool_execution_hardening.test_tool_runtime.TestToolExecutionHardening.test_argument_validation_runs_before_tool_auditor"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_tool_execution_hardening/test_action_parsing_and_schema.py",
+          "line": 121
+        },
+        {
+          "path": "test/test_att/test_tool_execution_hardening/test_tool_runtime.py",
+          "line": 194
+        }
+      ]
+    },
+    {
+      "id": "A14-04",
+      "area": "Tool contracts",
+      "requirement": "Self-mutation and actor/policy overrides cannot create background authority",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase0.test_contracts.TestNotificationAndExecutionContracts.test_background_is_explicit_and_self_mutation_is_rejected",
+        "test.test_att.test_conversations.test_personal_runtime.ChatRuntimeTests.test_tool_schema_does_not_allow_actor_or_operation_key_overrides"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase0/test_contracts.py",
+          "line": 180
+        },
+        {
+          "path": "test/test_att/test_conversations/test_personal_runtime.py",
+          "line": 45
+        }
+      ]
+    },
+    {
+      "id": "A15-01",
+      "area": "Resource conflicts",
+      "requirement": "Conflicting resources serialize while independent ones progress",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_resources_and_privacy.ResourceTests.test_conflicting_calls_serialize_while_independent_resources_progress"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_resources_and_privacy.py",
+          "line": 16
+        }
+      ]
+    },
+    {
+      "id": "A15-02",
+      "area": "Resource conflicts",
+      "requirement": "Foreground and background share reservations across owners",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_foreground_coordination.ForegroundCoordinationTests.test_undeclared_foreground_waits_for_another_owners_global_writer",
+        "test.test_att.test_background_tasks.test_foreground_contracts.ForegroundContractTests.test_mixed_effect_reservation_blocks_new_background_dispatch"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_foreground_coordination.py",
+          "line": 90
+        },
+        {
+          "path": "test/test_att/test_background_tasks/test_foreground_contracts.py",
+          "line": 60
+        }
+      ]
+    },
+    {
+      "id": "A15-03",
+      "area": "Resource conflicts",
+      "requirement": "Managed-link target changes cannot redirect an accepted write",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_binding_boundaries.BindingBoundaryTests.test_retarget_between_resolution_and_physical_write_is_rejected",
+        "test.test_att.test_background_tasks.test_binding_boundaries.BindingBoundaryTests.test_actual_target_must_be_claimed_even_if_alias_has_returned_to_original"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_binding_boundaries.py",
+          "line": 57
+        },
+        {
+          "path": "test/test_att/test_background_tasks/test_binding_boundaries.py",
+          "line": 83
+        }
+      ]
+    },
+    {
+      "id": "A15-04",
+      "area": "Resource conflicts",
+      "requirement": "Concurrent unrelated physical file writes can stage independently",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_resources_and_privacy.ResourceTests.test_same_library_unrelated_physical_writes_can_stage_concurrently"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_resources_and_privacy.py",
+          "line": 55
+        }
+      ]
+    },
+    {
+      "id": "A16-01",
+      "area": "Tool availability and retries",
+      "requirement": "Correctable input and ordinary business/permission errors remain observations",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_notifications_and_tools.NotificationAndToolTests.test_native_and_text_failures_remain_observations_not_idle_or_team_failure",
+        "test.test_att.test_agent_activity.test_notifications_and_tools.NotificationAndToolTests.test_invalid_sleep_is_correctable_without_cooling_the_control"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_notifications_and_tools.py",
+          "line": 13
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_notifications_and_tools.py",
+          "line": 64
+        }
+      ]
+    },
+    {
+      "id": "A16-02",
+      "area": "Tool availability and retries",
+      "requirement": "Execution faults cool new same-tool calls without extending the deadline",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_notifications_and_tools.NotificationAndToolTests.test_execution_fault_cools_only_new_calls_to_the_same_tool"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_notifications_and_tools.py",
+          "line": 40
+        }
+      ]
+    },
+    {
+      "id": "A16-03",
+      "area": "Tool availability and retries",
+      "requirement": "Only typed eligible execution retries replay a tool",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_tool_execution_hardening.test_tool_runtime.TestToolExecutionHardening.test_typed_transient_retry_policies",
+        "test.test_att.test_agent_activity.test_runtime_boundaries.RuntimeBoundaryTests.test_each_real_execution_retry_has_evidence_but_an_auditor_denial_has_none"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_tool_execution_hardening/test_tool_runtime.py",
+          "line": 117
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_runtime_boundaries.py",
+          "line": 236
+        }
+      ]
+    },
+    {
+      "id": "A16-04",
+      "area": "Tool availability and retries",
+      "requirement": "Provider retry waits remain separate from tool cooldowns",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_model_requests.ModelRequestTests.test_provider_wait_overrides_jitter_cap_and_refreshes_arrivals_on_retry"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_model_requests.py",
+          "line": 90
+        }
+      ]
+    },
+    {
+      "id": "A17-01",
+      "area": "Model retry boundaries",
+      "requirement": "Full Jitter caps, per-alias timeouts, and exact framework attempt counts are enforced",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_model_requests.ModelRequestTests.test_full_jitter_bounds_per_model_deadline_and_exact_framework_attempts"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_model_requests.py",
+          "line": 17
+        }
+      ]
+    },
+    {
+      "id": "A17-02",
+      "area": "Model retry boundaries",
+      "requirement": "Transient exhaustion waits for its configured recovery boundary",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_model_requests.ModelRequestTests.test_transient_exhaustion_obeys_the_configured_recovery_admission_delay"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_model_requests.py",
+          "line": 40
+        }
+      ]
+    },
+    {
+      "id": "A17-03",
+      "area": "Model retry boundaries",
+      "requirement": "System instructions, schemas, and output budgets share atomic reservation",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_model_requests.ModelRequestTests.test_explicit_input_and_schema_are_reserved_and_usage_settles_once",
+        "test.test_att.test_critical_hardening.test_discussion_and_token_budget.TestCriticalPersonalBudgets.test_concurrent_people_cannot_reserve_the_same_remaining_allowance"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_model_requests.py",
+          "line": 57
+        },
+        {
+          "path": "test/test_att/test_critical_hardening/test_discussion_and_token_budget.py",
+          "line": 15
+        }
+      ]
+    },
+    {
+      "id": "A17-04",
+      "area": "Model retry boundaries",
+      "requirement": "Provider wait instructions cannot exceed the remaining whole-sequence budget",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_model_requests.ModelRequestTests.test_provider_wait_beyond_sequence_budget_defers_without_early_dispatch",
+        "test.test_att.test_agent_activity.test_runtime_boundaries.RuntimeBoundaryTests.test_provider_capacity_wait_is_inside_the_whole_sequence_budget"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_model_requests.py",
+          "line": 117
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_runtime_boundaries.py",
+          "line": 276
+        }
+      ]
+    },
+    {
+      "id": "A17-05",
+      "area": "Model retry boundaries",
+      "requirement": "Permanent faults require remediation without periodic recovery",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_model_requests.ModelRequestTests.test_permanent_provider_error_has_no_periodic_recovery",
+        "test.test_att.test_agent_activity.test_runtime_boundaries.RuntimeBoundaryTests.test_host_remediation_does_not_reset_usage_or_the_person"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_model_requests.py",
+          "line": 137
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_runtime_boundaries.py",
+          "line": 312
+        }
+      ]
+    },
+    {
+      "id": "A17-06",
+      "area": "Model retry boundaries",
+      "requirement": "Late responses and unacknowledged local calls remain fenced",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_runtime_boundaries.RuntimeBoundaryTests.test_provider_completion_after_deadline_is_fenced_even_if_timer_started_late",
+        "test.test_att.test_agent_activity.test_runtime_boundaries.RuntimeBoundaryTests.test_synchronous_provider_timeout_retains_the_live_local_owner"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_runtime_boundaries.py",
+          "line": 148
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_runtime_boundaries.py",
+          "line": 394
+        }
+      ]
+    },
+    {
+      "id": "A17-07",
+      "area": "Model retry boundaries",
+      "requirement": "Uncooperative providers cannot indefinitely block manager close",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_model_requests.ModelRequestTests.test_close_does_not_wait_for_an_uncooperative_provider"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_model_requests.py",
+          "line": 212
+        }
+      ]
+    },
+    {
+      "id": "A18-01",
+      "area": "Cooldown recovery",
+      "requirement": "Downtime-excluded cooldown restores a remainder independently of sleep",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_profiles_and_countdowns.ProfileAndCountdownTests.test_excluded_cooldown_restores_its_remainder_not_elapsed_offline_time"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_profiles_and_countdowns.py",
+          "line": 46
+        }
+      ]
+    },
+    {
+      "id": "A18-02",
+      "area": "Cooldown recovery",
+      "requirement": "Rejected or cancelled cooldown receipts retain correct live boundaries",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_cooldown_transactions.CooldownTransactionTests.test_rejected_cooldown_receipt_does_not_publish_a_monotonic_deadline",
+        "test.test_att.test_agent_activity.test_cooldown_transactions.CooldownTransactionTests.test_cancelled_observer_publishes_a_successfully_committed_deadline"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_cooldown_transactions.py",
+          "line": 93
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_cooldown_transactions.py",
+          "line": 120
+        }
+      ]
+    },
+    {
+      "id": "A18-03",
+      "area": "Cooldown recovery",
+      "requirement": "Parallel faults serialize cooldown record versions",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_cooldown_transactions.CooldownTransactionTests.test_parallel_same_tool_faults_serialize_their_record_versions"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_cooldown_transactions.py",
+          "line": 14
+        }
+      ]
+    },
+    {
+      "id": "A19-01",
+      "area": "Detachment",
+      "requirement": "Threshold observation detaches the same single execution",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase0.spec_background_execution.SpecBackgroundExecution.test_threshold_releases_only_the_wait_and_produces_one_native_observation",
+        "test.test_att.test_background_tasks.test_detachment.DetachmentTests.test_text_detachment_continues_without_a_second_execution"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase0/spec_background_execution.py",
+          "line": 22
+        },
+        {
+          "path": "test/test_att/test_background_tasks/test_detachment.py",
+          "line": 20
+        }
+      ]
+    },
+    {
+      "id": "A19-02",
+      "area": "Detachment",
+      "requirement": "Fast siblings and one handle close one complete native batch",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_detachment.DetachmentTests.test_fast_native_sibling_and_one_handle_close_a_complete_batch"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_detachment.py",
+          "line": 42
+        }
+      ]
+    },
+    {
+      "id": "A19-03",
+      "area": "Detachment",
+      "requirement": "Fast results remain foreground without a second result notice",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_detachment.CompletionRaceTests.test_fast_result_stays_foreground_without_a_task_notice"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_detachment.py",
+          "line": 97
+        }
+      ]
+    },
+    {
+      "id": "A20-01",
+      "area": "Artifact execution",
+      "requirement": "Archived private libraries reject ordinary mutation while retained identities can reactivate",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_private_doclib.test_agent_lifecycle.TestPrivateAgentDocLib.test_archive_retain_reactivate_and_delete"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_private_doclib/test_agent_lifecycle.py",
+          "line": 17
+        }
+      ]
+    },
+    {
+      "id": "A20-02",
+      "area": "Artifact execution",
+      "requirement": "Private-library ownership and publication remain explicit",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_private_doclib.test_access_and_publishing.TestPrivateAgentDocLib.test_registration_private_boundary_and_shared_identity",
+        "test.test_att.test_private_doclib.test_access_and_publishing.TestPrivateAgentDocLib.test_publish_collision_move_and_private_events_hide_content"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_private_doclib/test_access_and_publishing.py",
+          "line": 16
+        },
+        {
+          "path": "test/test_att/test_private_doclib/test_access_and_publishing.py",
+          "line": 115
+        }
+      ]
+    },
+    {
+      "id": "A20-03",
+      "area": "Artifact execution",
+      "requirement": "Native symlinks and managed-link cycles cannot escape the managed boundary",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_critical_hardening.test_doclib_security.TestCriticalHardening.test_native_symlink_cannot_escape_doclib",
+        "test.test_att.test_critical_hardening.test_doclib_security.TestCriticalHardening.test_managed_doclib_link_cycle_is_rejected"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_critical_hardening/test_doclib_security.py",
+          "line": 236
+        },
+        {
+          "path": "test/test_att/test_critical_hardening/test_doclib_security.py",
+          "line": 160
+        }
+      ]
+    },
+    {
+      "id": "A20-04",
+      "area": "Artifact execution",
+      "requirement": "Managed links recheck current target ACL",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_critical_hardening.test_doclib_security.TestCriticalHardening.test_managed_doclib_link_enforces_live_target_acl"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_critical_hardening/test_doclib_security.py",
+          "line": 33
+        }
+      ]
+    },
+    {
+      "id": "A20-05",
+      "area": "Artifact execution",
+      "requirement": "Already entered atomic writes settle; revoked late writes fail closed",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_execution_authority.ExecutionAuthorityTests.test_already_entered_atomic_file_operation_settles_after_cancellation",
+        "test.test_att.test_agent_activity.test_execution_authority.ExecutionAuthorityTests.test_cancelled_synchronous_tool_cannot_start_a_late_write"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_execution_authority.py",
+          "line": 131
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_execution_authority.py",
+          "line": 96
+        }
+      ]
+    },
+    {
+      "id": "A21-01",
+      "area": "Cancellation",
+      "requirement": "Queued cancellation prevents dispatch",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_cancellation_and_health.CancellationTests.test_queued_cancel_prevents_dispatch"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_cancellation_and_health.py",
+          "line": 12
+        }
+      ]
+    },
+    {
+      "id": "A21-02",
+      "area": "Cancellation",
+      "requirement": "Running cooperative cancellation has factual acknowledgement",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_cancellation_and_health.CancellationTests.test_cooperative_running_cancel_has_an_acknowledgement"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_cancellation_and_health.py",
+          "line": 34
+        }
+      ]
+    },
+    {
+      "id": "A21-03",
+      "area": "Cancellation",
+      "requirement": "Threads retain reservations until actual return and known completion wins",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_cancellation_and_health.CancellationTests.test_cancelled_thread_keeps_its_resource_reservation_until_actual_return",
+        "test.test_att.test_background_tasks.test_cancellation_and_health.CancellationTests.test_uncooperative_async_completion_remains_a_confirmed_completion"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_cancellation_and_health.py",
+          "line": 77
+        },
+        {
+          "path": "test/test_att/test_background_tasks/test_cancellation_and_health.py",
+          "line": 52
+        }
+      ]
+    },
+    {
+      "id": "A21-04",
+      "area": "Cancellation",
+      "requirement": "Provider suspension requires acknowledgement and otherwise uses supported termination",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_owner_lifecycle.ExecutionLifecycleTests.test_supported_suspension_is_acknowledged_without_a_fabricated_terminal_state",
+        "test.test_att.test_background_tasks.test_owner_lifecycle.ExecutionLifecycleTests.test_unacknowledged_suspension_falls_back_to_supported_termination"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_owner_lifecycle.py",
+          "line": 50
+        },
+        {
+          "path": "test/test_att/test_background_tasks/test_owner_lifecycle.py",
+          "line": 63
+        }
+      ]
+    },
+    {
+      "id": "A21-05",
+      "area": "Cancellation",
+      "requirement": "Accepted local outcomes settle beyond the external grace period",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_control_settlement.ControlSettlementTests.test_close_waits_for_local_outcomes_without_using_the_external_grace_limit",
+        "test.test_att.test_institutional_runtime.test_shutdown_settlement.InstitutionalShutdownSettlementTests.test_returned_foreground_outcome_settles_while_close_waits_for_runtime_gate"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_control_settlement.py",
+          "line": 182
+        },
+        {
+          "path": "test/test_att/test_institutional_runtime/test_shutdown_settlement.py",
+          "line": 12
+        }
+      ]
+    },
+    {
+      "id": "A22-01",
+      "area": "Task dimensions",
+      "requirement": "Execution, health, attention, and uncertainty are independent values",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase0.test_contracts.TestNotificationAndExecutionContracts.test_execution_health_attention_and_uncertainty_are_independent"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase0/test_contracts.py",
+          "line": 206
+        }
+      ]
+    },
+    {
+      "id": "A22-02",
+      "area": "Task dimensions",
+      "requirement": "Unsupported heartbeat never becomes an inferred stall",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_cancellation_and_health.HealthTests.test_unsupported_heartbeat_is_not_an_inferred_stall"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_cancellation_and_health.py",
+          "line": 135
+        }
+      ]
+    },
+    {
+      "id": "A22-03",
+      "area": "Task dimensions",
+      "requirement": "Repeated health evidence coalesces only within a consecutive state",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_health_transitions.HealthTransitionTests.test_return_to_a_previous_health_state_is_a_new_observation",
+        "test.test_att.test_background_tasks.test_health_transitions.HealthTransitionTests.test_consecutive_identical_nonhealthy_reports_coalesce_only_until_a_transition"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_health_transitions.py",
+          "line": 26
+        },
+        {
+          "path": "test/test_att/test_background_tasks/test_health_transitions.py",
+          "line": 44
+        }
+      ]
+    },
+    {
+      "id": "A23-01",
+      "area": "Retained task-result access",
+      "requirement": "Default lawful retained results remain owner-readable after revocation",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_resources_and_privacy.RetainedResultTests.test_default_retention_and_restrictive_mode_do_not_grant_new_source_access"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_resources_and_privacy.py",
+          "line": 126
+        }
+      ]
+    },
+    {
+      "id": "A23-02",
+      "area": "Retained task-result access",
+      "requirement": "Restrictive policy cannot borrow a later membership or unverifiable source",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_resources_and_privacy.RetainedResultTests.test_restrictive_mode_cannot_borrow_new_membership_or_permissions",
+        "test.test_att.test_background_tasks.test_resources_and_privacy.RetainedResultTests.test_restrictive_mode_rejects_unverifiable_external_source_provenance"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_resources_and_privacy.py",
+          "line": 147
+        },
+        {
+          "path": "test/test_att/test_background_tasks/test_resources_and_privacy.py",
+          "line": 105
+        }
+      ]
+    },
+    {
+      "id": "A23-03",
+      "area": "Retained task-result access",
+      "requirement": "Revocation before acceptance cannot create a lawful retained body",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_commit_boundaries.CommitBoundaryTests.test_revocation_before_result_acceptance_does_not_create_a_retained_copy",
+        "test.test_att.test_background_tasks.test_binding_boundaries.BindingBoundaryTests.test_failure_body_is_not_an_authorization_bypass"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_commit_boundaries.py",
+          "line": 48
+        },
+        {
+          "path": "test/test_att/test_background_tasks/test_binding_boundaries.py",
+          "line": 112
+        }
+      ]
+    },
+    {
+      "id": "A23-04",
+      "area": "Retained task-result access",
+      "requirement": "Transient bodies do not reappear after restore or enter durable task payloads",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_persistence_and_recovery.PersistenceTests.test_transient_result_does_not_reappear_or_reread_after_restore",
+        "test.test_att.test_background_tasks.test_resources_and_privacy.RetainedResultTests.test_transient_private_read_never_persists_its_body_as_a_task_payload"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_persistence_and_recovery.py",
+          "line": 86
+        },
+        {
+          "path": "test/test_att/test_background_tasks/test_resources_and_privacy.py",
+          "line": 162
+        }
+      ]
+    },
+    {
+      "id": "A24-01",
+      "area": "Governance",
+      "requirement": "Incomplete electorates, membership changes, and ties cannot become approvals",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_personal_governance.test_rounds_and_concurrency.GovernanceCaseTests.test_complete_electorate_required_and_session_released",
+        "test.test_att.test_personal_governance.test_rounds_and_concurrency.GovernanceCaseTests.test_membership_changes_supersede_instead_of_reusing_votes",
+        "test.test_att.test_personal_governance.test_rounds_and_concurrency.GovernanceCaseTests.test_tie_creates_new_round_without_deleting_history"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_personal_governance/test_rounds_and_concurrency.py",
+          "line": 59
+        },
+        {
+          "path": "test/test_att/test_personal_governance/test_rounds_and_concurrency.py",
+          "line": 75
+        },
+        {
+          "path": "test/test_att/test_personal_governance/test_rounds_and_concurrency.py",
+          "line": 96
+        }
+      ]
+    },
+    {
+      "id": "A24-02",
+      "area": "Governance",
+      "requirement": "Reading addressed mail does not vote and actual choices are strict and immutable",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_personal_governance.test_identity_and_mail.PersonalGovernanceTests.test_unanswered_read_email_never_becomes_a_vote",
+        "test.test_att.test_personal_governance.test_identity_and_mail.PersonalGovernanceTests.test_strict_immutable_choice_and_cross_identity_rejection"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_personal_governance/test_identity_and_mail.py",
+          "line": 61
+        },
+        {
+          "path": "test/test_att/test_personal_governance/test_identity_and_mail.py",
+          "line": 113
+        }
+      ]
+    },
+    {
+      "id": "A24-03",
+      "area": "Governance",
+      "requirement": "Complete parent electorates and Root identity remain explicit",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_failover.TestATTFailover.test_parent_team_requires_every_explicit_ballot_before_alias_application",
+        "test.test_att.test_failover.TestATTFailover.test_explicit_root_agent_votes_as_itself_not_as_a_team_replacement"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_failover.py",
+          "line": 58
+        },
+        {
+          "path": "test/test_att/test_failover.py",
+          "line": 76
+        }
+      ]
+    },
+    {
+      "id": "A24-04",
+      "area": "Governance",
+      "requirement": "Unsupported communication wake is rejected on construction and assignment",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_routing.ExplicitRouteTests.test_communication_wake_is_rejected_at_construction_and_assignment"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_routing.py",
+          "line": 33
+        }
+      ]
+    },
+    {
+      "id": "A24-05",
+      "area": "Governance",
+      "requirement": "Case and channel recovery retain exact ballot provenance",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_communication.InstitutionalCommunicationTests.test_case_and_channel_restore_keep_exact_ballot_provenance"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_communication.py",
+          "line": 101
+        }
+      ]
+    },
+    {
+      "id": "A25-01",
+      "area": "Independence and approval",
+      "requirement": "Independent pairs communicate under every configured institution",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_routing.ExplicitRouteTests.test_independent_pair_is_permissive_under_every_policy"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_routing.py",
+          "line": 14
+        }
+      ]
+    },
+    {
+      "id": "A25-02",
+      "area": "Independence and approval",
+      "requirement": "Cross-tree lineage follows real tops without an invented Root",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_routing.ExplicitRouteTests.test_cross_tree_lineage_has_no_synthetic_root"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_routing.py",
+          "line": 21
+        }
+      ]
+    },
+    {
+      "id": "A25-03",
+      "area": "Independence and approval",
+      "requirement": "An independent parent still governs its attached child's requests",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_routing.ExplicitRouteTests.test_independent_parent_still_approves_for_attached_child"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_routing.py",
+          "line": 27
+        }
+      ]
+    },
+    {
+      "id": "A25-04",
+      "area": "Independence and approval",
+      "requirement": "Relevant independence transitions stale pending requests",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_communication.InstitutionalCommunicationTests.test_relevant_detachment_stales_even_before_any_ballot"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_communication.py",
+          "line": 83
+        }
+      ]
+    },
+    {
+      "id": "A25-05",
+      "area": "Independence and approval",
+      "requirement": "Active agreement revocation remains endpoint-owned and directionally idempotent",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_communication.test_agreements_and_delivery.TestAutonomousCommunication.test_one_way_delivery_idempotency_and_endpoint_revocation"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_communication/test_agreements_and_delivery.py",
+          "line": 10
+        }
+      ]
+    },
+    {
+      "id": "A26-01",
+      "area": "Formation",
+      "requirement": "Four attitudes and deliberate None are distinct from mail read flags",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_team_formation.test_consent_and_lifecycle.TestConsensualTeamFormation.test_four_attitudes_are_visible_but_only_acceptance_joins",
+        "test.test_att.test_personal_governance.test_lifecycle_and_choices.GovernanceLifecycleTests.test_formation_four_attitudes_are_independent_of_email_read_state"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_team_formation/test_consent_and_lifecycle.py",
+          "line": 128
+        },
+        {
+          "path": "test/test_att/test_personal_governance/test_lifecycle_and_choices.py",
+          "line": 114
+        }
+      ]
+    },
+    {
+      "id": "A26-02",
+      "area": "Formation",
+      "requirement": "Material revisions require renewed exact consent and reject stale responses",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_team_formation.test_revisions_and_deliberation.TestFormationRevisionsAndDeliberation.test_material_revision_resets_exact_consent_and_rejects_stale_actions"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_team_formation/test_revisions_and_deliberation.py",
+          "line": 84
+        }
+      ]
+    },
+    {
+      "id": "A26-03",
+      "area": "Formation",
+      "requirement": "Unanimity, final confirmation, and abandonment retain independent decisions",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_team_formation.test_consent_and_lifecycle.TestConsensualTeamFormation.test_unanimous_auto_creation_and_confirmation_abandonment"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_team_formation/test_consent_and_lifecycle.py",
+          "line": 189
+        }
+      ]
+    },
+    {
+      "id": "A26-04",
+      "area": "Formation",
+      "requirement": "Late joining is invitee-initiated and revalidates lifecycle",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_team_formation.test_consent_and_lifecycle.TestConsensualTeamFormation.test_late_join_is_always_invitee_initiated",
+        "test.test_att.test_team_formation.test_consent_and_lifecycle.TestConsensualTeamFormation.test_late_join_revalidates_agent_lifecycle_after_waiting_for_team_lock"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_team_formation/test_consent_and_lifecycle.py",
+          "line": 244
+        },
+        {
+          "path": "test/test_att/test_team_formation/test_consent_and_lifecycle.py",
+          "line": 471
+        }
+      ]
+    },
+    {
+      "id": "A26-05",
+      "area": "Formation",
+      "requirement": "Optional drafts remain supplied advisory candidates",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_team_formation.test_revisions_and_deliberation.TestFormationRevisionsAndDeliberation.test_collaborative_draft_is_detached_advisory_work_until_publication",
+        "test.test_att.test_team_formation.test_revisions_and_deliberation.TestFormationRevisionsAndDeliberation.test_preparing_candidate_never_invokes_a_hanging_provider"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_team_formation/test_revisions_and_deliberation.py",
+          "line": 254
+        },
+        {
+          "path": "test/test_att/test_team_formation/test_revisions_and_deliberation.py",
+          "line": 715
+        }
+      ]
+    },
+    {
+      "id": "A27-01",
+      "area": "Migration and failover",
+      "requirement": "Actual ancestor and lineage principals govern migration",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_policies.TestMigrationPolicies.test_ancestor_approval_uses_agent_teams_and_root_agent",
+        "test.test_att.test_policies.TestMigrationPolicies.test_lineage_path_uses_every_explicit_principal"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_policies.py",
+          "line": 53
+        },
+        {
+          "path": "test/test_att/test_policies.py",
+          "line": 65
+        }
+      ]
+    },
+    {
+      "id": "A27-02",
+      "area": "Migration and failover",
+      "requirement": "Migration cooldown and acceptance share successful commit time",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_migration_writer_time.MigrationWriterTimeTests.test_parent_acceptance_event_cooldown_and_receipt_share_one_final_time",
+        "test.test_att.test_institutional_runtime.test_migration_writer_time.MigrationWriterTimeTests.test_remaining_cooldown_counts_online_time_after_sql_commit_before_observation"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_migration_writer_time.py",
+          "line": 158
+        },
+        {
+          "path": "test/test_att/test_institutional_runtime/test_migration_writer_time.py",
+          "line": 201
+        }
+      ]
+    },
+    {
+      "id": "A27-03",
+      "area": "Migration and failover",
+      "requirement": "Runtime host policy is revalidated after lock and writer waits",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_migration_acceptance.MigrationAcceptanceTests.test_durable_detachment_rechecks_host_disable_after_runtime_gate_wait",
+        "test.test_att.test_institutional_runtime.test_migration_acceptance.MigrationAcceptanceTests.test_final_authority_check_rejects_disable_after_record_production"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_migration_acceptance.py",
+          "line": 49
+        },
+        {
+          "path": "test/test_att/test_institutional_runtime/test_migration_acceptance.py",
+          "line": 71
+        }
+      ]
+    },
+    {
+      "id": "A27-04",
+      "area": "Migration and failover",
+      "requirement": "Parent failover has its own expiry and rejects late choices without auto fallback",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_personal_governance.test_lifecycle_and_choices.GovernanceLifecycleTests.test_failover_timeout_closes_authority_but_retains_mail",
+        "test.test_att.test_failover.TestATTFailover.test_no_parent_and_self_parent_fail_closed_without_an_automatic_fallback"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_personal_governance/test_lifecycle_and_choices.py",
+          "line": 50
+        },
+        {
+          "path": "test/test_att/test_failover.py",
+          "line": 87
+        }
+      ]
+    },
+    {
+      "id": "A28-01",
+      "area": "Supervision",
+      "requirement": "Missing explicit findings create no health authority",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_supervision.TestATTSupervision.test_ordinary_answers_and_missing_findings_supply_no_health_authority"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_supervision.py",
+          "line": 29
+        }
+      ]
+    },
+    {
+      "id": "A28-02",
+      "area": "Supervision",
+      "requirement": "Confirmed integrity faults apply protection before incident persistence",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_supervision.TestATTSupervision.test_confirmed_integrity_fault_applies_protection_before_incident_commit"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_supervision.py",
+          "line": 48
+        }
+      ]
+    },
+    {
+      "id": "A28-03",
+      "area": "Supervision",
+      "requirement": "Audits create fresh real teams with common runtime and all findings",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_health.HealthRuntimeTests.test_real_fresh_team_uses_common_runtime_and_all_findings",
+        "test.test_att.test_supervision_lifecycle.TestSupervisoryTeamLifecycle.test_parallel_audits_have_separate_live_owners_and_provider_context"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_health.py",
+          "line": 71
+        },
+        {
+          "path": "test/test_att/test_supervision_lifecycle.py",
+          "line": 75
+        }
+      ]
+    },
+    {
+      "id": "A28-04",
+      "area": "Supervision",
+      "requirement": "Protocol and tool evidence use separate explicit thresholds",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_health.HealthRuntimeTests.test_protocol_streak_uses_one_person_and_different_protocol_codes",
+        "test.test_att.test_institutional_runtime.test_health.HealthRuntimeTests.test_tool_streaks_are_per_tool_and_category"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_health.py",
+          "line": 24
+        },
+        {
+          "path": "test/test_att/test_institutional_runtime/test_health.py",
+          "line": 56
+        }
+      ]
+    },
+    {
+      "id": "A28-05",
+      "area": "Supervision",
+      "requirement": "Unavailable audits preserve incidents without stopping ordinary people",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_health_admission_boundaries.HealthAdmissionBoundaryTests.test_unavailable_assessment_retains_incident_without_stopping_person"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_health_admission_boundaries.py",
+          "line": 21
+        }
+      ]
+    },
+    {
+      "id": "A28-06",
+      "area": "Supervision",
+      "requirement": "Audit deadline includes scheduler capacity and fences late findings",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_health_admission_boundaries.HealthAdmissionBoundaryTests.test_total_deadline_includes_waiting_for_common_scheduler_capacity",
+        "test.test_att.test_institutional_runtime.test_health_admission_boundaries.HealthAdmissionBoundaryTests.test_provider_response_after_total_deadline_cannot_submit_finding"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_health_admission_boundaries.py",
+          "line": 78
+        },
+        {
+          "path": "test/test_att/test_institutional_runtime/test_health_admission_boundaries.py",
+          "line": 109
+        }
+      ]
+    },
+    {
+      "id": "A28-07",
+      "area": "Supervision",
+      "requirement": "Incident handling checks current actual parent authority",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_incident_authority_publication.IncidentAuthorityPublicationTests.test_acknowledgement_rechecks_parent_authority_before_durable_acceptance",
+        "test.test_att.test_institutional_runtime.test_incident_authority_publication.IncidentAuthorityPublicationTests.test_claim_rechecks_parent_authority_before_volatile_acceptance"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_incident_authority_publication.py",
+          "line": 75
+        },
+        {
+          "path": "test/test_att/test_institutional_runtime/test_incident_authority_publication.py",
+          "line": 66
+        }
+      ]
+    },
+    {
+      "id": "A29-01",
+      "area": "Sleep",
+      "requirement": "Countdown units and total bounds are strict and Host-owned",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase0.test_contracts.TestScopeAndIntentContracts.test_duration_units_are_strict_and_total_bounds_are_host_owned",
+        "test.test_att.test_autonomous_activity_phase0.test_contracts.TestScopeAndIntentContracts.test_duration_wire_schemas_match_positive_omittable_units"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase0/test_contracts.py",
+          "line": 59
+        },
+        {
+          "path": "test/test_att/test_autonomous_activity_phase0/test_contracts.py",
+          "line": 107
+        }
+      ]
+    },
+    {
+      "id": "A29-02",
+      "area": "Sleep",
+      "requirement": "Sleep retains a mandatory finite deadline while mail is delivered",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_admission_and_controls.AdmissionAndControlTests.test_sleep_has_a_live_finite_safeguard_and_mail_does_not_cancel_it"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_admission_and_controls.py",
+          "line": 180
+        }
+      ]
+    },
+    {
+      "id": "A29-03",
+      "area": "Sleep",
+      "requirement": "Protected arrivals cross the sleep boundary without loss",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_sleep_scope.SleepScopeTests.test_protected_arrival_during_the_sleep_response_is_not_lost_at_the_boundary",
+        "test.test_att.test_agent_activity.test_notifications_and_tools.NotificationAndToolTests.test_ordinary_mail_cannot_spoof_a_protected_wake"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_sleep_scope.py",
+          "line": 13
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_notifications_and_tools.py",
+          "line": 143
+        }
+      ]
+    },
+    {
+      "id": "A29-04",
+      "area": "Sleep",
+      "requirement": "Provider unavailability cannot extend voluntary sleep",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_sleep_scope.SleepScopeTests.test_provider_unavailability_does_not_extend_voluntary_sleep"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_sleep_scope.py",
+          "line": 34
+        }
+      ]
+    },
+    {
+      "id": "A30-01",
+      "area": "Do-not-disturb",
+      "requirement": "Permanent and timed preferences share owner and duration rules",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase0.test_contracts.TestScopeAndIntentContracts.test_sleep_and_suppression_share_bounds_without_forcing_permanent_expiry",
+        "test.test_att.test_agent_activity.test_notification_suppression.SuppressionTests.test_preferences_cannot_select_another_owner_or_bypass_protected_notices"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase0/test_contracts.py",
+          "line": 84
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_notification_suppression.py",
+          "line": 47
+        }
+      ]
+    },
+    {
+      "id": "A30-02",
+      "area": "Do-not-disturb",
+      "requirement": "Expiry retains one source-count summary with unchanged read state",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_notification_suppression.SuppressionTests.test_timed_expiration_emits_one_count_summary_without_reading_mail"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_notification_suppression.py",
+          "line": 18
+        }
+      ]
+    },
+    {
+      "id": "A30-03",
+      "area": "Do-not-disturb",
+      "requirement": "Summaries never include private bodies, titles, or replay old notices",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_notification_suppression_privacy.SuppressionPrivacyTests.test_removal_frame_contains_counts_but_no_titles_bodies_or_reminder_replay"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_notification_suppression_privacy.py",
+          "line": 19
+        }
+      ]
+    },
+    {
+      "id": "A30-04",
+      "area": "Do-not-disturb",
+      "requirement": "Overlapping preferences and frozen archives remain independently filtered",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_notification_suppression_privacy.SuppressionPrivacyTests.test_new_overlapping_preference_does_not_strand_an_earlier_summary",
+        "test.test_att.test_agent_activity.test_notification_suppression_privacy.SuppressionPrivacyTests.test_departure_after_summary_creation_removes_its_archived_source_counts"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_notification_suppression_privacy.py",
+          "line": 74
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_notification_suppression_privacy.py",
+          "line": 50
+        }
+      ]
+    },
+    {
+      "id": "A31-01",
+      "area": "Independent identity and death",
+      "requirement": "Host-confirmed death is terminal and retains private artifacts",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_lifecycle.test_retained_death.DeathTests.test_death_is_explicit_host_only_terminal_and_preserves_private_artifacts"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_lifecycle/test_retained_death.py",
+          "line": 20
+        }
+      ]
+    },
+    {
+      "id": "A31-02",
+      "area": "Independent identity and death",
+      "requirement": "Death of members or creators preserves surviving teams and direct-child structure",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_lifecycle.test_retained_death.DeathTests.test_member_and_creator_death_preserves_teams_and_detaches_only_direct_children"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_lifecycle/test_retained_death.py",
+          "line": 46
+        }
+      ]
+    },
+    {
+      "id": "A31-03",
+      "area": "Independent identity and death",
+      "requirement": "Live and queued observers terminate without a prior idle boundary",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_lifecycle.test_retained_death.DeathTests.test_active_invocation_is_cancelled_without_an_idle_lock_requirement",
+        "test.test_att.test_agent_lifecycle.test_activity_observers.LifecycleObserverTests.test_queued_death_fails_all_checkpoint_and_interaction_waiters"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_lifecycle/test_retained_death.py",
+          "line": 73
+        },
+        {
+          "path": "test/test_att/test_agent_lifecycle/test_activity_observers.py",
+          "line": 23
+        }
+      ]
+    },
+    {
+      "id": "A31-04",
+      "area": "Independent identity and death",
+      "requirement": "Known returned results settle before death closes their authority",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_lifecycle_outcome_boundaries.LifecycleOutcomeTests.test_returned_personal_result_survives_death_and_observer_cancellation",
+        "test.test_att.test_background_tasks.test_lifecycle_outcome_boundaries.LifecycleOutcomeTests.test_source_revocation_still_denies_a_returned_result_during_death"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_lifecycle_outcome_boundaries.py",
+          "line": 73
+        },
+        {
+          "path": "test/test_att/test_background_tasks/test_lifecycle_outcome_boundaries.py",
+          "line": 141
+        }
+      ]
+    },
+    {
+      "id": "A31-05",
+      "area": "Independent identity and death",
+      "requirement": "Dead identities restore without a model binding or automatic wake",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_lifecycle.test_retained_death.DeathTests.test_dead_identity_round_trip_requires_no_model_binding_and_never_wakes"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_lifecycle/test_retained_death.py",
+          "line": 120
+        }
+      ]
+    },
+    {
+      "id": "A32-01",
+      "area": "Independent teams and live discovery",
+      "requirement": "Parents are explicit and personal membership never infers ancestry",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_admission_and_controls.AdmissionAndControlTests.test_personal_scope_and_memberships_cannot_reinfer_an_existing_parent",
+        "test.test_att.test_institutional_runtime.test_topology.InstitutionalTopologyTests.test_explicit_agent_parent_without_root_substitution"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_admission_and_controls.py",
+          "line": 17
+        },
+        {
+          "path": "test/test_att/test_institutional_runtime/test_topology.py",
+          "line": 33
+        }
+      ]
+    },
+    {
+      "id": "A32-02",
+      "area": "Independent teams and live discovery",
+      "requirement": "Dissolution and parent retirement detach surviving direct children only",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_topology.InstitutionalTopologyTests.test_parent_team_dissolution_detaches_direct_children_only",
+        "test.test_att.test_institutional_runtime.test_topology.InstitutionalTopologyTests.test_retiring_actual_agent_parent_preserves_creator_and_children"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_topology.py",
+          "line": 44
+        },
+        {
+          "path": "test/test_att/test_institutional_runtime/test_topology.py",
+          "line": 56
+        }
+      ]
+    },
+    {
+      "id": "A32-03",
+      "area": "Independent teams and live discovery",
+      "requirement": "Archived teams retain provenance without reentering live topology",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_topology_lifecycle.TopologyLifecycleTests.test_archived_child_retains_provenance_when_its_parent_is_later_archived",
+        "test.test_att.test_discovery.test_scope_and_privacy.DiscoveryScopeTests.test_inactive_deleted_and_audit_entities_are_excluded_from_every_operation"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_topology_lifecycle.py",
+          "line": 247
+        },
+        {
+          "path": "test/test_att/test_discovery/test_scope_and_privacy.py",
+          "line": 36
+        }
+      ]
+    },
+    {
+      "id": "A32-04",
+      "area": "Independent teams and live discovery",
+      "requirement": "Discovery uses restored registries without a persistent directory index",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_discovery.test_authority_and_restore.DiscoveryAuthorityTests.test_round_trip_uses_restored_registries_without_a_persisted_discovery_index"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_discovery/test_authority_and_restore.py",
+          "line": 72
+        }
+      ]
+    },
+    {
+      "id": "A33-01",
+      "area": "Voluntary topology changes",
+      "requirement": "Target acceptance and own-position cooldown are required for attachment",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_topology.InstitutionalTopologyTests.test_target_acceptance_and_own_cooldown"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_topology.py",
+          "line": 17
+        }
+      ]
+    },
+    {
+      "id": "A33-02",
+      "area": "Voluntary topology changes",
+      "requirement": "Agent tool detachment does not await an old parent",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_tool_entry_points.InstitutionalToolEntryTests.test_migration_tool_can_choose_null_without_waiting_for_an_old_parent"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_tool_entry_points.py",
+          "line": 52
+        }
+      ]
+    },
+    {
+      "id": "A33-03",
+      "area": "Voluntary topology changes",
+      "requirement": "Live Host disablement and exact final authority can reject a waiting transition",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_institutional_runtime.test_migration_acceptance.MigrationAcceptanceTests.test_detachment_rechecks_host_disable_after_record_lock_wait",
+        "test.test_att.test_institutional_runtime.test_migration_acceptance.MigrationAcceptanceTests.test_final_authority_check_rejects_disable_after_record_production"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_institutional_runtime/test_migration_acceptance.py",
+          "line": 52
+        },
+        {
+          "path": "test/test_att/test_institutional_runtime/test_migration_acceptance.py",
+          "line": 71
+        }
+      ]
+    },
+    {
+      "id": "A33-04",
+      "area": "Voluntary topology changes",
+      "requirement": "Parent provenance survives migration and restoration",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_topology_index.TopologyIndexTests.test_migration_after_restore_updates_the_parent_resolver",
+        "test.test_att.test_episodic_memory.test_persistence_and_privacy.test_incremental_dependencies.IncrementalMemoryDependencyTests.test_provenance_dependencies_keep_distinct_parent_and_creator_after_migration"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_topology_index.py",
+          "line": 76
+        },
+        {
+          "path": "test/test_att/test_episodic_memory/test_persistence_and_privacy/test_incremental_dependencies.py",
+          "line": 325
+        }
+      ]
+    },
+    {
+      "id": "A34-01",
+      "area": "Countdown recovery",
+      "requirement": "Offline time is excluded and restoration-start anchors survive slow publication",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_checkpoints_and_recovery.CheckpointAndRecoveryTests.test_sleep_export_samples_remainder_and_restore_does_not_spend_offline_time",
+        "test.test_att.test_state_persistence.test_recovery_wake_boundaries.RecoveryWakeTests.test_sleep_expired_during_slow_restore_settles_only_after_publication"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_checkpoints_and_recovery.py",
+          "line": 126
+        },
+        {
+          "path": "test/test_att/test_state_persistence/test_recovery_wake_boundaries.py",
+          "line": 100
+        }
+      ]
+    },
+    {
+      "id": "A34-02",
+      "area": "Countdown recovery",
+      "requirement": "Failed recovery preserves original timer deadlines",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_countdown_handoffs.CountdownHandoffTests.test_rejected_recovery_releases_the_original_expired_sleep",
+        "test.test_att.test_state_persistence.test_countdown_handoffs.CountdownHandoffTests.test_rejected_recovery_releases_the_original_expired_suppression"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_countdown_handoffs.py",
+          "line": 131
+        },
+        {
+          "path": "test/test_att/test_state_persistence/test_countdown_handoffs.py",
+          "line": 134
+        }
+      ]
+    },
+    {
+      "id": "A34-03",
+      "area": "Countdown recovery",
+      "requirement": "Timer handoffs exclude restore until accepted local settlement",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_countdown_handoffs.CountdownHandoffTests.test_sleep_expiry_owns_its_generation_while_the_activity_lock_is_queued",
+        "test.test_att.test_state_persistence.test_countdown_handoffs.CountdownHandoffTests.test_checkpoint_sampling_handoff_also_excludes_restore"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_countdown_handoffs.py",
+          "line": 88
+        },
+        {
+          "path": "test/test_att/test_state_persistence/test_countdown_handoffs.py",
+          "line": 176
+        }
+      ]
+    },
+    {
+      "id": "A34-04",
+      "area": "Countdown recovery",
+      "requirement": "A successful publication hands off exactly one new timer",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_countdown_handoffs.CountdownHandoffTests.test_successful_publication_uses_one_new_timer_and_discards_the_old_one"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_countdown_handoffs.py",
+          "line": 140
+        }
+      ]
+    },
+    {
+      "id": "A35-01",
+      "area": "Incremental persistence",
+      "requirement": "Committed dependency closures survive first partial export",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_foreground_evidence.ForegroundEvidenceTests.test_first_partial_export_includes_observation_execution_dependencies",
+        "test.test_att.test_episodic_memory.test_persistence_and_privacy.test_incremental_dependencies.IncrementalMemoryDependencyTests.test_segment_only_delta_includes_sources_owner_and_indexed_card"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_foreground_evidence.py",
+          "line": 13
+        },
+        {
+          "path": "test/test_att/test_episodic_memory/test_persistence_and_privacy/test_incremental_dependencies.py",
+          "line": 287
+        }
+      ]
+    },
+    {
+      "id": "A35-02",
+      "area": "Incremental persistence",
+      "requirement": "Unrelated identity and team rows remain unchanged for chat-only deltas",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_commit_and_restore.CommitAndRestoreTests.test_chat_only_delta_preserves_unrelated_identity_and_team_rows"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_commit_and_restore.py",
+          "line": 131
+        }
+      ]
+    },
+    {
+      "id": "A35-03",
+      "area": "Incremental persistence",
+      "requirement": "Cancelled observers retain accepted writes and exact receipts",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_high_hardening.test_persistence_queue.TestHighHardening.test_cancellation_does_not_drop_an_accepted_write_or_team_lock",
+        "test.test_att.test_conversations.test_commit_and_restore.CommitAndRestoreTests.test_cancelled_delivery_settles_and_replays_the_exact_durable_receipt"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_high_hardening/test_persistence_queue.py",
+          "line": 286
+        },
+        {
+          "path": "test/test_att/test_conversations/test_commit_and_restore.py",
+          "line": 16
+        }
+      ]
+    },
+    {
+      "id": "A35-04",
+      "area": "Incremental persistence",
+      "requirement": "Incremental validation agrees with strict reference validation",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_incremental_validation.test_detached_equivalence.DetachedEquivalenceTests.test_deleted_prerequisite_invalidates_unchanged_dependants",
+        "test.test_att.test_incremental_validation.test_detached_equivalence.DetachedEquivalenceTests.test_changed_request_invalidates_unchanged_presented_claim"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_incremental_validation/test_detached_equivalence.py",
+          "line": 69
+        },
+        {
+          "path": "test/test_att/test_incremental_validation/test_detached_equivalence.py",
+          "line": 81
+        }
+      ]
+    },
+    {
+      "id": "A36-01",
+      "area": "Schema and ownership",
+      "requirement": "Old, future, and malformed schema versions cause no DDL or workspace mutation",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_unsupported_schema.UnsupportedSchemaTests.test_old_future_and_malformed_versions_leave_database_and_workspace_unchanged"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_unsupported_schema.py",
+          "line": 15
+        }
+      ]
+    },
+    {
+      "id": "A36-02",
+      "area": "Schema and ownership",
+      "requirement": "Competing processes and abrupt restart enforce exclusive writer ownership",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_high_hardening.test_database_integrity.TestHighHardening.test_writer_ownership_and_abrupt_restart_recovery"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_high_hardening/test_database_integrity.py",
+          "line": 68
+        }
+      ]
+    },
+    {
+      "id": "A36-03",
+      "area": "Schema and ownership",
+      "requirement": "SQLite pragmas and coalesced pending deltas preserve strict writer semantics",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_high_hardening.test_persistence_queue.TestHighHardening.test_sqlite_pragmas_and_coalesced_pending_delta"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_high_hardening/test_persistence_queue.py",
+          "line": 69
+        }
+      ]
+    },
+    {
+      "id": "A37-01",
+      "area": "Durability modes",
+      "requirement": "Durable selection and missing paths are explicit rather than silently volatile",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase1.test_records_and_receipts.RecordTests.test_durable_is_default_and_volatile_is_explicit"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase1/test_records_and_receipts.py",
+          "line": 18
+        }
+      ]
+    },
+    {
+      "id": "A37-02",
+      "area": "Durability modes",
+      "requirement": "Host chat and exports preserve equivalent identities in durable and volatile modes",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_durability_parity.DurabilityParityTests.test_sources_views_changes_and_export_keep_the_same_person_in_both_modes"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_durability_parity.py",
+          "line": 10
+        }
+      ]
+    },
+    {
+      "id": "A37-03",
+      "area": "Durability modes",
+      "requirement": "Receipts survive lost responses and retain accepted identities",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_autonomous_activity_phase1.test_commit_boundaries.CommitBoundaryTests.test_lost_response_retry_after_restore_returns_the_original_receipt"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_autonomous_activity_phase1/test_commit_boundaries.py",
+          "line": 21
+        }
+      ]
+    },
+    {
+      "id": "A37-04",
+      "area": "Durability modes",
+      "requirement": "Complete consumer examples avoid project-root DocLib and verify restored identity",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_documentation_contracts.test_examples.RunnableExampleTests.test_personal_cli_runs_from_outside_the_repository",
+        "test.test_att.test_documentation_contracts.test_examples.RunnableExampleTests.test_text_cli_runs_from_outside_the_repository",
+        "test.test_att.test_documentation_contracts.test_examples.RunnableExampleTests.test_background_cli_runs_from_outside_the_repository"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_documentation_contracts/test_examples.py",
+          "line": 73
+        },
+        {
+          "path": "test/test_att/test_documentation_contracts/test_examples.py",
+          "line": 76
+        },
+        {
+          "path": "test/test_att/test_documentation_contracts/test_examples.py",
+          "line": 79
+        }
+      ]
+    },
+    {
+      "id": "A38-01",
+      "area": "Restore corruption",
+      "requirement": "Chat and command-reference corruption cannot change live runtime or files",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_commit_and_restore.CommitAndRestoreTests.test_corrupt_chat_reference_matrix_does_not_publish_runtime_or_files",
+        "test.test_att.test_conversations.test_operation_receipts.OperationReceiptTests.test_corrupt_command_receipts_reject_restore_without_changing_runtime_or_files"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_commit_and_restore.py",
+          "line": 81
+        },
+        {
+          "path": "test/test_att/test_conversations/test_operation_receipts.py",
+          "line": 46
+        }
+      ]
+    },
+    {
+      "id": "A38-02",
+      "area": "Restore corruption",
+      "requirement": "Execution and private-owner reference corruption fails atomically",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_persistence_and_recovery.PersistenceTests.test_corrupt_execution_matrix_preserves_original_manager_and_files",
+        "test.test_att.test_private_doclib.test_persistence_and_corruption.TestPrivateAgentDocLib.test_current_schema_round_trip_and_corruption_is_atomic"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_persistence_and_recovery.py",
+          "line": 110
+        },
+        {
+          "path": "test/test_att/test_private_doclib/test_persistence_and_corruption.py",
+          "line": 17
+        }
+      ]
+    },
+    {
+      "id": "A38-03",
+      "area": "Restore corruption",
+      "requirement": "Sleep, suppression, and dead ownership corruption fail before publication",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_activity_lifecycle_validation.LifecycleCorruptionTests.test_timed_suppression_corruption_matrix_preserves_the_live_manager",
+        "test.test_att.test_state_persistence.test_activity_lifecycle_validation.LifecycleCorruptionTests.test_dead_member_or_active_private_library_cannot_restore_as_valid_state"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_activity_lifecycle_validation.py",
+          "line": 12
+        },
+        {
+          "path": "test/test_att/test_state_persistence/test_activity_lifecycle_validation.py",
+          "line": 42
+        }
+      ]
+    },
+    {
+      "id": "A38-04",
+      "area": "Restore corruption",
+      "requirement": "Memory lifecycle and complete personal context are validated independently",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_episodic_memory.test_persistence_and_privacy.test_snapshots_and_restore.TestPersistenceAndPrivacy.test_restore_validation_rejects_invalid_memory_lifecycle_edges",
+        "test.test_att.test_agent_activity.test_restore_context_validation.RestoreContextValidationTests.test_invalid_context_matrix_is_rejected_before_any_publication"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_episodic_memory/test_persistence_and_privacy/test_snapshots_and_restore.py",
+          "line": 162
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_restore_context_validation.py",
+          "line": 51
+        }
+      ]
+    },
+    {
+      "id": "A39-01",
+      "area": "Crash boundaries",
+      "requirement": "Real exits surround dispatch, returned outcome, and SQLite result commit",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_crash_boundaries.ExecutionCrashBoundaryTests.test_process_exit_before_and_after_dispatch_and_result_commit_never_replays"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_crash_boundaries.py",
+          "line": 17
+        }
+      ]
+    },
+    {
+      "id": "A39-02",
+      "area": "Crash boundaries",
+      "requirement": "A process exit between directory swaps restores every original library",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_publication_crash_boundaries.PublicationCrashBoundaryTests.test_process_exit_between_library_swaps_rolls_back_every_original_directory"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_publication_crash_boundaries.py",
+          "line": 28
+        }
+      ]
+    },
+    {
+      "id": "A39-03",
+      "area": "Crash boundaries",
+      "requirement": "An exit after recovery receipt but before activation retains one addressed notice",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_publication_crash_boundaries.PublicationCrashBoundaryTests.test_exit_after_recovery_receipt_before_activation_keeps_one_notice_and_no_replay"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_publication_crash_boundaries.py",
+          "line": 54
+        }
+      ]
+    },
+    {
+      "id": "A39-04",
+      "area": "Crash boundaries",
+      "requirement": "Rollback intent restores prior request and quota rows after an actual crash",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_recovery_publication_crash.RecoveryCrashTests.test_crash_after_rollback_intent_restores_existing_request_and_claim_rows"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_recovery_publication_crash.py",
+          "line": 16
+        }
+      ]
+    },
+    {
+      "id": "A40-01",
+      "area": "Recovery policy",
+      "requirement": "Unfinished Host execution wakes its same owner without replay or reconnect",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_activity_recovery.RecoveryTests.test_unfinished_host_execution_wakes_a_never_activated_owner_once_without_replay"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_activity_recovery.py",
+          "line": 72
+        }
+      ]
+    },
+    {
+      "id": "A40-02",
+      "area": "Recovery policy",
+      "requirement": "Unaffected sleep and source read state survive restoration",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_activity_recovery.RecoveryTests.test_timed_suppression_and_sleep_exclude_offline_time_and_keep_source_unread"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_activity_recovery.py",
+          "line": 108
+        }
+      ]
+    },
+    {
+      "id": "A40-03",
+      "area": "Recovery policy",
+      "requirement": "Known terminal results restore attention and provenance without redispatch",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_persistence_and_recovery.PersistenceTests.test_result_attention_config_and_provenance_round_trip"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_persistence_and_recovery.py",
+          "line": 33
+        }
+      ]
+    },
+    {
+      "id": "A40-04",
+      "area": "Recovery policy",
+      "requirement": "Repeated restore deduplicates uncertain execution notices",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_crash_boundaries.ExecutionCrashBoundaryTests.test_process_exit_before_and_after_dispatch_and_result_commit_never_replays",
+        "test.test_att.test_state_persistence.test_publication_crash_boundaries.PublicationCrashBoundaryTests.test_exit_after_recovery_receipt_before_activation_keeps_one_notice_and_no_replay"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_crash_boundaries.py",
+          "line": 17
+        },
+        {
+          "path": "test/test_att/test_state_persistence/test_publication_crash_boundaries.py",
+          "line": 54
+        }
+      ]
+    },
+    {
+      "id": "A41-01",
+      "area": "Runtime replacement",
+      "requirement": "Old synchronous writes and returned delegated authority cannot cross a revoked generation",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_execution_authority.ExecutionAuthorityTests.test_cancelled_synchronous_tool_cannot_start_a_late_write",
+        "test.test_att.test_agent_activity.test_execution_authority.ExecutionAuthorityTests.test_returned_tool_cannot_implicitly_delegate_its_authority"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_execution_authority.py",
+          "line": 96
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_execution_authority.py",
+          "line": 170
+        }
+      ]
+    },
+    {
+      "id": "A41-02",
+      "area": "Runtime replacement",
+      "requirement": "Live executor ownership excludes restore",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_resources_and_privacy.ResourceTests.test_restore_rejects_a_live_executor_even_without_personal_activity"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_resources_and_privacy.py",
+          "line": 83
+        }
+      ]
+    },
+    {
+      "id": "A41-03",
+      "area": "Runtime replacement",
+      "requirement": "Failed runtime publication restores exact previous quota and request facts",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_state_persistence.test_activity_recovery.RecoveryTests.test_runtime_switch_failure_restores_existing_request_and_quota_rows_exactly"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_state_persistence/test_activity_recovery.py",
+          "line": 49
+        }
+      ]
+    },
+    {
+      "id": "A41-04",
+      "area": "Runtime replacement",
+      "requirement": "Indexing close and restore suspension cannot leave cancelled queue workers",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_episodic_memory.test_indexing_lifecycle.IndexingLifecycleTests.test_close_cannot_leave_a_cancelled_indexer_waiting_for_another_item",
+        "test.test_att.test_episodic_memory.test_indexing_lifecycle.IndexingLifecycleTests.test_restore_suspension_finishes_when_an_index_result_wins_cancellation",
+        "test.test_att.test_episodic_memory.test_indexing_lifecycle.IndexingLifecycleTests.test_close_releases_a_flush_observer_without_discarding_pending_segments"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_episodic_memory/test_indexing_lifecycle.py",
+          "line": 123
+        },
+        {
+          "path": "test/test_att/test_episodic_memory/test_indexing_lifecycle.py",
+          "line": 128
+        },
+        {
+          "path": "test/test_att/test_episodic_memory/test_indexing_lifecycle.py",
+          "line": 57
+        }
+      ]
+    },
+    {
+      "id": "A42-01",
+      "area": "Privacy",
+      "requirement": "Counts, discovery, callbacks, and operation events contain no chat bodies",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_conversations.test_changes_and_notifications.ChangeAndNoticeTests.test_callbacks_and_discovery_never_contain_chat_payloads",
+        "test.test_att.test_conversations.test_changes_and_notifications.ChangeAndNoticeTests.test_disabled_details_and_page_counts_do_not_parse_unreturned_bodies"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_conversations/test_changes_and_notifications.py",
+          "line": 152
+        },
+        {
+          "path": "test/test_att/test_conversations/test_changes_and_notifications.py",
+          "line": 140
+        }
+      ]
+    },
+    {
+      "id": "A42-02",
+      "area": "Privacy",
+      "requirement": "Private observations remain transient across checkpoints and model protocols",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_agent_activity.test_notifications_and_tools.NotificationAndToolTests.test_private_read_is_transient_even_at_a_mid_activity_checkpoint",
+        "test.test_att.test_private_doclib.test_reasoning_privacy.TestPrivateAgentDocLib.test_react_private_payload_is_not_durable_or_callback_visible",
+        "test.test_att.test_episodic_memory.test_persistence_and_privacy.test_tool_privacy.TestPersistenceAndPrivacy.test_native_private_result_cannot_enter_persisted_memory"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_agent_activity/test_notifications_and_tools.py",
+          "line": 112
+        },
+        {
+          "path": "test/test_att/test_private_doclib/test_reasoning_privacy.py",
+          "line": 17
+        },
+        {
+          "path": "test/test_att/test_episodic_memory/test_persistence_and_privacy/test_tool_privacy.py",
+          "line": 44
+        }
+      ]
+    },
+    {
+      "id": "A42-03",
+      "area": "Privacy",
+      "requirement": "Voting and audits cannot automatically ingest personal private artifacts",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_personal_governance.test_identity_and_mail.PersonalGovernanceTests.test_private_files_are_not_injected_into_voting_context"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_personal_governance/test_identity_and_mail.py",
+          "line": 101
+        }
+      ]
+    },
+    {
+      "id": "A42-04",
+      "area": "Privacy",
+      "requirement": "Result bodies cannot be read by another execution owner",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_background_tasks.test_admission_and_results.AdmissionTests.test_other_owner_cannot_inspect_search_read_or_cancel"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_background_tasks/test_admission_and_results.py",
+          "line": 72
+        }
+      ]
+    },
+    {
+      "id": "A43-01",
+      "area": "Optional memory",
+      "requirement": "Disabled mode needs no indexing and can persist Journal without cards",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_episodic_memory.test_catalog_and_recall.test_optional_mode.TestOptionalMode.test_disabled_by_default_and_runtime_tool_view_tracks_configuration",
+        "test.test_att.test_episodic_memory.test_catalog_and_recall.test_optional_mode.TestOptionalMode.test_disabled_mode_persists_journal_without_cards_or_fts"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_episodic_memory/test_catalog_and_recall/test_optional_mode.py",
+          "line": 39
+        },
+        {
+          "path": "test/test_att/test_episodic_memory/test_catalog_and_recall/test_optional_mode.py",
+          "line": 102
+        }
+      ]
+    },
+    {
+      "id": "A43-02",
+      "area": "Optional memory",
+      "requirement": "Indexing owns invocation provenance and cannot capture another person or business scope",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_episodic_memory.test_catalog_and_recall.test_indexing.TestCatalogAndRecall.test_one_finished_invocation_creates_one_isolated_card",
+        "test.test_att.test_episodic_memory.test_catalog_and_recall.test_indexing.TestCatalogAndRecall.test_background_indexer_does_not_inherit_business_invocation_context",
+        "test.test_att.test_episodic_memory.test_catalog_and_recall.test_indexing.TestCatalogAndRecall.test_another_agent_registered_during_activity_cannot_enter_its_segment"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_episodic_memory/test_catalog_and_recall/test_indexing.py",
+          "line": 44
+        },
+        {
+          "path": "test/test_att/test_episodic_memory/test_catalog_and_recall/test_indexing.py",
+          "line": 59
+        },
+        {
+          "path": "test/test_att/test_episodic_memory/test_catalog_and_recall/test_indexing.py",
+          "line": 77
+        }
+      ]
+    },
+    {
+      "id": "A43-03",
+      "area": "Optional memory",
+      "requirement": "Ephemeral recall clears and membership leaves the catalog intact",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_episodic_memory.test_catalog_and_recall.test_recall.TestCatalogAndRecall.test_search_is_owner_scoped_and_recall_expires",
+        "test.test_att.test_episodic_memory.test_persistence_and_privacy.test_identity_lifecycle.TestPersistenceAndPrivacy.test_membership_changes_do_not_touch_agent_memory"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_episodic_memory/test_catalog_and_recall/test_recall.py",
+          "line": 35
+        },
+        {
+          "path": "test/test_att/test_episodic_memory/test_persistence_and_privacy/test_identity_lifecycle.py",
+          "line": 30
+        }
+      ]
+    },
+    {
+      "id": "A43-04",
+      "area": "Optional memory",
+      "requirement": "Disabling with a backlog releases flush and reenable preserves pending indexing",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_episodic_memory.test_indexing_lifecycle.IndexingLifecycleTests.test_disabling_indexing_drains_a_backlog_and_reenable_preserves_pending_work"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_episodic_memory/test_indexing_lifecycle.py",
+          "line": 14
+        }
+      ]
+    },
+    {
+      "id": "A44-01",
+      "area": "Stress and cleanup",
+      "requirement": "Ordered callbacks tolerate blocking and failures without blocking the event loop",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_high_hardening.test_shared_agent_and_lifecycle.TestHighHardening.test_callbacks_are_ordered_nonblocking_and_isolated"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_high_hardening/test_shared_agent_and_lifecycle.py",
+          "line": 172
+        }
+      ]
+    },
+    {
+      "id": "A44-02",
+      "area": "Stress and cleanup",
+      "requirement": "Many-source admissions retain one person and fair independent progress",
+      "coverage": "covered",
+      "selectors": [
+        "test.reliability.stress_admission.AdmissionPressureTests.test_many_sources_coalesce_without_cloning_people_or_starving_other_owners"
+      ],
+      "sources": [
+        {
+          "path": "test/reliability/stress_admission.py",
+          "line": 15
+        }
+      ]
+    },
+    {
+      "id": "A44-03",
+      "area": "Stress and cleanup",
+      "requirement": "Continuous slow-writer producers retain all keys with two completion handles",
+      "coverage": "covered",
+      "selectors": [
+        "test.reliability.stress_writer.SlowWriterTests.test_continuous_producers_coalesce_without_losing_keys_or_blocking_the_loop"
+      ],
+      "sources": [
+        {
+          "path": "test/reliability/stress_writer.py",
+          "line": 19
+        }
+      ]
+    },
+    {
+      "id": "A44-04",
+      "area": "Stress and cleanup",
+      "requirement": "Seeded relationship periods preserve current authority across repeated restores",
+      "coverage": "covered",
+      "selectors": [
+        "test.reliability.stress_relationships.ExtendedRelationshipTests.test_seeded_relationship_histories_survive_repeated_restore"
+      ],
+      "sources": [
+        {
+          "path": "test/reliability/stress_relationships.py",
+          "line": 12
+        }
+      ]
+    },
+    {
+      "id": "A44-05",
+      "area": "Stress and cleanup",
+      "requirement": "Loop responsiveness continues while detached validation is blocked",
+      "coverage": "covered",
+      "selectors": [
+        "test.test_att.test_incremental_validation.test_volatile_lifecycle.VolatileValidationLifecycleTests.test_slow_preparation_does_not_block_heartbeat_or_publish_baseline"
+      ],
+      "sources": [
+        {
+          "path": "test/test_att/test_incremental_validation/test_volatile_lifecycle.py",
+          "line": 12
+        }
+      ]
+    }
+  ]
+}

@@ -124,6 +124,12 @@ Restore validates event and sequence uniqueness, Agent ownership, source-event e
 
 Persisted `processing` index jobs return to `pending` after restore, and `await manager.flush_memory_indexing()` waits for every currently runnable background job.
 
+Shutdown and restore suspension fence both new indexing and the worker's next queue wait, including when a returned label wins a cancellation race.
+
+Undispatched queue bookkeeping is released while pending segments remain retained, and a concurrent flush observer reports closure or suspension rather than waiting indefinitely or claiming indexing finished.
+
+Disabling the optional mode allows existing queue bookkeeping to drain without publishing cards, and re-enabling it resumes the retained pending segments.
+
 Trusted hosts can use `retry_memory_index`, `list_memory_index_failures`, `restore_forgotten_memory`, and `list_agent_history` without exposing Journal access to Agents.
 
 Confirmed permanent Agent deletion removes Working Context, segments, cards, retained references, and the Private Agent DocLib while retaining immutable Journal events with historical identity snapshots.

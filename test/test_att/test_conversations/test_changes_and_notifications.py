@@ -27,9 +27,13 @@ class ChangeAndNoticeTests(ChatTestCase):
         await self.manager.save_state()
         await self.manager.load_state(self.path)
         self.assertEqual(self.records("chat_withdrawals")[0].values["window_seconds"], 1200)
-        for value in (0, -1, float("inf"), float("nan"), True):
+        for value in (0, -1, float("inf"), float("nan"), True, "1200"):
             with self.assertRaises(ValidationError):
                 ConversationConfig(withdrawal_window_seconds=value)
+            before = self.manager.config.conversations.withdrawal_window_seconds
+            with self.assertRaises(ValidationError):
+                self.manager.config.conversations.withdrawal_window_seconds = value
+            self.assertEqual(self.manager.config.conversations.withdrawal_window_seconds, before)
 
     async def test_successful_edit_renews_window_but_failed_edit_does_not(self):
         self.manager.config.conversations.withdrawal_window_seconds = 10

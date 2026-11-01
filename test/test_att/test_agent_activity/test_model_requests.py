@@ -14,6 +14,46 @@ async def observed(predicate):
 
 
 class ModelRequestTests(ActivityTestCase):
+    async def test_full_jitter_bounds_per_model_deadline_and_exact_framework_attempts(self):
+        self.manager.register_runtime_clock(self.clock)
+        policy = self.manager.config.activity.llm
+        policy.max_retries = 2
+        policy.backoff_base_seconds = 1.0
+        policy.backoff_cap_seconds = 1.5
+        policy.model_timeouts["fixture"] = 7.0
+        ranges = []
+
+        def minimum_jitter(low, high):
+            ranges.append((low, high))
+            return low
+
+        self.manager._activity.models.jitter = minimum_jitter
+        self.steps(TransientLLMError("Synthetic first attempt"), TransientLLMError("Synthetic second attempt"), idle())
+        admission = await self.manager.activate_agent(self.root.agent_id)
+        await self.wait(admission)
+        self.assertEqual(ranges, [(0, 1.0), (0, 1.5)])
+        self.assertEqual(len(self.client.requests), 3)
+        self.assertEqual([row.values["request_budget"] for row in self.records("model_requests")], [7.0, 7.0, 7.0])
+        self.assertEqual([row.values["attempt_index"] for row in self.records("model_requests")], [1, 2, 3])
+        self.assertEqual(self.client.unexpected_requests, 0)
+
+    async def test_transient_exhaustion_obeys_the_configured_recovery_admission_delay(self):
+        from ai_team_team.core.manager.activity.values import ModelUnavailable
+        self.manager.register_runtime_clock(self.clock)
+        self.manager.config.activity.llm.max_retries = 0
+        self.steps(TransientLLMError("Synthetic unavailable provider"), idle())
+        admission = await self.manager.activate_agent(self.root.agent_id)
+        with self.assertRaises(ModelUnavailable):
+            await self.wait(admission)
+        self.assertEqual(self.records("model_availability")[0].values["earliest_admission_at"], 60.0)
+        self.clock.advance(59)
+        self.assertEqual(len(self.client.requests), 1)
+        self.clock.advance(1)
+        await observed(lambda: len(self.client.requests) == 2)
+        await self.settle()
+        self.assertEqual(self.manager.inspect_agent_activity(self.root.agent_id).intent, "idle")
+        self.assertEqual(self.client.maximum_in_flight, 1)
+
     async def test_explicit_input_and_schema_are_reserved_and_usage_settles_once(self):
         self.manager.config.model_token_limits["fixture"] = 1_000_000
         self.manager.config.model_max_output_tokens["fixture"] = 20

@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-AREAS = ("src", "test", "typecheck", "docs", "README.md", "Roadmap", ".github", "pyproject.toml")
+AREAS = ("src", "test", "typecheck", "examples", "scripts", "docs", "README.md", "Roadmap", ".github", "pyproject.toml")
 EXCLUDED = (
     "test/test_att/test_autonomous_activity_phase0/",
     "docs/dev/autonomous_activity/",

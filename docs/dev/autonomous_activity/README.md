@@ -20,7 +20,9 @@ Phase 7 adds [public documentation and executable consumer contracts](Phase_7.md
 
 Phase 7 documentation and local acceptance checks are complete.
 
-Phase 8 extended reliability acceptance remains separate work.
+Phase 8 adds [reliability acceptance](Phase_8.md), a [requirement-to-test ledger](Verification_Coverage.md), reproducible extended workloads, real crash boundaries, and source-bound run evidence.
+
+Its local results and the supported platform gate are recorded separately rather than inferring cross-platform acceptance from one host.
 
 The Autonomous Agent Runtime coordinates personal activity, scheduling, provider calls, and invocation-scoped execution.
 
@@ -58,6 +60,8 @@ The running persistence schema is now `16`; schema 15 and earlier are rejected w
 - [Phase 5 implementation](Phase_5.md): retained institutional mechanisms using common Agent execution, complete round removal, and completed local adversarial verification.
 - [Phase 6 implementation](Phase_6.md): sleep guarantees, reminder suppression, staged recovery settlement, and terminal retained death.
 - [Phase 7 implementation](Phase_7.md): current user guides, exact API tables, runnable offline examples, installed-wheel checks, and reconciled roadmap boundaries.
+- [Phase 8 acceptance](Phase_8.md): baseline evidence, tested interaction boundaries, lifecycle fixes, seeded workloads, crash recovery, and final verification scope.
+- [Verification coverage](Verification_Coverage.md): independently reviewable requirements and exact behavioral selectors, with [machine-readable declarations](verification_cases.json).
 
 The current usage guides are [Personal Activity](../../Personal_Activity.md), [Personal Conversations](../../Personal_Conversations.md), and [Background Tasks](../../Background_Tasks.md).
 
