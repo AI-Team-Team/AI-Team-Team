@@ -179,6 +179,10 @@ The all-output mode continuously streams the complete log to stderr, including p
 
 Capture redirects operating-system descriptors 1 and 2 as well as Python streams, so native writes and inherited subprocess output stay in the raw log and do not corrupt the JSON stdout summary.
 
+The native buffering regression uses a separately owned CRT stream and verifies that capture flushes its data before the stream is closed, without assuming that Windows exports the inline `printf` function.
+
+When a fixture expected to succeed exits unsuccessfully, the failure includes its child report, stdout, stderr, and retained raw log, so temporary-directory cleanup does not discard the underlying error.
+
 The stdout summary and `result.json` retain their payload-free metadata in every mode, while default human-readable stderr can contain the failed test's raw output and exception message.
 
 All modes preserve complete logs for resource-warning checks, so hiding successful output cannot hide acceptance failures.

@@ -4,7 +4,7 @@ ATT's reliability acceptance checks the implemented personal runtime and its int
 
 Agent identity, personal state, exact-revision formation consent, explicit governance ballots, live authorization, and factual execution evidence remain the governing contracts.
 
-Local acceptance completed on 2026-10-30; the supported-platform gate remains pending a committed CI run.
+Local acceptance completed on 2026-10-30; supported-platform acceptance remains subject to CI, including the Windows native-output correction described below.
 
 ## Baseline and Evidence
 
@@ -178,6 +178,18 @@ The supported CI matrix remains Python 3.11, 3.12, and 3.13 on Linux, macOS, and
 
 The new workflow runs full-suite evidence on all nine combinations and extended reliability on Python 3.13 for all three systems.
 
-The uncommitted Phase 8 changes have not run in GitHub CI, so platform acceptance remains pending a committed run and is not inferred from the baseline or this local host.
+The committed Phase 8 changes reached CI, where the Windows full-suite jobs failed in the buffered native-output fixture.
+
+That fixture assumed that `ucrtbase.dll` directly exports `printf`, which Windows does not guarantee.
+
+The corrected probe uses declared CRT functions with a separately owned, fully buffered stream, verifies pending data before capture exits, and checks that it was flushed before `fclose` can flush it implicitly.
+
+Unexpected positive-fixture exits now include their retained child report, stdout, stderr, and raw log in the assertion diagnostics.
+
+The focused correction checks include native-buffer retention, unexpected child-failure diagnostics, and CRLF text normalization while preserving original log bytes.
+
+A negative control confirmed that disabling native flushing makes the buffering regression fail before stream closure.
+
+A fresh Windows CI run is still required to verify the correction on Python 3.11, 3.12, and 3.13.
 
 Schema remains `16`, optional episodic memory remains disabled by default, and the runtime does not acquire the authority of formation, governance, communication, migration, failover, or supervision mechanisms.

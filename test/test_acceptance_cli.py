@@ -10,6 +10,16 @@ from pathlib import Path
 
 
 class AcceptanceCLITests(unittest.TestCase):
+    def fixture_diagnostics(self, report=None):
+        return (f"Fixture report: {json.dumps(report, sort_keys=True)}\n"
+                f"Child stdout:\n{self.last_process.stdout}\n"
+                f"Child stderr:\n{self.last_process.stderr}\n"
+                f"Captured log:\n{self.last_log}")
+
+    def assert_fixture_succeeded(self, code, report):
+        if code != 0:
+            self.fail(f"Fixture exited with code {code}.\n{self.fixture_diagnostics(report)}")
+
     def run_fixture(self, body, *arguments):
         checkout = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory(prefix="att-acceptance-cli-") as directory:
@@ -25,12 +35,19 @@ class AcceptanceCLITests(unittest.TestCase):
             process = subprocess.run([sys.executable, "-m", "scripts.acceptance", "--root", str(root),
                 "--output", str(output), *arguments], cwd=checkout, text=True, encoding="utf-8",
                 env={**os.environ, "PYTHONIOENCODING": "utf-8"}, capture_output=True, timeout=30)
-            report = json.loads((output / "result.json").read_text(encoding="utf-8"))
+            self.last_process = process
+            log_path = output / "unittest.log"
+            self.last_log_bytes = log_path.read_bytes() if log_path.exists() else b""
+            # Match subprocess text decoding while retaining untouched bytes.
+            self.last_log = (log_path.read_text(encoding="utf-8", errors="backslashreplace")
+                             if log_path.exists() else "")
+            try:
+                report = json.loads((output / "result.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError) as error:
+                self.fail(f"Fixture report could not be read: {type(error).__name__}.\n"
+                          f"{self.fixture_diagnostics()}")
             self.assertNotIn("PRIVATE_CLI_PROBE", json.dumps(report))
             self.assertNotIn("PRIVATE_CLI_PROBE", process.stdout)
-            self.last_process = process
-            self.last_log = (output / "unittest.log").read_text(encoding="utf-8", errors="backslashreplace")
-            self.last_log_bytes = (output / "unittest.log").read_bytes()
             return process.returncode, report
 
     def test_successful_output_is_retained_without_console_noise(self):
@@ -41,7 +58,7 @@ class Fixture(unittest.TestCase):
         print('PASS_STDERR', file=sys.stderr)
         logging.warning('PASS_LOGGING')
 """)
-        self.assertEqual(code, 0)
+        self.assert_fixture_succeeded(code, report)
         self.assertTrue(report["passed"])
         self.assertEqual(self.last_process.stderr, "")
         self.assertNotIn(b"\r\n", self.last_log_bytes)
@@ -80,7 +97,7 @@ class Fixture(unittest.TestCase):
     def test_body(self):
         print('PASS_OUTPUT')
 """, "-v")
-        self.assertEqual(code, 0)
+        self.assert_fixture_succeeded(code, report)
         self.assertEqual(report["console_mode"], "verbose")
         self.assertIn("Fixture.test_body", self.last_process.stderr)
         self.assertIn("passed (", self.last_process.stderr)
@@ -96,7 +113,7 @@ class Fixture(unittest.TestCase):
         os.write(sys.stdout.fileno(), b'DIRECT_DESCRIPTOR_OUTPUT\\n')
         faulthandler.dump_traceback(file=sys.stderr)
 """, "--all-output")
-        self.assertEqual(code, 0)
+        self.assert_fixture_succeeded(code, report)
         self.assertTrue(report["passed"])
         self.assertEqual(report["console_mode"], "all")
         self.assertEqual(self.last_process.stderr, self.last_log)
@@ -129,7 +146,7 @@ class Fixture(unittest.TestCase):
         os.write(2, b'NATIVE_STDERR\\n')
         subprocess.run([sys.executable, '-c', "import os; os.write(1, b'CHILD_STDOUT\\\\n'); os.write(2, b'CHILD_STDERR\\\\n')"], check=True)
 """, "--all-output")
-        self.assertEqual(code, 0)
+        self.assert_fixture_succeeded(code, report)
         self.assertTrue(report["passed"])
         self.assertTrue(json.loads(self.last_process.stdout)["passed"])
         self.assertEqual(self.last_process.stderr, self.last_log)
@@ -137,17 +154,81 @@ class Fixture(unittest.TestCase):
             self.assertIn(marker, self.last_log)
 
     def test_buffered_native_stdio_is_flushed_before_capture_ends(self):
-        code, report = self.run_fixture("""import ctypes, os, unittest
+        code, report = self.run_fixture("""import ctypes, os, pathlib, tempfile, unittest
+from scripts.acceptance.capture import capture_output
 class Fixture(unittest.TestCase):
     def test_body(self):
         library = ctypes.CDLL('ucrtbase' if os.name == 'nt' else None)
-        library.printf.argtypes = [ctypes.c_char_p]
-        library.printf(b'BUFFERED_NATIVE_STDIO')
+        duplicate = getattr(library, '_dup' if os.name == 'nt' else 'dup')
+        close = getattr(library, '_close' if os.name == 'nt' else 'close')
+        fdopen = getattr(library, '_fdopen' if os.name == 'nt' else 'fdopen')
+        for function in (duplicate, close):
+            function.argtypes = [ctypes.c_int]
+            function.restype = ctypes.c_int
+        fdopen.argtypes = [ctypes.c_int, ctypes.c_char_p]
+        fdopen.restype = ctypes.c_void_p
+        library.fclose.argtypes = [ctypes.c_void_p]
+        library.fclose.restype = ctypes.c_int
+        library.setvbuf.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t]
+        library.setvbuf.restype = ctypes.c_int
+        library.fwrite.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]
+        library.fwrite.restype = ctypes.c_size_t
+        payload = b'BUFFERED_NATIVE_STDIO'
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory, 'native.log')
+            with path.open('w', encoding='utf-8') as log:
+                stream = None
+                descriptor = None
+                try:
+                    with capture_output(log):
+                        descriptor = duplicate(1)
+                        self.assertGreaterEqual(descriptor, 0)
+                        stream = fdopen(descriptor, b'wb')
+                        self.assertTrue(stream)
+                        # _IOFBF is zero on the supported C runtimes.
+                        self.assertEqual(library.setvbuf(stream, None, 0, 4096), 0)
+                        self.assertEqual(library.fwrite(payload, 1, len(payload), stream), len(payload))
+                        self.assertNotIn(payload, path.read_bytes())
+                    # Verify capture flushed the stream before fclose can do so.
+                    self.assertIn(payload, path.read_bytes())
+                finally:
+                    if stream:
+                        library.fclose(stream)
+                    elif descriptor is not None and descriptor >= 0:
+                        close(descriptor)
+        print('NATIVE_FLUSH_VERIFIED')
 """, "--all-output")
-        self.assertEqual(code, 0)
+        self.assert_fixture_succeeded(code, report)
         self.assertTrue(report["passed"])
-        self.assertIn("BUFFERED_NATIVE_STDIO", self.last_log)
+        self.assertIn("NATIVE_FLUSH_VERIFIED", self.last_log)
+        self.assertTrue(json.loads(self.last_process.stdout)["passed"])
         self.assertNotIn("BUFFERED_NATIVE_STDIO", self.last_process.stdout)
+
+    def test_unexpected_fixture_failure_includes_its_retained_diagnostics(self):
+        code, report = self.run_fixture("""import unittest
+class Fixture(unittest.TestCase):
+    def test_body(self):
+        print('SYNTHETIC_CHILD_OUTPUT')
+        raise RuntimeError('Synthetic fixture diagnostic failure')
+""", "--quiet")
+        with self.assertRaises(AssertionError) as failure:
+            self.assert_fixture_succeeded(code, report)
+        details = str(failure.exception)
+        for marker in ("Fixture exited with code 1", "Child stdout:", "Child stderr:",
+                       "Captured log:", "SYNTHETIC_CHILD_OUTPUT",
+                       "RuntimeError: Synthetic fixture diagnostic failure"):
+            self.assertIn(marker, details)
+
+    def test_fixture_text_normalizes_crlf_without_changing_raw_bytes(self):
+        code, report = self.run_fixture("""import os, unittest
+class Fixture(unittest.TestCase):
+    def test_body(self):
+        os.write(1, b'CRLF_NATIVE_OUTPUT\\r\\n')
+""", "--all-output")
+        self.assert_fixture_succeeded(code, report)
+        self.assertIn(b"CRLF_NATIVE_OUTPUT\r\n", self.last_log_bytes)
+        self.assertIn("CRLF_NATIVE_OUTPUT\n", self.last_log)
+        self.assertEqual(self.last_process.stderr, self.last_log)
 
     def test_binary_descriptor_output_does_not_destroy_run_results(self):
         code, report = self.run_fixture("""import os, unittest
@@ -155,7 +236,7 @@ class Fixture(unittest.TestCase):
     def test_body(self):
         os.write(1, b'BINARY_\\xff\\xfe\\n')
 """, "--all-output")
-        self.assertEqual(code, 0)
+        self.assert_fixture_succeeded(code, report)
         self.assertTrue(report["passed"])
         self.assertIn(b"BINARY_\xff\xfe", self.last_log_bytes)
         self.assertIn("BINARY_\\xff\\xfe", self.last_process.stderr)
@@ -170,7 +251,7 @@ class Fixture(unittest.TestCase):
         logging.getLogger('asyncio').error('Task exception was never retrieved')
         subprocess.run([sys.executable, '-c', "import sys; print('ResourceWarning: ordinary child text', file=sys.stderr)"], check=True)
 """, "--all-output")
-        self.assertEqual(code, 0)
+        self.assert_fixture_succeeded(code, report)
         self.assertTrue(report["passed"])
         self.assertFalse(any(report["leaks"].values()))
         self.assertIn("ResourceWarning: ordinary child text", self.last_log)
@@ -239,7 +320,7 @@ class Fixture(unittest.TestCase):
                 subprocess.run([sys.executable, '-Wdefault', '-c', "import warnings; warnings.warn('Handled child warning', ResourceWarning)"], check=True)
             self.assertEqual(counts(events)['ResourceWarning:'], 1)
 """)
-        self.assertEqual(code, 0)
+        self.assert_fixture_succeeded(code, report)
         self.assertTrue(report["passed"])
         self.assertFalse(any(report["leaks"].values()))
 
