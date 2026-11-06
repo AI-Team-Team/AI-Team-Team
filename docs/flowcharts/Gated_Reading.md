@@ -6,9 +6,15 @@ This document visualizes token-counter resolution, range continuation, DocLib au
 
 ```mermaid
 flowchart TD
-    Tool["read_library_file or read_private_file"] --> Context{"Active Agent and AgentTeam context valid?"}
+    Tool["read_library_file or read_private_file"] --> Context{"Active registered Agent context valid?"}
     Context -- "No" --> Deny["Fail closed without reading content"]
-    Context -- "Yes" --> Authorization["Validate private ownership or team ACL"]
+    Context -- "Yes" --> Kind{"Requested read tool"}
+    Kind -- "read_private_file" --> Owner{"Agent owns the private library?"}
+    Owner -- "No" --> Deny
+    Owner -- "Yes; no AgentTeam required" --> Range
+    Kind -- "read_library_file" --> Team{"Valid current AgentTeam membership?"}
+    Team -- "No" --> Deny
+    Team -- "Yes" --> Authorization["Validate team-library source ACL"]
     Authorization --> Link["Resolve managed link chain and live target ACLs"]
     Link --> Range["Validate one-based line and character range"]
     Range --> Counter["Resolve counter for the Agent's effective model"]
@@ -23,7 +29,8 @@ flowchart TD
     Complete -- "Yes" --> Done["Return complete FileReadResult"]
 ```
 
-The token budget applies only to decoded `content`. Status, continuation coordinates, counter metadata, and tool-protocol framing are outside the budget.
+The token budget applies only to decoded `content`.
+Status, continuation coordinates, counter metadata, and tool-protocol framing are outside the budget.
 
 ## 2. Counter Resolution
 
@@ -60,7 +67,7 @@ Line endings are normalized to `\n`, and coordinates refer to decoded Unicode co
 
 ```mermaid
 flowchart TD
-    Invocation["Invocation-scoped Agent and AgentTeam"] --> Kind{"Library kind"}
+    Invocation["Invocation-scoped Agent and optional AgentTeam"] --> Kind{"Library kind"}
     Kind -- "team" --> ACL["Check current AgentTeam READ or WRITE ACL"]
     ACL --> Managed["Resolve managed file links and recheck every target ACL"]
     Kind -- "agent_private" --> Owner["Require active Agent owner"]
@@ -72,4 +79,5 @@ flowchart TD
     Locks --> Copy["Atomic copy while preserving private source"]
 ```
 
-Native filesystem symlinks remain forbidden. Private libraries never participate in team ACLs, public discovery, or managed links.
+Native filesystem symlinks remain forbidden.
+Private libraries never participate in team ACLs, public discovery, or managed links.

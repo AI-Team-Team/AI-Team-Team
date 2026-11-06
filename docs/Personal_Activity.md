@@ -42,6 +42,32 @@ This waits for the Agent's actual idle choice; it is not a Host command to force
 
 Cancelling an answer or checkpoint observer does not cancel the person, undo an accepted operation, or acknowledge an unread source.
 
+## Work, Conversation, and Completion
+
+An Agent is the continuing owner of personal state, while an AgentTeam supplies organizational relationships and authority.
+
+A conversation identifies an exchange or subject, and a background task identifies one registered execution; neither defines the complete business objective.
+
+`WorkItem` is a conceptual distinction for the outcome or activity the Agents describe, not a required runtime object, database table, or measurable-result contract.
+
+Agents may maintain their own plans, criteria, reviews, and completion judgments in personal or team DocLibs.
+
+ATT does not require business work to have a requester, external verifier, mandatory progress field, or deadline; participants choose those arrangements when useful.
+
+One piece of work may involve several conversations and executions, and one team may pursue several pieces of work.
+
+Personal work remains personally owned, and a message or conversation does not need a WorkItem association.
+
+Agents may exchange or record votes about whether they consider work complete, but ATT supplies no general completion-vote API, fixed electorate, threshold, requester-acceptance gate, or automatic binding effect for those judgments.
+
+Any work-specific procedure is chosen by the participants and does not replace membership consent, institutional ballots, live permissions, or other framework authority.
+
+Choosing not to speak can coexist with reading, tools, writing artifacts, or other activity; it does not choose idle, leave the team, retire the Agent, cancel owned tasks, or close the conversation for other members.
+
+An ended invocation, empty queue, read receipt, acknowledged notification, or stopped utterance does not certify a business outcome.
+
+Migration and conversation interruption do not themselves complete, delete, or replace work artifacts; ordinary file authority and explicit lifecycle policies still apply.
+
 ## Scope and Tool Availability
 
 Every invocation captures personal scope or one authorized AgentTeam scope.
@@ -94,6 +120,8 @@ An ordinary reminder wakes sleep early only when it matches an admitted conditio
 
 Protected membership, position, permission, health, and interruption notices bypass personal suppression.
 
+Scheduling policy still applies: a queue-mode health notice does not itself activate an idle or sleeping person, while a wake-mode protected notice may end sleep without an ordinary early condition.
+
 Permanent or timed do-not-disturb preferences suppress ordinary reminders rather than source delivery or deliberate inspection:
 
 ```text
@@ -142,7 +170,7 @@ Unchanged persistent UUIDs identify the same people after restore, although Pyth
 
 The Host must reacquire current objects, using `manager.root_ai` or its active Agent index and saved IDs, before further operations.
 
-Confirmed Host death is terminal, retains personal history and private artifacts, closes current relationships, and settles outstanding personal observers even if no worker started.
+Host-confirmed Agent death is terminal, retains personal history and private artifacts, closes current relationships, and settles outstanding personal observers even if no worker started.
 
 `reactivate_agent()` applies only to retained or archived identities.
 

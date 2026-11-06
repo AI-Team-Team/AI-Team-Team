@@ -10,7 +10,7 @@ from ai_team_team import Agent, StateRestoreError
 from ai_team_team.core.activity.contracts import SuppressionPreference, WakeDuration
 from ai_team_team.core.manager.restore import transaction
 from test.test_att.test_agent_activity._support import ActivityTestCase, call, idle
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep, ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep, ScriptedModelClient
 from test.test_att.test_background_tasks._support import contract
 
 

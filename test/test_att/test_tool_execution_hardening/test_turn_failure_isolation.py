@@ -6,7 +6,7 @@ from ai_team_team import Agent, LLMResponse, StatePersistenceError
 from ai_team_team.core.manager.activity.values import ModelUnavailable
 from test.personal_activity import interact_and_idle
 from test.test_att.test_agent_activity._support import ActivityTestCase, call, idle
-from test.test_att.test_autonomous_activity_phase0._fixtures import ModelStep, ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures import ModelStep, ScriptedModelClient
 
 
 class TestPersonalFailureIsolation(ActivityTestCase):

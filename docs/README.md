@@ -1,8 +1,8 @@
-# AI Autonomy Suite: ATT (AI Team Team) Topology
+# ATT Documentation
 
-Welcome to the technical specifications and architectural guide for the **ATT (AI Team Team) Autonomy Suite**.
+This directory contains the user guides, technical specifications, and architecture references for **AI-Team-Team (ATT)**.
 
-This directory contains deep-dive design guides, parameters, and operation specs for each module of our self-governing multi-agent framework.
+The guides describe Agent identity, explicit organizations, autonomous personal activity, institutional authority, persistence, and integration interfaces.
 
 ## Document Directory
 
@@ -32,16 +32,17 @@ To understand specific systems in detail, please refer to the following document
 12. **[Agent and AgentTeam Discovery](Agent_and_AgentTeam_Discovery.md)**: Defines on-demand public directory listing, case-insensitive OR keyword search, stable-ID inspection, inclusive entity-position ranges, lifecycle scope, and independent authorization boundaries.
 13. **[Performance Measurement](dev/Performance_Measurement.md)**: Defines reproducible persistence and runtime measurements, instrumentation boundaries, and correctness gates.
 
-### Design Blueprints & Implementation Plans
+### Architecture and Verification
 
-The [Design Blueprints index](blueprints/README.md) separates target behavior, engineering delivery, and deferred features from the current-runtime guides above.
+* [Autonomous Agent Runtime Architecture](Autonomous_Agent_Runtime_Architecture/README.md): Agent scheduling, invocation context, notifications, model/tool execution, lifecycle, concurrency, and integration with institutional services.
+* [Database Architecture](Database/README.md): Complete current schema, ownership, accepted transactions, validation, and recoverable publication.
+* [Verification](dev/verification/README.md): Current adversarial requirements, exact behavioral test mappings, and evidence-based acceptance.
 
-* **[Autonomous Agent Activity, Messaging, and Background Tasks](blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md)**: The governing design for continuing personal activity, explicit communication, background execution, and recovery.
-* **[Implementation Plan](blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md)**: Confirmed decisions, engineering contracts, implementation phases, and acceptance gates.
-* **[Future Plans](blueprints/Todo_Autonomous_Agent_Activity_Messaging_and_Background_Tasks.md)**: Deferred features outside the initial replacement scope, not an implementation-progress checklist.
-* **[Autonomous Activity Implementation](dev/autonomous_activity/README.md)**: Engineering contracts, phase-specific implementation and verification records, schema profiles, and dependency inventories.
+### Historical Records and Research
 
-Use the current guides above for integration and the numbered phase profiles for historical implementation evidence.
+The [historical archive](../docs_archive/README.md) preserves the original blueprints, numbered schema extensions, implementation records, and past acceptance results unchanged.
+
+The [Roadmap](../Roadmap/Roadmap.md) contains unimplemented research, and the [current Todo](../todo.md) records active work and confirmed actionable follow-up.
 
 ## 📊 Visual Flowcharts Directory
 

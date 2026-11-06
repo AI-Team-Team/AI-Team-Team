@@ -18,7 +18,7 @@ from ai_team_team import (
     TokenLimitExceededError,
 )
 from test.governance_client import PersonalGovernanceClient, settle_governance_activity
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier
 
 
 class GovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):

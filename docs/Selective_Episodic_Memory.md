@@ -42,6 +42,10 @@ The indexing call uses the Agent invocation lock, receives a detached temporary 
 
 Indexing failure never changes the personal invocation result and leaves a retryable or failed segment visible to trusted host APIs.
 
+Disabling indexing releases its pending flush observers and workers without claiming that queued segments were indexed, while retaining pending source segments for a later explicit reenablement.
+
+Reenabling may schedule fresh maintenance requests over retained sources without replaying historical provider requests or creating another personal admission for the beneficiary.
+
 ### Working Context
 
 `agent.messages` is the persisted bounded model-visible Working Context and may be compressed or pruned.
@@ -90,9 +94,11 @@ The following tools appear in the invocation-scoped tool view only while the fea
 
 Recall content is prefixed as historical reference data rather than instructions.
 
-Line and Unicode-character coordinates are one-based. `end_line` and `character_count` are mutually exclusive selections, while `max_recall_lines`, `max_recall_chars`, and `max_recall_tokens` remain host-controlled output bounds.
+Line and Unicode-character coordinates are one-based.
+`end_line` and `character_count` are mutually exclusive selections, while `max_recall_lines`, `max_recall_chars`, and `max_recall_tokens` remain host-controlled output bounds.
 
-A partial result returns `next_line`, `next_character`, and the immutable Segment digest as `segment_version`. The next call supplies those coordinates and `expected_segment_version`; this makes long single lines, Unicode, and multi-line content reachable without gaps or duplication and rejects a continuation if its source Segment changed.
+A partial result returns `next_line`, `next_character`, and the immutable Segment digest as `segment_version`.
+The next call supplies those coordinates and `expected_segment_version`; this makes long single lines, Unicode, and multi-line content reachable without gaps or duplication and rejects a continuation if its source Segment changed.
 
 The recalled body is available only to the current invocation and is replaced in Working Context with `[Historical memory recalled: <memory_id>]` when that invocation ends.
 

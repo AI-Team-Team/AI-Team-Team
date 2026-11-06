@@ -8,7 +8,7 @@ from contextlib import closing
 from ai_team_team import Agent, StateRestoreError
 from ai_team_team.database.persistence.records import DomainRecord, thaw
 from ai_team_team.database.persistence.store.detached_validation import validate_detached_records
-from test.test_att.test_autonomous_activity_phase0._fixtures import AgentIdentitySnapshot
+from test.test_att.test_runtime_contracts._fixtures import AgentIdentitySnapshot
 
 from ._support import make_manager, record
 

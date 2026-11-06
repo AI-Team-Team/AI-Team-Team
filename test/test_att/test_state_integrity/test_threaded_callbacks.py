@@ -6,7 +6,7 @@ import threading
 import unittest
 
 from ai_team_team import ATTConfig, ATTManager, Agent
-from test.test_att.test_autonomous_activity_phase0._fixtures import ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures import ScriptedModelClient
 
 from ._support import make_manager
 

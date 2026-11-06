@@ -179,7 +179,7 @@ flowchart TB
 | --- | --- |
 | Identity, ownership, and discovery | [Core objects](../Core_Objects_Model.md), [Agent and AgentTeam discovery](../Agent_and_AgentTeam_Discovery.md) |
 | Formation and topology | [Consensual Team Formation](../Consensual_Team_Formation.md), [lineage mutations](Lineage_Tree_Mutations.md) |
-| Personal activity and lifecycle | [Personal runtime](../dev/autonomous_activity/Phase_2.md), [sleep, recovery, and retained lifecycle](../dev/autonomous_activity/Phase_6.md) |
+| Personal activity and lifecycle | [Personal scheduling](../Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md), [lifecycle and recovery](../Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md) |
 | Governance and peer communication | [Team Governance](../Team_Governance.md), [communication flowcharts](Autonomous_Communication_Governance.md) |
 | Conversations and personal contact controls | [Personal conversations](Personal_Conversations.md) |
 | Tools and background execution | [Tooling and execution](Tooling_and_Execution.md), [background tasks](Background_Tasks.md) |

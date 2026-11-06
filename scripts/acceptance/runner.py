@@ -22,7 +22,6 @@ from .diagnostics import counts as diagnostic_counts, observe_diagnostics
 
 SUITES = {
     "full": ("test", "test*.py"),
-    "frozen": ("test/test_att/test_autonomous_activity_phase0", "spec_*.py"),
     "extended": ("test/reliability", "stress_*.py"),
 }
 

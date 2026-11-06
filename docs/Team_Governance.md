@@ -134,7 +134,9 @@ Before final approval, ATT validates the relevant captured position revisions an
 
 A relevant path change makes the Request `STALE` and creates a successor under the saved policy; unrelated topology changes do not invalidate it.
 
-All required Approvals and creation of the resulting Agreement commit through the same authoritative transaction.
+After every required Approval is accepted, the Request's final `APPROVED` transition and creation of the resulting Agreement commit atomically.
+
+Earlier accepted ballots and individual principal decisions remain durable while other approvals are pending.
 
 Existing Agreements survive policy and topology changes until an endpoint explicitly revokes them.
 
@@ -257,7 +259,11 @@ Confirmed permission-execution or integrity faults require immediate determinist
 
 Incidents use stable persisted fingerprints, occurrence counts, and first/latest timestamps, with no TTL or hard drop limit.
 
-`"queue"` delivers addressed attention without forcing activation, while `"wake"` may request ordinary personal activity without changing the recipient's intent or team scope.
+`"queue"` delivers addressed attention without scheduling activation; an already active person may receive it at the next eligible model boundary.
+
+`"wake"` requests eligible personal activity, and its protected health notice may end sleep without an ordinary early-wake condition.
+
+The same person chooses the response, and a busy invocation retains its captured scope; a later admission revalidates current scope authority.
 
 Explicit incident claims distinguish handling from mail reading; acknowledgement requires the current occurrence generation.
 

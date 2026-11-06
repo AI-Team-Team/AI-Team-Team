@@ -10,7 +10,7 @@ from unittest.mock import patch
 from ai_team_team import ATTConfig, Agent, LLMResponse, ParentApprovalCommunicationConfig
 from ai_team_team.core.activity.contracts import AgentTeamScope, SuppressionPreference
 from test.async_waits import wait_for_runtime
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep
 
 from ._support import ActivityTestCase, call, idle
 

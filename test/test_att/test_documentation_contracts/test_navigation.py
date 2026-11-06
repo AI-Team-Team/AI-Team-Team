@@ -2,24 +2,17 @@
 
 import ast
 import re
-import unicodedata
 import unittest
 from urllib.parse import unquote, urlsplit
 
 from ai_team_team.database.persistence.constants import STATE_SCHEMA_VERSION
 
-from ._support import ROOT, runnable_blocks
-
-
-GUIDES = ("Personal_Activity.md", "Personal_Conversations.md", "Background_Tasks.md")
+from ._support import ROOT, heading_anchors, runnable_blocks
 
 
 class DocumentationNavigationTests(unittest.TestCase):
     def current_documents(self):
-        return [ROOT / "README.md", *(
-            path for path in (ROOT / "docs").rglob("*.md")
-            if "blueprints" not in path.parts and "autonomous_activity" not in path.parts
-        )]
+        return [ROOT / "README.md", *(ROOT / "docs").rglob("*.md")]
 
     def test_current_local_document_links_have_real_targets(self):
         for path in self.current_documents():
@@ -32,26 +25,19 @@ class DocumentationNavigationTests(unittest.TestCase):
                     self.assertTrue((path.parent / unquote(parsed.path)).exists())
 
     def test_links_into_current_guides_use_actual_heading_anchors(self):
-        targets = {name: ROOT / "docs" / name for name in GUIDES}
-        targets["Quickstart.md"] = ROOT / "docs/user/Quickstart.md"
-        targets["API_Reference.md"] = ROOT / "docs/user/API_Reference.md"
-        checked = 0
+        checked, headings = 0, {}
         for document in self.current_documents():
             for target in re.findall(r"\[[^\]\n]+\]\(([^)\n]+)\)", document.read_text(encoding="utf-8")):
-                parsed = urlsplit(target)
-                if parsed.scheme or not parsed.fragment or not parsed.path:
+                parsed = urlsplit(target.strip("<>"))
+                if parsed.scheme or parsed.netloc or not parsed.fragment:
                     continue
-                path = (document.parent / unquote(parsed.path)).resolve()
-                if path not in targets.values():
+                path = (document.parent / unquote(parsed.path)).resolve() if parsed.path else document
+                if path.suffix != ".md":
                     continue
-                anchors = set()
-                for heading in re.findall(r"^#{1,6} (.+)$", path.read_text(encoding="utf-8"), re.M):
-                    plain = "".join(character for character in heading.strip().lower()
-                                    if character in "_- " or unicodedata.category(character)[0] in "LMN")
-                    plain = re.sub(r"[\ufe00-\ufe0f\U000e0100-\U000e01ef]", "", plain)
-                    anchors.add(plain.replace(" ", "-"))
+                if path not in headings:
+                    headings[path] = heading_anchors(path.read_text(encoding="utf-8"))
                 with self.subTest(document=document.relative_to(ROOT), target=target):
-                    self.assertIn(unquote(parsed.fragment), anchors)
+                    self.assertIn(unquote(parsed.fragment), headings[path])
                 checked += 1
         self.assertGreater(checked, 0)
 

@@ -1,4 +1,4 @@
-"""Intentionally red until Phase 4; no second invocation or executor is faked."""
+"""Threshold detachment preserves the original execution and one Native observation."""
 
 import asyncio
 import unittest
@@ -6,19 +6,19 @@ import unittest
 from ai_team_team import LLMResponse, ToolCall
 from ai_team_team.core.activity.contracts import BackgroundTaskHandle, ToolExecutionContract
 
-from test.test_att.test_autonomous_activity_phase0._fixtures import (
+from test.test_att.test_runtime_contracts._fixtures import (
     AsyncBarrier,
     ControlledExecutor,
     ModelStep,
 )
-from test.test_att.test_autonomous_activity_phase0._runtime_spec import (
+from test.test_att.test_runtime_contracts._runtime_spec import (
     RuntimeSpecFixture,
     idle_response,
     model_input,
 )
 
 
-class SpecBackgroundExecution(RuntimeSpecFixture, unittest.IsolatedAsyncioTestCase):
+class TestBackgroundExecutionContracts(RuntimeSpecFixture, unittest.IsolatedAsyncioTestCase):
     async def test_threshold_releases_only_the_wait_and_produces_one_native_observation(self):
         activate = self.require_method("activate_agent")
         bind_clock = self.require_method("register_runtime_clock")

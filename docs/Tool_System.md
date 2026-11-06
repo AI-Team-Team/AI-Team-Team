@@ -4,19 +4,21 @@ This document outlines both the internal execution strategies of the framework a
 
 ## 1. Architectural Overview
 
-The [Phase 2 personal runtime](dev/autonomous_activity/Phase_2.md) uses the shared parsers, strict `Tool` validation, auditor, typed executor, and privacy helpers in continuing invocations.
+The [personal runtime](Autonomous_Agent_Runtime_Architecture/README.md) uses the shared parsers, strict `Tool` validation, auditor, typed executor, and privacy helpers in continuing invocations.
+
+The [executor integration reference](Autonomous_Agent_Runtime_Architecture/Executor_Integration.md) defines execution-contract fields, custom binding hooks, resource resolvers, and typed health evidence.
 
 Its ordinary tool failures remain observations, and technical budgets yield fairly without ending the person's activity.
 
 Native batches keep one captured scope and apply explicit idle, sleep, or scope controls only after every required observation is complete.
 
-Governance, formation, and restricted temporary audits now use this same runtime; no institutional discussion engine remains.
+Governance, formation, and restricted temporary audits use this same runtime while their own services retain consent, authority, and outcome rules.
 
-Foreground execution evidence now commits before each real attempt, including opted-in retries; undeclared custom tools still cannot detach into background work.
+Foreground execution evidence commits before each real attempt, including opted-in retries; undeclared custom tools cannot detach into background work.
 
-The [Phase 4 execution service](dev/autonomous_activity/Phase_4.md) owns explicitly background and automatically detached operations independently of the foreground observer, with canonical resource exclusion and factual cancellation.
+The [registered execution service](Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md) owns explicitly background and automatically detached operations independently of the foreground observer, with canonical resource exclusion and factual cancellation.
 
-Use [Personal Activity](Personal_Activity.md), [Personal Conversations](Personal_Conversations.md), and [Background Tasks](Background_Tasks.md) for current integration behavior; numbered phase profiles retain engineering history.
+Use [Personal Activity](Personal_Activity.md), [Personal Conversations](Personal_Conversations.md), and [Background Tasks](Background_Tasks.md) for integration behavior, and [Autonomous Agent Runtime Architecture](Autonomous_Agent_Runtime_Architecture/README.md) for internal coordination.
 
 Provider-neutral request and tool contracts keep the common personal runtime independent of concrete model SDKs.
 
@@ -30,7 +32,8 @@ Personal admission -> one continuing Agent -> bounded provider request
 
 The system supports two core execution modes:
 
-1. **Text ReAct Mode (`"text_react"`)**: A bounded step-by-step loop alternating between Thought, Action, and Observation. A balanced character scanner recognizes nested delimiters, quotes, triple quotes, escapes, multiline values, Markdown fences, and Unicode before the literal-only AST parser validates arguments.
+1. **Text ReAct Mode (`"text_react"`)**: A bounded step-by-step loop alternating between Thought, Action, and Observation.
+   A balanced character scanner recognizes nested delimiters, quotes, triple quotes, escapes, multiline values, Markdown fences, and Unicode before the literal-only AST parser validates arguments.
 2. **Native Tool Calling Mode (`"native"`)**: Executes structured tool invocations directly using LLM function calling schemas, running multiple tool calls concurrently in parallel.
 
 ## 2. One Runtime with Two Provider Protocols
@@ -49,11 +52,17 @@ A model answer alone is not a publication, ballot, completion declaration, or st
 
 The safe auto probe accepts only a synchronous literal boolean `True`.
 
-Exceptions, awaitables, and other return types emit a sanitized event and fall back to Text ReAct; forced native mode does not probe.
+Exceptions, awaitables, and other invalid outcomes received by the manager probe emit a sanitized event and fall back to Text ReAct; forced Native mode does not probe.
+
+The generator-handler wrapper currently normalizes its inner probe before the manager sees it: non-`True` returns become `False`, and caught exceptions can use the configured capability flag.
+
+Those paths do not reliably preserve the invalid-outcome diagnostic or fallback contract; the [wrapped-probe issue](../todo.md#wrapped-handler-capability-probe) tracks the implementation gap.
+
+Handler integrations should declare a synchronous boolean capability explicitly or select a forced protocol after validating their adapter.
 
 ## 3. Tool Contract, Schema Generation, and Validation
 
-The framework operates under a **Thorough Abstraction Paradigm**. Instead of eagerly converting tools into JSON schemas at the reasoning layer and passing weak `Dict` structures to clients, the personal runtime passes `Tool` objects to the provider adapter.
+The personal runtime passes provider-neutral `Tool` objects to the provider adapter.
 
 The personal runner and adapters use one provider-neutral contract: `tools: Optional[List[Tool]]`.
 
@@ -63,7 +72,8 @@ The resolver can dynamically build schemas from:
 
 1. **Handwritten Schema**: A standard python dictionary containing raw JSON Schema properties.
 2. **Pydantic Model**: A `BaseModel` subclass.
-3. **TypedDict Class**: A `typing_extensions.TypedDict` class. Portable tool schemas across Python 3.11–3.13 must import `TypedDict`, `Required`, and `NotRequired` from `typing_extensions`; Pydantic does not support `typing.TypedDict` on Python 3.11.
+3. **TypedDict Class**: A `typing_extensions.TypedDict` class.
+   Portable tool schemas across Python 3.11–3.13 must import `TypedDict`, `Required`, and `NotRequired` from `typing_extensions`; Pydantic does not support `typing.TypedDict` on Python 3.11.
 4. **Function Signatures**: If no schema is provided, the resolver parses parameter defaults and type annotations.
 
 Tool registration validates every generated or handwritten schema with JSON Schema Draft 2020-12.
@@ -132,7 +142,7 @@ The [model-tool reference](user/API_Reference.md#-built-in-react-tools-reference
 
 ## 5. Tool Registration & Development
 
-ATT handles the heavy lifting of schema extraction. You only need to write standard Python functions with clear type hints and docstrings.
+ATT derives tool names, descriptions, defaults, and argument schemas from Python function signatures, type hints, and docstrings unless registration supplies explicit metadata.
 
 ```python
 def check_server_health(region: str, max_retries: int = 3) -> str:
@@ -166,15 +176,20 @@ They resolve the current Agent from invocation `ContextVar` state and fail close
 
 `publish_private_file` copies an ordinary private file to the current team's built-in DocLib after a live target `WRITE` check; `move_library_file` requires `WRITE` on both team-library paths.
 
-Tool observations may contain content only when the owner explicitly reads a private file. That observation expires when the current reasoning invocation ends and is replaced by a redacted marker before the shared AI can run for another team.
+Tool observations may contain content only when the owner explicitly reads a private file.
+That observation expires when the current reasoning invocation ends and is replaced by a redacted marker before the shared AI can run for another team.
 
 Optional episodic-memory recall uses the same transient-observation boundary and replaces the body with `[Historical memory recalled: <memory_id>]` at the end of the invocation.
 
 Operational callbacks never contain private file bodies.
 
-## 6. Shared Context Injection (`tools_context`)
+## 6. Host Runtime Dependencies (`tools_context`)
 
-Instead of relying on global variables, you should use the `tools_context`. ATT automatically attempts to inject it into any tool that defines a `context` parameter.
+`tools_context` is a Host-owned runtime dependency mapping whose reserved `att_manager` binding is used by the built-in tool registry.
+
+Custom tool dependencies must be bound explicitly by the Host, for example through a closure before registration.
+
+A parameter named `context` receives ordinary signature and schema validation; it does not request automatic trusted-resource injection.
 
 ```python
 # 1. Register global resources
@@ -182,18 +197,22 @@ manager.register_tools_context({
     "db_connection": my_sql_db
 })
 
-# 2. Define a tool that accepts the context
-def query_database(sql_query: str, context: dict) -> str:
-    db = context.get("db_connection")
-    return db.execute(sql_query)
+# 2. Bind the Host dependency without exposing it as a model argument.
+def bind_database_tool(db):
+    def query_database(sql_query: str) -> str:
+        return str(db.execute(sql_query))
+    return query_database
+
+query_database = bind_database_tool(manager.tools_context["db_connection"])
+manager.register_tool(query_database)
 ```
 
 ## 7. Tool Interception (ToolAuditor Hooks)
 
-Allowing AI agents to execute Python functions autonomously poses significant safety risks. ATT provides a **ToolAuditor** interceptor pattern to block calls before execution.
+A **ToolAuditor** hook inspects validated tool arguments before execution and may deny the call.
 
 ```python
-def audit_query_database(sql_query: str, context: dict) -> tuple[bool, str]:
+def audit_query_database(sql_query: str) -> tuple[bool, str]:
     if "DROP" in sql_query.upper():
         return False, "Security Violation: Destructive SQL commands are prohibited."
     return True, "Query approved."
@@ -242,7 +261,7 @@ Governance authority requires complete exact-case explicit ballots, never a tran
 
 They expose only existing directory fields, never select collaborators or grant consent, communication Agreements, or DocLib ACLs, and remain available independently of delegation depth and optional episodic memory.
 
-Prompt assembly and formation deliberation no longer inject the full global Agent directory or AgentTeam topology.
+Prompt assembly advertises discovery tools without injecting the full global Agent directory or AgentTeam topology.
 
 The operations are read-only, while their explicit observations may join the calling Agent's ordinary memory.
 
@@ -286,7 +305,7 @@ Chat tools use the common continuing runtime and do not introduce a team-discuss
 
 `list_chat_reminders(message_id=None, limit=50, cursor=None)` inspects owner-authorized captured unread previews separately from current source retrieval, including after withdrawal.
 
-See [Phase 3](dev/autonomous_activity/Phase_3.md) for frozen history, current-source withdrawal, recipient-owned reminders, exact receipts, and the archive-finalization boundary.
+See [Personal Conversations](Personal_Conversations.md) for frozen history, current-source withdrawal, recipient-owned reminders, exact receipts, and the archive-finalization boundary.
 
 ### Personal Background Task Tools
 
@@ -322,7 +341,7 @@ Executors declaring `suspension="provider"` supply `async suspend(execution_id)`
 
 A suspension request alone is not a paused outcome, and a missing acknowledgement falls back to termination without inventing a terminal execution state or automatic resumption.
 
-See [Phase 6](dev/autonomous_activity/Phase_6.md) for retained owner death, resource fencing, countdown recovery, and exact publication boundaries.
+See [Lifecycle and Recovery](Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md) and [Recovery and Publication](Database/Recovery_and_Publication.md) for retained owner death, resource fencing, countdown recovery, and exact publication boundaries.
 
 Heartbeat and progress timeout decisions serialize with accepted samples and retain crossed deadlines during slow observation commits, preventing stale stalls and lost monitor wakeups.
 

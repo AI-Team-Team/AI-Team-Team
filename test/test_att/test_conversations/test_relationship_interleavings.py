@@ -4,7 +4,7 @@ import asyncio
 from unittest.mock import patch
 
 from ai_team_team import ToolBusinessError
-from test.test_att.test_autonomous_activity_phase0._fixtures import LogicalClock
+from test.test_att.test_runtime_contracts._fixtures import LogicalClock
 
 from ._relationship_schedules import exercise_relationship_schedule
 from ._support import ChatTestCase

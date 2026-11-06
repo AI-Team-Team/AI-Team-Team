@@ -7,7 +7,7 @@ from contextlib import closing
 from unittest.mock import AsyncMock, patch
 
 from ai_team_team import StateRestoreError
-from test.test_att.test_autonomous_activity_phase1._support import make_manager
+from test.test_att.test_state_integrity._support import make_manager
 from test.governance_client import settle_governance_activity, submit_case_ballots
 from ._support import ChatTestCase
 
@@ -154,7 +154,7 @@ class TopologyLifecycleTests(ChatTestCase):
                 self.assertEqual(denied.status, "DENIED")
                 target._publication_pending = False
                 from test.test_att.test_agent_activity._support import idle
-                from test.test_att.test_autonomous_activity_phase0._fixtures import ModelStep
+                from test.test_att.test_runtime_contracts._fixtures import ModelStep
                 manager.llm_clients["fixture"].steps.extend(ModelStep(idle()) for _ in target.members)
                 await manager.close_team_conversation(target.team_id)
                 for source, destination in ((moving, target), (target, moving)):

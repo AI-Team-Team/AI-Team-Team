@@ -1,0 +1,2741 @@
+{
+  "state_schema": "16",
+  "behavioral_ledger": "verification_cases.json",
+  "scope": "Current behavioral contracts, explicit explanatory headings, and implementation entry points; historical counts are not semantic coverage evidence.",
+  "contracts": [
+    {
+      "verification_id": "A01-01",
+      "requirement": "Joining and leaving preserve Agent-owned fields",
+      "documentation": [
+        {
+          "path": "docs/Database/Ownership_and_Evidence.md",
+          "heading": "Ordinary Identities"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/agents.py",
+        "src/ai_team_team/core/manager/messaging/membership.py"
+      ]
+    },
+    {
+      "verification_id": "A01-02",
+      "requirement": "Shared membership preserves personal memory and private-library ownership",
+      "documentation": [
+        {
+          "path": "docs/Selective_Episodic_Memory.md",
+          "heading": "Identity and Membership Boundary"
+        },
+        {
+          "path": "docs/Database/Ownership_and_Evidence.md",
+          "heading": "Ordinary Identities"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/memory/service/catalog.py",
+        "src/ai_team_team/core/manager/libraries/private_files.py"
+      ]
+    },
+    {
+      "verification_id": "A01-03",
+      "requirement": "Root votes as its own Agent identity",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "E. Approval Decisions"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/governance/cases.py",
+        "src/ai_team_team/core/manager/governance/submissions.py"
+      ]
+    },
+    {
+      "verification_id": "A01-04",
+      "requirement": "Unaffiliated people enter ordinary formation without identity mutation",
+      "documentation": [
+        {
+          "path": "docs/Consensual_Team_Formation.md",
+          "heading": "Formation Inputs"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/agents.py",
+        "src/ai_team_team/core/manager/formations/lifecycle/creation.py"
+      ]
+    },
+    {
+      "verification_id": "A02-01",
+      "requirement": "Concurrent sources coalesce into one personal admission",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "One Owner"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/service.py"
+      ]
+    },
+    {
+      "verification_id": "A02-02",
+      "requirement": "Chat and governance coexist without implicit votes in both protocols and durability modes",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Sources and Presentation"
+        },
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "Personal Email Is Not a Ballot"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/notifications.py",
+        "src/ai_team_team/core/manager/governance/submissions.py"
+      ]
+    },
+    {
+      "verification_id": "A02-03",
+      "requirement": "Other eligible people progress while an independent person waits",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "Admission and Fairness"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/service.py",
+        "src/ai_team_team/core/manager/activity/runner.py"
+      ]
+    },
+    {
+      "verification_id": "A02-04",
+      "requirement": "Cancellation and unavailable local providers retain one owner",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "One Owner"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Retry and Availability"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/service.py",
+        "src/ai_team_team/core/manager/activity/models.py"
+      ]
+    },
+    {
+      "verification_id": "A03-01",
+      "requirement": "A silent member does not prevent another member from reaching idle",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "One Owner"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "Explicit Controls"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/runner.py",
+        "src/ai_team_team/core/manager/activity/controls.py"
+      ]
+    },
+    {
+      "verification_id": "A03-02",
+      "requirement": "Ordinary answers continue without automatic publication",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "Explicit Controls"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/runner.py",
+        "src/ai_team_team/core/manager/messaging/writes.py"
+      ]
+    },
+    {
+      "verification_id": "A03-03",
+      "requirement": "Retired methods, result exports, and configuration cannot remain execution paths",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "Current Invocation Surface"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/facade/activity_api.py",
+        "src/ai_team_team/core/config.py"
+      ]
+    },
+    {
+      "verification_id": "A03-04",
+      "requirement": "Governance retains cases without a team discussion engine",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "E. Approval Decisions"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/governance/cases.py",
+        "src/ai_team_team/core/manager/governance/submissions.py"
+      ]
+    },
+    {
+      "verification_id": "A04-01",
+      "requirement": "Arrivals during a provider wait enter the following valid frame",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Sources and Presentation"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/notifications.py"
+      ]
+    },
+    {
+      "verification_id": "A04-02",
+      "requirement": "Arrivals during a tool wait enter the following valid frame",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Sources and Presentation"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/notifications.py",
+        "src/ai_team_team/core/manager/executions/dispatch.py"
+      ]
+    },
+    {
+      "verification_id": "A04-03",
+      "requirement": "Native batches retain their scope until all observations settle",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Captured Scope"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "Explicit Controls"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/controls.py",
+        "src/ai_team_team/core/manager/activity/checkpoints.py"
+      ]
+    },
+    {
+      "verification_id": "A04-04",
+      "requirement": "Arrivals racing idle/checkpoint receipt cannot be stranded",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Sources and Presentation"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/checkpoints.py",
+        "src/ai_team_team/core/manager/activity/notifications.py"
+      ]
+    },
+    {
+      "verification_id": "A05-01",
+      "requirement": "Presented unread mail does not cause repeated admissions or imply reading",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Sources and Presentation"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/notifications.py"
+      ]
+    },
+    {
+      "verification_id": "A05-02",
+      "requirement": "Mail opening and read flags never supply a ballot",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "Personal Email Is Not a Ballot"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/governance/submissions.py"
+      ]
+    },
+    {
+      "verification_id": "A05-03",
+      "requirement": "Uncertain provider receipt cannot establish successful usage or presentation",
+      "documentation": [
+        {
+          "path": "docs/Database/Request_and_Token_States.md",
+          "heading": "Legal Dispatch and Outcome Combinations"
+        },
+        {
+          "path": "docs/Database/Request_and_Token_States.md",
+          "heading": "Presentation Claims"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/store/validation/graph.py",
+        "src/ai_team_team/core/manager/activity/models.py"
+      ]
+    },
+    {
+      "verification_id": "A06-01",
+      "requirement": "Shared membership does not supply an ambiguous or borrowed current team",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Captured Scope"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/service.py"
+      ]
+    },
+    {
+      "verification_id": "A06-02",
+      "requirement": "Unavailable or nonmember scopes fail before a provider request",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Captured Scope"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/service.py"
+      ]
+    },
+    {
+      "verification_id": "A06-03",
+      "requirement": "A complete captured batch retains the original scope",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "Explicit Controls"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Captured Scope"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/controls.py",
+        "src/ai_team_team/core/manager/activity/runner.py"
+      ]
+    },
+    {
+      "verification_id": "A06-04",
+      "requirement": "Valid publication succeeds in live scope and is explicitly denied after dissolution",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Ending a Team Scope"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/service.py",
+        "src/ai_team_team/core/manager/messaging/writes.py"
+      ]
+    },
+    {
+      "verification_id": "A07-01",
+      "requirement": "Departure freezes revisions and rejoining excludes absence-period sources",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Leaving, Rejoining, and Dissolution"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/membership.py",
+        "src/ai_team_team/core/manager/messaging/views.py"
+      ]
+    },
+    {
+      "verification_id": "A07-02",
+      "requirement": "Archived conversations remain inspectable without current posting authority",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Leaving, Rejoining, and Dissolution"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/archive.py",
+        "src/ai_team_team/core/manager/messaging/views.py"
+      ]
+    },
+    {
+      "verification_id": "A07-03",
+      "requirement": "Hidden source counts, searches, pagination, and reply references fail closed",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Leaving, Rejoining, and Dissolution"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/views.py",
+        "src/ai_team_team/core/manager/messaging/reads.py"
+      ]
+    },
+    {
+      "verification_id": "A07-04",
+      "requirement": "Membership publication and retirement are atomic relationship changes",
+      "documentation": [
+        {
+          "path": "docs/State_Persistence.md",
+          "heading": "Membership and Source Projections"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Retained Lifecycle"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/membership.py",
+        "src/ai_team_team/core/manager/agents.py"
+      ]
+    },
+    {
+      "verification_id": "A08-01",
+      "requirement": "Preview inspection never marks a message read",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Titles, Previews, and Body Reads"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/views.py",
+        "src/ai_team_team/core/manager/messaging/reads.py"
+      ]
+    },
+    {
+      "verification_id": "A08-02",
+      "requirement": "Partial reads return only authorized content with versioned continuation",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Titles, Previews, and Body Reads"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/reads.py"
+      ]
+    },
+    {
+      "verification_id": "A08-03",
+      "requirement": "Read observation and its read marker share accepted persistence",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Titles, Previews, and Body Reads"
+        },
+        {
+          "path": "docs/State_Persistence.md",
+          "heading": "Chat Views and Read Settlement"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/read_receipts.py",
+        "src/ai_team_team/core/manager/activity/checkpoints.py"
+      ]
+    },
+    {
+      "verification_id": "A08-04",
+      "requirement": "Failures and cancelled siblings do not leave false read facts",
+      "documentation": [
+        {
+          "path": "docs/State_Persistence.md",
+          "heading": "Chat Views and Read Settlement"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/read_receipts.py"
+      ]
+    },
+    {
+      "verification_id": "A08-05",
+      "requirement": "Explicit unread state and concurrent new revisions remain independent",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Edits, Withdrawal, and Personal Controls"
+        },
+        {
+          "path": "docs/State_Persistence.md",
+          "heading": "Chat Views and Read Settlement"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/read_receipts.py",
+        "src/ai_team_team/core/manager/messaging/views.py"
+      ]
+    },
+    {
+      "verification_id": "A09-01",
+      "requirement": "Titles, Unicode, untitled messages, and code fences obey Markdown limits",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Titles, Previews, and Body Reads"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/markdown.py"
+      ]
+    },
+    {
+      "verification_id": "A09-02",
+      "requirement": "A successful edit renews the withdrawal deadline and failed edits do not",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Edits, Withdrawal, and Personal Controls"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/writes.py"
+      ]
+    },
+    {
+      "verification_id": "A09-03",
+      "requirement": "Withdrawal retains separate read and preview history",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Edits, Withdrawal, and Personal Controls"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/writes.py",
+        "src/ai_team_team/core/manager/messaging/views.py"
+      ]
+    },
+    {
+      "verification_id": "A09-04",
+      "requirement": "Withdrawn sources cannot be reopened through projection changes",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Edits, Withdrawal, and Personal Controls"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/writes.py",
+        "src/ai_team_team/database/persistence/store/validation/graph.py"
+      ]
+    },
+    {
+      "verification_id": "A09-05",
+      "requirement": "Personal deletion survives editing and restoration is explicit",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Edits, Withdrawal, and Personal Controls"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/views.py"
+      ]
+    },
+    {
+      "verification_id": "A10-01",
+      "requirement": "A 1200-second configured window is legal and retains applied historical evidence",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Edits, Withdrawal, and Personal Controls"
+        },
+        {
+          "path": "docs/Database/Relational_Constraints.md",
+          "heading": "Scalar and State Checks"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/writes.py",
+        "src/ai_team_team/database/persistence/store/validation/graph.py"
+      ]
+    },
+    {
+      "verification_id": "A10-02",
+      "requirement": "Nonpositive or nonfinite withdrawal configuration is rejected on construction and assignment",
+      "documentation": [
+        {
+          "path": "docs/user/API_Reference.md",
+          "heading": "`ConversationConfig`"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/config.py"
+      ]
+    },
+    {
+      "verification_id": "A10-03",
+      "requirement": "Source and withdrawal projection must commit together",
+      "documentation": [
+        {
+          "path": "docs/Database/Relational_Constraints.md",
+          "heading": "Concrete References and Exclusive Choices"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/writes.py",
+        "src/ai_team_team/database/persistence/store/validation/graph.py"
+      ]
+    },
+    {
+      "verification_id": "A11-01",
+      "requirement": "Concurrent edits and sends consume one shared directional allowance",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/relationships.py",
+        "src/ai_team_team/core/manager/messaging/writes.py"
+      ]
+    },
+    {
+      "verification_id": "A11-02",
+      "requirement": "Historical-generation and friendship-era edits charge the current period",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/relationships.py",
+        "src/ai_team_team/core/manager/messaging/writes.py"
+      ]
+    },
+    {
+      "verification_id": "A11-03",
+      "requirement": "Failed edits preserve quota, reminders, and the prior withdrawal deadline",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Delivery and Idempotency"
+        },
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/writes.py",
+        "src/ai_team_team/core/manager/messaging/relationships.py"
+      ]
+    },
+    {
+      "verification_id": "A11-04",
+      "requirement": "Directional allowance and idempotent sends are atomic",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Delivery and Idempotency"
+        },
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/writes.py",
+        "src/ai_team_team/core/manager/messaging/relationships.py"
+      ]
+    },
+    {
+      "verification_id": "A11-05",
+      "requirement": "Edits share the current allowance and honor blocks",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/writes.py",
+        "src/ai_team_team/core/manager/messaging/relationships.py"
+      ]
+    },
+    {
+      "verification_id": "A11-06",
+      "requirement": "Failed persistence does not charge quota or create delivery",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Delivery and Idempotency"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/writes.py"
+      ]
+    },
+    {
+      "verification_id": "A11-07",
+      "requirement": "Mixed generation, edit, replay, and restore histories follow current authority",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/relationships.py",
+        "src/ai_team_team/database/persistence/store/validation/graph.py"
+      ]
+    },
+    {
+      "verification_id": "A12-01",
+      "requirement": "Either endpoint blocks both delivery directions; only final unblock resets the period",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/relationships.py"
+      ]
+    },
+    {
+      "verification_id": "A12-02",
+      "requirement": "Removing absent friendship or cancelling/crossing requests grants no allowance reset",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/relationships.py"
+      ]
+    },
+    {
+      "verification_id": "A12-03",
+      "requirement": "Accepting during a block race cannot resurrect friendship",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/relationships.py"
+      ]
+    },
+    {
+      "verification_id": "A13-01",
+      "requirement": "Accepted old-generation requests survive removal and restore as history",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/relationships.py",
+        "src/ai_team_team/database/persistence/store/validation/graph.py"
+      ]
+    },
+    {
+      "verification_id": "A13-02",
+      "requirement": "Recipient refusal remains owned and requires explicit lifting",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/relationships.py"
+      ]
+    },
+    {
+      "verification_id": "A13-03",
+      "requirement": "Generated relationship histories preserve ownership and current authorization",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/relationships.py",
+        "src/ai_team_team/database/persistence/store/validation/graph.py"
+      ]
+    },
+    {
+      "verification_id": "A14-01",
+      "requirement": "Unknown and foreground-only tools cannot be dispatched in background",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "ToolExecutionContract Fields"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/service.py"
+      ]
+    },
+    {
+      "verification_id": "A14-02",
+      "requirement": "Auditor denial creates no actual execution attempt",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "Executor Binding and ExecutorCall"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "ToolExecutionContract Fields"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/dispatch.py",
+        "src/ai_team_team/core/tool_runtime.py"
+      ]
+    },
+    {
+      "verification_id": "A14-03",
+      "requirement": "Strict nested validation precedes execution and auditing",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "ToolExecutionContract Fields"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/dispatch.py",
+        "src/ai_team_team/core/tool_runtime.py"
+      ]
+    },
+    {
+      "verification_id": "A14-04",
+      "requirement": "Self-mutation and actor/policy overrides cannot create background authority",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "ToolExecutionContract Fields"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Captured Scope"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/activity/contracts/execution.py",
+        "src/ai_team_team/core/manager/executions/dispatch.py"
+      ]
+    },
+    {
+      "verification_id": "A15-01",
+      "requirement": "Conflicting resources serialize while independent ones progress",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "ResourceClaim and Resolver Contract"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/resources.py"
+      ]
+    },
+    {
+      "verification_id": "A15-02",
+      "requirement": "Foreground and background share reservations across owners",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "ResourceClaim and Resolver Contract"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Detachment and Resources"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/resources.py",
+        "src/ai_team_team/core/manager/executions/dispatch.py"
+      ]
+    },
+    {
+      "verification_id": "A15-03",
+      "requirement": "Managed-link target changes cannot redirect an accepted write",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "ResourceClaim and Resolver Contract"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/dispatch.py",
+        "src/ai_team_team/core/manager/libraries/access.py"
+      ]
+    },
+    {
+      "verification_id": "A15-04",
+      "requirement": "Concurrent unrelated physical file writes can stage independently",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Detachment and Resources"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/doc_library.py",
+        "src/ai_team_team/core/manager/executions/resources.py"
+      ]
+    },
+    {
+      "verification_id": "A16-01",
+      "requirement": "Correctable input and ordinary business/permission errors remain observations",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "Failure Boundaries"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Registered Operations"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/tool_runtime.py",
+        "src/ai_team_team/core/manager/activity/runner.py"
+      ]
+    },
+    {
+      "verification_id": "A16-02",
+      "requirement": "Execution faults cool new same-tool calls without extending the deadline",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Registered Operations"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/outcomes.py",
+        "src/ai_team_team/core/manager/executions/dispatch.py"
+      ]
+    },
+    {
+      "verification_id": "A16-03",
+      "requirement": "Only typed eligible execution retries replay a tool",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Registered Operations"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/tool_runtime.py"
+      ]
+    },
+    {
+      "verification_id": "A16-04",
+      "requirement": "Provider retry waits remain separate from tool cooldowns",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Retry and Availability"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Registered Operations"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/models.py"
+      ]
+    },
+    {
+      "verification_id": "A17-01",
+      "requirement": "Full Jitter caps, per-alias timeouts, and exact framework attempt counts are enforced",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Retry and Availability"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/models.py"
+      ]
+    },
+    {
+      "verification_id": "A17-02",
+      "requirement": "Transient exhaustion waits for its configured recovery boundary",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Retry and Availability"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/models.py"
+      ]
+    },
+    {
+      "verification_id": "A17-03",
+      "requirement": "System instructions, schemas, and output budgets share atomic reservation",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Provider Requests"
+        },
+        {
+          "path": "docs/Database/Request_and_Token_States.md",
+          "heading": "Token Claim States"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/models.py"
+      ]
+    },
+    {
+      "verification_id": "A17-04",
+      "requirement": "Provider wait instructions cannot exceed the remaining whole-sequence budget",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Retry and Availability"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/models.py"
+      ]
+    },
+    {
+      "verification_id": "A17-05",
+      "requirement": "Permanent faults require remediation without periodic recovery",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Retry and Availability"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/service.py",
+        "src/ai_team_team/core/manager/activity/models.py"
+      ]
+    },
+    {
+      "verification_id": "A17-06",
+      "requirement": "Late responses and unacknowledged local calls remain fenced",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Retry and Availability"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/models.py"
+      ]
+    },
+    {
+      "verification_id": "A17-07",
+      "requirement": "Uncooperative providers cannot indefinitely block manager close",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Retry and Availability"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Shutdown"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/models.py",
+        "src/ai_team_team/core/manager/executions/lifecycle.py"
+      ]
+    },
+    {
+      "verification_id": "A18-01",
+      "requirement": "Downtime-excluded cooldown restores a remainder independently of sleep",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Registered Operations"
+        },
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Timers, Context, and History"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/sleep.py",
+        "src/ai_team_team/core/manager/restore/recovery.py"
+      ]
+    },
+    {
+      "verification_id": "A18-02",
+      "requirement": "Rejected or cancelled cooldown receipts retain correct live boundaries",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Registered Operations"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/outcomes.py"
+      ]
+    },
+    {
+      "verification_id": "A18-03",
+      "requirement": "Parallel faults serialize cooldown record versions",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Registered Operations"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/outcomes.py"
+      ]
+    },
+    {
+      "verification_id": "A19-01",
+      "requirement": "Threshold observation detaches the same single execution",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Detachment and Resources"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/dispatch.py"
+      ]
+    },
+    {
+      "verification_id": "A19-02",
+      "requirement": "Fast siblings and one handle close one complete native batch",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Detachment and Resources"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/dispatch.py",
+        "src/ai_team_team/core/manager/activity/checkpoints.py"
+      ]
+    },
+    {
+      "verification_id": "A19-03",
+      "requirement": "Fast results remain foreground without a second result notice",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Detachment and Resources"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/dispatch.py"
+      ]
+    },
+    {
+      "verification_id": "A20-01",
+      "requirement": "Archived private libraries reject ordinary mutation while retained identities can reactivate",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Retained Lifecycle"
+        },
+        {
+          "path": "docs/Gated_Reading.md",
+          "heading": "6. Document Libraries (DocLib)"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/agents.py",
+        "src/ai_team_team/core/manager/libraries/private_files.py"
+      ]
+    },
+    {
+      "verification_id": "A20-02",
+      "requirement": "Private-library ownership and publication remain explicit",
+      "documentation": [
+        {
+          "path": "docs/Gated_Reading.md",
+          "heading": "6. Document Libraries (DocLib)"
+        },
+        {
+          "path": "docs/Database/Ownership_and_Evidence.md",
+          "heading": "Ordinary Identities"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/libraries/private_files.py"
+      ]
+    },
+    {
+      "verification_id": "A20-03",
+      "requirement": "Native symlinks and managed-link cycles cannot escape the managed boundary",
+      "documentation": [
+        {
+          "path": "docs/Gated_Reading.md",
+          "heading": "6. Document Libraries (DocLib)"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/doc_library.py",
+        "src/ai_team_team/core/manager/libraries/access.py"
+      ]
+    },
+    {
+      "verification_id": "A20-04",
+      "requirement": "Managed links recheck current target ACL",
+      "documentation": [
+        {
+          "path": "docs/Gated_Reading.md",
+          "heading": "6. Document Libraries (DocLib)"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/libraries/access.py"
+      ]
+    },
+    {
+      "verification_id": "A20-05",
+      "requirement": "Already entered atomic writes settle; revoked late writes fail closed",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Concurrency_and_Observers.md",
+          "heading": "Isolated Execution Context"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Outcomes and Controls"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/dispatch.py",
+        "src/ai_team_team/doc_library.py"
+      ]
+    },
+    {
+      "verification_id": "A21-01",
+      "requirement": "Queued cancellation prevents dispatch",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "Cancellation and Suspension Hooks"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/controls.py"
+      ]
+    },
+    {
+      "verification_id": "A21-02",
+      "requirement": "Running cooperative cancellation has factual acknowledgement",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "Cancellation and Suspension Hooks"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/controls.py"
+      ]
+    },
+    {
+      "verification_id": "A21-03",
+      "requirement": "Threads retain reservations until actual return and known completion wins",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Outcomes and Controls"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "Cancellation and Suspension Hooks"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/lifecycle.py",
+        "src/ai_team_team/core/manager/executions/outcomes.py"
+      ]
+    },
+    {
+      "verification_id": "A21-04",
+      "requirement": "Provider suspension requires acknowledgement and otherwise uses supported termination",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "Cancellation and Suspension Hooks"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/controls.py",
+        "src/ai_team_team/core/manager/executions/lifecycle.py"
+      ]
+    },
+    {
+      "verification_id": "A21-05",
+      "requirement": "Accepted local outcomes settle beyond the external grace period",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Outcomes and Controls"
+        },
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Cancellation Settlement"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/outcomes.py",
+        "src/ai_team_team/core/manager/executions/lifecycle.py"
+      ]
+    },
+    {
+      "verification_id": "A22-01",
+      "requirement": "Execution, health, attention, and uncertainty are independent values",
+      "documentation": [
+        {
+          "path": "docs/Background_Tasks.md",
+          "heading": "Independent Task Dimensions"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/queries.py"
+      ]
+    },
+    {
+      "verification_id": "A22-02",
+      "requirement": "Unsupported heartbeat never becomes an inferred stall",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "Health Reports and Deadlines"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/health.py"
+      ]
+    },
+    {
+      "verification_id": "A22-03",
+      "requirement": "Repeated health evidence coalesces only within a consecutive state",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "Health Reports and Deadlines"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/health.py"
+      ]
+    },
+    {
+      "verification_id": "A23-01",
+      "requirement": "Default lawful retained results remain owner-readable after revocation",
+      "documentation": [
+        {
+          "path": "docs/Background_Tasks.md",
+          "heading": "Protected Results and Stopping"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/queries.py"
+      ]
+    },
+    {
+      "verification_id": "A23-02",
+      "requirement": "Restrictive policy cannot borrow a later membership or unverifiable source",
+      "documentation": [
+        {
+          "path": "docs/Background_Tasks.md",
+          "heading": "Protected Results and Stopping"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Executor_Integration.md",
+          "heading": "ResourceClaim and Resolver Contract"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/queries.py",
+        "src/ai_team_team/core/manager/executions/dispatch.py"
+      ]
+    },
+    {
+      "verification_id": "A23-03",
+      "requirement": "Revocation before acceptance cannot create a lawful retained body",
+      "documentation": [
+        {
+          "path": "docs/Background_Tasks.md",
+          "heading": "Protected Results and Stopping"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/outcomes.py"
+      ]
+    },
+    {
+      "verification_id": "A23-04",
+      "requirement": "Transient bodies do not reappear after restore or enter durable task payloads",
+      "documentation": [
+        {
+          "path": "docs/Database/Ownership_and_Evidence.md",
+          "heading": "Private and Transient Content"
+        },
+        {
+          "path": "docs/Background_Tasks.md",
+          "heading": "Protected Results and Stopping"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/outcomes.py",
+        "src/ai_team_team/core/manager/executions/queries.py"
+      ]
+    },
+    {
+      "verification_id": "A24-01",
+      "requirement": "Incomplete electorates, membership changes, and ties cannot become approvals",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "E. Approval Decisions"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/governance/cases.py",
+        "src/ai_team_team/core/manager/governance/submissions.py"
+      ]
+    },
+    {
+      "verification_id": "A24-02",
+      "requirement": "Reading addressed mail does not vote and actual choices are strict and immutable",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "Personal Email Is Not a Ballot"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/governance/submissions.py"
+      ]
+    },
+    {
+      "verification_id": "A24-03",
+      "requirement": "Complete parent electorates and Root identity remain explicit",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "E. Approval Decisions"
+        },
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "B. Parent Approval Policy (`\"parent_approval\"`)"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/governance/cases.py",
+        "src/ai_team_team/core/broker/approvals.py"
+      ]
+    },
+    {
+      "verification_id": "A24-04",
+      "requirement": "Unsupported communication wake is rejected on construction and assignment",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "D. Request Delivery and Direction"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/config.py"
+      ]
+    },
+    {
+      "verification_id": "A24-05",
+      "requirement": "Case and channel recovery retain exact ballot provenance",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "F. Request and Agreement Lifecycle"
+        },
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Domain Recovery"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/broker/approvals.py",
+        "src/ai_team_team/core/manager/restore/recovery.py"
+      ]
+    },
+    {
+      "verification_id": "A25-01",
+      "requirement": "Independent pairs communicate under every configured institution",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "A. Permissive Policy (`\"permissive\"`)"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/broker/routing.py"
+      ]
+    },
+    {
+      "verification_id": "A25-02",
+      "requirement": "Cross-tree lineage follows real tops without an invented Root",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "C. Lineage Approval Policy (`\"lineage_approval\"`)"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/broker/routing.py"
+      ]
+    },
+    {
+      "verification_id": "A25-03",
+      "requirement": "An independent parent still governs its attached child's requests",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "B. Parent Approval Policy (`\"parent_approval\"`)"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/broker/routing.py"
+      ]
+    },
+    {
+      "verification_id": "A25-04",
+      "requirement": "Relevant independence transitions stale pending requests",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "F. Request and Agreement Lifecycle"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/broker/requests.py",
+        "src/ai_team_team/core/broker/routing.py"
+      ]
+    },
+    {
+      "verification_id": "A25-05",
+      "requirement": "Active agreement revocation remains endpoint-owned and directionally idempotent",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "F. Request and Agreement Lifecycle"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/broker/lifecycle.py"
+      ]
+    },
+    {
+      "verification_id": "A26-01",
+      "requirement": "Four attitudes and deliberate None are distinct from mail read flags",
+      "documentation": [
+        {
+          "path": "docs/Consensual_Team_Formation.md",
+          "heading": "Invitation Attitudes"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/formations/lifecycle/responses.py"
+      ]
+    },
+    {
+      "verification_id": "A26-02",
+      "requirement": "Material revisions require renewed exact consent and reject stale responses",
+      "documentation": [
+        {
+          "path": "docs/Consensual_Team_Formation.md",
+          "heading": "Proposal Revisions and Exact Consent"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/formations/lifecycle/revisions.py"
+      ]
+    },
+    {
+      "verification_id": "A26-03",
+      "requirement": "Unanimity, final confirmation, and abandonment retain independent decisions",
+      "documentation": [
+        {
+          "path": "docs/Consensual_Team_Formation.md",
+          "heading": "Creation and Completion"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/formations/lifecycle/creation.py"
+      ]
+    },
+    {
+      "verification_id": "A26-04",
+      "requirement": "Late joining is invitee-initiated and revalidates lifecycle",
+      "documentation": [
+        {
+          "path": "docs/Consensual_Team_Formation.md",
+          "heading": "Late Joining"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/formations/lifecycle/late_join.py"
+      ]
+    },
+    {
+      "verification_id": "A26-05",
+      "requirement": "Optional drafts remain supplied advisory candidates",
+      "documentation": [
+        {
+          "path": "docs/Consensual_Team_Formation.md",
+          "heading": "Voluntary Design and Optional Candidates"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/formations/lifecycle/drafts.py"
+      ]
+    },
+    {
+      "verification_id": "A27-01",
+      "requirement": "Actual ancestor and lineage principals govern migration",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "4. Migration & Reorganization Policies"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/migration.py"
+      ]
+    },
+    {
+      "verification_id": "A27-02",
+      "requirement": "Migration cooldown and acceptance share successful commit time",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "4. Migration & Reorganization Policies"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/migration.py",
+        "src/ai_team_team/database/persistence/store/writer/transaction.py"
+      ]
+    },
+    {
+      "verification_id": "A27-03",
+      "requirement": "Runtime host policy is revalidated after lock and writer waits",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "4. Migration & Reorganization Policies"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/migration.py"
+      ]
+    },
+    {
+      "verification_id": "A27-04",
+      "requirement": "Parent failover has its own expiry and rejects late choices without auto fallback",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "A. Failover Routing Strategies"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/failover.py"
+      ]
+    },
+    {
+      "verification_id": "A28-01",
+      "requirement": "Missing explicit findings create no health authority",
+      "documentation": [
+        {
+          "path": "docs/Supervisory_Team.md",
+          "heading": "Fresh managed lifecycle"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/supervision/assessment.py"
+      ]
+    },
+    {
+      "verification_id": "A28-02",
+      "requirement": "Confirmed integrity faults apply protection before incident persistence",
+      "documentation": [
+        {
+          "path": "docs/Supervisory_Team.md",
+          "heading": "Triggering an assessment"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/facade/health_api.py",
+        "src/ai_team_team/core/manager/supervision/incidents.py"
+      ]
+    },
+    {
+      "verification_id": "A28-03",
+      "requirement": "Audits create fresh real teams with common runtime and all findings",
+      "documentation": [
+        {
+          "path": "docs/Supervisory_Team.md",
+          "heading": "Fresh managed lifecycle"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/supervision/service.py",
+        "src/ai_team_team/core/manager/supervision/assessment.py"
+      ]
+    },
+    {
+      "verification_id": "A28-04",
+      "requirement": "Protocol and tool evidence use separate explicit thresholds",
+      "documentation": [
+        {
+          "path": "docs/Supervisory_Team.md",
+          "heading": "Triggering an assessment"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/supervision/detection.py"
+      ]
+    },
+    {
+      "verification_id": "A28-05",
+      "requirement": "Unavailable audits preserve incidents without stopping ordinary people",
+      "documentation": [
+        {
+          "path": "docs/Supervisory_Team.md",
+          "heading": "Triggering an assessment"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/supervision/service.py",
+        "src/ai_team_team/core/manager/supervision/detection.py"
+      ]
+    },
+    {
+      "verification_id": "A28-06",
+      "requirement": "Audit deadline includes scheduler capacity and fences late findings",
+      "documentation": [
+        {
+          "path": "docs/Supervisory_Team.md",
+          "heading": "Fresh managed lifecycle"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/supervision/service.py",
+        "src/ai_team_team/core/manager/supervision/assessment.py"
+      ]
+    },
+    {
+      "verification_id": "A28-07",
+      "requirement": "Incident handling checks current actual parent authority",
+      "documentation": [
+        {
+          "path": "docs/Supervisory_Team.md",
+          "heading": "Incident lifecycle"
+        },
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "7. Health Attention and Escalation"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/supervision/incidents.py"
+      ]
+    },
+    {
+      "verification_id": "A29-01",
+      "requirement": "Countdown units and total bounds are strict and Host-owned",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Intent and Sleep"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/sleep.py",
+        "src/ai_team_team/core/manager/activity/controls.py"
+      ]
+    },
+    {
+      "verification_id": "A29-02",
+      "requirement": "Sleep retains a mandatory finite deadline while mail is delivered",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Intent and Sleep"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/sleep.py"
+      ]
+    },
+    {
+      "verification_id": "A29-03",
+      "requirement": "Protected arrivals cross the sleep boundary without loss",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Protected Information and Personal Summaries"
+        },
+        {
+          "path": "docs/Supervisory_Team.md",
+          "heading": "Incident lifecycle"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/notifications.py",
+        "src/ai_team_team/core/manager/activity/sleep.py"
+      ]
+    },
+    {
+      "verification_id": "A29-04",
+      "requirement": "Provider unavailability cannot extend voluntary sleep",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Intent and Sleep"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/sleep.py",
+        "src/ai_team_team/core/manager/activity/service.py"
+      ]
+    },
+    {
+      "verification_id": "A30-01",
+      "requirement": "Permanent and timed preferences share owner and duration rules",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Intent and Sleep"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/suppression/service.py"
+      ]
+    },
+    {
+      "verification_id": "A30-02",
+      "requirement": "Expiry retains one source-count summary with unchanged read state",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Protected Information and Personal Summaries"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/suppression/summaries.py"
+      ]
+    },
+    {
+      "verification_id": "A30-03",
+      "requirement": "Summaries never include private bodies, titles, or replay old notices",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Protected Information and Personal Summaries"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/suppression/summaries.py"
+      ]
+    },
+    {
+      "verification_id": "A30-04",
+      "requirement": "Overlapping preferences and frozen archives remain independently filtered",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Protected Information and Personal Summaries"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/suppression/summaries.py"
+      ]
+    },
+    {
+      "verification_id": "A31-01",
+      "requirement": "Host-confirmed death is terminal and retains private artifacts",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Retained Lifecycle"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/agent_lifecycle/death.py",
+        "src/ai_team_team/core/manager/agents.py"
+      ]
+    },
+    {
+      "verification_id": "A31-02",
+      "requirement": "Death of members or creators preserves surviving teams and direct-child structure",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Retained Lifecycle"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/agent_lifecycle/death.py",
+        "src/ai_team_team/core/manager/topology.py"
+      ]
+    },
+    {
+      "verification_id": "A31-03",
+      "requirement": "Live and queued observers terminate without a prior idle boundary",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Retained Lifecycle"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "Addressed Interaction and Observation"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/agent_lifecycle/death.py",
+        "src/ai_team_team/core/manager/activity/service.py"
+      ]
+    },
+    {
+      "verification_id": "A31-04",
+      "requirement": "Known returned results settle before death closes their authority",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Retained Lifecycle"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/agent_lifecycle/death.py",
+        "src/ai_team_team/core/manager/executions/outcomes.py"
+      ]
+    },
+    {
+      "verification_id": "A31-05",
+      "requirement": "Dead identities restore without a model binding or automatic wake",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Retained Lifecycle"
+        },
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Activation and Execution Facts"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/restore/recovery.py",
+        "src/ai_team_team/database/persistence/store/validation/graph.py"
+      ]
+    },
+    {
+      "verification_id": "A32-01",
+      "requirement": "Parents are explicit and personal membership never infers ancestry",
+      "documentation": [
+        {
+          "path": "docs/Database/Ownership_and_Evidence.md",
+          "heading": "Ordinary Identities"
+        },
+        {
+          "path": "docs/Agent_and_AgentTeam_Discovery.md",
+          "heading": "Live Queries and Persistence"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/topology.py",
+        "src/ai_team_team/core/manager/discovery.py"
+      ]
+    },
+    {
+      "verification_id": "A32-02",
+      "requirement": "Dissolution and parent retirement detach surviving direct children only",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "Retained Lifecycle"
+        },
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Leaving, Rejoining, and Dissolution"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/topology.py",
+        "src/ai_team_team/core/manager/messaging/archive.py"
+      ]
+    },
+    {
+      "verification_id": "A32-03",
+      "requirement": "Archived teams retain provenance without reentering live topology",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Leaving, Rejoining, and Dissolution"
+        },
+        {
+          "path": "docs/Agent_and_AgentTeam_Discovery.md",
+          "heading": "Live Queries and Persistence"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/archive.py",
+        "src/ai_team_team/core/manager/discovery.py"
+      ]
+    },
+    {
+      "verification_id": "A32-04",
+      "requirement": "Discovery uses restored registries without a persistent directory index",
+      "documentation": [
+        {
+          "path": "docs/Agent_and_AgentTeam_Discovery.md",
+          "heading": "Live Queries and Persistence"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/discovery.py"
+      ]
+    },
+    {
+      "verification_id": "A33-01",
+      "requirement": "Target acceptance and own-position cooldown are required for attachment",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "4. Migration & Reorganization Policies"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/migration.py"
+      ]
+    },
+    {
+      "verification_id": "A33-02",
+      "requirement": "Agent tool detachment does not await an old parent",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "4. Migration & Reorganization Policies"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/migration.py"
+      ]
+    },
+    {
+      "verification_id": "A33-03",
+      "requirement": "Live Host disablement and exact final authority can reject a waiting transition",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "4. Migration & Reorganization Policies"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/migration.py"
+      ]
+    },
+    {
+      "verification_id": "A33-04",
+      "requirement": "Parent provenance survives migration and restoration",
+      "documentation": [
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "4. Migration & Reorganization Policies"
+        },
+        {
+          "path": "docs/Database/Ownership_and_Evidence.md",
+          "heading": "Ordinary Identities"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/migration.py",
+        "src/ai_team_team/core/manager/topology.py"
+      ]
+    },
+    {
+      "verification_id": "A34-01",
+      "requirement": "Offline time is excluded and restoration-start anchors survive slow publication",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Timers, Context, and History"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/restore/recovery.py",
+        "src/ai_team_team/core/manager/activity/sleep.py"
+      ]
+    },
+    {
+      "verification_id": "A34-02",
+      "requirement": "Failed recovery preserves original timer deadlines",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "State Replacement"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/sleep.py",
+        "src/ai_team_team/core/manager/restore/transaction.py"
+      ]
+    },
+    {
+      "verification_id": "A34-03",
+      "requirement": "Timer handoffs exclude restore until accepted local settlement",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "State Replacement"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/sleep.py",
+        "src/ai_team_team/core/manager/restore/service.py"
+      ]
+    },
+    {
+      "verification_id": "A34-04",
+      "requirement": "A successful publication hands off exactly one new timer",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Lifecycle_and_Recovery.md",
+          "heading": "State Replacement"
+        },
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Timers, Context, and History"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/restore/recovery.py",
+        "src/ai_team_team/core/manager/activity/sleep.py"
+      ]
+    },
+    {
+      "verification_id": "A35-01",
+      "requirement": "Committed dependency closures survive first partial export",
+      "documentation": [
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Immutable Capture and Dependency Closure"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/durable_records.py",
+        "src/ai_team_team/database/persistence/records.py"
+      ]
+    },
+    {
+      "verification_id": "A35-02",
+      "requirement": "Unrelated identity and team rows remain unchanged for chat-only deltas",
+      "documentation": [
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Immutable Capture and Dependency Closure"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/durable_records.py",
+        "src/ai_team_team/database/persistence/store/writer/transaction.py"
+      ]
+    },
+    {
+      "verification_id": "A35-03",
+      "requirement": "Cancelled observers retain accepted writes and exact receipts",
+      "documentation": [
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Cancellation Settlement"
+        },
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Bounded Writer and Exact Acceptance"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/durable_records.py",
+        "src/ai_team_team/database/persistence/coordinator.py"
+      ]
+    },
+    {
+      "verification_id": "A35-04",
+      "requirement": "Incremental validation agrees with strict reference validation",
+      "documentation": [
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Reference and Incremental Validation"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/store/validation/database.py"
+      ]
+    },
+    {
+      "verification_id": "A36-01",
+      "requirement": "Old, future, and malformed schema versions cause no DDL or workspace mutation",
+      "documentation": [
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Database Admission"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/store/service.py"
+      ]
+    },
+    {
+      "verification_id": "A36-02",
+      "requirement": "Competing processes and abrupt restart enforce exclusive writer ownership",
+      "documentation": [
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Database Admission"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/lease.py"
+      ]
+    },
+    {
+      "verification_id": "A36-03",
+      "requirement": "SQLite pragmas and coalesced pending deltas preserve strict writer semantics",
+      "documentation": [
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Database Admission"
+        },
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Bounded Writer and Exact Acceptance"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/store/service.py",
+        "src/ai_team_team/database/persistence/coordinator.py"
+      ]
+    },
+    {
+      "verification_id": "A37-01",
+      "requirement": "Durable selection and missing paths are explicit rather than silently volatile",
+      "documentation": [
+        {
+          "path": "docs/State_Persistence.md",
+          "heading": "Incremental single-writer design"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/facade/manager.py"
+      ]
+    },
+    {
+      "verification_id": "A37-02",
+      "requirement": "Host chat and exports preserve equivalent identities in durable and volatile modes",
+      "documentation": [
+        {
+          "path": "docs/State_Persistence.md",
+          "heading": "Incremental single-writer design"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/writes.py",
+        "src/ai_team_team/core/manager/messaging/membership.py"
+      ]
+    },
+    {
+      "verification_id": "A37-03",
+      "requirement": "Receipts survive lost responses and retain accepted identities",
+      "documentation": [
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Bounded Writer and Exact Acceptance"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/records.py",
+        "src/ai_team_team/database/persistence/coordinator.py"
+      ]
+    },
+    {
+      "verification_id": "A37-04",
+      "requirement": "Complete consumer examples avoid project-root DocLib and verify restored identity",
+      "documentation": [
+        {
+          "path": "docs/State_Persistence.md",
+          "heading": "Incremental single-writer design"
+        },
+        {
+          "path": "docs/Background_Tasks.md",
+          "heading": "Complete Offline Example"
+        }
+      ],
+      "implementation": [
+        "examples/personal_activity.py",
+        "examples/background_tasks.py"
+      ]
+    },
+    {
+      "verification_id": "A38-01",
+      "requirement": "Chat and command-reference corruption cannot change live runtime or files",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Preflight and Staging"
+        },
+        {
+          "path": "docs/Database/Relational_Constraints.md",
+          "heading": "Concrete References and Exclusive Choices"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/store/validation/graph.py",
+        "src/ai_team_team/core/manager/restore/service.py"
+      ]
+    },
+    {
+      "verification_id": "A38-02",
+      "requirement": "Execution and private-owner reference corruption fails atomically",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Preflight and Staging"
+        },
+        {
+          "path": "docs/Database/Relational_Constraints.md",
+          "heading": "Concrete References and Exclusive Choices"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/store/validation/graph.py",
+        "src/ai_team_team/core/manager/restore/service.py"
+      ]
+    },
+    {
+      "verification_id": "A38-03",
+      "requirement": "Sleep, suppression, and dead ownership corruption fail before publication",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Preflight and Staging"
+        },
+        {
+          "path": "docs/Database/Relational_Constraints.md",
+          "heading": "Scalar and State Checks"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/store/validation/graph.py",
+        "src/ai_team_team/core/manager/restore/service.py"
+      ]
+    },
+    {
+      "verification_id": "A38-04",
+      "requirement": "Memory lifecycle and complete personal context are validated independently",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Preflight and Staging"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Checkpointed Personal Memory"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/restore/service.py"
+      ]
+    },
+    {
+      "verification_id": "A39-01",
+      "requirement": "Real exits surround dispatch, returned outcome, and SQLite result commit",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
+          "heading": "Outcomes and Controls"
+        },
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Recoverable Publication"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/dispatch.py",
+        "src/ai_team_team/core/manager/executions/outcomes.py"
+      ]
+    },
+    {
+      "verification_id": "A39-02",
+      "requirement": "A process exit between directory swaps restores every original library",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Failure Boundaries"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/publication.py"
+      ]
+    },
+    {
+      "verification_id": "A39-03",
+      "requirement": "An exit after recovery receipt but before activation retains one addressed notice",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Recoverable Publication"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/restore/recovery.py",
+        "src/ai_team_team/core/manager/restore/publication.py"
+      ]
+    },
+    {
+      "verification_id": "A39-04",
+      "requirement": "Rollback intent restores prior request and quota rows after an actual crash",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Failure Boundaries"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/store/publication_rollback.py"
+      ]
+    },
+    {
+      "verification_id": "A40-01",
+      "requirement": "Unfinished Host execution wakes its same owner without replay or reconnect",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Activation and Execution Facts"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/restore/recovery.py"
+      ]
+    },
+    {
+      "verification_id": "A40-02",
+      "requirement": "Unaffected sleep and source read state survive restoration",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Activation and Execution Facts"
+        },
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Timers, Context, and History"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/restore/recovery.py"
+      ]
+    },
+    {
+      "verification_id": "A40-03",
+      "requirement": "Known terminal results restore attention and provenance without redispatch",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Activation and Execution Facts"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/restore/recovery.py"
+      ]
+    },
+    {
+      "verification_id": "A40-04",
+      "requirement": "Repeated restore deduplicates uncertain execution notices",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Activation and Execution Facts"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/restore/recovery.py"
+      ]
+    },
+    {
+      "verification_id": "A41-01",
+      "requirement": "Old synchronous writes and returned delegated authority cannot cross a revoked generation",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Concurrency_and_Observers.md",
+          "heading": "Isolated Execution Context"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/dispatch.py",
+        "src/ai_team_team/doc_library.py"
+      ]
+    },
+    {
+      "verification_id": "A41-02",
+      "requirement": "Live executor ownership excludes restore",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Preflight and Staging"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/service.py"
+      ]
+    },
+    {
+      "verification_id": "A41-03",
+      "requirement": "Failed runtime publication restores exact previous quota and request facts",
+      "documentation": [
+        {
+          "path": "docs/Database/Recovery_and_Publication.md",
+          "heading": "Failure Boundaries"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/store/publication_rollback.py",
+        "src/ai_team_team/core/manager/restore/transaction.py"
+      ]
+    },
+    {
+      "verification_id": "A41-04",
+      "requirement": "Indexing close and restore suspension cannot leave cancelled queue workers",
+      "documentation": [
+        {
+          "path": "docs/Selective_Episodic_Memory.md",
+          "heading": "Persistence and Restore"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/memory/service/runtime.py"
+      ]
+    },
+    {
+      "verification_id": "A42-01",
+      "requirement": "Counts, discovery, callbacks, and operation events contain no chat bodies",
+      "documentation": [
+        {
+          "path": "docs/Database/Ownership_and_Evidence.md",
+          "heading": "Private and Transient Content"
+        },
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Notifications and Privacy"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/notifications.py",
+        "src/ai_team_team/core/manager/discovery.py"
+      ]
+    },
+    {
+      "verification_id": "A42-02",
+      "requirement": "Private observations remain transient across checkpoints and model protocols",
+      "documentation": [
+        {
+          "path": "docs/Database/Ownership_and_Evidence.md",
+          "heading": "Private and Transient Content"
+        },
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md",
+          "heading": "Checkpointed Personal Memory"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/checkpoints.py",
+        "src/ai_team_team/core/manager/activity/runner.py"
+      ]
+    },
+    {
+      "verification_id": "A42-03",
+      "requirement": "Voting and audits cannot automatically ingest personal private artifacts",
+      "documentation": [
+        {
+          "path": "docs/Supervisory_Team.md",
+          "heading": "Evidence and privacy"
+        },
+        {
+          "path": "docs/Team_Governance.md",
+          "heading": "Personal Email Is Not a Ballot"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/supervision/service.py",
+        "src/ai_team_team/core/manager/governance/submissions.py"
+      ]
+    },
+    {
+      "verification_id": "A42-04",
+      "requirement": "Result bodies cannot be read by another execution owner",
+      "documentation": [
+        {
+          "path": "docs/Background_Tasks.md",
+          "heading": "Protected Results and Stopping"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/executions/queries.py"
+      ]
+    },
+    {
+      "verification_id": "A43-01",
+      "requirement": "Disabled mode needs no indexing and can persist Journal without cards",
+      "documentation": [
+        {
+          "path": "docs/Selective_Episodic_Memory.md",
+          "heading": "Enabling the Optional Mode"
+        },
+        {
+          "path": "docs/Selective_Episodic_Memory.md",
+          "heading": "System Memory Journal"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/memory/service/catalog.py",
+        "src/ai_team_team/core/manager/memory/service/runtime.py"
+      ]
+    },
+    {
+      "verification_id": "A43-02",
+      "requirement": "Indexing owns invocation provenance and cannot capture another person or business scope",
+      "documentation": [
+        {
+          "path": "docs/Selective_Episodic_Memory.md",
+          "heading": "Identity and Membership Boundary"
+        },
+        {
+          "path": "docs/Selective_Episodic_Memory.md",
+          "heading": "Persistence and Restore"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/memory/service/indexing.py"
+      ]
+    },
+    {
+      "verification_id": "A43-03",
+      "requirement": "Ephemeral recall clears and membership leaves the catalog intact",
+      "documentation": [
+        {
+          "path": "docs/Selective_Episodic_Memory.md",
+          "heading": "Working Context"
+        },
+        {
+          "path": "docs/Selective_Episodic_Memory.md",
+          "heading": "Identity and Membership Boundary"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/memory/service/catalog.py",
+        "src/ai_team_team/core/manager/activity/runner.py"
+      ]
+    },
+    {
+      "verification_id": "A43-04",
+      "requirement": "Disabling with a backlog releases flush and reenable preserves pending indexing",
+      "documentation": [
+        {
+          "path": "docs/Selective_Episodic_Memory.md",
+          "heading": "AI-visible Memory Catalog"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/memory/service/runtime.py"
+      ]
+    },
+    {
+      "verification_id": "A44-01",
+      "requirement": "Ordered callbacks tolerate blocking and failures without blocking the event loop",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Concurrency_and_Observers.md",
+          "heading": "Ordered Observational Callbacks"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/callbacks.py"
+      ]
+    },
+    {
+      "verification_id": "A44-02",
+      "requirement": "Many-source admissions retain one person and fair independent progress",
+      "documentation": [
+        {
+          "path": "docs/Autonomous_Agent_Runtime_Architecture/Personal_Scheduling.md",
+          "heading": "Admission and Fairness"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/activity/service.py"
+      ]
+    },
+    {
+      "verification_id": "A44-03",
+      "requirement": "Continuous slow-writer producers retain all keys with two completion handles",
+      "documentation": [
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Bounded Writer and Exact Acceptance"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/coordinator.py"
+      ]
+    },
+    {
+      "verification_id": "A44-04",
+      "requirement": "Seeded relationship periods preserve current authority across repeated restores",
+      "documentation": [
+        {
+          "path": "docs/Personal_Conversations.md",
+          "heading": "Direct Relationships"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/core/manager/messaging/relationships.py"
+      ]
+    },
+    {
+      "verification_id": "A44-05",
+      "requirement": "Loop responsiveness continues while detached validation is blocked",
+      "documentation": [
+        {
+          "path": "docs/Database/Transactions_and_Validation.md",
+          "heading": "Immutable Capture and Dependency Closure"
+        }
+      ],
+      "implementation": [
+        "src/ai_team_team/database/persistence/store/validation/database.py"
+      ]
+    }
+  ]
+}

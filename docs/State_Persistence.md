@@ -26,17 +26,9 @@ Durable mode is the default and requires an explicit database path.
 
 The Host can explicitly select `persistence_mode="volatile"` without `db_path` for a session that has no restart-recovery promise; permission and ownership rules are unchanged.
 
-The [Phase 1 engineering profile](dev/autonomous_activity/Phase_1.md) describes schema 12 records, exact commit receipts, recoverable publication, and resource-generation leases.
+The [database architecture](Database/README.md) describes the complete current schema, concrete ownership, exact receipts, incremental validation, and recoverable runtime/file publication.
 
-The [Phase 3 messaging profile](dev/autonomous_activity/Phase_3.md) activates incompatible schema 13 for explicit publications, exact chat command keys, private read/detail controls, historical views, friendship periods, and recipient-owned reminder evidence.
-
-The [Phase 4 execution profile](dev/autonomous_activity/Phase_4.md) activates incompatible schema 14 for explicit and detached execution, immutable declaration and source provenance, protected input/result references, factual cancellation, and owner-only result recovery without replay.
-
-The [Phase 5 institutional profile](dev/autonomous_activity/Phase_5.md) activates incompatible schema 15 for exact governance cases, explicit-parent topology and acceptance, resource attempts, and event-driven health evidence.
-
-The [Phase 6 lifecycle profile](dev/autonomous_activity/Phase_6.md) activates incompatible schema 16 for suppression lifecycle and summary coverage, retained terminal death, and recovery updates with exact rollback before-images.
-
-The [Phase 2 personal runtime](dev/autonomous_activity/Phase_2.md) atomically checkpoints the sanitized personal window, Journal dependencies, notification claims, and activity progress.
+The [personal runtime](Autonomous_Agent_Runtime_Architecture/Context_and_Notifications.md) atomically checkpoints the sanitized personal window, Journal dependencies, notification claims, and activity progress.
 
 Open Native exchanges are excluded from saved model windows while their issued execution evidence remains retained.
 
@@ -124,11 +116,15 @@ The database stores:
 - typed health observations and detector states, stable incidents and their occurrence/claim histories, temporary audit runs and participant snapshots, scoped provider/execution/chat evidence, individual findings, and final results;
 - document-library metadata, ACLs, managed cross-library links, paths, and file contents.
 
+### Membership and Source Projections
+
 An incremental membership change rewrites the affected team's `team_members` rows without rewriting an already persisted Agent record, Working Context, Journal, Memory Catalog, model binding, lifecycle state, or Private DocLib.
 
 Those rows are derived from the latest accepted open membership intervals after record application, so a coalesced or later progress snapshot cannot reopen a departed relationship.
 
 New membership identities, their Private DocLibs, and proposal replacements publish with the same receipt; ordinary snapshots cannot capture their unaccepted staging state or overwrite a replacement that is still settling.
+
+### Chat Views and Read Settlement
 
 Departure and archive-finalization transactions freeze exact authorized source references, while later edits and withdrawals update only live views.
 
@@ -139,6 +135,8 @@ Cancelled, unreturned Host reads compensate only their own immediately preceding
 Withdrawal validation uses the persisted finite positive applied window, not a hard-coded ten-minute cap or a later configuration value.
 
 An accepted historical friendship request remains accepted after its relationship generation changes, without granting current contact authority.
+
+### Audit Evidence and Runtime Bindings
 
 Each audit's supervisory AgentTeam and fresh auditors are fully registered in the running Manager but deliberately omitted from state snapshots, including full saves taken during an audit.
 

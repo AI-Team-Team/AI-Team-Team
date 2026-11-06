@@ -5,7 +5,7 @@ import unittest
 from contextlib import closing
 
 from ai_team_team import Agent, StateRestoreError
-from test.test_att.test_autonomous_activity_phase0._fixtures import AgentIdentitySnapshot
+from test.test_att.test_runtime_contracts._fixtures import AgentIdentitySnapshot
 
 from ._support import invocation_graph, make_manager
 

@@ -16,7 +16,15 @@ Undeclared custom tools remain foreground-only with conservative shared-resource
 
 Only an affirmative `ToolExecutionContract(background_allowed=True, ...)` allows explicit background admission or automatic detachment.
 
+The [executor integration reference](Autonomous_Agent_Runtime_Architecture/Executor_Integration.md) lists every contract field, valid combination, binding hook, resource claim, and health-report format, with a custom binding example.
+
 Self-modifying and undeclared effects cannot run in the background, and detachable mutations require a declared safety contract.
+
+Private DocLib writes create work artifacts rather than modifying the owner's identity, instructions, model binding, Working Context, or lifecycle.
+
+The built-in private write, move, and delete tools declare background-eligible artifact effects with managed-lease safety; private ownership, archive protection, path validation, and library/resource locking still apply.
+
+Executor results and later judgments return to the same owner's personal activity rather than allowing a background worker to rewrite that person's model context.
 
 The Host registers executor bindings; models cannot supply arbitrary Python, a callable, an executor, another owner, or policy overrides.
 
@@ -49,6 +57,8 @@ An ordinary foreground call returns either its completed observation or one hand
 
 The operation is never restarted merely to detach, and its original model call does not later receive a second tool reply.
 
+Crossing the detachment threshold is not a failure, cancellation, retry, or execution-deadline expiry.
+
 Later outcomes notify only the same owner, who can deliberately inspect the task and result.
 
 ## Independent Task Dimensions
@@ -63,9 +73,46 @@ Later outcomes notify only the same owner, who can deliberately inspect the task
 
 A returned remote job ID confirms only the registered submission operation, not completion of the remote job or business objective.
 
+Descriptions and labels are metadata and do not set execution, health, or attention state.
+
 Lists and searches inspect owner-filtered metadata without scanning protected result bodies.
 
 Reading a result does not acknowledge attention; `acknowledge_background_task()` is a separate explicit operation.
+
+Reading a task notification also does not acknowledge the task's attention state.
+
+Execution health uses declared signals and retained evidence: an unsupported heartbeat or a legitimate lack of intermediate output is not itself a fault.
+
+`unknown` represents insufficient supported evidence, while `stalled` represents suspected lack of progress even when the execution still runs.
+
+A health observation alone does not replay, restart, cancel, or mark an execution failed; actual terminal outcomes and explicit control acknowledgements retain their separate authority.
+
+The [signal and deadline contract](Autonomous_Agent_Runtime_Architecture/Executor_Integration.md#health-reports-and-deadlines) defines optional timers independently of the detachment threshold.
+
+## Model-Visible Task Summary
+
+Every ordinary personal model request includes a lightweight task summary, including when all counts are zero.
+
+It covers the same owner's explicit background and detached executions across personal and team scopes, without including task bodies or creating another personal activity.
+
+Foreground executions enter these counts only if they detach.
+
+| Summary count | Included executions |
+| --- | --- |
+| Queued or running | Executions in that state with no unconfirmed outcome and no acknowledged suspension. |
+| Completed, failed, or cancelled | Terminal executions whose attention is still `required`. |
+| Suspended | Executions with an acknowledged suspension whose last execution state remains `running`. |
+| Stalled health | Executions whose latest health observation is `stalled` and whose attention is not `acknowledged`. |
+| Requiring attention | Executions whose attention is `required`, independently of execution or health state. |
+| Unconfirmed outcomes | Executions retaining `outcome_unconfirmed=True`. |
+
+These counts can overlap: one running execution may also have stalled health and require attention.
+
+Adding the counters therefore does not produce a total number of tasks.
+
+Acknowledging a terminal task removes it from the terminal attention count while preserving its history for authorized list, search, inspection, and result access.
+
+Task counts do not read results, acknowledge attention, or decide that business work is complete.
 
 ## Resources, Writes, and Retries
 
@@ -90,6 +137,8 @@ Executors holding shared reservations cannot synchronously wait for nested perso
 ## Protected Results and Stopping
 
 Results use owner-authorized storage or transient delivery according to their registration.
+
+Inspecting a lawfully retained result after restoration does not require rebinding its historical tool or executor and does not reconnect or rerun that operation.
 
 `read_background_task_result()` uses the effective model's content-token budget and supports line, character, and file-version continuation.
 

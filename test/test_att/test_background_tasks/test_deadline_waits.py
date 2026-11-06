@@ -4,7 +4,7 @@ import asyncio
 import unittest
 
 from ai_team_team.core.manager.timing import wait_until
-from test.test_att.test_autonomous_activity_phase0._fixtures import LogicalClock
+from test.test_att.test_runtime_contracts._fixtures import LogicalClock
 
 from ._timer_support import wait_registered
 

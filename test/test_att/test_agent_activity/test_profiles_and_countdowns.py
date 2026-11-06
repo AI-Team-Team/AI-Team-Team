@@ -4,7 +4,7 @@ import asyncio
 
 from ai_team_team import ATTConfig, ATTManager, Agent, LLMResponse, HealthSubject
 from test.health_client import HealthModelClient
-from test.test_att.test_autonomous_activity_phase0._fixtures import ModelStep, ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures import ModelStep, ScriptedModelClient
 
 from ._support import ActivityTestCase, call, idle
 

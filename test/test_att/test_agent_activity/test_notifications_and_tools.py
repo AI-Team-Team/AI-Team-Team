@@ -4,7 +4,7 @@ import asyncio
 import json
 
 from ai_team_team import LLMResponse, ToolPermissionError, RetryableToolError
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep
 
 from ._support import ActivityTestCase, call, idle
 

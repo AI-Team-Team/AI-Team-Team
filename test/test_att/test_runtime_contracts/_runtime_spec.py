@@ -1,4 +1,4 @@
-"""The red suite targets the real Manager, never a fake activity implementation."""
+"""Contract scenarios exercise the real Manager with controlled external boundaries."""
 
 import asyncio
 import json
@@ -26,7 +26,7 @@ def model_input(request: CapturedRequest, *, notification_only: bool = False) ->
 
 class RuntimeSpecFixture:
     async def asyncSetUp(self):
-        self.workspace = tempfile.TemporaryDirectory(prefix="att-phase0-red-")
+        self.workspace = tempfile.TemporaryDirectory(prefix="att-runtime-contract-")
         self.addCleanup(self.workspace.cleanup)
         self.clock = LogicalClock()
         self.addCleanup(self.clock.close)

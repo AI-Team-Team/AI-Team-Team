@@ -30,7 +30,7 @@ def run_reports(root, directory, selectors):
             "cases": [{"selector": selector, "status": "passed", "elapsed_seconds": 0.01}
                       for selector in selectors]}
     paths, reports = [], []
-    for suite in ("full", "frozen", "extended"):
+    for suite in ("full", "extended"):
         path = directory / suite / "result.json"
         path.parent.mkdir()
         report = {**copy.deepcopy(base), "suite": suite, "coverage": suite == "full"}

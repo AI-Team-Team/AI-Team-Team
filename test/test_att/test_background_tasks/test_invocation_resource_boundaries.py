@@ -3,7 +3,7 @@
 from ai_team_team import Agent, ResourceClaim
 from ai_team_team.core.activity.contracts import ToolExecutionContract
 from test.test_att.test_agent_activity._support import call, idle, personal_control_contract
-from test.test_att.test_autonomous_activity_phase0._fixtures import ModelStep, ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures import ModelStep, ScriptedModelClient
 
 from ._support import BackgroundTestCase
 

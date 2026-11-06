@@ -5,7 +5,7 @@ import threading
 from unittest.mock import patch
 
 from ai_team_team import Agent, LLMResponse, ToolCall, StateRestoreError
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier
 from test.test_att.test_agent_activity._support import ActivityTestCase, call, idle
 from ._support import ChatTestCase
 

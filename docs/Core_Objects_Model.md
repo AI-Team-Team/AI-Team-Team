@@ -1,21 +1,29 @@
 # Core Objects Model
 
-This document serves as the architectural data dictionary for the AI-Team-Team (ATT) framework. It breaks down the properties, state mechanics, and relationships of the primary orchestration classes.
+This document serves as the architectural data dictionary for the AI-Team-Team (ATT) framework.
+It breaks down the properties, state mechanics, and relationships of the primary orchestration classes.
 
 ## 1. `ATTManager`: The Master Orchestrator
 
-The `ATTManager` is the public orchestration facade exported by the `ai_team_team.core.manager` package. Its implementation lives in the `manager/facade/` package, while bounded manager-owned packages implement communication validation, personal activity, DocLib operations, restore, state validation, and team creation. Additional focused services implement Agent lifecycle, persistence, topology mutation, migration, failover, durable health incidents, runtime registries, and ordered callbacks. SQLite work remains coordinated by the single-writer `PersistenceCoordinator` behind `StateCoordinator`.
+The `ATTManager` is the public orchestration facade exported by the `ai_team_team.core.manager` package.
+Its implementation lives in the `manager/facade/` package, while bounded manager-owned packages implement communication validation, personal activity, DocLib operations, restore, state validation, and team creation.
+Additional focused services implement Agent lifecycle, persistence, topology mutation, migration, failover, durable health incidents, runtime registries, and ordered callbacks.
+SQLite work remains coordinated by the single-writer `PersistenceCoordinator` behind `StateCoordinator`.
 
 ### Key Internal State
 
-- **`teams (Dict[str, AgentTeam])`**: A flat hash map tracking every active team in the lineage hierarchy by their unique `team_id`.
+- **`teams (Dict[str, AgentTeam])`**: Registered teams by `team_id`, including dissolved ordinary teams retained for historical references and temporary audit teams during their live audit scope.
+  Registry presence alone does not authorize current operations; the public directory separately filters eligible active ordinary teams, and completed audit teams leave the live registry.
 - **`agents (Dict[str, Agent])`**: Compatibility index of active agents by unique display name.
 - **`_agents_by_id (Dict[str, Agent])`**: Authoritative registry of active, retained, archived, and dead identities by immutable UUID.
 - **`model_configs (Dict[str, Any])`**: The centralized registry decoupling model identities from underlying provider configurations.
 - **`config.working_context_message_limit (int)`**: Recent-message target used when context compression is enabled; compaction preserves retained history and Agent identity.
-- **`tools_context (Dict[str, Any])`**: A shared memory space injected into ReAct tools containing references like `{"att_manager": self}`.
+- **`tools_context (Dict[str, Any])`**: Host-provided runtime dependency mapping used by the built-in registry and explicitly bound custom tools, with the reserved `{"att_manager": self}` binding installed automatically.
+  This mapping is separate from each Agent's Working Context, Journal, and optional memory catalog.
+  Declaring a custom tool parameter named `context` does not inject this mapping; see [Host runtime dependencies](Tool_System.md#6-host-runtime-dependencies-tools_context).
 - **Invocation Context (`ContextVar`)**: Carries the active Agent, selected operation scope, and personal invocation ID through nested model and tool calls without caching a shared agent to one owner team.
-- **Persistence Coordinator**: Holds one cross-process writer lease, one active delta, and one coalesced pending delta. Snapshot materialization and SQLite work execute off the event loop.
+- **Persistence Coordinator**: Holds one cross-process writer lease, one active delta, and one coalesced pending delta.
+  Snapshot materialization and SQLite work execute off the event loop.
 - **State Coordinator**: Owns task-local dirty-state batching, authoritative delta submission, flush operations, and the `PersistenceCoordinator` instance.
 - **Agent Registry**: Owns active-name and immutable-ID indexes together with private DocLib lifecycle transitions.
 - **Topology Service**: Owns the parent index and topology mutation lock used by lookups, rendering, creation, and migration.
@@ -36,7 +44,8 @@ An `AgentTeam` represents an organization in an explicit forest.
 
 Ordinary creation and membership removal enforce `config.min_subagent_team_size`, whose default is three; Host-confirmed terminal death may leave a surviving team below that minimum.
 
-Membership is role-neutral and contains only the relationship between a `team_id` and an `agent_id`. The same `Agent` object may appear in several `team.members` lists; joining or leaving one team does not redefine the Agent or affect any other membership.
+Membership is role-neutral and contains only the relationship between a `team_id` and an `agent_id`.
+The same `Agent` object may appear in several `team.members` lists; joining or leaving one team does not redefine the Agent or affect any other membership.
 
 ### Structural Pointers
 
@@ -44,14 +53,16 @@ Membership is role-neutral and contains only the relationship between a `team_id
 - **`parent_team (Optional[AgentTeam])`**: The AgentTeam parent pointer, when the organizational parent is a team.
 - **`is_independent (bool)`**: True only when no organizational parent is recorded.
 - **`child_teams (List[AgentTeam])`**: References to dynamic sub-teams.
-- **`depth (int)`**: A memoized property tracking distance within its actual parent tree, without manufacturing a Root edge. Migrations recursively invalidate the moved branch's cache.
+- **`depth (int)`**: A memoized property tracking distance within its actual parent tree, without manufacturing a Root edge.
+  Migrations recursively invalidate the moved branch's cache.
 
 ### Concurrency & Mutation State
 
 - **`state_lock (asyncio.Lock)`**: The asynchronous mutex protecting structural membership and proposal transactions during concurrent activity.
 - **`_status_lock (threading.RLock)`**: Independent synchronous protection for the display-only `status_map`, accessed through `set_status()` and `status_snapshot()`.
 - **`message_inbox (List[Dict[str, Any]])`**: AT-addressed durable references, separate from team chat and every person's model window.
-- **`proposals (Dict[str, Dict])`**: Active democratic voting proposals (e.g., adding/removing members).
+- **`proposals (Dict[str, Dict])`**: Membership voting records, including active proposals and retained terminal decisions.
+  Inspect each record's `status` to distinguish an open vote from approved, rejected, or retracted history.
 
 ## 3. `Agent`: The Atomic Actor
 
@@ -61,7 +72,8 @@ The `Agent` encapsulates a single identity and ReAct execution profile.
 
 - **`llm_client (LLMClientProto)`**: The attached adapter handling prompt formatting and parsing.
 - **`agent_id (str)`**: Immutable canonical UUID used by persistence, team membership, creators, governance identities, and private ownership.
-- **`private_doc_library_id (str)`**: Read-only identifier for the one persistent `PDL-<agent_id>` workspace. The raw library object is intentionally not exposed on `Agent`.
+- **`private_doc_library_id (str)`**: Read-only identifier for the one persistent `PDL-<agent_id>` workspace.
+  The raw library object is intentionally not exposed on `Agent`.
 - **`lifecycle_state (str)`**: `active`, `retained`, `archived`, or terminal `dead`; inactive identities leave the active name index and do not require a model binding during restore.
 - **`messages (List[Dict])`**: The bounded high-fidelity model window.
 - **`message_history (List[Dict])`**: A host-facing compatibility view of the Agent's sanitized Journal message events; it is not loaded into the model-visible `messages` window after restore.
@@ -79,10 +91,12 @@ See [Personal Activity](Personal_Activity.md) for the distinctions among admissi
 
 Governance and restricted temporary audit profiles use the same runtime rather than invoking a second model execution engine.
 
-Private documents are deliberate artifacts, not hidden reasoning. They enter a model observation only after the owner explicitly invokes `read_private_file`, and enter a team library only after explicit publication.
+Private documents are deliberate artifacts, not hidden reasoning.
+They enter a model observation only after the owner explicitly invokes `read_private_file`, and enter a team library only after explicit publication.
 
 Selective Episodic Memory is optional and Agent-owned by immutable UUID, so team membership changes cannot copy, clear, relabel, or reassign its Journal events, Memory Cards, indexing jobs, or retained references.
 
-An Agent's `role`, description, instructions, model binding, memory, lifecycle state, invocation lock, and Private DocLib belong to the Agent identity rather than to any membership. Invocation-scoped team facts are carried through `ContextVar` values and are never persisted as a team-specific Agent identity.
+An Agent's `role`, description, instructions, model binding, memory, lifecycle state, invocation lock, and Private DocLib belong to the Agent identity rather than to any membership.
+Invocation-scoped team facts are carried through `ContextVar` values and are never persisted as a team-specific Agent identity.
 
 Successful restore preserves the persistent person but reconstructs Python objects; the Host reacquires current references rather than reusing pre-restore Agent or configuration objects.

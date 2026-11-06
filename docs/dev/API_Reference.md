@@ -7,7 +7,7 @@ This document provides a technical overview of the internal classes, properties,
 
 The current usage guides cover [Personal Activity](../Personal_Activity.md), [Personal Conversations](../Personal_Conversations.md), and [Background Tasks](../Background_Tasks.md).
 
-Numbered engineering profiles describe the corresponding implementation stages and historical schema changes.
+The [database reference](../Database/README.md) and [runtime architecture](../Autonomous_Agent_Runtime_Architecture/README.md) describe current contracts; original numbered implementation profiles remain in the [historical archive](../../docs_archive/README.md).
 
 ## Core Classes
 
@@ -15,7 +15,8 @@ Numbered engineering profiles describe the corresponding implementation stages a
 
 Represents an individual AI specialist equipped with role definitions and generator client integration.
 
-One instance may be shared across teams. Its `lock` serializes all model-window mutations, `message_history` projects the sanitized cross-team Journal for host compatibility, and manager `ContextVar` values provide the selected scope and personal invocation.
+One instance may be shared across teams.
+Its `lock` serializes all model-window mutations, `message_history` projects the sanitized cross-team Journal for host compatibility, and manager `ContextVar` values provide the selected scope and personal invocation.
 
 * **Constructor**:
 
@@ -38,7 +39,8 @@ One instance may be shared across teams. Its `lock` serializes all model-window 
 
     No invitation mutates Agent-owned identity or runtime state.
 
-`agent_id` is an immutable canonical UUID. `_private_doc_library_id` and `_model_alias` are manager-owned persistence fields; public code reads only `private_doc_library_id`.
+`agent_id` is an immutable canonical UUID.
+`_private_doc_library_id` and `_model_alias` are manager-owned persistence fields; public code reads only `private_doc_library_id`.
 
 ### `AgentTeam`
 
@@ -62,7 +64,8 @@ Use the Manager's creation or formation APIs to publish a registered team.
 
 * **Properties**:
   * `parent_team -> Optional[AgentTeam]`: Resolves the parent team in the lineage tree.
-  * `depth -> int`: Returns memoized lineage depth. A migration recursively invalidates this cache for the moved team and every descendant.
+  * `depth -> int`: Returns memoized lineage depth.
+    A migration recursively invalidates this cache for the moved team and every descendant.
   * `state_lock -> asyncio.Lock`: Asynchronous mutex safeguarding proposal structural mutations during parallel Native tool executions.
 * **Methods**:
   * `launch_att(...) -> AgentTeam | TeamFormationRequest`: Creates a child of the calling team or returns a consent request when existing Agents or initiator membership are included.
@@ -72,13 +75,13 @@ No AgentTeam method executes a compulsory all-member discussion or reasoning tur
 
 ### `ATTManager`
 
-The new personal runtime is composed through `ActivityAPI` and `PersonalActivityService` under `core/manager/activity/`.
+The personal runtime is composed through `ActivityAPI` and `PersonalActivityService` under `core/manager/activity/`.
 
 `activate_agent()`, `inspect_agent_activity()`, `wait_for_activity_checkpoint()`, and `deliver_agent_mail()` expose committed admission and observation rather than a transcript-producing discussion.
 
 The [personal activity guide](../Personal_Activity.md) defines admission, explicit intent, scope changes, and resource availability.
 
-The [Phase 2 engineering profile](autonomous_activity/Phase_2.md) records the underlying safe batches, immutable request profiles, local ownership, and lock ordering, extended by the [Phase 6 recovery profile](autonomous_activity/Phase_6.md).
+The [execution architecture](../Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md), [concurrency rules](../Autonomous_Agent_Runtime_Architecture/Concurrency_and_Observers.md), and [recovery protocol](../Database/Recovery_and_Publication.md) describe safe batches, immutable request profiles, local ownership, and publication ordering.
 
 Public immutable results and model-tool signatures are listed separately from Host APIs in the [user reference](../user/API_Reference.md#runtime-result-models).
 
@@ -90,7 +93,9 @@ It is not a model-facing policy override or a new tool argument.
 
 Master orchestrator managing the overall ATT topology, dynamic presets, tool registrations, and callback events.
 
-`create_agent_team()` returns an immediate AgentTeam only for all-new membership. Existing Agent inputs return a persistent `TeamFormationRequest`; accepted identities are revalidated before the staged commit, and membership stores only the team/Agent relationship. `bootstrap_agent_team()` is the explicit audited host-only provisioned-topology bypass and is not registered as a tool.
+`create_agent_team()` returns an immediate AgentTeam only for all-new membership.
+Existing Agent inputs return a persistent `TeamFormationRequest`; accepted identities are revalidated before the staged commit, and membership stores only the team/Agent relationship.
+`bootstrap_agent_team()` is the explicit audited host-only provisioned-topology bypass and is not registered as a tool.
 
 Formation consent is revision-scoped.
 
@@ -140,7 +145,7 @@ Per-callback observation tasks isolate self-cancellation from the ordered dispat
   * `preview_agent_death(agent_id)` / `await mark_agent_dead(agent_id, confirm=True)`
     Host-only retained terminal death closes current memberships, preserves creator provenance, and fences owned work without replacing identity or Root.
   * `register_preset(name: str, description: str, system_instructions: str, roles: List[Tuple[str, str]])`
-    Registers custom dynamic committee presets.
+    Registers custom AgentTeam presets.
   * `get_preset(name: str) -> dict`
     Retrieves a registered preset or defaults to `generic`.
   * `register_tool(name, description=None, func=None, schema=None, *, memory_capture="metadata_only", execution_contract=None, executor="callable", resource_resolver=None, retry_safe=False, result_storage="protected")`
@@ -148,7 +153,9 @@ Per-callback observation tasks isolate self-cancellation from the ordered dispat
   * `register_tool_auditor(tool_name: str, auditor_func: Callable[..., Tuple[bool, str]])`
     Registers an auditing hook callback that intercepts specific tool calls before execution.
   * `register_tools_context(context: Dict[str, Any])`
-    Registers additional runtime resources and rebinds coordination tools. The reserved `att_manager` reference is installed automatically and cannot be overwritten.
+    Registers additional runtime resources and rebinds coordination tools.
+    The reserved `att_manager` reference is installed automatically and cannot be overwritten.
+    Custom tools bind their Host dependencies explicitly rather than requesting injection through a parameter name.
   * `create_agent_team(...) -> AgentTeam | TeamFormationRequest`
     Validates all-new creation before mutation or opens a consent request without creating team entities when existing identities participate.
   * `bootstrap_agent_team(...) -> AgentTeam`
@@ -161,7 +168,7 @@ Per-callback observation tasks isolate self-cancellation from the ordered dispat
     Nested, task-local batching context that merges dirty deltas and submits one write when the outer scope exits.
   * `await execute_agent_interaction(agent, prompt, *, team=None) -> InteractionResult`
     Observes one personal answer without publishing it, stopping continuing activity, or treating it as a ballot.
-  * `activate_agent(agent_id, scope=None)` / `wait_for_activity_checkpoint(admission_id, intent=None)`
+  * `await activate_agent(agent_id, scope=None)` / `await wait_for_activity_checkpoint(admission_id, intent=None)`
     Admit personal activity and observe accepted fairness or intent boundaries.
   * `find_parent_team(target: AgentTeam) -> Optional[AgentTeam]`
     Locates the parent team in the active team topology using the explicit parent index without creator or membership inference.
@@ -204,7 +211,8 @@ Per-callback observation tasks isolate self-cancellation from the ordered dispat
 
 Configuration options for tuning the ATT multi-agent framework.
 
-`ATTConfig` is a strict Pydantic model with forbidden extra fields and assignment validation. Runtime updates to scalar fields and supported mutable configuration mappings are validated by the same rules used during construction.
+`ATTConfig` is a strict Pydantic model with forbidden extra fields and assignment validation.
+Runtime updates to scalar fields and supported mutable configuration mappings are validated by the same rules used during construction.
 
 * **Constructor**:
 
@@ -230,10 +238,12 @@ Configuration options for tuning the ATT multi-agent framework.
 
 ### `NegotiationBroker`
 
-Owns durable communication requests, approvals, ballots, Agreements, and peer-delivery records. It reads policy only from `ATTConfig` and accepts already authenticated runtime actors from the tool boundary.
+Owns durable communication requests, approvals, ballots, Agreements, and peer-delivery records.
+It reads policy only from `ATTConfig` and accepts already authenticated runtime actors from the tool boundary.
 
 * `request_peer_communication(sender, recipient, initiated_by_agent_id, rationale) -> CommunicationOperationResult`
-      Returns `APPROVED`, `ALREADY_ACTIVE`, or `PENDING_APPROVAL`. Approval policies create an immutable request snapshot and schedule explicit principals outside the caller's tool stack.
+      Returns `APPROVED`, `ALREADY_ACTIVE`, or `PENDING_APPROVAL`.
+      Approval policies create an immutable request snapshot and schedule explicit principals outside the caller's tool stack.
 * `send_peer_message(sender, recipient, initiated_by_agent_id, content, invocation_id=None) -> CommunicationOperationResult`
       Commits one idempotent delivery or returns `NO_AGREEMENT`.
 * `revoke_agreement(agreement_id, actor_team_id, reason) -> CommunicationOperationResult`
@@ -283,15 +293,21 @@ Scoped evidence remains retained, but temporary identities are removed and never
 
 Typed streak detectors, stable incidents, occurrence events, explicit claims, and current-generation acknowledgement remain separate from model findings and operational availability.
 
-See [Supervisory Team](../Supervisory_Team.md) and the [Phase 5 profile](autonomous_activity/Phase_5.md) for evidence and authority boundaries.
+See [Supervisory Team](../Supervisory_Team.md) and [Institutional Services](../Autonomous_Agent_Runtime_Architecture/Institutional_Services.md) for evidence and authority boundaries.
 
 ### `Tool` and `ToolExecutor`
 
-`Tool` owns the provider-neutral callable contract, validated JSON Schema, prompt rendering metadata, examples, and `retry_safe` declaration. Automatic schemas support `Annotated`, `Literal`, Enum, Pydantic models, `TypedDict`, containers, unions, and nesting. Portable `TypedDict` annotations across Python 3.11–3.13 must come from `typing_extensions`; incompatible standard-library definitions fail during tool registration with an actionable error. Registration validates handwritten schemas against Draft 2020-12.
+`Tool` owns the provider-neutral callable contract, validated JSON Schema, prompt rendering metadata, examples, and `retry_safe` declaration.
+Automatic schemas support `Annotated`, `Literal`, Enum, Pydantic models, `TypedDict`, containers, unions, and nesting.
+Portable `TypedDict` annotations across Python 3.11–3.13 must come from `typing_extensions`; incompatible standard-library definitions fail during tool registration with an actionable error.
+Registration validates handwritten schemas against Draft 2020-12.
 
-`ToolExecutor.execute()` is shared by Text and Native protocols. It binds the invocation signature, applies strict Pydantic JSON validation, validates the original argument object against the generated or handwritten Draft 2020-12 schema, runs the auditor and callable under Agent/AgentTeam ContextVars, and returns `ToolResult` with a structured status, error kind, and attempt count. It recognizes typed `ToolArgumentError`, `ToolPermissionError`, `ToolBusinessError`, and `RetryableToolError`; custom result strings are never classified by prefix.
+`ToolExecutor.execute()` is shared by Text and Native protocols.
+It binds the invocation signature, applies strict Pydantic JSON validation, validates the original argument object against the generated or handwritten Draft 2020-12 schema, runs the auditor and callable under Agent/AgentTeam ContextVars, and returns `ToolResult` with a structured status, error kind, and attempt count.
+It recognizes typed `ToolArgumentError`, `ToolPermissionError`, `ToolBusinessError`, and `RetryableToolError`; custom result strings are never classified by prefix.
 
-Native provider interfaces receive `Optional[List[Tool]]`. The provider adapter converts `Tool.json_schema` into its SDK's concrete function-calling shape and converts responses back to `LLMResponse` and `ToolCall`.
+Native provider interfaces receive `Optional[List[Tool]]`.
+The provider adapter converts `Tool.json_schema` into its SDK's concrete function-calling shape and converts responses back to `LLMResponse` and `ToolCall`.
 
 ### `GatedFileReader`
 
@@ -310,11 +326,14 @@ Asynchronous token-bounded reader for normalized model-facing text content.
 
 * **Methods**:
   * `await read_file(path: str, start_line: int = 1, end_line: Optional[int] = None, start_character: int = 1, character_count: Optional[int] = None, expected_file_version: Optional[str] = None) -> FileReadResult`
-    Returns the largest requested normalized content prefix within `max_read_tokens`. Partial results include the next source position and file version; the token budget excludes structured metadata and tool framing.
+    Returns the largest requested normalized content prefix within `max_read_tokens`.
+    Partial results include the next source position and file version; the token budget excludes structured metadata and tool framing.
 
 ### `DocumentLibrary`
 
-Represents a `team` or `agent_private` document store with path traversal protection. Team libraries use prefix ACLs. Private libraries reject ACLs, public visibility, and managed links at manager boundaries.
+Represents a `team` or `agent_private` document store with path traversal protection.
+Team libraries use prefix ACLs.
+Private libraries reject ACLs, public visibility, and managed links at manager boundaries.
 
 * **Constructor**:
 
@@ -342,11 +361,13 @@ Represents a `team` or `agent_private` document store with path traversal protec
   * `move_file(source_path: str, target_path: str, overwrite: bool = False)`
   * `write_file_atomic(path: str, content: str, overwrite: bool = False)`
 
-Native filesystem symlinks are rejected. Cross-library links are manager-owned metadata exposed through `create_library_link`; direct `DocumentLibrary` methods operate on physical files only.
+Native filesystem symlinks are rejected.
+Cross-library links are manager-owned metadata exposed through `create_library_link`; direct `DocumentLibrary` methods operate on physical files only.
 
 ## Policies & Strategy Interfaces
 
-Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/policies.py). Communication is not a per-call strategy interface: its strict Pydantic configuration is consumed by `NegotiationBroker`.
+Migration strategies are defined in [`policies.py`](../../src/ai_team_team/core/policies.py).
+Communication is not a per-call strategy interface: its strict Pydantic configuration is consumed by `NegotiationBroker`.
 
 ### Migration Policies
 
@@ -366,13 +387,15 @@ SQLAlchemy models and relational activity tables mapping schema 16 are grouped i
 * **`TeamModel`**: Tracks explicit parent positions, independent creator provenance, lifecycle, and UUID-backed membership references.
 * **`TeamInboxModel` & `TeamProposalModel`**: Persists child escalations, peer messages, and democratic proposal votes.
 * **`TeamFormationRequestModel`, `TeamFormationInvitationModel`, `TeamFormationRevisionModel`, `TeamFormationInvitationDecisionModel`, and `TeamFormationDraftModel`**: Persist the current proposal projection, current invitations, immutable material revision snapshots, append-only exact-revision attitudes, optional initiator-authored candidates, accepted founding records, completion choices, and late-join state.
-* **`CommunicationRequestModel`, `CommunicationApprovalModel`, `CommunicationBallotModel`**: Persist the request lifecycle, ordered explicit principals, and member ballots.
+* **`CommunicationRequestModel` and `CommunicationApprovalModel`**: Persist request lifecycles and ordered explicit principals; authoritative ballots belong to the referenced governance case.
 * **`CommunicationAgreementModel` & `PeerMessageModel`**: Persist directional endpoint channels, revocation state, and idempotent delivery lifecycle.
 * **`GovernanceCaseModel`, `GovernanceElectorateModel`, `GovernanceBallotModel`, and `MigrationRequestModel`**: Persist exact cases, eligible people, append-only choices, and revalidated migration authority.
 * **Institutional activity tables**: Retain topology revisions, parent acceptances, cooldowns, resource attempts, typed health observations, incidents, scoped audit activity, findings, and final evidence.
 * **`LibraryModel` & `LibraryPermissionModel` & `DocLibFileModel` & `DocLibLinkModel`**: Persists library kind, mutually exclusive team/agent ownership, lifecycle, ACL segments, physical document contents, and managed team-library link targets.
 
 ### Registered Execution Service
+
+The [executor integration reference](../Autonomous_Agent_Runtime_Architecture/Executor_Integration.md) specifies exact fields, valid combinations, binding methods, resource claims, health evidence, and a custom binding example.
 
 `core.manager.executions` owns all registered personal-tool admission, canonical resource scheduling, executor dispatch, actual-start timing, threshold observation, factual stop controls, health evidence, and owner-only queries.
 
@@ -398,11 +421,15 @@ Timeout observations and accepted heartbeat/progress samples use the same activi
 
 See [Background Tasks](../Background_Tasks.md) for the current registration and control contract.
 
-The [Phase 4 implementation profile](autonomous_activity/Phase_4.md) and [schema 14](autonomous_activity/Schema_14.md) record its initial implementation boundary.
+The [execution architecture](../Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md) describes current admission, resources, and provider boundaries.
 
-The [Phase 6 profile](autonomous_activity/Phase_6.md) and [schema 16](autonomous_activity/Schema_16.md) add lifecycle stopping, suppression coverage, and staged recovery updates with before-image rollback.
+The [complete database schema](../Database/Schema.md) and [recovery protocol](../Database/Recovery_and_Publication.md) cover lifecycle stopping, suppression coverage, and staged updates with before-image rollback.
+
+Use the [exact relational keys and constraints](../Database/Relational_Constraints.md), [full SQL reference](../Database/Schema.sql), and [request/token state matrices](../Database/Request_and_Token_States.md) when changing physical records or validation.
 
 ### Database Session Factory
 
 * **`get_session(db_path: str) -> Generator[Session, None, None]`**
-  A strict standalone writer context defined in `database/session.py`. It acquires the same exclusive writer lease, performs schema preflight before DDL, enables the configured SQLite safeguards, and yields a transactional SQLAlchemy session. Foreign-key enforcement cannot be disabled.
+  A strict standalone writer context defined in `database/session.py`.
+  It acquires the same exclusive writer lease, performs schema preflight before DDL, enables the configured SQLite safeguards, and yields a transactional SQLAlchemy session.
+  Foreign-key enforcement cannot be disabled.

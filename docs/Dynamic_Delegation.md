@@ -30,7 +30,8 @@ One common continuing-person runtime supports two provider protocols without a s
 
 1. **Text ReAct Mode (`"text_react"`)** parses a balanced Python-call or XML Action, validates literal arguments, and feeds the classified observation back to the same personal Working Context.
 2. **Native Tool Calling Mode (`"native"`)** passes provider-neutral `List[Tool]`, normalizes returned calls, executes independent calls concurrently, and retains valid call/result sequencing.
-3. **Auto Mode (`"auto"`)**: Uses the manager's safe capability probe. Only a synchronous literal `True` selects Native Mode; exceptions, awaitables, and other values emit a system event and fall back to Text ReAct.
+3. **Auto Mode (`"auto"`)**: Uses the manager's safe capability probe, which selects Native only for a synchronous literal `True`.
+   Invalid outcomes received by that probe emit a sanitized event and fall back to Text ReAct; wrapped generator-handler probes have a [known diagnostic limitation](Tool_System.md#2-one-runtime-with-two-provider-protocols).
 
 ### Prompt Sequence Protocol
 
@@ -48,11 +49,15 @@ One common continuing-person runtime supports two provider protocols without a s
    * **Continuation boundary**: An ordinary final answer neither stops personal activity nor publishes to team chat; technical request and tool-batch limits create fairness checkpoints, not discussion rounds.
 
 2. **Robust Action & Safe Argument Parser**:
-   To ensure high parsing resilience under varying LLM temperatures or when using smaller models, the ReAct parser supports multiple action parsing strategies:
-   * **Alternative XML Tag Format**: The parser natively extracts actions structured as XML tags, e.g. `<action name="tool_name">arguments</action>`. If the arguments inside the XML block are wrapped in Markdown code fences (e.g., ` ```python ... ``` `), the parser automatically strips them.
+   The ReAct parser accepts the following action formats and validates their arguments before execution:
+   * **Alternative XML Tag Format**: The parser natively extracts actions structured as XML tags, e.g. `<action name="tool_name">arguments</action>`.
+     If the arguments inside the XML block are wrapped in Markdown code fences (e.g., ` ```python ... ``` `), the parser automatically strips them.
    * **Standard Action Format with Markdown Code Block Stripping**: The parser supports the classic `Action: tool_name(arguments)` pattern and handles wrapping inside Markdown code blocks (e.g., `Action: ```python tool_name(arguments) ``` `).
-   * **Balanced Python-Call Scanner**: The standard Action scanner tracks `()`, `[]`, `{}`, single and double quotes, triple quotes, escapes, multiline content, Markdown fences, and Unicode. It closes the invocation only when the outer call delimiter closes, so parentheses inside string values cannot truncate the call.
-   * **Literal-Only Arguments**: Arguments must be valid Python literals or keyword assignments. Truncated expressions, duplicate keywords, expanded `*args`/`**kwargs`, identifiers, unknown parameters, and type mismatches become `invalid_arguments` observations and never execute the tool. There is no positional-string fallback.
+   * **Balanced Python-Call Scanner**: The standard Action scanner tracks `()`, `[]`, `{}`, single and double quotes, triple quotes, escapes, multiline content, Markdown fences, and Unicode.
+     It closes the invocation only when the outer call delimiter closes, so parentheses inside string values cannot truncate the call.
+   * **Literal-Only Arguments**: Arguments must be valid Python literals or keyword assignments.
+     Truncated expressions, duplicate keywords, expanded `*args`/`**kwargs`, identifiers, unknown parameters, and type mismatches become `invalid_arguments` observations and never execute the tool.
+     There is no positional-string fallback.
 
 3. **On-Demand Entity Discovery**:
    Text ReAct, Native, and personal interactions advertise the available `list_entities`, `search_entities`, and `inspect_entity` tools instead of automatically injecting the global Agent directory or full AgentTeam topology.
@@ -61,9 +66,9 @@ One common continuing-person runtime supports two provider protocols without a s
 
 ## 3. Explicit Escalation
 
-`delegate_escalation(objective, rationale)` addresses the current AT's actual parent through the configured communication gate.
+`delegate_escalation(objective, rationale)` addresses the current AT's actual AgentTeam parent through the configured communication gate.
 
-An independent AT has no implicit Root recipient.
+The tool is unavailable for an Agent parent or an independent AT; there is no implicit Root recipient.
 
 Escalation does not bypass an Agreement requirement, force another person's intent or scope, or start a group discussion.
 
@@ -95,21 +100,28 @@ Identity prompts describe only tools that are actually available, so configurati
 
 The [personal activity guide](Personal_Activity.md) explains admission and scope boundaries, while [background execution](Background_Tasks.md) retains the same owner without synchronously waiting for child business work.
 
-* **`dispatch_subagent(...) -> JSON`**: Creates a child of the current AT or opens its persistent exact-revision consent request, then returns its reference immediately without waiting for child business work. `propose_team_formation` instead offers `organizational_parent="none"`, `"self"`, or `"current_team"`, with independence as its default. An initial task becomes addressed initial mail, not a synchronous discussion or fabricated completion.
-* **Formation and Agent inbox tools**: `list_agent_inbox`, `mark_agent_inbox_read`, `inspect_team_formation`, `prepare_team_formation_draft`, `inspect_team_formation_draft`, `publish_team_formation_draft`, `revise_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, and `decide_team_formation_late_join` operate from the invocation-scoped Agent identity. Every authorization-bearing action names the exact proposal revision it reviewed, and no tool accepts an acting-Agent override. See [Consensual Existing-Agent Team Formation](Consensual_Team_Formation.md).
+* **`dispatch_subagent(...) -> JSON`**: Creates a child of the current AT or opens its persistent exact-revision consent request, then returns its reference immediately without waiting for child business work.
+  `propose_team_formation` instead offers `organizational_parent="none"`, `"self"`, or `"current_team"`, with independence as its default.
+  An initial task becomes addressed initial mail, not a synchronous discussion or fabricated completion.
+* **Formation and Agent inbox tools**: `list_agent_inbox`, `mark_agent_inbox_read`, `inspect_team_formation`, `prepare_team_formation_draft`, `inspect_team_formation_draft`, `publish_team_formation_draft`, `revise_team_formation`, `respond_team_invitation`, `create_team_from_formation`, `abandon_team_formation`, and `decide_team_formation_late_join` operate from the invocation-scoped Agent identity.
+  Every authorization-bearing action names the exact proposal revision it reviewed, and no tool accepts an acting-Agent override.
+  See [Consensual Existing-Agent Team Formation](Consensual_Team_Formation.md).
 * **Entity discovery tools**: `list_entities`, `search_entities`, and `inspect_entity` expose only public Agent and AgentTeam records and remain available independently of delegation depth or optional episodic memory.
 * **`delegate_escalation(objective: str, rationale: str) -> str`**: Sends a help request to the direct parent AgentTeam through the configured peer gate and returns the delivery result without nested parent execution.
 * **`update_team_purpose(new_purpose: str) -> str`**: Updates the purpose string of the caller's team.
 * **`update_team_status(purpose: str, progress: str) -> str`**: Updates the current team's purpose and progress, which other Agents may inspect through explicit discovery.
-* **`request_peer_communication(team_id: str, rationale: str) -> str`**: Requests a durable channel under the configured parent- or lineage-approval institution. The caller cannot override policy, direction, sender, or principals.
-* **`send_peer_message(team_id: str, message: str) -> str`**: Durably sends from the invocation-scoped AgentTeam. Approval institutions require an active Agreement; permissive mode does not.
+* **`request_peer_communication(team_id: str, rationale: str) -> str`**: Requests a durable channel under the configured parent- or lineage-approval institution.
+  The caller cannot override policy, direction, sender, or principals.
+* **`send_peer_message(team_id: str, message: str) -> str`**: Durably sends from the invocation-scoped AgentTeam.
+  Approval institutions require an active Agreement; permissive mode does not.
 * **`revoke_peer_agreement(agreement_id: str, reason: str) -> str`**: Lets either endpoint AgentTeam revoke a channel.
 * **`list_peer_requests(status: str = "pending") -> str`**: Lists communication requests visible to the current endpoint or approval AgentTeam.
 * **`list_peer_agreements(active_only: bool = True) -> str`**: Lists Agreements whose endpoints include the current AgentTeam.
 * **`add_team_member(team_id: str, role_name: str, model_name: str, role_description: str, system_instructions: str) -> str`**: Allows parent teams to administratively add a new member with custom configurations to a child team.
 * **`remove_team_member(team_id: str, agent_name: str) -> str`**: Allows parent teams to administratively remove a member from a child team, enforcing the configured minimum team size.
 * **`initiate_membership_vote(action: str, target: str, rationale: str, initiator_type: str = "individual", proposed_details: dict = None) -> str`**: Initiates a democratic membership proposal to add/remove a member.
-* **`cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str`**: Casts a vote ("Agree", "Disagree", or "Abstain") on an active membership proposal. If `public` is set to `False`, the ballot is cast anonymously, hiding the displayed voter identity while retaining authoritative identity validation.
+* **`cast_vote(proposal_id: str, vote: str, public: bool = True, rationale: str = "") -> str`**: Records a validated member's "Agree", "Disagree", or "Abstain" ballot and its `public` preference on an active membership proposal.
+  The preference does not currently provide an anonymized display or an anonymity guarantee.
 * **`retract_membership_vote(proposal_id: str) -> str`**: Allows the initiator of an active proposal to withdraw it.
 * **`request_migration(target_parent, rationale) -> JSON`**: Returns a durable request reference while actual principals decide; `target_parent` is an explicit Agent/AgentTeam principal or `None` for voluntary detachment.
 * **`inspect_migration_request(request_id: str) -> JSON`**: Lets the moving, target, or original-parent AgentTeam inspect pending or terminal migration progress.
@@ -127,17 +139,23 @@ The [personal activity guide](Personal_Activity.md) explains admission and scope
 
 ## 5. Atomic Team Creation
 
-`create_agent_team()` validates the creator, team size, new-member configuration, existing active Agent references, duplicate identities, model aliases, initial document paths and bodies, and mutually exclusive fields before any mutation. Existing Agent inputs open invitations; they do not enter the creation transaction until they accept.
+`create_agent_team()` validates the creator, team size, new-member configuration, existing active Agent references, duplicate identities, model aliases, initial document paths and bodies, and mutually exclusive fields before any mutation.
+Existing Agent inputs open invitations; they do not enter the creation transaction until they accept.
 
-Every consent-bearing proposal starts at revision `1`. Material changes create immutable revision history, reset retained invitation attitudes, and require renewed consent; stale callers cannot respond or create from an older revision. An optional validated candidate can be prepared by the initiator during current activity and explicitly published, but is never a compulsory draft or detached synthesis job.
+Every consent-bearing proposal starts at revision `1`.
+Material changes create immutable revision history, reset retained invitation attitudes, and require renewed consent; stale callers cannot respond or create from an older revision.
+An optional validated candidate can be prepared by the initiator during current activity and explicitly published, but is never a compulsory draft or detached synthesis job.
 
-New Agent identities, their Private DocLibs, the Team DocLib, and initial files are created under a detached staging directory after the formation becomes eligible. Accepted existing members retain the same object, UUID, identity fields, model binding, memory, invocation lock, lifecycle state, Agent inbox, and Private DocLib; formation notifications are appended to that existing inbox rather than replacing it.
+New Agent identities, their Private DocLibs, the Team DocLib, and initial files are created under a detached staging directory after the formation becomes eligible.
+Accepted existing members retain the same object, UUID, identity fields, model binding, memory, invocation lock, lifecycle state, Agent inbox, and Private DocLib; formation notifications are appended to that existing inbox rather than replacing it.
 
 The topology lock then revalidates and commits registry and parent/child state while DocLib directories are atomically published.
 
-A failure at validation, construction, or publication restores registries, pointers, dirty state, and filesystem directories; callbacks, logging, and auto-save begin only after commit. A successful commit adds only `team_id ↔ agent_id` relationships for existing Agents and introduces no framework-level team role.
+A failure at validation, construction, or publication restores registries, pointers, dirty state, and filesystem directories; callbacks, logging, and auto-save begin only after commit.
+A successful commit adds only `team_id ↔ agent_id` relationships for existing Agents and introduces no framework-level team role.
 
-Synchronous delegation admission applies to work that actually waits for an Agent invocation. Existing-Agent formation is asynchronous and does not reserve a dependency merely because an invitation exists; the general wait-for graph still rejects any later synchronous direct or transitive cycle.
+Synchronous delegation admission applies to work that actually waits for an Agent invocation.
+Existing-Agent formation is asynchronous and does not reserve a dependency merely because an invitation exists; the general wait-for graph still rejects any later synchronous direct or transitive cycle.
 
 A later personal activity failure does not roll back an already committed AgentTeam.
 
@@ -147,9 +165,18 @@ Nonblocking formation itself creates no model-wait dependency; operations that a
 
 To ensure team autonomy and collaborative membership management, the ATT framework introduces an optional, asynchronous democratic voting system:
 
-* **Optional Activation**: Enabled via `ATTConfig(enable_membership_voting=True)`. By default, it is disabled (`False`).
+* **Optional Activation**: Enabled via `ATTConfig(enable_membership_voting=True)`.
+  By default, it is disabled (`False`).
 * **Proposal Mechanics**: Any agent can call `initiate_membership_vote` to propose adding a new member (defining their role, description, instructions, and model) or removing an existing member.
-* **Unanimous Participation**: The vote remains active and pending in the team's context. A proposal is only resolved and evaluated once **all** active members of the team have explicitly cast their vote (`"Agree"`, `"Disagree"`, or `"Abstain"`).
-* **Consensus Gate**: If all members have voted, the framework calculates the ratio of `"Agree"` votes. A **$\ge 2/3$ majority** of total members is required to approve the proposal. Approved proposals commit their membership effect immediately through the common relationship transaction; no discussion-round boundary delays execution, and removal does not retire the person. Rejected proposals are closed without modification.
-* **Anonymous Voting (Public vs. Private Ballots)**: The `cast_vote` tool accepts an optional `public: bool` parameter (default: `True`). Setting `public=False` enforces voter anonymity: the voter's identity is masked as `"Anonymous Voter"` in the active membership votes queue injected into the team's prompt context, while still allowing the system to verify that all distinct members have voted.
-* **Concurrency Safety (State Locking)**: All democratic voting actions (`initiate`, `cast_vote`, `retract`) mutate the shared `team.proposals` structure. To guarantee memory safety during parallel `asyncio.gather` tool executions (Native Mode), the `AgentTeam` utilizes a lazy-initialized `state_lock` (`asyncio.Lock`). Every structural mutation to the team's proposal queue is strictly wrapped in this asynchronous mutex, preventing race conditions.
+* **Unanimous Participation**: The proposal remains active in `team.proposals` until **all** current members explicitly cast a vote (`"Agree"`, `"Disagree"`, or `"Abstain"`).
+  Ordinary answers and mail read state do not count as participation, and the personal runtime does not automatically inject a membership-vote queue into prompts.
+* **Consensus Gate**: If all members have voted, the framework calculates the ratio of `"Agree"` votes.
+  A **$\ge 2/3$ majority** of total members is required to approve the proposal.
+  Approved proposals commit their membership effect immediately through the common relationship transaction; no discussion-round boundary delays execution, and removal does not retire the person.
+  Rejected proposals are closed without modification.
+* **Ballot Visibility Metadata**: `cast_vote` retains the `public` flag alongside the actual voter identity, choice, and rationale so the system can validate distinct participation.
+  An anonymized model-facing membership-vote presentation is not implemented; `public=False` must not be treated as an anonymity guarantee or a privacy boundary.
+  The intended audience and field visibility require an explicit contract before that presentation is implemented; the [Todo](../todo.md#membership-ballot-visibility) preserves this open requirement.
+* **Concurrency Safety (State Locking)**: All democratic voting actions (`initiate`, `cast_vote`, `retract`) mutate the shared `team.proposals` structure.
+  To guarantee memory safety during parallel `asyncio.gather` tool executions (Native Mode), the `AgentTeam` utilizes a lazy-initialized `state_lock` (`asyncio.Lock`).
+  Every structural mutation to the team's proposal queue is strictly wrapped in this asynchronous mutex, preventing race conditions.

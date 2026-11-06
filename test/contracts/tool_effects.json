@@ -1,0 +1,612 @@
+{
+  "abandon_team_formation": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "acknowledge_health_incident": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "either"
+    }
+  },
+  "add_team_member": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "cast_vote": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "claim_health_incident": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "either"
+    }
+  },
+  "create_doc_library": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "create_library_link": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "artifact_write"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "create_team_from_formation": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "decide_team_formation_late_join": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "delegate_escalation": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "delete_library_file": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "artifact_write"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "delete_private_file": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "artifact_write"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "dispatch_subagent": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "forget_memory": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "self_modification"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "grant_library_permission": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "initiate_membership_vote": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "inspect_entity": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "either"
+    }
+  },
+  "inspect_health_incident": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "either"
+    }
+  },
+  "inspect_migration_request": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "either"
+    }
+  },
+  "inspect_team_formation": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "personal"
+    }
+  },
+  "inspect_team_formation_draft": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "personal"
+    }
+  },
+  "keep_memory_in_context": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "self_modification"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "list_agent_inbox": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "personal"
+    }
+  },
+  "list_entities": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "either"
+    }
+  },
+  "list_governance_requests": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "personal"
+    }
+  },
+  "list_health_incidents": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "either"
+    }
+  },
+  "list_library_files": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "agent_team"
+    }
+  },
+  "list_peer_agreements": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "agent_team"
+    }
+  },
+  "list_peer_messages": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "agent_team"
+    }
+  },
+  "list_peer_requests": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "agent_team"
+    }
+  },
+  "list_private_files": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "personal"
+    }
+  },
+  "list_public_libraries": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "either"
+    }
+  },
+  "mark_agent_inbox_read": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "move_library_file": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "artifact_write"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "move_private_file": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "artifact_write"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "open_agent_mail": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "personal"
+    }
+  },
+  "prepare_team_formation_draft": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "either"
+    }
+  },
+  "propose_team_formation": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "either"
+    }
+  },
+  "publish_private_file": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "artifact_write"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "publish_team_formation_draft": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "either"
+    }
+  },
+  "read_library_file": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "agent_team"
+    }
+  },
+  "read_peer_message": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "agent_team"
+    }
+  },
+  "read_private_file": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "personal"
+    }
+  },
+  "recall_memory": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "self_modification"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "remove_team_member": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "request_migration": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "request_peer_communication": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "respond_team_invitation": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "retract_membership_vote": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "revise_team_formation": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "revoke_library_permission": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "revoke_peer_agreement": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "search_entities": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "either"
+    }
+  },
+  "search_memories": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "read_only"
+      ],
+      "mutation_safety": "none",
+      "required_scope": "personal"
+    }
+  },
+  "send_peer_message": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "submit_governance_choice": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  },
+  "update_library_metadata": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "update_team_purpose": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "update_team_status": {
+    "contract": {
+      "background_allowed": false,
+      "effects": [
+        "domain_mutation"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "write_library_file": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "artifact_write"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "agent_team"
+    }
+  },
+  "write_private_file": {
+    "contract": {
+      "background_allowed": true,
+      "effects": [
+        "artifact_write"
+      ],
+      "mutation_safety": "managed_lease",
+      "required_scope": "personal"
+    }
+  }
+}

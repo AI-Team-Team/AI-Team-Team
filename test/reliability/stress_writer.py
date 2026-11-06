@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from ai_team_team.database.persistence import DatabaseStore
 from test.async_waits import DEFAULT_RUNTIME_TIMEOUT
-from test.test_att.test_autonomous_activity_phase1._support import make_manager
+from test.test_att.test_state_integrity._support import make_manager
 
 import unittest
 

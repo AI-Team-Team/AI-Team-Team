@@ -3,7 +3,7 @@
 import os
 
 from ai_team_team import Agent
-from test.test_att.test_autonomous_activity_phase1._support import make_manager
+from test.test_att.test_state_integrity._support import make_manager
 from test.test_att.test_conversations._relationship_schedules import exercise_relationship_schedule
 from test.test_att.test_conversations._support import ChatTestCase
 

@@ -1,1 +1,1 @@
-"""Phase 5 institutional behavior on the common personal runtime."""
+"""Institutional behavior on the common personal runtime."""

@@ -1,0 +1,581 @@
+{
+  "snapshot": "2026-11-02-document-organization",
+  "captured_at_utc": "2026-11-02T14:14:37.946431+00:00",
+  "source_commit": "dd5d5c6b9e6a96a63096af1acd49c2bbda189156",
+  "source_worktree_porcelain": "",
+  "moves": [
+    {
+      "source": "docs/dev/autonomous_activity",
+      "archive": "docs_archive/dev/autonomous_activity"
+    },
+    {
+      "source": "docs/blueprints",
+      "archive": "docs_archive/blueprints"
+    },
+    {
+      "source": "todo.md",
+      "archive": "docs_archive/todo.md"
+    }
+  ],
+  "files": [
+    {
+      "source": "docs/dev/autonomous_activity/Contracts.md",
+      "archive": "docs_archive/dev/autonomous_activity/Contracts.md",
+      "bytes": 14340,
+      "sha256": "246534515da62a1beda4ec01f8526ff3e2f44fe20fc6cdd2395a8fcb236f5ec0",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Phase_1.md",
+      "archive": "docs_archive/dev/autonomous_activity/Phase_1.md",
+      "bytes": 14410,
+      "sha256": "998daefe617c35289cab7b110d072ea6353cc92dd01f5e9a41e81e10bec0742a",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Phase_2.md",
+      "archive": "docs_archive/dev/autonomous_activity/Phase_2.md",
+      "bytes": 19293,
+      "sha256": "03cec8916db4e91a39316c126795fc66b8eccb8b404812dcac972a34b2093fa0",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Phase_3.md",
+      "archive": "docs_archive/dev/autonomous_activity/Phase_3.md",
+      "bytes": 11473,
+      "sha256": "576624c6e46a626e05a2307c8ada8ce398327b70bc9b3d20413546880cdba536",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Phase_4.md",
+      "archive": "docs_archive/dev/autonomous_activity/Phase_4.md",
+      "bytes": 14820,
+      "sha256": "442d52c70c03c2cd22869ec9b94f6cef73188673333817ea72a9c915375ba95e",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Phase_5.md",
+      "archive": "docs_archive/dev/autonomous_activity/Phase_5.md",
+      "bytes": 12161,
+      "sha256": "a50a9eeb5ad0ee238acdd9453682851f83200a6f5f23c26b06596c1ec923ba89",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Phase_6.md",
+      "archive": "docs_archive/dev/autonomous_activity/Phase_6.md",
+      "bytes": 9568,
+      "sha256": "1c3747e1a17ea8edd18b3a9494ce674a40d62c47b680de419f5520ba510b8161",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Phase_7.md",
+      "archive": "docs_archive/dev/autonomous_activity/Phase_7.md",
+      "bytes": 5221,
+      "sha256": "c439cc10ac4206de72cdc3d6bc648aca38f8d6e969024e0ab15cd167a0347dd7",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Phase_8.md",
+      "archive": "docs_archive/dev/autonomous_activity/Phase_8.md",
+      "bytes": 14016,
+      "sha256": "46f57070542da7b451d6573b64122a81f35a55a41ccc9fbc7e2859e6110037b9",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/README.md",
+      "archive": "docs_archive/dev/autonomous_activity/README.md",
+      "bytes": 11039,
+      "sha256": "9590d99fcad0a34a2a77141e7a1a9b9e8c3ead0829b5dfe167430046982c9328",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Replacement_Inventory.md",
+      "archive": "docs_archive/dev/autonomous_activity/Replacement_Inventory.md",
+      "bytes": 7705,
+      "sha256": "4498175236163fbaf8c89093d0db8821ea1323150ecb5c30c94101a1022148fd",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Schema_12.md",
+      "archive": "docs_archive/dev/autonomous_activity/Schema_12.md",
+      "bytes": 25829,
+      "sha256": "d9aa3394d48ff4fe48c99c69ff4b9c02495196f77e380e9707f9d267dc7ff73f",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Schema_13.md",
+      "archive": "docs_archive/dev/autonomous_activity/Schema_13.md",
+      "bytes": 3960,
+      "sha256": "80407e2c3da6edde9b8ad4e089228204e4b5bf28107cd72872ab62a5d35d9ea8",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Schema_14.md",
+      "archive": "docs_archive/dev/autonomous_activity/Schema_14.md",
+      "bytes": 3219,
+      "sha256": "f7d80e24fe88ebebec949c5ffc4c9751f9e4e6eb1d7a71c61e65a1895015f230",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Schema_15.md",
+      "archive": "docs_archive/dev/autonomous_activity/Schema_15.md",
+      "bytes": 4579,
+      "sha256": "fbfda7882daefaae878bfdf6e4bb61e0dabbf33cc51cb9097c63c43bb2f41a5d",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Schema_16.md",
+      "archive": "docs_archive/dev/autonomous_activity/Schema_16.md",
+      "bytes": 2453,
+      "sha256": "7b28505ec891465c83cef78b593ef93ffbe2255aec28dc2d72b46c1d1132b44c",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/Verification_Coverage.md",
+      "archive": "docs_archive/dev/autonomous_activity/Verification_Coverage.md",
+      "bytes": 59397,
+      "sha256": "4d04736405d64f5a03f008eda1c26d7be1dbdcb7e0d1954d97dd2b4c44638803",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/acceptance/2026-10-30-output-validation.json",
+      "archive": "docs_archive/dev/autonomous_activity/acceptance/2026-10-30-output-validation.json",
+      "bytes": 27322,
+      "sha256": "03ae4d581bb9b611cc074a798bd4e72789cd05379e2ec0964f6196d94817a285",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/acceptance/2026-10-30.json",
+      "archive": "docs_archive/dev/autonomous_activity/acceptance/2026-10-30.json",
+      "bytes": 34594,
+      "sha256": "06f64787d51ac3d928c0f1fd6e96ee21a5f75890e27a201092287a49d4b78948",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/round_dependencies.json",
+      "archive": "docs_archive/dev/autonomous_activity/round_dependencies.json",
+      "bytes": 90240,
+      "sha256": "aad105e3d674ca1cf16787a0b9d980bb5ffc66347c26ca14f332b02f41f8b6f6",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/tool_effects.json",
+      "archive": "docs_archive/dev/autonomous_activity/tool_effects.json",
+      "bytes": 15083,
+      "sha256": "eea4b78b2d9f2431ae1e0511d517a11c6416f74a159a6881956ad022513689a0",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/dev/autonomous_activity/verification_cases.json",
+      "archive": "docs_archive/dev/autonomous_activity/verification_cases.json",
+      "bytes": 125293,
+      "sha256": "97ccd3d4c60ef709ba7aefa1d9af0ba79e38b7a2ad45231dda4ca4130c24090c",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/01_Foundation.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/01_Foundation.md",
+      "bytes": 1777,
+      "sha256": "0cc858e49b40d9d7f6bf4a449113854ca72db1afadde35d00ec4e702391e043d",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/02_Core_Concepts.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/02_Core_Concepts.md",
+      "bytes": 1706,
+      "sha256": "7fe07c302717b48dfc410749995c160734bf8650b12b80478c389023eceb41a2",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/03_Scope_and_Institutional_Boundaries.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/03_Scope_and_Institutional_Boundaries.md",
+      "bytes": 1156,
+      "sha256": "eeaeb6f18ca64467a4a74b8047d7b13e0891baf1850bb0081c6d2cee64594435",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/04_Ordinary_Activity.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/04_Ordinary_Activity.md",
+      "bytes": 2431,
+      "sha256": "8932a68e95af37c149a0fe7904cd6de1ea75a29603f0a25b89c0e1a7bf036bd3",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/05_Personal_Activity_and_Wake.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/05_Personal_Activity_and_Wake.md",
+      "bytes": 8391,
+      "sha256": "f06d2a2ef2f5898c2a7868ae799ccbc07a81b82c9f49748171373c2d4b29b3df",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/06_Team_Conversations.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/06_Team_Conversations.md",
+      "bytes": 5806,
+      "sha256": "7afc70e17470f32c62ce9fc81d5cf12b787688e5570cf4f45c9e74a417cb6c7b",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/07_Communication_Surfaces.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/07_Communication_Surfaces.md",
+      "bytes": 1476,
+      "sha256": "cb1938295e49cd90276b82df642d7e587dcd44b98d7c3b0f4123ac08b745f3dc",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/08_Direct_Chat_and_Friendship.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/08_Direct_Chat_and_Friendship.md",
+      "bytes": 6043,
+      "sha256": "75c4898ca27a993de713e98fd6b72a34ae4def3d6da333de8ce152018bbf4f8d",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/09_Work_Artifacts.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/09_Work_Artifacts.md",
+      "bytes": 1684,
+      "sha256": "490c1041f5f4252554ebb31c83d2bed06c5005935d1af7622c77d3227c736536",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/10_Background_Execution.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/10_Background_Execution.md",
+      "bytes": 4846,
+      "sha256": "d5f3378df092ea2c8b228c3a853dba64041c0327c703669ebb7c2c897c223aa9",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/11_Background_Task_States.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/11_Background_Task_States.md",
+      "bytes": 2004,
+      "sha256": "c8a9e33d425f919f557ccc1059f446ae7b9246d54d1a086d15e104238073a124",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/12_Task_Queries_and_Notifications.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/12_Task_Queries_and_Notifications.md",
+      "bytes": 3111,
+      "sha256": "ed17a9a20a5833ffed94d11acaf90622ca1895a99ccbebbff483b18af128a64d",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/13_Task_Health.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/13_Task_Health.md",
+      "bytes": 2142,
+      "sha256": "ee60a0d72cdd0f32694cd354c3dabb40ecb9c7f34a5a9b1e28a14cf82acac22e",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/14_Health_Supervision.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/14_Health_Supervision.md",
+      "bytes": 2477,
+      "sha256": "62b6e3615d5b711674541d9afd6994903cff77fb15068def0f57474b2d310485",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/15_Authority_and_Privacy.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/15_Authority_and_Privacy.md",
+      "bytes": 1945,
+      "sha256": "978b4cc080091a5006b32084e3e2f62935a540ac16ee4a8b6b7cdac0efaa8d8f",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/16_Persistence_and_Recovery.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/16_Persistence_and_Recovery.md",
+      "bytes": 15181,
+      "sha256": "7c4fe529ab70dbde08edd76d888cedda4f4e6960cffebf8a839bc65d30d4783c",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/17_Asynchronous_Roadmap.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/17_Asynchronous_Roadmap.md",
+      "bytes": 1417,
+      "sha256": "dcdcae3480b870343f05a9dc46cc803681311d35fbf0e967073055737536f750",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/18_Engineering_Constraints.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/18_Engineering_Constraints.md",
+      "bytes": 1709,
+      "sha256": "27947551eaa5bd4481b4a941234e5280b02cce5b9d0a45cec977a2731d1bf85b",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/19_Implementation_Research.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/19_Implementation_Research.md",
+      "bytes": 4162,
+      "sha256": "b830a13bd1f9f6bb71236678c264236d283425c3cf8ed4a04a6578a4ca6f11c3",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/20_Verification_Scenarios.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/20_Verification_Scenarios.md",
+      "bytes": 6325,
+      "sha256": "0adeda141fd5de477199b3b3f99f9e5819b639bdc17e2d25ee95831b0ddfd5e4",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/21_Confirmed_Defaults.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/21_Confirmed_Defaults.md",
+      "bytes": 4412,
+      "sha256": "334368134407eba2f176c3345b1bbf3a1cc9b20dcb286daec7aef47ae7e68799",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md",
+      "archive": "docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md",
+      "bytes": 5409,
+      "sha256": "33fd6d0ab770a2389b7423a2463e4c912ca28ac5658c1dc7c247874cb5f2f2c1",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/01_Scope.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/01_Scope.md",
+      "bytes": 4810,
+      "sha256": "f0d22b25850af7368724ae4ca8750fbfc1154777cffe6bbb9977465891da8cda",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/02_Repository_Findings.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/02_Repository_Findings.md",
+      "bytes": 4317,
+      "sha256": "bb83dd980ca6ec8ef766898917b299b26eb8022bd52e24235e4d779625ebdbc7",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/03_System_Invariants.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/03_System_Invariants.md",
+      "bytes": 4066,
+      "sha256": "633e113d0135d30088688a00057b2a5ab0ff82b077e1b88fad5e3e252f0bebec",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/04_Architecture.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/04_Architecture.md",
+      "bytes": 3728,
+      "sha256": "0542cad6ff02f24e48a7ba21ca99542dd7a04e836a43600492d832cae6652f4d",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/05_Personal_Activity.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/05_Personal_Activity.md",
+      "bytes": 8630,
+      "sha256": "391a146cab4b8b31bbda9aa804f3452ea420fb6d4a7ff3b1b0782eb5de8f0d7d",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/06_Context_and_Memory.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/06_Context_and_Memory.md",
+      "bytes": 5168,
+      "sha256": "e810675f5b245dfcd972ea156de5d650961a05d0e6d4bc94833c1421071b7141",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/07_Notifications_and_Sleep.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/07_Notifications_and_Sleep.md",
+      "bytes": 5745,
+      "sha256": "1d7e99809a0f0b6957612d3e86be9a762d1f7092b34d2f092c4eb7869986d992",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/08_Team_Conversations.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/08_Team_Conversations.md",
+      "bytes": 9856,
+      "sha256": "e03298a4ae285334237bb0f04d162b30be67d2ae0335c0c0eac88d5436e02d50",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/09_Direct_Chat_and_Friendship.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/09_Direct_Chat_and_Friendship.md",
+      "bytes": 5322,
+      "sha256": "6d996205b5dc7b2fb5a3e29789f3807cca510f76cf3bfdba62f01465bf04c9e5",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/10_Background_Tasks.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/10_Background_Tasks.md",
+      "bytes": 12530,
+      "sha256": "9ad24006c5b66175e6a15c31f2da019f735f527b8d4b04c0def2084e5d3b4ed3",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/11_Governance_and_Topology.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/11_Governance_and_Topology.md",
+      "bytes": 16996,
+      "sha256": "416b220e42dfb74e8ceea01274838fb8ef05ef937e8f565d7c32ce52661a8f19",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/12_Health_Supervision.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/12_Health_Supervision.md",
+      "bytes": 6072,
+      "sha256": "040e7ccd66a7be9ff0c26d8705f55420535d40cbe792df0abaa5019375aab1d4",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/13_Transactions_and_Concurrency.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/13_Transactions_and_Concurrency.md",
+      "bytes": 3238,
+      "sha256": "ae47ba7e5b8f2c5be5cca9b8e216fe4aa75aa7e5ca4f7a3bcadb9c1d0c3d93cc",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/14_Persistence_and_Recovery.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/14_Persistence_and_Recovery.md",
+      "bytes": 11462,
+      "sha256": "63ac2ca274b52eb94cb7ee28ca598a2b7fba2bd34dc459b58b289186f92dca39",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/15_Lifecycle_and_Shutdown.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/15_Lifecycle_and_Shutdown.md",
+      "bytes": 5536,
+      "sha256": "b1e3c63b949991a4b3fe785b07041ed03d6d7cdf9ada51029ff01bf1cef7a340",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/16_Public_Contracts_and_Configuration.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/16_Public_Contracts_and_Configuration.md",
+      "bytes": 11872,
+      "sha256": "567872bfed2b85f1954a4422f613dcb08a339293f3171fdd594b4651c90acae3",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/17_Implementation_Sequence.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/17_Implementation_Sequence.md",
+      "bytes": 15425,
+      "sha256": "a57a1b7be705795d532467e97f2711e9253b327076748ca00040cfa751dbcca8",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/18_Verification_Matrix.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/18_Verification_Matrix.md",
+      "bytes": 13895,
+      "sha256": "0a3c4b94caeef800e61d7d57d69cfac9dfe1dcc11ee0dc97e33465986816524c",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/19_Decision_Status.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/19_Decision_Status.md",
+      "bytes": 8480,
+      "sha256": "9bc91216be079e01b399b585a86ebfe25ffdf731077749e0fec89a6a7e245ef0",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/20_Traceability.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/20_Traceability.md",
+      "bytes": 2042,
+      "sha256": "7efa8753ea97c65bf5fce07bf74b81e95ad3824febc4f3456a829e4130b6adbf",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md",
+      "archive": "docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/README.md",
+      "bytes": 5153,
+      "sha256": "17d2f0327275ab879670f57f5e49051c4044550f1e3f99e4649bd9377674f759",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/README.md",
+      "archive": "docs_archive/blueprints/README.md",
+      "bytes": 1531,
+      "sha256": "ffb2e0500e7b6949259556c01034db309614deb2ab19f8c332765a2a9ee85b9f",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "docs/blueprints/Todo_Autonomous_Agent_Activity_Messaging_and_Background_Tasks.md",
+      "archive": "docs_archive/blueprints/Todo_Autonomous_Agent_Activity_Messaging_and_Background_Tasks.md",
+      "bytes": 3918,
+      "sha256": "ba7d2fb3b3a8a1229e0df1c1ac4f4fadde899df97d68d002275c749ddbfd9287",
+      "mode": "644",
+      "tracked_at_capture": true
+    },
+    {
+      "source": "todo.md",
+      "archive": "docs_archive/todo.md",
+      "bytes": 1037,
+      "sha256": "580c3b5f40d897a4a54334eed28169a823f33af535ffe0f544781718eecf7baa",
+      "mode": "644",
+      "tracked_at_capture": true
+    }
+  ],
+  "optional_local_metadata": [
+    {
+      "source": "docs/blueprints/.DS_Store",
+      "archive": "docs_archive/blueprints/.DS_Store",
+      "bytes": 6148,
+      "sha256": "bd52614ae796bc5d045727e8e26638cbf27f8e0b697cc2a393506780d4172999",
+      "mode": "644",
+      "tracked_at_capture": false
+    }
+  ],
+  "notes": [
+    "Original document contents and historical references are preserved unchanged.",
+    "Finder metadata is preserved locally but is outside the versioned document payload.",
+    "Archive navigation and this manifest are maintained outside the copied payload."
+  ]
+}

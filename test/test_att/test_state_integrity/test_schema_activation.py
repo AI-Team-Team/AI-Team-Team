@@ -1,4 +1,4 @@
-"""The implemented incompatible schema belongs to ordinary Phase 1 discovery."""
+"""The physical checkpoint enforces the current independent schema contract."""
 
 import asyncio
 import tempfile
@@ -9,8 +9,8 @@ from ai_team_team import ATTConfig, ATTManager, Agent
 from ai_team_team.core.activity.contracts import TARGET_STATE_SCHEMA_VERSION
 from ai_team_team.database.persistence.constants import STATE_SCHEMA_VERSION
 
-from test.test_att.test_autonomous_activity_phase0._fixtures import ScriptedModelClient
-from test.test_att.test_autonomous_activity_phase0._fixtures.schema import physical_schema
+from test.test_att.test_runtime_contracts._fixtures import ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures.schema import physical_schema
 
 
 REQUIRED_TABLES = {
@@ -72,13 +72,13 @@ REQUIRED_TABLES = {
 
 
 class TestSchemaActivation(unittest.IsolatedAsyncioTestCase):
-    async def test_physical_schema_matches_the_frozen_target(self):
+    async def test_physical_schema_matches_the_current_contract(self):
         self.assertEqual(
             STATE_SCHEMA_VERSION,
             TARGET_STATE_SCHEMA_VERSION,
             "Runtime and physical checkpoint contracts must use the same schema.",
         )
-        workspace = tempfile.TemporaryDirectory(prefix="att-phase0-schema-")
+        workspace = tempfile.TemporaryDirectory(prefix="att-runtime-contract-schema-")
         self.addCleanup(workspace.cleanup)
         database_path = Path(workspace.name).resolve() / "state.sqlite"
         client = ScriptedModelClient()

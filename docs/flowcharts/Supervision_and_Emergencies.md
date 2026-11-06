@@ -36,7 +36,7 @@ flowchart TD
     Delivery -- "queue or wake" --> Handler{"Actual organizational handler exists?"}
     Handler -- "No" --> Event
     Handler -- "Yes, queue" --> Mail["Addressed attention, no forced activation"]
-    Handler -- "Yes, wake" --> Personal["Request ordinary personal activity, no scope or intent override"]
+    Handler -- "Yes, wake" --> Personal["Admit the same Agent; a protected notice may end sleep"]
     Mail --> Claim["Explicit current-authority claim"]
     Personal --> Claim
     Claim --> Handled{"Explicit current-generation acknowledgement?"}

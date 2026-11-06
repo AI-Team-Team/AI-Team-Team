@@ -22,17 +22,14 @@ def git(root, *arguments):
 
 
 def source_digest(root):
-    """Exclude generated results so recording a run cannot change its source identity."""
+    """Identify current source, test, documentation, and configuration inputs."""
     files = set()
     for area in ("src", "test", "typecheck", "examples", "scripts", ".github", "docs", "Roadmap"):
         for path in (root / area).rglob("*"):
-            relative = path.relative_to(root).as_posix()
             if (not path.is_file() or path.suffix in {".pyc", ".pyo"}
                     or path.name == ".DS_Store"
                     or any(part in {"__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache"}
-                           or part.endswith(".egg-info") for part in path.parts)
-                    or relative == "docs/dev/autonomous_activity/Phase_8.md"
-                    or relative.startswith("docs/dev/autonomous_activity/acceptance/")):
+                           or part.endswith(".egg-info") for part in path.parts)):
                 continue
             files.add(path)
     files.update(root / name for name in ("README.md", "pyproject.toml", "MANIFEST.in") if (root / name).exists())

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from ai_team_team.core.activity.contracts import BackgroundTaskHandle
 from test.test_att.test_agent_activity._support import call, idle
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep
 
 from ._support import BackgroundTestCase, contract
 from ._timer_support import TimerStartGate, wait_registered

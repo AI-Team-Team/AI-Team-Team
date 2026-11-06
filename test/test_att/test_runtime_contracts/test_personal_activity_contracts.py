@@ -1,19 +1,19 @@
-"""Intentionally red until Phase 2; run with the explicit spec_*.py command."""
+"""Continuing personal activity preserves ownership, publication, and notification boundaries."""
 
 import unittest
 
 from ai_team_team import LLMResponse, ToolCall
 from ai_team_team.core.activity.contracts import AgentTeamScope, ToolExecutionContract
 
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep
-from test.test_att.test_autonomous_activity_phase0._runtime_spec import (
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep
+from test.test_att.test_runtime_contracts._runtime_spec import (
     RuntimeSpecFixture,
     idle_response,
     model_input,
 )
 
 
-class SpecPersonalActivity(RuntimeSpecFixture, unittest.IsolatedAsyncioTestCase):
+class TestPersonalActivityContracts(RuntimeSpecFixture, unittest.IsolatedAsyncioTestCase):
     async def test_a_plain_answer_continues_activity_without_publication(self):
         activate = self.require_method("activate_agent")
         second_request = AsyncBarrier()
@@ -28,8 +28,7 @@ class SpecPersonalActivity(RuntimeSpecFixture, unittest.IsolatedAsyncioTestCase)
         )
         await second_request.wait_entered()
         self.assertEqual(self.client.maximum_in_flight, 1)
-        # Publication is a source fact; the public historical-query API belongs
-        # to Phase 3 and must not be faked merely to make this gate green.
+        # Publication is a committed source fact rather than an ordinary answer.
         self.assertFalse(any(row.table_name == "chat_messages" for row in self.manager._records.snapshot()))
         second_request.release()
         self.assertEqual((await self.wait_idle(admitted.admission_id)).intent, "idle")

@@ -6,7 +6,7 @@ from unittest.mock import Mock
 from ai_team_team.core.activity.contracts import AgentTeamScope
 from test.test_att.test_agent_activity._support import ActivityTestCase, call, idle
 from ai_team_team.core.manager.activity.values import capture
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep
 
 
 class SleepScopeTests(ActivityTestCase):

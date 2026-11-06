@@ -63,9 +63,27 @@ Partial results carry `next_line`, `next_character`, and `file_version`; pass th
 
 Only content actually returned through the appropriate accepted read boundary advances that person's read state.
 
+Reading an eligible earlier revision cannot clear a later unread revision or erase its captured reminder.
+
 A failed or stale read returns no body and does not create a read receipt.
 
 Personal-runtime reads settle with their tool observations, while a Host read cancelled before returning compensates its own unreturned read update where still applicable.
+
+## Unread Counts and Bounded Previews
+
+Each eligible live conversation reports its unread-message total separately from the previews shown in the model frame.
+
+`conversations.summary_preview_limit` defaults to 20 and caps eligible previews per conversation, not the conversation's unread count.
+
+When eligible previews exceed that limit, the frame reports how many previews it shows and how many remain eligible.
+
+A withdrawn message can retain unread reminders for several authorized revisions, so one unread message may account for multiple captured previews.
+
+Use the message-listing tools for authorized message metadata and `list_chat_reminders()` for retained revision reminders.
+
+Disabling team or direct details preserves eligible unread counts, while personal deletion, suppression, and frozen-history boundaries continue to filter presentation.
+
+Neither displaying a count nor inspecting a preview marks a message read.
 
 ## Delivery and Idempotency
 
@@ -76,6 +94,8 @@ It does not prove model presentation, reading, a reply, or agreement with the co
 The Host can reuse an `operation_key` for an identical lost-response retry; using that key for different input fails.
 
 Model invocations use framework execution identities for idempotency rather than caller-selected operation keys.
+
+A deliberately new send with identical text remains a distinct message; body equality is not the idempotency key.
 
 Reusing a provider's tool-call ID in a later request does not make it the same publication.
 
@@ -90,6 +110,16 @@ Cancellation after acceptance preserves the committed message, and failed writes
 | Mark read or unread | No shared source mutation. | Only the acting person's authorized view changes. |
 | Personal deletion | No shared source mutation. | The acting person's view is hidden; later edits do not restore it. |
 | Personal restoration | No new publication. | The acting person explicitly restores their eligible hidden view. |
+
+Editing has no message-age limit, but still requires the active original author and current AT publication authority for team messages.
+
+Listings and reads identify the applicable revision, and explicit version selection can inspect eligible earlier revisions while the source is available.
+
+A frozen view caps that selection at its own departure-time revision rather than the current shared version.
+
+Direct edits remain subject to current delivery controls and stranger allowance.
+
+A withdrawn message cannot be edited or withdrawn again.
 
 The withdrawal window defaults to ten minutes after the latest successful edit, or the original send if unedited.
 
@@ -111,6 +141,20 @@ The Host instead uses `control_chat_message(command, message_id, actor=...)` wit
 
 ## Leaving, Rejoining, and Dissolution
 
+Chat-history entitlement is the union of the person's actual membership intervals.
+
+Membership and message operations share a transaction-assigned event order rather than relying on timestamps alone.
+
+A message must follow its join boundary and, once that interval closes, precede its leave boundary.
+
+Migration does not create a leave-and-rejoin interval for unchanged memberships.
+
+A new member cannot retrieve messages from before joining, and a returning member cannot retrieve messages from its absence.
+
+The same interval checks apply to previews, unread counts, listing, search, inspection, and reply references, not only body reads.
+
+Counts and opaque pagination are computed after authorization so hidden sources cannot leak through totals or stream-position gaps, and reply references are authorized independently.
+
 Leaving freezes the person's exact authorized revision and withdrawal references at the departure boundary.
 
 Later shared edits and withdrawals do not rewrite that frozen archive.
@@ -118,6 +162,10 @@ Later shared edits and withdrawals do not rewrite that frozen archive.
 Rejoining opens a new membership interval without revealing messages from the absence period or refreshing an earlier frozen view.
 
 Former participants inspect their authorized archives in personal scope without acquiring current posting or DocLib authority.
+
+They receive no current-team unread summaries solely from their former membership.
+
+Chat entitlement does not erase previously acquired memories or artifacts and remains separate from DocLib ACLs.
 
 Live entity discovery and archived conversation access are separate: a dissolved AT disappears from current discovery while eligible personal history remains.
 
@@ -127,19 +175,33 @@ It closes current memberships and preserves surviving direct children as indepen
 
 ## Direct Relationships
 
+New direct deliveries and friendship requests require active ordinary Agent endpoints; inactive, deleted, and audit-scoped identities are outside that contact interface.
+
 Each sender has three stranger deliveries per canonical relationship generation before friendship is established.
+
+Accepted friendship removes that relationship allowance without promising replies, unlimited model budget, or exemption from Host resource limits.
 
 Sending a new message or editing an old direct message consumes one delivery while not friends, including edits to messages from earlier generations or friendship periods.
 
 Both operations check current blocks and recipient refusal, while historical reads remain separately authorized.
 
+Only the recipient may explicitly lift that recipient's direct-delivery refusal; reissuing or cancelling a request does not clear another person's control.
+
 Friend requests carry metadata and require explicit acceptance; crossed requests alone do not establish friendship.
 
 The recipient can accept, reject, or ignore a request; only its sender can cancel it.
 
+Rejecting a friendship request sets the recipient's direct-delivery refusal, preventing further sends and edits from that sender until the recipient explicitly lifts it.
+
+Ignoring resolves the request without establishing friendship or setting a new refusal.
+
 Either endpoint's block ends friendship and prevents both delivery directions, and only that endpoint can remove its own block.
 
+A new block sends the other active endpoint a `relationship_changed` personal mail notice rather than a direct message that bypasses the block.
+
 Removing established friendship or clearing the final block starts a new generation with a fresh directional allowance and no automatic friendship.
+
+These allowance resets do not clear a separately retained recipient refusal.
 
 Old accepted requests retain their historical outcome but cannot authorize the new generation.
 

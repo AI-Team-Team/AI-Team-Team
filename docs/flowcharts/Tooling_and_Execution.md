@@ -2,17 +2,22 @@
 
 This document consolidates the sequence flows defining how tools are parsed, audited, and executed within the runtime reasoning loops of the framework, as well as the low-level adapter logic for the LLM integrations.
 
-## 1. LLM Adapter Streaming vs Sync Execution (Deep Dive)
+## 1. Generator Handler Forwarding and Response Conversion
 
 This sequence diagram illustrates the default generator-handler adapter's forwarding and response-conversion behavior for a Native request.
 
 The personal runtime resolves a concrete provider binding before quota reservation, and directly registered clients do not require this forwarding path.
+
+Handlers return `str`, `dict`, or `LLMResponse`, synchronously or through an awaitable.
+
+The Host collects provider-specific streams and assembles any streamed tool calls before returning one of these supported values; the default ATT wrapper does not consume iterators or asynchronous iterators.
 
 ```mermaid
 sequenceDiagram
     participant Agent as Default Adapter Caller
     participant Adapter as ManagerDefaultClientAdapter
     participant Handler as HandlerClientAdapter
+    participant Generator as Host Generator Handler
     participant Provider as External LLM Provider (e.g., OpenAI)
 
     Agent->>Adapter: generate(prompt, tools=List[Tool])
@@ -22,11 +27,13 @@ sequenceDiagram
     
     Note over Handler: Honor the handler's supported parameter contract
     
-    Handler->>Provider: Invoke global generator_handler(**kwargs)
+    Handler->>Generator: Invoke global generator_handler(**kwargs)
+    Generator->>Provider: Make Host-owned SDK request
     
-    Note over Provider,Handler: Provider API processes request (Streaming or Blocking)
+    Provider-->>Generator: Return result or provider-specific stream
+    Note over Generator: Collect streams and normalize provider fields before returning
     
-    Provider-->>Handler: Returns raw response object
+    Generator-->>Handler: Return str, dict, or LLMResponse
     
     alt Return is pure String
         Handler->>Handler: Cast to LLMResponse(text=res)
@@ -60,16 +67,16 @@ sequenceDiagram
     participant Auditor as ToolAuditor
     participant Binding as Registered Executor / Callable
     
-    %% Phase 1: Registration
-    Note over Dev,Manager: Phase 1: Tool Registration
+    %% Registration
+    Note over Dev,Manager: Tool Registration
     Dev->>Manager: register_tool(name="drop_db", func=drop_db, description=...)
     Manager->>Manager: Wraps python function in native `Tool` object
     
     Dev->>Manager: register_tool_auditor("drop_db", audit_drop_db)
     Manager->>Manager: Store hook in tool_auditors under the public tool name
     
-    %% Phase 2: Generation
-    Note over Manager,LLM: Phase 2: Provider Request Preparation
+    %% Generation
+    Note over Manager,LLM: Provider Request Preparation
     alt Native protocol
         Strategy->>LLM: generate(prompt, tools=List[Tool])
         Note over LLM: Adapter converts Tool schemas into provider format
@@ -80,8 +87,8 @@ sequenceDiagram
         Strategy->>Strategy: Balanced scanner and literal-only argument parsing
     end
     
-    %% Phase 3: Execution & Audit
-    Note over Strategy,Auditor: Phase 3: Execution & Interception
+    %% Execution and audit
+    Note over Strategy,Auditor: Execution and Interception
     Strategy->>Service: execute(tool_name, arguments, captured scope)
     Service->>Service: Resolve available tool and validate scope, arguments, binding and resources
 

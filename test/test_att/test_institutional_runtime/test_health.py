@@ -69,12 +69,29 @@ class HealthRuntimeTests(ActivityTestCase):
             self.assertEqual(admit.await_count, 1)
 
     async def test_real_fresh_team_uses_common_runtime_and_all_findings(self):
-        client = HealthModelClient()
+        observed_inputs = []
+
+        class EvidenceSnapshotClient(HealthModelClient):
+            async def generate(self, prompt, system_instruction=None, tools=None, **kwargs):
+                observed_inputs.append((repr(prompt), system_instruction or ""))
+                if any(tool.name == "read_audit_evidence" for tool in tools or ()) and not any(
+                    message.get("role") == "tool" and message.get("name") == "read_audit_evidence"
+                    for message in prompt
+                ):
+                    return LLMResponse(tool_calls=[ToolCall("read-evidence", "read_audit_evidence", {})])
+                return await super().generate(
+                    prompt, system_instruction=system_instruction, tools=tools, **kwargs
+                )
+
+        client = EvidenceSnapshotClient()
         self.root.llm_client = client
         self.manager.register_llm_client("health-fixture", client)
+        private_body = "PRIVATE-ARTIFACT-OUTSIDE-AUDIT-EVIDENCE"
+        permitted_fact = "HOST-AUTHORIZED-AUDIT-FACT"
+        self.manager.libraries[self.root.private_doc_library_id].write_file("audit-excluded.txt", private_body)
         before = (self.root.agent_id, self.root.private_doc_library_id, list(self.root.messages))
         admission = await self.manager.request_health_assessment(HealthSubject(kind="att"),
-            {"kind": "host", "facts": ["Assess explicitly permitted framework metadata."]})
+            {"kind": "host", "facts": [permitted_fact]})
         result = await self.manager.wait_for_health_assessment(admission.audit_id)
         self.assertEqual(result.status, AuditStatus.HEALTHY)
         self.assertEqual(len(self.records("audit_findings")), 3)
@@ -83,6 +100,12 @@ class HealthRuntimeTests(ActivityTestCase):
         self.assertTrue(self.records("audit_activity_checkpoints"))
         self.assertFalse(any(team.team_kind == "supervisory" for team in self.manager.teams.values()))
         self.assertEqual((self.root.agent_id, self.root.private_doc_library_id, self.root.messages), before)
+        self.assertTrue(observed_inputs)
+        self.assertTrue(any(permitted_fact in prompt or permitted_fact in instruction
+                            for prompt, instruction in observed_inputs))
+        for prompt, instruction in observed_inputs:
+            self.assertNotIn(private_body, prompt)
+            self.assertNotIn(private_body, instruction)
         for _prompt, _instruction, names in client.calls:
             self.assertNotIn("read_private_file", names)
             self.assertNotIn("dispatch_subagent", names)

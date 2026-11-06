@@ -4,7 +4,7 @@ import asyncio
 
 from ai_team_team import ATTConfig, Agent, LLMResponse, ToolCall
 from ai_team_team.core.activity.contracts import AgentTeamScope
-from test.test_att.test_autonomous_activity_phase0._fixtures import (
+from test.test_att.test_runtime_contracts._fixtures import (
     AsyncBarrier,
     ModelStep,
     ScriptedModelClient,

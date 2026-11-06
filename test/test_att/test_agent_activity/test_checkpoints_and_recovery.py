@@ -6,7 +6,7 @@ from contextlib import closing
 
 from ai_team_team import ATTConfig, ATTManager, Agent, LLMResponse
 from ai_team_team.core.activity.contracts import AgentTeamScope
-from test.test_att.test_autonomous_activity_phase0._fixtures import (
+from test.test_att.test_runtime_contracts._fixtures import (
     AsyncBarrier,
     ModelStep,
     ScriptedModelClient,

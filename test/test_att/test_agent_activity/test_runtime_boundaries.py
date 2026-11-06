@@ -14,7 +14,7 @@ from ai_team_team import (
 )
 from ai_team_team.core.config import PersonalActivityConfig
 from ai_team_team.core.manager.activity.values import ModelUnavailable
-from test.test_att.test_autonomous_activity_phase0._fixtures import (
+from test.test_att.test_runtime_contracts._fixtures import (
     AsyncBarrier,
     ModelStep,
     ScriptedModelClient,

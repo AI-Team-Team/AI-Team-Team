@@ -10,7 +10,7 @@ from ai_team_team import Agent
 from ai_team_team.core.manager.activity.values import ModelUnavailable
 from ai_team_team.tool.membership import build_membership_tools
 from test.governance_client import settle_governance_activity
-from test.test_att.test_autonomous_activity_phase0._fixtures import AgentIdentitySnapshot
+from test.test_att.test_runtime_contracts._fixtures import AgentIdentitySnapshot
 
 from ._support import hydrate_team_stream_id, invocation_graph, make_manager
 

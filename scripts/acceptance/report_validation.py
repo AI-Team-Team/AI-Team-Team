@@ -78,7 +78,7 @@ def validate_report(report, path, threshold):
             errors.append(f"{key} must be the literal boolean true.")
     if report.get("status") != "completed" or report.get("root_doclib_exists") is not False:
         errors.append("The run must be complete with no project-root DocLib.")
-    if not isinstance(report.get("suite"), str) or report["suite"] not in {"full", "frozen", "extended"}:
+    if not isinstance(report.get("suite"), str) or report["suite"] not in {"full", "extended"}:
         errors.append("Unknown or missing suite identity.")
     tests, cases = report.get("tests"), report.get("cases")
     if type(tests) is not int or tests <= 0 or not isinstance(cases, list) or len(cases) != tests:

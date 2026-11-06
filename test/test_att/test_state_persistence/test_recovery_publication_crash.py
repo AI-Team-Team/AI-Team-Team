@@ -9,7 +9,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from test.test_att.test_autonomous_activity_phase1._support import invocation_graph, make_manager, model_request
+from test.test_att.test_state_integrity._support import invocation_graph, make_manager, model_request
 
 
 class RecoveryCrashTests(unittest.IsolatedAsyncioTestCase):
@@ -29,7 +29,7 @@ class RecoveryCrashTests(unittest.IsolatedAsyncioTestCase):
 import asyncio, os, sys
 from ai_team_team import Agent, ATTConfig, ATTManager
 from ai_team_team.core.manager.restore import transaction
-from test.test_att.test_autonomous_activity_phase0._fixtures import ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures import ScriptedModelClient
 
 async def main():
     client = ScriptedModelClient()

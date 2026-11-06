@@ -5,15 +5,18 @@ import json
 from pathlib import Path
 
 
-LEDGER = Path("docs/dev/autonomous_activity/verification_cases.json")
+LEDGER = Path("docs/dev/verification/verification_cases.json")
 
 
 def load_checks(root):
     path = root / LEDGER
+    constants_path = root / "src/ai_team_team/database/persistence/constants.py"
     if not path.exists():
-        return []  # A pinned baseline predating this evidence ledger.
+        if constants_path.exists():
+            raise ValueError("The current ATT verification ledger is missing.")
+        return []  # Isolated maintenance-tool probes have no ATT database contract.
     data = json.loads(path.read_text(encoding="utf-8"))
-    constants = ast.parse((root / "src/ai_team_team/database/persistence/constants.py").read_text(encoding="utf-8"))
+    constants = ast.parse(constants_path.read_text(encoding="utf-8"))
     version = next(ast.literal_eval(node.value) for node in constants.body
         if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "STATE_SCHEMA_VERSION" for target in node.targets))
     if data["schema"] != version:

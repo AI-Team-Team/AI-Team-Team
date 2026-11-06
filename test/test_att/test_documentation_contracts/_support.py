@@ -3,11 +3,37 @@
 import ast
 import inspect
 import re
+import unicodedata
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
 API = ROOT / "docs/user/API_Reference.md"
+
+
+def heading_anchors(text):
+    """Resolve local ATX heading anchors, including duplicate headings and fences."""
+    anchors, fence = set(), None
+    for line in text.splitlines():
+        marker = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if marker:
+            if fence is None:
+                fence = marker[1][0]
+            elif marker[1][0] == fence:
+                fence = None
+            continue
+        heading = re.match(r"^#{1,6} (.+)$", line) if fence is None else None
+        if heading is None:
+            continue
+        plain = "".join(character for character in heading[1].strip().lower()
+                        if character in "_- " or unicodedata.category(character)[0] in "LMN")
+        plain = re.sub(r"[\ufe00-\ufe0f\U000e0100-\U000e01ef]", "", plain).replace(" ", "-")
+        candidate, suffix = plain, 0
+        while candidate in anchors:
+            suffix += 1
+            candidate = f"{plain}-{suffix}"
+        anchors.add(candidate)
+    return anchors
 
 
 def section(text, heading):

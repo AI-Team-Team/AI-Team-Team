@@ -9,7 +9,7 @@ from sqlalchemy import insert
 from ai_team_team.database.models import AgentModel
 from ai_team_team.database.persistence.receipts import CommitReceipt
 from ai_team_team.database.persistence.store import DatabaseStore
-from test.test_att.test_autonomous_activity_phase1._support import invocation_graph, model_request, record
+from test.test_att.test_state_integrity._support import invocation_graph, model_request, record
 
 
 OWNER = "person"

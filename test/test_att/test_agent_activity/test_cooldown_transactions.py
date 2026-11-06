@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from ai_team_team import LLMResponse, RetryableToolError, StatePersistenceError, Tool, ToolCall
 from ai_team_team.core.tool_runtime import ToolExecutor
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep
 
 from ._support import ActivityTestCase, call, idle, personal_control_contract
 

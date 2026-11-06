@@ -26,6 +26,16 @@ Reaching a threshold means that inspection is warranted, not that the Agent is u
 
 The observation window ages detection samples only; it never expires a retained incident.
 
+Each logical model response or tool invocation contributes at most one detection observation; internal execution retries, duplicate callbacks, and replayed observers do not multiply that count.
+
+Detection streaks belong to the same immutable Agent identity across memberships, so joining or leaving an AT does not reset them.
+
+A tool's argument streak remains separate from other tools and groups consecutive failures by argument-error category.
+
+Even when semantic detection is enabled, repetition, special characters, or non-English output alone are insufficient evidence of a health problem.
+
+The Host-supplied detector must use explicitly authorized evidence rather than treating a language or writing style as a failure classification.
+
 The Host can explicitly request an assessment:
 
 ```python
@@ -130,7 +140,13 @@ Incident claims and acknowledgements revalidate that authority at their commit b
 
 Queue mode records an addressed notice without forcing activation.
 
-Wake mode may request ordinary personal activity, but cannot switch another person's scope, override intent, or force a group discussion.
+An already active person may receive that queued notice in the next eligible model frame.
+
+Wake mode requests eligible personal activity, and the protected health notice may end sleep even without an ordinary early-wake condition.
+
+The same Agent chooses how to respond; presentation does not supply a reply, ballot, incident claim, or acknowledgement.
+
+A busy person's invocation retains its captured scope, while a subsequent admission revalidates current scope authority.
 
 Incident handling is explicit:
 

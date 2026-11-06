@@ -8,7 +8,7 @@ from unittest.mock import patch
 from ai_team_team import ATTConfig, Agent, LLMResponse
 from test.async_waits import wait_for_runtime
 from test.test_att.test_agent_activity._support import ActivityTestCase, idle
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep, ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep, ScriptedModelClient
 
 
 class AdmissionPressureTests(ActivityTestCase):

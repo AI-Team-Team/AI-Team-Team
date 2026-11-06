@@ -6,11 +6,11 @@ from pathlib import Path
 from ai_team_team import ATTConfig, ATTManager, Agent
 from ai_team_team.database.persistence.records import DomainRecord
 from ai_team_team.database.persistence.records import thaw
-from test.test_att.test_autonomous_activity_phase0._fixtures import ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures import ScriptedModelClient
 
 
 def make_manager(test, *, volatile=False):
-    workspace = tempfile.TemporaryDirectory(prefix="att-phase1-")
+    workspace = tempfile.TemporaryDirectory(prefix="att-state-integrity-")
     test.addCleanup(workspace.cleanup)
     path = str(Path(workspace.name) / "state.sqlite")
     client = ScriptedModelClient()

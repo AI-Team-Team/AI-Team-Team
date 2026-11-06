@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ai_team_team import ATTConfig, ATTManager, Agent, StateRestoreError
 from ai_team_team.database.persistence.constants import STATE_SCHEMA_VERSION
-from test.test_att.test_autonomous_activity_phase1._support import make_manager
+from test.test_att.test_state_integrity._support import make_manager
 
 
 class UnsupportedSchemaTests(unittest.IsolatedAsyncioTestCase):

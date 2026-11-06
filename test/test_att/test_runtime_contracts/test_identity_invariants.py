@@ -8,7 +8,7 @@ from unittest.mock import patch
 from ai_team_team import ATTConfig, ATTManager, Agent
 from ai_team_team.tool import get_default_tools
 
-from test.test_att.test_autonomous_activity_phase0._fixtures import (
+from test.test_att.test_runtime_contracts._fixtures import (
     AgentIdentitySnapshot,
     ScriptedModelClient,
 )
@@ -16,7 +16,7 @@ from test.test_att.test_autonomous_activity_phase0._fixtures import (
 
 class TestRelationshipIdentitySnapshots(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.workspace = tempfile.TemporaryDirectory(prefix="att-phase0-identity-")
+        self.workspace = tempfile.TemporaryDirectory(prefix="att-runtime-contract-identity-")
         self.addCleanup(self.workspace.cleanup)
         self.client = ScriptedModelClient()
         self.root = Agent("Root", "Architect", self.client)

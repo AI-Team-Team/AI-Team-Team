@@ -1,0 +1,115 @@
+{
+  "additional_clarifications": [
+    "Unavailable team scope denies issued team effects while preserving lawful personal history.",
+    "Same-tool cooldown versions and live deadlines depend on accepted receipts.",
+    "Retained death can preserve teams below ordinary creation minimum size.",
+    "Only the recipient clears that recipient's direct refusal.",
+    "Disabling optional indexing releases observers without claiming queued completion and preserves pending source segments.",
+    "Runtime clock methods and institutional lifetime freeze are explicit.",
+    "The preexisting README democratic-voting anchor is corrected and current heading-link checks cover all Markdown destinations."
+  ],
+  "archival_integrity": {
+    "earlier_closeout_sha256": "d9f7da9334be71062386db60b47615d0172eda5bd7c5d703ce540f3ce14cda1f",
+    "original_manifest_and_disposition_hashes_unchanged": true,
+    "original_payloads_verified": 68
+  },
+  "client_date": "2026-11-04",
+  "database_reference": {
+    "checks": 591,
+    "columns": 771,
+    "declared_indexes": 5,
+    "sql_sha256": "36f125a811b4ab3c66483a371a76bf344aaff65a046835eda95de89bc9b0601f",
+    "structural_check": "Executed reference SQL and declared models in separate in-memory SQLite stores; compared columns, FK groups, check expressions, unique/partial/secondary indexes.",
+    "tables": 83,
+    "unique_constraints": 43
+  },
+  "documentation_routes": {
+    "note": "Reference integrity and counts are not semantic proof; explanations and actual assertions were reviewed by rule.",
+    "requirements": 186,
+    "sha256": "eb2412b5bbc9d745a8815c81f7280b93f4175a412565960a348fe98090df5873"
+  },
+  "findings_addressed": [
+    "Queue and protected wake scheduling, sleep interruption, captured scope, and voluntary personal response are distinguished across guides and flowchart.",
+    "Complete physical SQL, exact keys/indexes/delete actions, cross-row authority, and ordinary/audit/index request/token/presentation matrices are current references.",
+    "Strict tool/executor/resource/health fields, combinations, hooks, deadlines, and an executed custom-binding example are documented.",
+    "Each of 186 behavioral requirements has explicit explanatory headings and implementation entry points, with separate frozen-contract and D01-D15 archive routing."
+  ],
+  "notes": [
+    "Source-bound historical results and original archived payloads were not rewritten.",
+    "This local result covers the recorded environment; it does not claim a new GitHub CI run.",
+    "Raw logs and detailed evidence remain outside the checkout at the recorded paths."
+  ],
+  "runtime_production_code_changed": false,
+  "scope": "Address the four documentation-integration findings and additional engineering rules identified during requirement-level review.",
+  "source": {
+    "base_commit": "dd5d5c6b9e6a96a63096af1acd49c2bbda189156",
+    "machine": "arm64",
+    "packages": {
+      "jsonschema": "4.26.0",
+      "pydantic": "2.13.5",
+      "sqlalchemy": "2.1.2",
+      "tokenizers": "0.23.2",
+      "typing-extensions": "4.16.0"
+    },
+    "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+    "python": "3.13.18 (main, Oct 25 2026, 18:31:23) [Clang 21.0.0 (clang-2100.3.34.2)]",
+    "source_digest": "d00788a9bb7ec7fa7521748f27d13d1babd7568ab1583b7605d9ccd7b91058dd",
+    "source_kind": "checkout",
+    "sqlite": "3.54.1",
+    "worktree_dirty": true
+  },
+  "state_schema": "16",
+  "status": "completed",
+  "validation": {
+    "behavioral_projection": {
+      "basis": "All ordinary discoveries completed with plain OK and no skips; extended case outcomes come from their actual runner report.",
+      "external_report": "/var/folders/ml/72q4_jwd5293vmvqvmfpkqnh0000gn/T/att-document-contracts-vklbxeuz/behavioral-projection.json",
+      "requirements_passed": 186,
+      "sha256": "de29c02c9da8fb34efab9c6b1af9c17984183fbba5d47e207088ffee9d1d4c3d"
+    },
+    "coverage": "Not remeasured for this documentation/test-only update; earlier coverage remains evidence for its original source digest.",
+    "documentation_contracts": {
+      "elapsed_seconds": 7.891,
+      "external_log": "/var/folders/ml/72q4_jwd5293vmvqvmfpkqnh0000gn/T/att-document-contracts-vklbxeuz/documentation-tests.log",
+      "log_sha256": "64f4fa58d5f7a7f67d9e4ea2e1050d9dc327bf43cad80ba99acc46499ccbe099",
+      "passed": true,
+      "tests": 26
+    },
+    "exact_executor_fence": {
+      "elapsed_seconds": 0.123,
+      "external_log": "/var/folders/ml/72q4_jwd5293vmvqvmfpkqnh0000gn/T/att-document-contracts-vklbxeuz/executor-example.log",
+      "log_sha256": "94c5f59b916e568183d578842aaa59b71ca6a30f2b4406ca168c2d0f471401e6",
+      "passed": true,
+      "tests": 1
+    },
+    "extended": {
+      "elapsed_seconds": 43.058086,
+      "leaks": {
+        "ResourceWarning:": 0,
+        "Task exception was never retrieved": 0,
+        "Task was destroyed but it is pending": 0,
+        "was never awaited": 0
+      },
+      "passed": true,
+      "stress_operations": 96,
+      "stress_seeds": 8,
+      "tests": 3
+    },
+    "extended_report_sha256": "a331d4da23e2bf1443aeba28d620d02ba98158c1d63fae95f088e18d361374bf",
+    "local_links": {
+      "failures": [],
+      "heading_links": 327,
+      "local_links": 1248
+    },
+    "mypy_consumer_contracts_passed": 2,
+    "ordinary_unittest": {
+      "elapsed_seconds": 599.526,
+      "external_log": "/var/folders/ml/72q4_jwd5293vmvqvmfpkqnh0000gn/T/att-document-contracts-vklbxeuz/unittest.log",
+      "log_sha256": "784fb0a350d13e41d31ca01a7aa800a458b4c6586773602adc8add75797ac052",
+      "passed": true,
+      "tests": 1196
+    },
+    "root_doclib_exists": false,
+    "ruff_passed": true
+  }
+}

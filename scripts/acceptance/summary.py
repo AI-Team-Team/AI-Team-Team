@@ -1,4 +1,4 @@
-"""Combine full, frozen, and extended evidence for the same source inputs."""
+"""Combine full and extended evidence for the same current source inputs."""
 
 import argparse
 import json
@@ -34,7 +34,7 @@ def summarize(root, paths):
     checks = project(load_checks(root), outcomes)
     suites = {report["suite"] for report, accepted in reports if accepted}
     coverage = any(report.get("coverage") is True for report, accepted in reports if accepted)
-    passed = bool(compatible and environment_compatible and checks and {"full", "frozen", "extended"} <= suites and coverage
+    passed = bool(compatible and environment_compatible and checks and {"full", "extended"} <= suites and coverage
               and not invalid
               and all(row["coverage"] == "covered" and row["execution"] == "passed" for row in checks))
     return {"passed": passed, "source_digest": current, "source_compatible": compatible,

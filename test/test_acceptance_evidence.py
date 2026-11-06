@@ -13,6 +13,18 @@ from test.acceptance_reports import run_reports, write_reports
 
 
 class AcceptanceEvidenceTests(unittest.TestCase):
+    def test_missing_current_ledger_cannot_fall_back_to_an_archive(self):
+        with tempfile.TemporaryDirectory(prefix="att-missing-ledger-") as directory:
+            root = Path(directory)
+            constants = root / "src/ai_team_team/database/persistence/constants.py"
+            constants.parent.mkdir(parents=True)
+            constants.write_text('STATE_SCHEMA_VERSION = "16"\n', encoding="utf-8")
+            historical = root / "docs_archive/dev/autonomous_activity/verification_cases.json"
+            historical.parent.mkdir(parents=True)
+            historical.write_text('{"checks": []}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "current ATT verification ledger is missing"):
+                load_checks(root)
+
     def test_summary_rejects_stale_sources_mixed_environments_and_string_success(self):
         root = Path(__file__).resolve().parents[1]
         checks = load_checks(root)
@@ -88,7 +100,7 @@ class AcceptanceEvidenceTests(unittest.TestCase):
             source.write_text("VALUE = 2\n", encoding="utf-8")
             self.assertNotEqual(source_digest(root), before)
             for name in ("test/fixture.json", "docs/user/API_Reference.md", "README.md",
-                         "docs/dev/autonomous_activity/round_dependencies.json"):
+                         "docs/dev/verification/verification_cases.json"):
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 before = source_digest(root)
@@ -97,8 +109,8 @@ class AcceptanceEvidenceTests(unittest.TestCase):
                 before = source_digest(root)
                 path.write_text("Test input version two.\n", encoding="utf-8")
                 self.assertNotEqual(source_digest(root), before, name)
-            for name in ("docs/dev/autonomous_activity/Phase_8.md",
-                         "docs/dev/autonomous_activity/acceptance/result.json",
+            for name in ("docs_archive/dev/autonomous_activity/Phase_8.md",
+                         "docs_archive/dev/autonomous_activity/acceptance/result.json",
                          "src/__pycache__/generated.pyc", "src/package.egg-info/SOURCES.txt"):
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)

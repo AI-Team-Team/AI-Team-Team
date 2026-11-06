@@ -4,7 +4,7 @@ import json
 
 from ai_team_team import Agent, LLMResponse
 from test.test_att.test_agent_activity._support import ActivityTestCase, call, idle
-from test.test_att.test_autonomous_activity_phase0._fixtures import ScriptedModelClient, ModelStep
+from test.test_att.test_runtime_contracts._fixtures import ScriptedModelClient, ModelStep
 
 
 class ChatRuntimeTests(ActivityTestCase):

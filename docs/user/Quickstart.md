@@ -1,6 +1,7 @@
 # Quickstart Guide
 
-Welcome to **AI-Team-Team (ATT)**! This guide will help you integrate ATT into your project, define custom tools, configure LLM client adapters, and run continuing personal activity within explicit organizations.
+Welcome to **AI-Team-Team (ATT)**!
+This guide will help you integrate ATT into your project, define custom tools, configure LLM client adapters, and run continuing personal activity within explicit organizations.
 
 ## 📦 1. Installation
 
@@ -198,7 +199,8 @@ Retirement and reactivation preserve the same Agent identity and private library
 
 ## 🔌 3. Implement the LLM Client
 
-ATT is backend-agnostic. To connect your LLM provider (e.g., Google GenAI, OpenAI, Anthropic, or a local model), you must provide a client class that implements the `LLMClientProto` protocol.
+ATT is backend-agnostic.
+To connect your LLM provider (e.g., Google GenAI, OpenAI, Anthropic, or a local model), you must provide a client class that implements the `LLMClientProto` protocol.
 
 The adapter class must implement `generate` and the two synchronous capability methods in `LLMClientProto`:
 
@@ -313,7 +315,7 @@ def audit_search(query: str, limit: int = 3) -> tuple[bool, str]:
 manager.register_tool_auditor("search_knowledge_base", audit_search)
 ```
 
-### Registering Committee Presets
+### Registering AgentTeam Presets
 
 Presets allow you to define custom roles and instructions for dynamic sub-teams spawned at runtime:
 
@@ -451,7 +453,11 @@ Escalation to an actual parent AgentTeam uses the same configured peer-communica
 
 ATT uses `tool_calling_mode="auto"` by default.
 
-Auto mode selects Native Strategy only when the client's synchronous `supports_native_tool_calling()` probe returns the literal boolean `True`; probe errors, awaitables, and non-boolean values produce a system event and fall back to Text ReAct.
+Auto mode selects Native Strategy only when the manager receives the literal boolean `True` from the client's synchronous `supports_native_tool_calling()` probe.
+
+Probe errors, awaitables, and non-boolean outcomes received by the manager produce a system event and fall back to Text ReAct.
+
+Generator-handler wrappers currently pre-normalize inner probe outcomes and can conceal that diagnostic or use a configured capability after an exception; see the [documented limitation](../Tool_System.md#2-one-runtime-with-two-provider-protocols).
 
 Provider adapters receive `List[Tool]` and are responsible for converting each `Tool.json_schema` into the provider SDK's format.
 
@@ -568,7 +574,9 @@ Action: dispatch_subagent(
 
 ### Reusing an Existing Agent
 
-Register a persistent Agent once, then invite the same identity to several AgentTeams. Ordinary host calls and Agent tools create a persistent formation request rather than adding an existing Agent immediately; only the Agent's explicit acceptance makes it eligible to join. Membership never rebinds or clears the shared Agent's role, instructions, model binding, memory, lifecycle state, invocation lock, Agent inbox, or Private DocLib; formation notifications are appended to the existing inbox independently.
+Register a persistent Agent once, then invite the same identity to several AgentTeams.
+Ordinary host calls and Agent tools create a persistent formation request rather than adding an existing Agent immediately; only the Agent's explicit acceptance makes it eligible to join.
+Membership never rebinds or clears the shared Agent's role, instructions, model binding, memory, lifecycle state, invocation lock, Agent inbox, or Private DocLib; formation notifications are appended to the existing inbox independently.
 
 ```python
 shared_client = MyLLMClient()
@@ -603,7 +611,9 @@ assert next(member for member in team_a.members if member.agent_id == alice.agen
 assert next(member for member in team_b.members if member.agent_id == alice.agent_id) is alice
 ```
 
-Consent always belongs to an exact proposal revision. If the initiator materially revises an open proposal with `await manager.revise_team_formation(..., base_revision=formation.proposal_revision, changes=TeamFormationRevisionPatch(...))`, every retained invitee returns to `no_response` and must review the new revision. The initiator may publish its design directly or call optional `prepare_team_formation_draft(objective, candidate, request_id=None)` and then explicitly publish the ready artifact.
+Consent always belongs to an exact proposal revision.
+If the initiator materially revises an open proposal with `await manager.revise_team_formation(..., base_revision=formation.proposal_revision, changes=TeamFormationRevisionPatch(...))`, every retained invitee returns to `no_response` and must review the new revision.
+The initiator may publish its design directly or call optional `prepare_team_formation_draft(objective, candidate, request_id=None)` and then explicitly publish the ready artifact.
 
 Candidate preparation invokes no other person, imposes no all-member barrier, and never supplies invitee consent.
 
@@ -645,7 +655,8 @@ Other teams can search for discoverable libraries at runtime:
 
 ### Granting and Requesting Access (ACL)
 
-By default, a team's DocLib is private and only accessible by its own members. To share a document or folder, the owner team can grant permissions:
+By default, a team's DocLib is private and only accessible by its own members.
+To share a document or folder, the owner team can grant permissions:
 
 - **Grant access**: `Action: grant_library_permission(lib_id="DL-AT-abc123", path="/specs", target_team_id="AT-xyz789", permission="READ")`
 - **Revoke access**: `Action: revoke_library_permission(lib_id="DL-AT-abc123", path="/specs", target_team_id="AT-xyz789")`
@@ -665,9 +676,14 @@ Agent teams can use standard file operations:
 - **Delete file**: `Action: delete_library_file(lib_id="DL-AT-abc123", path="/specs/guide.txt")`
 - **Create managed file link**: `Action: create_library_link(source_lib_id="DL-AT-xyz789", source_path="/references/guide.txt", target_lib_id="DL-AT-abc123", target_path="/specs/guide.txt")`
 
-All `read_library_file` operations limit returned decoded content to `ATTConfig.file_read.max_read_tokens`, regardless of file size, line count, or requested range. A partial result supplies `next_line`, `next_character`, and `file_version`; pass those coordinates and the version as `expected_file_version` to continue without gaps. The small structured metadata and tool-protocol framing are outside the content budget.
+All `read_library_file` operations limit returned decoded content to `ATTConfig.file_read.max_read_tokens`, regardless of file size, line count, or requested range.
+A partial result supplies `next_line`, `next_character`, and `file_version`; pass those coordinates and the version as `expected_file_version` to continue without gaps.
+The small structured metadata and tool-protocol framing are outside the content budget.
 
-Managed links work only between registered DocLib files. Creation requires `WRITE` on the source path and `READ` on the target. Reads and writes recheck the target ACL every time; writes require target `WRITE`, and deleting the link does not delete the target file. Native filesystem symlinks are rejected.
+Managed links work only between registered DocLib files.
+Creation requires `WRITE` on the source path and `READ` on the target.
+Reads and writes recheck the target ACL every time; writes require target `WRITE`, and deleting the link does not delete the target file.
+Native filesystem symlinks are rejected.
 
 ### Private Agent Workspace
 
@@ -686,9 +702,11 @@ The current AI can deliberately use:
 - `Action: delete_private_file(path="obsolete.md")`
 - `Action: publish_private_file(source_path="final.md", target_path="research/final.md")`
 
-Publishing copies the file to the current team's built-in DocLib and keeps the private source. A collision is rejected unless `overwrite=True`, and the target path is always checked for current team `WRITE` permission.
+Publishing copies the file to the current team's built-in DocLib and keeps the private source.
+A collision is rejected unless `overwrite=True`, and the target path is always checked for current team `WRITE` permission.
 
-An explicit private read is scoped to that single reasoning invocation. ATT redacts the observation from the AI's reusable model window when the invocation ends, preventing another team from receiving the private file body implicitly.
+An explicit private read is scoped to that single reasoning invocation.
+ATT redacts the observation from the AI's reusable model window when the invocation ends, preventing another team from receiving the private file body implicitly.
 
 ## 💾 12. Save and Close
 

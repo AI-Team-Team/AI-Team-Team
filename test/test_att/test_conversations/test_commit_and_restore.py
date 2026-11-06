@@ -8,7 +8,7 @@ from contextlib import closing
 from unittest.mock import patch
 
 from ai_team_team import Agent, StateRestoreError
-from test.test_att.test_autonomous_activity_phase1._support import make_manager
+from test.test_att.test_state_integrity._support import make_manager
 from ._support import ChatTestCase
 
 

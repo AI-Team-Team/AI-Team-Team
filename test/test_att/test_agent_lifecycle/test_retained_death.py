@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 from ai_team_team import Agent, StatePersistenceError
 from ai_team_team.core.exceptions import ToolPermissionError
 from test.test_att.test_agent_activity._support import ActivityTestCase
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep
 from test.test_att.test_agent_activity._support import idle
 from test.test_att.test_background_tasks._support import contract
 

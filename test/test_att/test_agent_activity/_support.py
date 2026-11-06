@@ -8,7 +8,7 @@ from pathlib import Path
 from ai_team_team import ATTConfig, ATTManager, Agent, LLMResponse, ToolCall
 from ai_team_team.core.activity.contracts import ToolExecutionContract
 from test.async_waits import DEFAULT_RUNTIME_TIMEOUT, runtime_watchdog, wait_for_runtime
-from test.test_att.test_autonomous_activity_phase0._fixtures import (
+from test.test_att.test_runtime_contracts._fixtures import (
     LogicalClock,
     ModelStep,
     ScriptedModelClient,

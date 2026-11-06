@@ -8,7 +8,8 @@ The [line-ending guide](Line_Endings.md) describes the LF convention, index and 
 
 ## 1. Running Tests
 
-The test suite is located in the `test/` directory. You can run all tests using standard module discovery from the project root:
+The test suite is located in the `test/` directory.
+You can run all tests using standard module discovery from the project root:
 
 ```bash
 ./venv/bin/python -m unittest discover -s test
@@ -30,109 +31,21 @@ The quality job runs Ruff and both public mypy contracts, while a separate wheel
 
 CI runs the full suite through `scripts.acceptance` to retain per-test outcomes, identify the source inputs, and reject skips, source edits during execution, root-level DocLib creation, and resource-leak warnings.
 
-Separate required reliability jobs run the frozen specifications and extended workloads on Linux, macOS, and Windows with Python 3.13.
+Separate required reliability jobs run the extended workloads on Linux, macOS, and Windows with Python 3.13.
 
 The ordinary full-suite matrix continues to cover all nine Python and operating-system combinations.
 
-The autonomous-activity replacement has a [contract freeze and implementation index](autonomous_activity/README.md), deterministic adversarial fixtures, and a separately invoked `spec_*.py` gate whose five runtime specifications are now implemented.
+The [current verification matrix](verification/Verification_Matrix.md) and [behavioral ledger](verification/Verification_Coverage.md) connect implemented requirements to concrete assertions.
 
-Ordinary discovery includes schema activation, publication safety, and the four implemented personal specifications in `test/test_att/test_agent_activity/`.
+Ordinary full-suite discovery includes all five runtime specification scenarios exactly once under `test/test_att/test_runtime_contracts/`.
 
-`./venv/bin/python -m unittest discover -s test/test_att/test_autonomous_activity_phase0 -t . -p 'spec_*.py'` now passes all five runtime specifications, with completed specifications also included in ordinary discovery rather than skipped or converted to expected failures.
+That package also contains strict value contracts, identity invariants, and deterministic fixtures, while `test/test_att/test_state_integrity/` covers records, receipts, schema integrity, publication, leases, and recovery.
 
-Use `./venv/bin/python -m unittest discover -s test/test_att/test_background_tasks -t .` for the [Phase 4 execution gate](autonomous_activity/Phase_4.md), including same-execution detachment, independent-resource concurrency, stop acknowledgement, late fencing, owner-only result reads, source revocation, and no-replay recovery.
+Run either functional package with ordinary discovery or select individual modules and methods; there is no separate phase-only acceptance profile.
 
-Race managed-link changes against both attempt receipts and physical filesystem access, and verify that failed result bodies cannot bypass final source authorization.
-
-Cancel queued and running stop observers during accepted commits, cancel returned outcomes during local preparation, and require shutdown to drain local finalizers without applying the external cancellation grace period to persistence.
-
-Verify cross-owner foreground/background exclusion, actual synchronous-thread reservation lifetime, typed late failures, fatal-error propagation, and health transitions that revisit an earlier state without losing observation order.
-
-Test mixed self-modification contracts against declared background reservations and source revocation, and verify that foreground provider bindings run instead of placeholder callables without losing the original personal Session.
-
-Exercise nested institutional tools from source-free personal coordination, and reject both direct and interaction-based model waits while a shared reservation is held.
-
-Distinguish opaque global claims from explicit empty source-free resolvers, including after save and restore under restrictive retained-result access.
-
-Inject immediate, cancelled-observer, and late synchronous stop-hook framework failures, preserve concurrent factual completion, and require shutdown to propagate the failure without claiming an unconfirmed external stop.
-
-Queue a healthy sample ahead of a timeout at the real activity lock and delay a different signal's stall receipt across its deadline; use the logical clock to verify both absence of stale stalls and rearmed future timers.
-
-Delay the first execution of a detachment or health timer Task until after the logical clock advances, and verify that its absolute deadline is not shifted by Task scheduling.
-
-Keep the immediate clock-advance regressions across supported Python versions, and check remaining-time waits, completion races, cancellation cleanup, and refreshed health deadlines without increasing watchdogs or adding arbitrary sleeps.
-
-Fixtures that deliberately coordinate personal invocation state or cancel parallel personal controls must declare a foreground self-modification contract rather than rely on undeclared shared-resource independence.
-
-Use `./venv/bin/python -m unittest discover -s test/test_att/test_agent_activity -t test` to verify coalescing, continuing activity, batch scope, mail presentation, request/claim settlement, finite timers, late fencing, and scoped audit/index profiles.
-
-Tests needing a finite personal interaction must script the Agent's explicit idle control rather than treat a final answer as a runtime stop.
-
-Wait for real worker registration, commit receipts, and lock-attempt barriers instead of assuming a fixed count of event-loop yields establishes synchronization.
-
-The five-Agent dependency-chain regression uses one 60-second end-to-end watchdog, including final idle settlement, to accommodate slower CI runners without changing runtime safety limits.
-
-Watchdog failures report dependency edges, worker locations, queue sizes, model-call counts, and lock states without including prompts, responses, or tool payloads.
-
-Shared personal-runtime, governance, and parallel-audit observers use `test/async_waits.py` with a bounded 60-second default; explicitly larger scenario budgets remain explicit.
-
-The watchdog emits state versions, accepted-operation counts, queue progress, task locations, and lock states before cancellation, so slow accepted-commit cleanup cannot erase the diagnostic snapshot.
-
-Domain `TimeoutError` exceptions and external cancellation retain their original meaning; an observer deadline is not a production model, governance, or persistence-flush deadline.
-
-`test/test_att/test_incremental_validation/` compares full SQL validation with incremental candidates and covers reverse dependencies, collection constraints, external database mutations, reconnects, unknown triggers, commit failure, late preparation, and cache publication order.
-
-Governance dependency tests touch each mapped input table independently, while SQL-tracking regressions reject misleading FTS literals, comments, CTEs, definitions, and lookalike names and verify transaction rollback without an accepted receipt.
-
-Performance regressions assert bounded SQL work and reuse of unrelated projections rather than relying only on machine-specific elapsed-time limits.
+The [feature-specific requirements](#8-feature-specific-test-requirements) describe regression scenarios by domain, including [cross-mechanism workloads](#cross-mechanism-regression-workloads).
 
 Use the [performance measurement guide](Performance_Measurement.md) for reproducible timing, SQL counting boundaries, reference-validation comparisons, and CI timeout diagnosis.
-
-Personal-runtime regressions include corrupt activity-context restore preflight, Native sibling cancellation, instruction cancellation on both sides of source acceptance, and delayed or duplicate notification dispatch after confirmed presentation.
-
-Additional transaction regressions queue an explicit save before restore admission, complete same-tool Native faults concurrently, revoke identity and team publication while topology is contended, and retire a mail recipient while ingress waits for the activity lock.
-
-These tests distinguish rejected preparation from a successful receipt followed by observer cancellation, and verify that no unaccepted inbox row, cooldown deadline, identity, or private directory remains.
-
-Run `./venv/bin/mypy typecheck/activity_contract.py` alongside the existing public consumer contract when editing the frozen value records.
-
-The Phase 5 gate additionally requires absence of a production discussion engine, exact voluntary case ballots, actual-parent topology and acceptance, bounded resource attempts, and fresh restricted audits on the common runtime.
-
-Use `test/test_att/test_institutional_runtime/` for the focused route, receipt-publication, candidate-source, cooldown, and health-deadline regressions.
-
-Queue incident claims and acknowledgements behind a real parent transition, and verify rejected former-parent operations change neither volatile nor durable attention state.
-
-Exercise optional-draft and automatic formation paths after depth-limit or parent-position changes, including a lower limit while the authoritative creation commit waits.
-
-Queue a legitimate creator-membership removal ahead of formation acceptance, and reject the former member without leaving identities, directories, accepted initial mail, or a ghost notification.
-
-Commit an unrelated team, document, or personal mail while another creation is waiting, then reject the waiting creation and require every independently accepted object and file to survive in both volatile and durable modes.
-
-Cancel candidate publication before each admission gate and after its exact receipt, preserving only accepted proposals, automatic creation, and initial-work dispatch, including cleanup after captured tool authority has been revoked.
-
-Queue a full save ahead of another task's pending publication, team creation, or revision, cancel the unaccepted operation, and restore the saved database to verify that no cancelled state or private directory is resurrected.
-
-Cancel revisions, invitation responses, and abandonment before their receipts in both persistence modes; reject a revision after an independent mail delivery and require the accepted message and its notice to survive together.
-
-Publish unrelated proposal changes concurrently and create a new proposal during another candidate's wait, checking that per-entity publication preserves both accepted results.
-
-Queue a draft behind a competing proposal revision and require `STALE_REVISION` with current immutable history rather than a publication conflict or a resurrected candidate.
-
-Remove the initiator's creator-team or intended-parent membership while initial, revision, unchanged-draft, or candidate-preparation commits are waiting, and require final authority checks to reject them.
-
-Change live Host detachment permission during runtime or record-lock waits, and advance the logical clock beyond 600 seconds before admission to verify a fresh position event and full cooldown rather than an expired interval at publication.
-
-Block record-digest preparation or detached graph validation before migration acceptance, advance the logical clock beyond 600 seconds, and verify the complete cooldown, matching position timestamp, exact receipt digest, and persisted evidence.
-
-Repeat that delay inside SQLite materialization and graph validation, and coalesce the pending transition with unrelated state deltas to verify that its receipt and clock binding survive bounded writer queueing.
-
-Cancel the observer after writer submission, reject a final clock reading, and delay observation after SQL commit; require accepted transitions to survive cancellation, rejected transactions to leave no position, and online elapsed time to count from the actual commit anchor.
-
-Inject temporary filesystem failure partway through audit staging and require continued ordinary activity, retained incident evidence, and complete cleanup without suppressing writer failures.
-
-Freeze runtime clock binding at institutional admission before any worker starts, retain that binding after scoped auditor teardown, and distinguish expected admission closure from actual governance errors in logs.
-
-Passing a lexical inventory alone does not establish those runtime authority boundaries.
 
 Run the same quality checks locally with:
 
@@ -148,13 +61,13 @@ Run the same quality checks locally with:
 
 ### Reliability Evidence and Extended Workloads
 
-The [verification ledger](autonomous_activity/Verification_Coverage.md) maps independently reviewable requirements to exact test selectors.
+The [verification ledger](verification/Verification_Coverage.md) maps independently reviewable requirements to exact test selectors.
 
 Mapping a selector does not establish that it ran or passed; the acceptance reports record those facts separately for their actual source digest and environment.
 
-The source digest covers code, test fixtures, documentation, examples, maintenance scripts, configuration, and CI inputs, including the frozen manifests and verification ledger.
+The source digest covers code, test fixtures, documentation, examples, maintenance scripts, configuration, and CI inputs, including maintained contract manifests and the verification ledger.
 
-Generated package metadata, caches, the Phase 8 results page, and its retained acceptance records are excluded so recording results does not invalidate the inputs being measured.
+Caches and generated package metadata are excluded; historical snapshots live outside the current source areas, and new run artifacts use external evidence directories.
 
 Use fresh output directories outside the checkout to preserve previous results and avoid treating generated artifacts as tested source.
 
@@ -162,9 +75,8 @@ The following POSIX commands use temporary evidence directories; Windows users s
 
 ```bash
 ./venv/bin/python -m scripts.acceptance --coverage --output /tmp/att-acceptance/full
-./venv/bin/python -m scripts.acceptance --suite frozen --output /tmp/att-acceptance/frozen
 ./venv/bin/python -m scripts.acceptance --suite extended --seeds 8 --operations 96 --output /tmp/att-acceptance/extended
-./venv/bin/python -m scripts.acceptance.summary --output /tmp/att-acceptance/summary.json /tmp/att-acceptance/full/result.json /tmp/att-acceptance/frozen/result.json /tmp/att-acceptance/extended/result.json
+./venv/bin/python -m scripts.acceptance.summary --output /tmp/att-acceptance/summary.json /tmp/att-acceptance/full/result.json /tmp/att-acceptance/extended/result.json
 ```
 
 Successful tests keep their Python stdout, stderr, and captured logging output in `unittest.log` without printing it to the console.
@@ -175,7 +87,7 @@ Add `-v` or `--verbose` for per-test progress and durations while successful Pyt
 
 Add `-q` or `--quiet` for JSON-only console output, with raw failure details retained in the external log.
 
-CI explicitly runs the full suite with `--suite full --all-output`, alongside the frozen specifications and extended reliability jobs, which also use `--all-output`.
+CI explicitly runs the full suite with `--suite full --all-output`, and the extended reliability jobs also use `--all-output`.
 
 The all-output mode continuously streams the complete log to stderr, including passing-test stdout and stderr, test progress, warnings, direct log-descriptor diagnostics, coverage reports, and full failure tracebacks, without redaction or truncation.
 
@@ -213,7 +125,7 @@ Result metadata includes safe operation traces, numeric workload metrics, and fa
 
 Raw diagnostic logs remain in the external evidence directory, and CI uploads the complete `unittest.log`, typed diagnostic events, and any `coverage.json` measurement alongside each JSON result so aggregation can verify the retained artifacts.
 
-The aggregate gate requires full, frozen, and extended results for identical source inputs and one environment, including the configured full-suite coverage gate.
+The aggregate gate requires full and extended results for identical source inputs and one environment, including a measured full-suite coverage gate and all five runtime specifications in ordinary discovery.
 
 Aggregation validates complete per-test statistics, durations, environment identity, and diagnostic counters, and checks instrumented full runs against the repository's configured coverage threshold.
 
@@ -223,7 +135,7 @@ Skipped, incomplete, stale-source, mixed-environment, and failed results cannot 
 
 Diagnostics identify a stalled test and its thread stacks without cancelling accepted local persistence commits.
 
-See the [Phase 8 record](autonomous_activity/Phase_8.md) for baseline limitations, fixed defects, local results, and the distinct platform gate.
+See [Verification](verification/README.md) for current acceptance requirements and the distinction between local measurements, archived historical results, and platform evidence.
 
 ### Documentation and Installed Examples
 
@@ -234,6 +146,12 @@ Run the functional documentation-contract package with:
 ```
 
 It checks current configuration defaults, result-model fields, real model-tool signatures, local guide links, documented test selectors, and complete runnable examples.
+
+Engineering-reference checks execute the documented SQL in isolated memory, compare columns/references/checks/indexes with the declared layout, verify the request-state matrix and execution-contract defaults, and resolve each current documentation route against the behavioral ledger.
+
+Heading-link checks cover current Markdown destinations across the guide set, including repeated headings, instead of limiting anchor validation to a selected group of user guides.
+
+Those checks establish consistency and reference integrity; review the actual prose and behavioral assertions before claiming semantic coverage.
 
 A complete Python fence uses an `<!-- runnable: examples/name.py -->` marker and must match the corresponding checked-in source exactly.
 
@@ -255,7 +173,7 @@ The wheel-smoke job repeats all three variants with the installed interpreter ou
 
 Use asynchronous callbacks for observers that operate on asyncio primitives; synchronous callbacks run on background threads and require a thread-safe handoff to the event loop.
 
-The [Phase 7 profile](autonomous_activity/Phase_7.md) records this documentation boundary without treating it as Phase 8 stress or platform acceptance.
+The [verification guide](verification/README.md) separates documentation contracts, full-suite behavior, extended reliability, and platform evidence.
 
 ## 2. Asynchronous Execution
 
@@ -269,7 +187,7 @@ import tempfile
 import unittest
 
 from ai_team_team import ATTConfig, ATTManager, Agent
-from test.test_att.test_autonomous_activity_phase0._fixtures import ModelStep, ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures import ModelStep, ScriptedModelClient
 
 
 class TestFeature(unittest.IsolatedAsyncioTestCase):
@@ -295,26 +213,27 @@ This repository-local example uses the real scripted-client fixture and explicit
 
 ## 3. Pathing and Imports
 
-Be mindful of python's module path resolution. Always ensure `sys.path` is pre-pended with the `src` directory before attempting relative framework imports in a test file:
+Install the package into the project's virtual environment before test discovery, matching the CI prerequisite:
 
-```python
-import sys
-import os
-
-CURRENT_DIR = os.path.dirname(__file__)
-ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
-SRC_DIR = os.path.join(ROOT_DIR, "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+```bash
+./venv/bin/python -m pip install -e ".[dev]"
 ```
+
+Import ATT through its installed package and shared test fixtures through their package paths, such as `from ._support import ActivityTestCase` within a test package defining that fixture.
+
+Use the discovery top-level directory required by the selected functional package; the commands in [Running Tests](#1-running-tests) give representative forms.
+
+Do not derive the repository root from one fixed number of `..` components for every test: functional test packages have different nesting depths.
 
 ## 4. Test Isolation (Sandbox Environments)
 
 Because `ATTManager` and `DocumentLibrary` dynamically generate directories (e.g. `.att_doc_libs`, `DL-AT-xxx`) and persist SQLite databases, **you must ensure tests run in an isolated sandbox** to prevent polluting the project root.
 
-Directory-based suites may place shared clients and fixture base classes in a package-local `_support.py`. Keep assertions and behavior-specific setup in the individual test module so changes to one support fixture do not silently alter unrelated test domains.
+Directory-based suites may place shared clients and fixture base classes in a package-local `_support.py`.
+Keep assertions and behavior-specific setup in the individual test module so changes to one support fixture do not silently alter unrelated test domains.
 
-To achieve this, inject a temporary directory sandbox into the `setUp()` method of every test class. This guarantees that `workspace_root` (which defaults to the current working directory) points to an ephemeral folder that is cleanly destroyed after the test.
+To achieve this, inject a temporary directory sandbox into the `setUp()` method of every test class.
+This guarantees that `workspace_root` (which defaults to the current working directory) points to an ephemeral folder that is cleanly destroyed after the test.
 
 ```python
     def setUp(self):
@@ -337,49 +256,53 @@ Cleanup callbacks run in reverse registration order, so register directory remov
 
 ## 5. Mocking LLM Responses
 
-Since production code is strictly forbidden from importing `unittest.mock` or containing test-specific conditional branches (Issue 9 compliance), you **must** mock LLM responses by registering a mock handler callback on the `ATTManager` or passing a compliant `LLMClientAdapter`.
+Production behavior must not detect mock types or contain test-specific branches.
+
+Provide a scripted client implementing `LLMClientProto`, or register a generator handler and bind the test Agent to its registered model alias through the ordinary runtime integration.
 
 Do **NOT** attempt to pass raw `MagicMock` or `AsyncMock` objects expecting the framework to automatically handle them via `isinstance` checks.
 
 ### A. Register a Mock Handler Callback
 
 ```python
-        # ATT installs its reserved manager context automatically.
-        async def mock_generate(prompt, system_instruction=None, tools=None, temperature=0.3, require_json=False):
-            return '{"thought": "test", "commands": []}'
-            
-        self.manager.generator_handler = mock_generate
+        async def mock_generate(model_name, prompt, system_instruction=None, tools=None,
+                                max_output_tokens=None, temperature=0.3, require_json=False):
+            return "Action: set_activity_intent(intent={'kind': 'idle'})"
+
+        self.manager.register_generator_handler(mock_generate)
 ```
+
+This handler fragment targets Text ReAct and assumes the Agent has a handler-backed client binding; registration does not attach a client to an existing Agent whose `llm_client` is `None`.
+
+Native fixtures must return actual `ToolCall` values, and optional indexing fixtures must return the separately requested strict JSON contract.
 
 ## 6. Concurrent State Mutations
 
 When writing tests that evaluate `AgentTeam` mutations, respect `team.state_lock` and the task-local `manager.suppress_auto_save()` context.
 
-To test these protected blocks without triggering actual DB hits or risking deadlocks in the test loop:
+Save suppression defers and merges ordinary auto-save deltas; it does not disable persistence.
+
+For a durable batching fixture, make a valid state change under its domain lock, leave that lock before outer-scope submission, and await the resulting write before inspecting persisted state:
 
 ```python
         async with self.manager.suppress_auto_save():
             async with team.state_lock:
-                team.proposals["VP-123"] = {"status": "active"}
+                team.team_progress = "Fixture progress"
             self.manager._auto_save(teams={team.team_id})
+        await self.manager.flush_state()
 ```
 
-Wrap the real per-team session lock in the test fixture so `second_a_attempted` is set immediately before the competing task awaits acquisition, with no intervening suspension.
+Use an explicitly volatile manager or a deliberately replaced writer fixture when a test requires no database I/O throughout; suppression alone is insufficient.
 
-With AT-A's first discussion paused and competing discussions started on both teams, wait for the actual lock attempt and verify that AT-B runs while AT-A's next discussion waits:
+Personal concurrency tests must distinguish the same Agent across teams from different Agents within one team:
 
-```python
-await asyncio.wait_for(second_a_attempted.wait(), timeout=10)
-await asyncio.wait_for(b_started.wait(), timeout=10)
-self.assertFalse(second_a_started.is_set(), execution_order)
+- Pause a real provider request for Agent A, deliver another input for A from a different membership, and assert one coalesced admission without overlapping model calls or replacement of its captured scope.
+- Admit Agent B while A remains paused and assert B can reach its own checkpoint, even when both belong to the same AgentTeam.
+- Use an explicit registration, provider-entry, lock-attempt, or receipt barrier appropriate to the assertion rather than a whole-team session lock.
 
-release_first_a.set()
-await asyncio.wait_for(asyncio.gather(first, emergency, other_team), timeout=10)
-```
+Current examples are [shared-person admission coalescing](../../test/test_att/test_runtime_contracts/test_personal_activity_contracts.py) and [independent people progressing without a team barrier](../../test/test_att/test_agent_activity/test_admission_and_controls.py).
 
-Record the first discussion's actual lock release and assert the order `A1-start → B-start → A1-released → A2-start`, rather than treating an LLM Mock returning as the end of the full session.
-
-Release blocking events and cancel and await unfinished tasks in `finally`, and verify that deliberately bypassing the session lock makes the test fail.
+Release blocking events and cancel and await fixture-owned unfinished observers in `finally`; observer cancellation must not be mistaken for cancellation of accepted personal activity.
 
 `asyncio.sleep(0)` yields an execution opportunity but does not establish that a particular task has reached the protected boundary.
 
@@ -458,6 +381,112 @@ Topology recovery tests must keep the Manager and its parent resolver on the sam
 The `test/test_att/test_state_persistence/test_topology_index.py` module covers these parent-index recovery cases.
 
 ## 8. Feature-Specific Test Requirements
+
+### Cross-Mechanism Regression Workloads
+
+The following scenarios use the shared isolation, barrier, logical-clock, and exact-receipt patterns described above.
+
+#### Registered Executions and Background Work
+
+Use `./venv/bin/python -m unittest discover -s test/test_att/test_background_tasks -t .` for same-execution detachment, independent-resource concurrency, stop acknowledgement, late fencing, owner-only result reads, source revocation, and no-replay recovery.
+
+Race managed-link changes against both attempt receipts and physical filesystem access, and verify that failed result bodies cannot bypass final source authorization.
+
+Cancel queued and running stop observers during accepted commits, cancel returned outcomes during local preparation, and require shutdown to drain local finalizers without applying the external cancellation grace period to persistence.
+
+Verify cross-owner foreground/background exclusion, actual synchronous-thread reservation lifetime, typed late failures, fatal-error propagation, and health transitions that revisit an earlier state without losing observation order.
+
+Test mixed self-modification contracts against declared background reservations and source revocation, and verify that foreground provider bindings run instead of placeholder callables without losing the original personal Session.
+
+Exercise nested institutional tools from source-free personal coordination, and reject both direct and interaction-based model waits while a shared reservation is held.
+
+Distinguish opaque global claims from explicit empty source-free resolvers, including after save and restore under restrictive retained-result access.
+
+Inject immediate, cancelled-observer, and late synchronous stop-hook framework failures, preserve concurrent factual completion, and require shutdown to propagate the failure without claiming an unconfirmed external stop.
+
+Queue a healthy sample ahead of a timeout at the real activity lock and delay a different signal's stall receipt across its deadline; use the logical clock to verify both absence of stale stalls and rearmed future timers.
+
+Delay the first execution of a detachment or health timer Task until after the logical clock advances, and verify that its absolute deadline is not shifted by Task scheduling.
+
+Keep the immediate clock-advance regressions across supported Python versions, and check remaining-time waits, completion races, cancellation cleanup, and refreshed health deadlines without increasing watchdogs or adding arbitrary sleeps.
+
+Fixtures that deliberately coordinate personal invocation state or cancel parallel personal controls must declare a foreground self-modification contract rather than rely on undeclared shared-resource independence.
+
+#### Personal Admission, Observation, and Validation
+
+Use `./venv/bin/python -m unittest discover -s test/test_att/test_agent_activity -t test` to verify coalescing, continuing activity, batch scope, mail presentation, request/claim settlement, finite timers, late fencing, and scoped audit/index profiles.
+
+Tests needing a finite personal interaction must script the Agent's explicit idle control rather than treat a final answer as a runtime stop.
+
+Wait for real worker registration, commit receipts, and lock-attempt barriers instead of assuming a fixed count of event-loop yields establishes synchronization.
+
+The five-Agent dependency-chain regression uses one 60-second end-to-end watchdog, including final idle settlement, to accommodate slower CI runners without changing runtime safety limits.
+
+Watchdog failures report dependency edges, worker locations, queue sizes, model-call counts, and lock states without including prompts, responses, or tool payloads.
+
+Shared personal-runtime, governance, and parallel-audit observers use `test/async_waits.py` with a bounded 60-second default; explicitly larger scenario budgets remain explicit.
+
+The watchdog emits state versions, accepted-operation counts, queue progress, task locations, and lock states before cancellation, so slow accepted-commit cleanup cannot erase the diagnostic snapshot.
+
+Domain `TimeoutError` exceptions and external cancellation retain their original meaning; an observer deadline is not a production model, governance, or persistence-flush deadline.
+
+`test/test_att/test_incremental_validation/` compares full SQL validation with incremental candidates and covers reverse dependencies, collection constraints, external database mutations, reconnects, unknown triggers, commit failure, late preparation, and cache publication order.
+
+Governance dependency tests touch each mapped input table independently, while SQL-tracking regressions reject misleading FTS literals, comments, CTEs, definitions, and lookalike names and verify transaction rollback without an accepted receipt.
+
+Performance regressions assert bounded SQL work and reuse of unrelated projections rather than relying only on machine-specific elapsed-time limits.
+
+Use the [performance measurement guide](Performance_Measurement.md) for reproducible timing, SQL counting boundaries, reference-validation comparisons, and CI timeout diagnosis.
+
+Personal-runtime regressions include corrupt activity-context restore preflight, Native sibling cancellation, instruction cancellation on both sides of source acceptance, and delayed or duplicate notification dispatch after confirmed presentation.
+
+Additional transaction regressions queue an explicit save before restore admission, complete same-tool Native faults concurrently, revoke identity and team publication while topology is contended, and retire a mail recipient while ingress waits for the activity lock.
+
+These tests distinguish rejected preparation from a successful receipt followed by observer cancellation, and verify that no unaccepted inbox row, cooldown deadline, identity, or private directory remains.
+
+Run `./venv/bin/mypy typecheck/activity_contract.py` alongside the existing public consumer contract when editing the immutable value contracts.
+
+#### Institutional Authority and Consensual Formation
+
+Institutional regressions require absence of a production discussion engine, exact voluntary case ballots, actual-parent topology and acceptance, bounded resource attempts, and fresh restricted audits on the common runtime.
+
+Use `test/test_att/test_institutional_runtime/` for the focused route, receipt-publication, candidate-source, cooldown, and health-deadline regressions.
+
+Queue incident claims and acknowledgements behind a real parent transition, and verify rejected former-parent operations change neither volatile nor durable attention state.
+
+Exercise optional-draft and automatic formation paths after depth-limit or parent-position changes, including a lower limit while the authoritative creation commit waits.
+
+Queue a legitimate creator-membership removal ahead of formation acceptance, and reject the former member without leaving identities, directories, accepted initial mail, or a ghost notification.
+
+Commit an unrelated team, document, or personal mail while another creation is waiting, then reject the waiting creation and require every independently accepted object and file to survive in both volatile and durable modes.
+
+Cancel candidate publication before each admission gate and after its exact receipt, preserving only accepted proposals, automatic creation, and initial-work dispatch, including cleanup after captured tool authority has been revoked.
+
+Queue a full save ahead of another task's pending publication, team creation, or revision, cancel the unaccepted operation, and restore the saved database to verify that no cancelled state or private directory is resurrected.
+
+Cancel revisions, invitation responses, and abandonment before their receipts in both persistence modes; reject a revision after an independent mail delivery and require the accepted message and its notice to survive together.
+
+Publish unrelated proposal changes concurrently and create a new proposal during another candidate's wait, checking that per-entity publication preserves both accepted results.
+
+Queue a draft behind a competing proposal revision and require `STALE_REVISION` with current immutable history rather than a publication conflict or a resurrected candidate.
+
+Remove the initiator's creator-team or intended-parent membership while initial, revision, unchanged-draft, or candidate-preparation commits are waiting, and require final authority checks to reject them.
+
+#### Migration Timing and Audit Admission
+
+Change live Host detachment permission during runtime or record-lock waits, and advance the logical clock beyond 600 seconds before admission to verify a fresh position event and full cooldown rather than an expired interval at publication.
+
+Block record-digest preparation or detached graph validation before migration acceptance, advance the logical clock beyond 600 seconds, and verify the complete cooldown, matching position timestamp, exact receipt digest, and persisted evidence.
+
+Repeat that delay inside SQLite materialization and graph validation, and coalesce the pending transition with unrelated state deltas to verify that its receipt and clock binding survive bounded writer queueing.
+
+Cancel the observer after writer submission, reject a final clock reading, and delay observation after SQL commit; require accepted transitions to survive cancellation, rejected transactions to leave no position, and online elapsed time to count from the actual commit anchor.
+
+Inject temporary filesystem failure partway through audit staging and require continued ordinary activity, retained incident evidence, and complete cleanup without suppressing writer failures.
+
+Freeze runtime clock binding at institutional admission before any worker starts, retain that binding after scoped auditor teardown, and distinguish expected admission closure from actual governance errors in logs.
+
+Behavioral assertions establish these authority boundaries; the completed migration inventory is retained only in the historical archive.
 
 ### LLM Mocks and Retries
 
@@ -556,7 +585,8 @@ Shared-membership tests must use the consensual formation workflow for ordinary 
 
 Tests must:
 
-- Assert exact object identity across teams and after restore.
+- Assert that every membership in one live graph resolves to the same Agent object, including within the reconstructed graph after restore.
+- Across restore, compare the persistent UUID and retained personal fields while expecting a newly reconstructed Python object; reacquire current references before further operations.
 - Verify that every Agent-owned field remains unchanged and confirm that removing one membership leaves every other membership, invitation history, Agent inbox, and Private DocLib intact.
 
 `member_configs` is reserved for creating new Agent identities and must reject legacy existing-Agent forms.
@@ -712,7 +742,7 @@ Test both asynchronous and synchronous cancellation-resistant tools, inherited c
 
 ### Team Conversations and Personal Direct Chat
 
-Run `./venv/bin/python -m unittest discover -s test/test_att/test_conversations -t .` for the Phase 3 implementation gate.
+Run `./venv/bin/python -m unittest discover -s test/test_att/test_conversations -t .` for authoritative conversations and personal relationships.
 
 Exercise actual Text and Native personal invocations, including repeated provider call IDs in distinct requests, without using ordinary model answers as publications.
 
@@ -740,4 +770,4 @@ Use staging and real writer barriers to race archive finalization with child cre
 
 Reject schema 12 before DDL and test that later queued team metadata cannot replace accepted interval-derived membership.
 
-Use the [Phase 3 engineering profile](autonomous_activity/Phase_3.md) for the exact archive-finalization boundary and later-phase exclusions.
+Use [Personal Conversations](../Personal_Conversations.md) and [Recovery and Publication](../Database/Recovery_and_Publication.md) for archive-finalization and publication boundaries.

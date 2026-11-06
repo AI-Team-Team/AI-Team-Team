@@ -10,7 +10,7 @@ from unittest.mock import patch
 from ai_team_team import Agent, StatePersistenceError, StateRestoreError
 from ai_team_team.core.exceptions import RuntimeAdmissionClosedError
 from ai_team_team.core.manager.restore import preparation
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep, ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep, ScriptedModelClient
 
 from ._support import ActivityTestCase, idle
 

@@ -1,35 +1,16 @@
 # AI-Team-Team (ATT)
 
 > [!IMPORTANT]
-> **Major architectural refactor in progress.**
+> ATT has undergone a major architectural refactor, introducing a new autonomous activity model for Agents.
 >
-> ATT is replacing team-wide discussion-round execution with one continuing personal activity mechanism per Agent.
->
-> Implemented foundations include explicit team conversation streams and personal messaging, notification and sleep controls, tracked background execution, and durable activity checkpoints and recovery.
->
-> Governance, Team Formation, topology, and supervision retain their institutional rules, authorization, and durable state while their Agent execution uses this common activity mechanism.
->
-> Agent identity, personal memory, membership consent, and permission boundaries remain core requirements.
->
-> Phases 0–4 provide the contract, durability, personal-activity, conversation, and execution foundations.
->
-> Phase 5 implements these institutional execution adapters and removes the old discussion engine.
->
-> Phase 6 completes sleep and do-not-disturb controls, staged recovery settlement, and retained lifecycle integration.
->
-> It introduces schema 16; databases using schema 15 or earlier are no longer supported.
->
-> Phase 7 provides current-runtime guides, executable examples, and checked public documentation contracts; extended reliability acceptance remains Phase 8 work.
->
-> See the [Design Blueprints](docs/blueprints/README.md) for the design, implementation phases, and deferred features.
+> See [Personal Activity](docs/Personal_Activity.md) for an overview and [Autonomous Agent Runtime Architecture](docs/Autonomous_Agent_Runtime_Architecture/README.md) for the underlying design.
 
-A generic framework for persistent, hierarchical, and dynamically organized multi-agent collaboration in Python.
+ATT is a Python framework that lets AIs communicate autonomously, form teams, and develop organizational structures through their own actions.
 
-ATT models stable Agent identities that can participate in autonomous AgentTeams.
+Each AI remains an independent Agent with its own identity, memory, model binding, and private workspace.
+These remain with the same Agent across its team memberships.
 
-Agents can propose teams, publish messages, make explicit governance choices, communicate across teams, and reorganize topology under shared system-wide rules.
-
-ATT keeps identity, authority, memory, and team state as separate system concepts as its coordination structure grows.
+Agents and AgentTeams establish, change, and end relationships through explicit actions under shared rules for consent, communication, and governance.
 
 Many thanks to Gemini, GPT and Qwen for their help!
 
@@ -53,7 +34,8 @@ ATT is built to let AIs communicate with one another, form teams, and develop or
 
 The basic idea is simple: every AI remains an independent Agent, and the relationships between Agents and AgentTeams are explicit, autonomous, and changeable.
 
-An Agent can join several AgentTeams without becoming a different Agent. Its identity, memory, model binding, private workspace, and personal messages remain its own.
+An Agent can join several AgentTeams without becoming a different Agent.
+Its identity, memory, model binding, private workspace, and personal messages remain its own.
 
 An AgentTeam is an organization with its own relationships and shared resources.
 
@@ -170,7 +152,7 @@ The current [personal activity](docs/Personal_Activity.md), [conversation](docs/
 
 [Persistence and recovery](docs/State_Persistence.md) use incompatible schema 16, exact commit receipts, validated publication, and stale-worker fencing.
 
-The [engineering profiles](docs/dev/autonomous_activity/README.md) retain the earlier phases' implementation and verification history without making their historical schemas the current format.
+The [autonomous Agent runtime architecture](docs/Autonomous_Agent_Runtime_Architecture/Concurrency_and_Observers.md) explains these coordination boundaries, and the [historical archive](docs_archive/README.md) retains the original development records.
 
 ### Failure Semantics Follow the Type of Decision
 
@@ -220,7 +202,11 @@ Incremental persistence records changed entities and file paths through a single
 
 State restoration is staged and validated before publication, including identity references, topology relationships, governance status combinations, model aliases, memory provenance, and DocLib ownership.
 
-A failed restore leaves the existing manager and managed files unchanged rather than publishing a partially reconstructed runtime.
+Validation and staging failures leave the existing manager and managed files unchanged.
+
+Publication failures restore the recorded before-images; an unsuccessful rollback keeps affected resources fenced, while cleanup or scheduling failures after accepted publication do not undo the new generation.
+
+The [recovery contract](docs/Database/Recovery_and_Publication.md#failure-boundaries) defines these phase-specific guarantees.
 
 Schema versions are checked before database definition changes, and incompatible databases are rejected explicitly because the project currently favors unambiguous state semantics over legacy-schema compatibility.
 
@@ -249,8 +235,11 @@ ATT represents dynamic multi-agent topologies as recursive lineages with explici
 * **[Dynamic Lineage Migration](docs/Dynamic_Delegation.md)**: Permits active teams to request parent-hierarchy migrations, arbitrated by modular strategies with loop/cycle detection and parent notification logs.
 * **[Hierarchical Topology Map](docs/Dynamic_Delegation.md)**: Provides a trusted-host ASCII map of ordinary teams, purposes, status, and progress without automatically inserting the full map into Agent prompts.
 * **[Agent and AgentTeam Discovery](docs/Agent_and_AgentTeam_Discovery.md)**: Lets Agents explicitly list public directory records, search case-insensitive OR keywords, and inspect stable IDs, using inclusive entity-position ranges with a default page of 30 and no implicit collaborator selection or authority grant.
-* **[Shared-Agent Continuity](docs/Consensual_Team_Formation.md)**: One `Agent` may participate in several teams with one identity, one persistent Agent inbox, and complete memory. Invocation-scoped team and personal invocation context keeps prompts and team-sensitive tools correctly scoped while the agent's own model calls remain serialized.
-* **[Resilient Failover Routing](docs/Team_Governance.md#5-token-budget--failover-policies)**: Dynamically hot-swaps exhausted or failing model clients. `"auto"` selects from available bindings; `"parent"` uses an explicit parent AgentTeam ballot or a Root Agent decision and fails closed.
+* **[Shared-Agent Continuity](docs/Consensual_Team_Formation.md)**: One `Agent` may participate in several teams with one identity, one persistent Agent inbox, and complete memory.
+  Invocation-scoped team and personal invocation context keeps prompts and team-sensitive tools correctly scoped while the agent's own model calls remain serialized.
+* **[Quota-Triggered Failover Routing](docs/Team_Governance.md#5-token-budget--failover-policies)**: Selects another model binding after token-quota exhaustion through the same atomic ledger.
+  `"auto"` selects an available binding; `"parent"` requires the actual AgentTeam or Agent parent's explicit decision, with Root participating only when it is that parent.
+  Parent decision failure does not fall back to automatic selection, and provider faults retain their separate retry and availability handling.
 
 ### 🧠 ReAct Loops & Execution Engine
 
@@ -258,21 +247,29 @@ ATT represents dynamic multi-agent topologies as recursive lineages with explici
 * **Strict Balanced Action Parser**: A character-level scanner handles nested delimiters, quotes, triple quotes, escapes, multiline input, Markdown fences, and Unicode before literal-only argument parsing; malformed or unquoted expressions never execute a tool.
 * **[Bounded Working Context](docs/State_Persistence.md)**: Compacts the model window into derived history references without a separate summary model call, while retaining the complete sanitized personal Journal.
 * **[Optional Selective Episodic Memory](docs/Selective_Episodic_Memory.md)**: When explicitly enabled, records one deterministic Agent-owned segment per committed personal invocation boundary, queues isolated retrieval-metadata indexing in the background, and lets only that Agent search or temporarily recall its own Memory Cards through token-bounded, gap-free continuation coordinates.
-* **[LLM Adapter Architecture](docs/Tool_System.md)**: Unifies sync, async, and streaming LLM payloads from various providers (Google, OpenAI, Anthropic) into standard `LLMResponse` and `ToolCall` formats via the `ManagerDefaultClientAdapter`.
+* **[LLM Adapter Architecture](docs/Tool_System.md)**: Accepts synchronous or asynchronous handlers returning `str`, `dict`, or `LLMResponse` and normalizes supported results into provider-neutral response and tool-call values.
+  Provider-specific streams must be collected by the Host adapter or handler before returning a supported result.
 * **[Atomic Token Budget Circuit Breakers](docs/Team_Governance.md#5-token-budget--failover-policies)**: Enforces hard per-model quotas by atomically reserving prompt and maximum output capacity before each request, settling provider usage, refunding unused capacity, and routing failover through the same ledger.
 
 ### 🗳️ Governance & Inter-Team Communication
 
-* **[Democratic Voting System](docs/Dynamic_Delegation.md#5-team-governance--democratic-voting-system)**: Features an asynchronous voting pipeline to add or remove members, requiring unanimous participation and a $\ge 2/3$ agreement majority.
-* **Anonymous Voting**: Enforces voter anonymity via `cast_vote(..., public=False)` which masks voter names as `"Anonymous Voter"` in the team prompt context.
-* **[Autonomous AgentTeam Communication](docs/Team_Governance.md)**: `ATTConfig.communication` selects permissive, parent-approval, or lineage-approval governance. AgentTeams own requests and agreements; Agents act only from invocation-scoped team authority. No member order or creator identity grants communication authority.
+* **[Democratic Voting System](docs/Dynamic_Delegation.md#6-team-governance--democratic-voting-system)**: Features an asynchronous voting pipeline to add or remove members, requiring unanimous participation and a $\ge 2/3$ agreement majority.
+* **Membership Ballot Metadata**: Retains each validated voter's identity, choice, rationale, and `public` preference.
+  An anonymized membership-vote display is not currently implemented, so `public=False` does not provide an anonymity guarantee; see the [current limitation](docs/Dynamic_Delegation.md#6-team-governance--democratic-voting-system).
+* **[Autonomous AgentTeam Communication](docs/Team_Governance.md)**: `ATTConfig.communication` selects permissive, parent-approval, or lineage-approval governance.
+  AgentTeams own requests and agreements; Agents act only from invocation-scoped team authority.
+  No member order or creator identity grants communication authority.
 
 ### 🔒 Context Protection & Safety Gates
 
 * **[Token-Bounded File Reading](docs/Gated_Reading.md)**: Limits model-facing reads by the effective model's content-token budget rather than file size or line count, supports exact continuation inside long lines, and rejects stale file cursors.
-* **[Collaborative DocLib Storage](docs/Gated_Reading.md#6-document-libraries-doclib)**: Equips teams with built-in document libraries. Access is governed by prefix path ACL permissions (`READ`/`WRITE`) that inherit recursively downward to subdirectories.
-* **Private Agent DocLibs**: Gives every registered AI one persistent private workspace (`PDL-<agent_id>`). Private files follow a shared AI across teams, remain outside team ACLs and prompts, and enter a team library only through an explicit copy/publish tool.
-* **[Consensual Existing-Agent Membership](docs/Consensual_Team_Formation.md)**: Ordinary Agent and host APIs send revision-bound identity-inbox invitations before adding a registered Agent to a new AgentTeam. Material proposal revisions preserve immutable history and renew consent, while the initiator may prepare an optional validated candidate without deciding for invitees. Membership remains a role-neutral relation that never rebinds or clears Agent-owned identity, memory, model, lifecycle, lock, inbox, or Private DocLib state.
+* **[Collaborative DocLib Storage](docs/Gated_Reading.md#6-document-libraries-doclib)**: Equips teams with built-in document libraries.
+  Access is governed by prefix path ACL permissions (`READ`/`WRITE`) that inherit recursively downward to subdirectories.
+* **Private Agent DocLibs**: Gives every registered AI one persistent private workspace (`PDL-<agent_id>`).
+  Private files follow a shared AI across teams, remain outside team ACLs and prompts, and enter a team library only through an explicit copy/publish tool.
+* **[Consensual Existing-Agent Membership](docs/Consensual_Team_Formation.md)**: Ordinary Agent and host APIs send revision-bound identity-inbox invitations before adding a registered Agent to a new AgentTeam.
+  Material proposal revisions preserve immutable history and renew consent, while the initiator may prepare an optional validated candidate without deciding for invitees.
+  Membership remains a role-neutral relation that never rebinds or clears Agent-owned identity, memory, model, lifecycle, lock, inbox, or Private DocLib state.
 * **Tool Auditor Interception**: Registers pre-execution interception hooks to audit, vet, approve, or reject specific tool calls (e.g. database safety query check).
 
 ### 💾 Persistence & Diagnostics
@@ -409,11 +406,13 @@ The complete and current `ATTConfig` reference has moved to the [Public API Refe
 
 The reference includes every top-level option, nested policy configuration, tokenizer mapping, validation constraint, and the model-facing file-read token-counter rules.
 
-## Design Blueprints
+## Architecture and Development Records
 
-The [Design Blueprints](docs/blueprints/README.md) collect the autonomous Agent activity blueprint, implementation plan, and deferred features.
+[Autonomous Agent Runtime Architecture](docs/Autonomous_Agent_Runtime_Architecture/README.md) and [Database Architecture](docs/Database/README.md) describe the implemented system by responsibility.
 
-They describe the target architecture and implementation boundaries; Phases 0–6 provide the implemented runtime and institutions, Phase 7 consolidates current documentation and examples, and Phase 8 retains extended reliability acceptance.
+[Verification](docs/dev/verification/README.md) connects current requirements to executable tests and acceptance commands.
+
+Original blueprints, implementation records, and acceptance evidence are preserved in the [historical archive](docs_archive/README.md), while unimplemented research remains in the [Roadmap](Roadmap/Roadmap.md).
 
 ## 📊 Architecture & Control Flow Diagrams
 
@@ -421,4 +420,5 @@ For visual flowcharts and sequencing diagrams detailing the runtime loops, gated
 
 ## 📄 License
 
-Distributed under the Apache License 2.0. See `LICENSE.txt` for details.
+Distributed under the Apache License 2.0.
+See `LICENSE.txt` for details.

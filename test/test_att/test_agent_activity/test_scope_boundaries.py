@@ -6,7 +6,7 @@ from unittest.mock import Mock
 from ai_team_team import Agent
 from ai_team_team.core.activity.contracts import AgentTeamScope, SuppressionPreference
 from test.test_att.test_agent_activity._support import ActivityTestCase, call, idle
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep, ScriptedModelClient
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep, ScriptedModelClient
 
 
 class ScopeBoundaryTests(ActivityTestCase):

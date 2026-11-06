@@ -6,14 +6,9 @@ import unittest
 from ai_team_team import LLMResponse, ToolCall
 from ai_team_team.core.activity.contracts import BackgroundTaskHandle
 from test.test_att.test_agent_activity._support import ActivityTestCase, idle
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ControlledExecutor, ModelStep
-from test.test_att.test_autonomous_activity_phase0 import spec_background_execution as frozen
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ControlledExecutor, ModelStep
 
 from ._support import BackgroundTestCase, contract
-
-
-class FrozenBackgroundContractTests(frozen.SpecBackgroundExecution):
-    """The previously red Phase 0 contract now participates in discovery."""
 
 
 class DetachmentTests(ActivityTestCase):

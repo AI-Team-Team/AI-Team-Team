@@ -8,7 +8,7 @@ from ai_team_team.core.adapters import HandlerClientAdapter
 from ai_team_team.core.manager.activity.values import ModelUnavailable
 from ai_team_team.core.utils import _count_request_input_tokens, generate_with_retry
 from test.test_att.test_agent_activity._support import ActivityTestCase, idle
-from test.test_att.test_autonomous_activity_phase0._fixtures import AsyncBarrier, ModelStep
+from test.test_att.test_runtime_contracts._fixtures import AsyncBarrier, ModelStep
 
 
 class TestCriticalPersonalBudgets(ActivityTestCase):

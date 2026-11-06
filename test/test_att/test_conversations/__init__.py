@@ -1,1 +1,1 @@
-"""Phase 3 authoritative chat and personal relationship tests."""
+"""Authoritative chat and personal relationship tests."""

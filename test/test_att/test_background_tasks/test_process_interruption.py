@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from test.test_att.test_agent_activity._support import idle
-from test.test_att.test_autonomous_activity_phase0._fixtures import ModelStep
+from test.test_att.test_runtime_contracts._fixtures import ModelStep
 
 from ._support import BackgroundTestCase
 

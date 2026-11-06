@@ -6,7 +6,7 @@ import unittest
 from ai_team_team import LLMResponse
 from ai_team_team.tool import Tool
 
-from test.test_att.test_autonomous_activity_phase0._fixtures import (
+from test.test_att.test_runtime_contracts._fixtures import (
     AsyncBarrier,
     ControlledCommitter,
     ControlledExecutor,

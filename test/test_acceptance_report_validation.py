@@ -27,6 +27,20 @@ class ReportValidationTests(unittest.TestCase):
     def test_complete_measured_evidence_passes(self):
         self.assertTrue(self.evaluate()["passed"])
 
+    def test_full_suite_and_measured_coverage_remain_required(self):
+        write_reports(self.paths, self.reports)
+        self.assertFalse(summarize(self.root, self.paths[1:])["passed"])
+        self.reports[0]["coverage"] = False
+        for field in ("coverage_threshold", "coverage_percent", "coverage_artifact_sha256"):
+            self.reports[0].pop(field)
+        self.assertFalse(self.evaluate()["passed"])
+
+    def test_retired_phase_only_profile_is_not_current_evidence(self):
+        self.reports[1]["suite"] = "frozen"
+        result = self.evaluate()
+        self.assertFalse(result["passed"])
+        self.assertTrue(result["invalid_reports"])
+
     def test_zero_coverage_is_rejected_even_when_flags_claim_success(self):
         coverage_artifact(self.paths[0], self.reports[0], percentage=0)
         result = self.evaluate()

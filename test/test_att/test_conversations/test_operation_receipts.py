@@ -8,7 +8,7 @@ from unittest.mock import patch
 from ai_team_team import Agent, StateRestoreError
 from ai_team_team.database.persistence.records import DomainRecord, thaw
 from ai_team_team.database.persistence.store.detached_validation import validate_detached_records
-from test.test_att.test_autonomous_activity_phase1._support import make_manager, record
+from test.test_att.test_state_integrity._support import make_manager, record
 from ._support import ChatTestCase
 
 

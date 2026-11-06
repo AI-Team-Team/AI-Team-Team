@@ -1,0 +1,251 @@
+{
+  "archive": {
+    "all_payload_hashes_reverified": true,
+    "manifest_sha256": "a27de3358d33b8adc8aa4fd89315b6a60351b68eaa2eed0cf239ad0294820bed",
+    "markdown_sections_with_explicit_disposition": 340,
+    "section_disposition_sha256": "73cd962d4a4f5f4ed6a54a448c97d481c79c371d3539a44d8bc5463a8138d193",
+    "section_disposition_summary": {
+      "scope": "All copied documents and data; current material is reconciled with implemented contracts.",
+      "snapshot_manifest": "2026-11-02-document-organization.json"
+    },
+    "unchanged_document_and_data_files": 68
+  },
+  "completed_at_utc": "2026-11-02T15:28:28.952164+00:00",
+  "current_topics": {
+    "database": "docs/Database/",
+    "functional_test_packages": [
+      "test/test_att/test_runtime_contracts/",
+      "test/test_att/test_state_integrity/"
+    ],
+    "runtime_architecture": "docs/Runtime_Architecture/",
+    "tool_contracts": "test/contracts/tool_effects.json",
+    "verification": "docs/dev/verification/"
+  },
+  "notes": [
+    "Original archive payloads retain all original wording, selectors, hashes, and historical status.",
+    "Fresh per-test reports, coverage artifacts, and diagnostic logs are retained outside the checkout at the recorded paths.",
+    "This record contains source identity, outcomes, timings, and hashes rather than runtime payloads or tool arguments.",
+    "Local validation covers the recorded macOS/Python environment; the maintained CI matrix covers supported platforms on the next run."
+  ],
+  "runtime_behavior_changed": false,
+  "schema": "16",
+  "section_disposition": "2026-11-02-document-disposition.json",
+  "snapshot_manifest": "2026-11-02-document-organization.json",
+  "source": {
+    "base_commit": "dd5d5c6b9e6a96a63096af1acd49c2bbda189156",
+    "machine": "arm64",
+    "packages": {
+      "jsonschema": "4.26.0",
+      "pydantic": "2.13.5",
+      "sqlalchemy": "2.1.2",
+      "tokenizers": "0.23.2",
+      "typing-extensions": "4.16.0"
+    },
+    "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+    "python": "3.13.18 (main, Oct 25 2026, 18:31:23) [Clang 21.0.0 (clang-2100.3.34.2)]",
+    "source_digest": "03b677930a2ec79dac9724034fb6f876126a853a46a01858207f1d98f2fc198b",
+    "source_kind": "checkout",
+    "sqlite": "3.54.1",
+    "worktree_dirty": true
+  },
+  "starting_ci": {
+    "basis": "User-confirmed successful baseline CI.",
+    "commit": "dd5d5c6b9e6a96a63096af1acd49c2bbda189156",
+    "run_url": "https://github.com/AI-Team-Team/AI-Team-Team/actions/runs/41317043838",
+    "scope": "The committed starting revision; these uncommitted changes have local evidence below.",
+    "status": "passed"
+  },
+  "status": "completed",
+  "test_discovery": {
+    "count_reconciliation": "The previous ordinary count of 1191 gains four regressions and retires three migration-only tests; five specification aliases are replaced by direct discovery without changing their count.",
+    "full_tests": 1192,
+    "inherited_specification_aliases_removed": 5,
+    "new_regressions": [
+      "DocumentationOrganizationTests.test_default_discovery_contains_each_runtime_scenario_once",
+      "AcceptanceEvidenceTests.test_missing_current_ledger_cannot_fall_back_to_an_archive",
+      "ReportValidationTests.test_full_suite_and_measured_coverage_remain_required",
+      "ReportValidationTests.test_retired_phase_only_profile_is_not_current_evidence"
+    ],
+    "retired_migration_only_tests": [
+      "TestFreezeArtifacts.test_inventory_includes_both_workflow_extensions_and_other_source_formats",
+      "TestFreezeArtifacts.test_inventory_excludes_all_blueprints_without_excluding_current_runtime_docs",
+      "TestFreezeArtifacts.test_inventory_matches_the_complete_current_scan"
+    ],
+    "retirement_reason": "The completed replacement inventory is historical; continuing schema, fixture, tool-effect, ownership, and authority regressions remain active.",
+    "specification_method_bodies_ast_unchanged": true,
+    "specifications_discovered_and_executed_once": [
+      "test.test_att.test_runtime_contracts.test_background_execution_contracts.TestBackgroundExecutionContracts.test_threshold_releases_only_the_wait_and_produces_one_native_observation",
+      "test.test_att.test_runtime_contracts.test_personal_activity_contracts.TestPersonalActivityContracts.test_a_plain_answer_continues_activity_without_publication",
+      "test.test_att.test_runtime_contracts.test_personal_activity_contracts.TestPersonalActivityContracts.test_an_idle_owner_receives_mail_without_a_forced_reply_or_read",
+      "test.test_att.test_runtime_contracts.test_personal_activity_contracts.TestPersonalActivityContracts.test_arrival_during_a_tool_wait_enters_the_immediate_next_valid_frame",
+      "test.test_att.test_runtime_contracts.test_personal_activity_contracts.TestPersonalActivityContracts.test_shared_person_admission_coalesces_across_team_scopes"
+    ]
+  },
+  "validation": {
+    "aggregate": {
+      "checks": 186,
+      "environment_compatible": true,
+      "external_report": "/private/tmp/att-document-closeout-0cnzf_q7/summary.json",
+      "passed": true,
+      "report_sha256": "b7d83e69e34cbe532032ff459299c768034e2f10a58b28efd96fa84585480d90",
+      "source_compatible": true
+    },
+    "build": {
+      "artifacts": [
+        {
+          "name": "ai_team_team-0.1.0-py3-none-any.whl",
+          "sha256": "35ec5d875ecddef106b75eb018835212c00af3b5351c53eb842642438fce126a"
+        },
+        {
+          "name": "ai_team_team-0.1.0.tar.gz",
+          "sha256": "a5ab2e3c7e61fa38a8b137c8ffde3d8e4a1fdf0804a1200c0349e3331d4a2297"
+        }
+      ],
+      "log_sha256": "a6a73c7f5e399615bcab99a3e596836a9ea60a03de865df5a7aed8b4b809a1d6",
+      "passed": true
+    },
+    "coverage": {
+      "artifact_sha256": "e812a8e9f05e788790ed2ed6836b0b4d7d469eeed404da1117bba9a0f1a3bad7",
+      "branch_instrumentation": true,
+      "combined_percent": 84.82420711116997,
+      "external_artifact": "/private/tmp/att-document-closeout-0cnzf_q7/coverage/coverage.json",
+      "required_percent": 70.0,
+      "totals": {
+        "covered_branches": 6290,
+        "covered_lines": 19332,
+        "excluded_lines": 113,
+        "missing_branches": 2000,
+        "missing_lines": 2584,
+        "num_branches": 8290,
+        "num_partial_branches": 1636,
+        "num_statements": 21916,
+        "percent_branches_covered": 75.8745476477684,
+        "percent_branches_covered_display": "75.87",
+        "percent_covered": 84.82420711116997,
+        "percent_covered_display": "84.82",
+        "percent_statements_covered": 88.20952728600109,
+        "percent_statements_covered_display": "88.21"
+      }
+    },
+    "extended": {
+      "elapsed_seconds": 43.292206,
+      "external_report": "/private/tmp/att-document-closeout-0cnzf_q7/extended/result.json",
+      "leaks": {
+        "ResourceWarning:": 0,
+        "Task exception was never retrieved": 0,
+        "Task was destroyed but it is pending": 0,
+        "was never awaited": 0
+      },
+      "passed": true,
+      "report_sha256": "5f19b252f548e034f7a1dcc6e7eeebda89b13fb50dd0885bab3cdcef6a7f3f9c",
+      "root_doclib_exists": false,
+      "skips": 0,
+      "source_unchanged": true,
+      "stress_operations": 96,
+      "stress_seeds": 8,
+      "suite": "extended",
+      "tests": 3
+    },
+    "focused": {
+      "acceptance_tools": {
+        "elapsed_seconds": 29.805,
+        "external_log": "/private/tmp/att-document-closeout-0cnzf_q7/focused-acceptance.log",
+        "log_sha256": "9ef9cabc2cb097660bef5efb8b3f94148687e94345f1a0e66485b6902184d16d",
+        "passed": true,
+        "tests": 50
+      },
+      "documentation": {
+        "elapsed_seconds": 7.829,
+        "external_log": "/private/tmp/att-document-closeout-0cnzf_q7/focused-documentation.log",
+        "log_sha256": "2b656122fb7730b286c0808317280671bafa463f773e459b5f6cfbe63e4651c9",
+        "passed": true,
+        "tests": 22
+      },
+      "mechanics": {
+        "elapsed_seconds": 15.614,
+        "external_log": "/private/tmp/att-document-closeout-0cnzf_q7/focused-mechanics.log",
+        "log_sha256": "786c574a779779f172118b83f62fb68ac2feb95cef42a87df30f694ebe395d26",
+        "passed": true,
+        "tests": 22
+      },
+      "runtime_contracts": {
+        "elapsed_seconds": 6.427,
+        "external_log": "/private/tmp/att-document-closeout-0cnzf_q7/focused-runtime-contracts.log",
+        "log_sha256": "70efcd4a419ae8fcfc5feceaa26d1d72d77bb98c60ffab6129ae0ca40f9e5f45",
+        "passed": true,
+        "tests": 37
+      },
+      "state_integrity": {
+        "elapsed_seconds": 41.905,
+        "external_log": "/private/tmp/att-document-closeout-0cnzf_q7/focused-state-integrity.log",
+        "log_sha256": "2e82c99097db654a8f31c78dc6805207c73f57822d5ae3ce7921f10ad21e3222",
+        "passed": true,
+        "tests": 107
+      }
+    },
+    "full_with_coverage": {
+      "elapsed_seconds": 1125.263055,
+      "external_report": "/private/tmp/att-document-closeout-0cnzf_q7/coverage/result.json",
+      "leaks": {
+        "ResourceWarning:": 0,
+        "Task exception was never retrieved": 0,
+        "Task was destroyed but it is pending": 0,
+        "was never awaited": 0
+      },
+      "passed": true,
+      "report_sha256": "75ff5bacfd3b71abfc875ec41c694408d43085691813e3b2237e826f1b4d05ae",
+      "root_doclib_exists": false,
+      "skips": 0,
+      "source_unchanged": true,
+      "stress_operations": 96,
+      "stress_seeds": 8,
+      "suite": "full",
+      "tests": 1192
+    },
+    "installed_wheel": {
+      "consumer_mypy": "Success: no issues found in 2 source files",
+      "dependencies_shared_read_only": true,
+      "elapsed_seconds": 14.550705,
+      "examples": [
+        {
+          "durability": "durable",
+          "intent": "idle",
+          "model_calls": 2,
+          "same_identity_restored": true
+        },
+        {
+          "durability": "durable",
+          "intent": "idle",
+          "model_calls": 2,
+          "same_identity_restored": true
+        },
+        {
+          "admission": "BACKGROUND",
+          "attention": "ACKNOWLEDGED",
+          "durability": "durable",
+          "execution": "completed"
+        }
+      ],
+      "isolated_origin": "/private/tmp/att-document-closeout-0cnzf_q7/wheel-smoke/venv/lib/python3.13/site-packages/ai_team_team/__init__.py",
+      "passed": true,
+      "production_modules": 284,
+      "runtime_specifications": 5
+    },
+    "mypy": {
+      "consumer_contracts": 2,
+      "log_sha256": "f9b031e5c45aa702cd4fef028d465551cb20a2c4698e0913c7b00766b20ac4d8",
+      "passed": true
+    },
+    "ordinary": {
+      "elapsed_seconds": 609.688,
+      "external_log": "/private/tmp/att-document-closeout-0cnzf_q7/unittest.log",
+      "log_sha256": "196ac4cae8b36c11c1445ea5647ac7b636b55af42a1ab4cebcc637b3ac23b781",
+      "passed": true,
+      "tests": 1192
+    },
+    "ruff": {
+      "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "passed": true
+    }
+  }
+}

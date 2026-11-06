@@ -12,8 +12,8 @@ from pathlib import Path
 
 from ai_team_team import ATTConfig, ATTManager, Agent
 from test.test_att.test_agent_activity._support import idle
-from test.test_att.test_autonomous_activity_phase0._fixtures import ModelStep
-from test.test_att.test_autonomous_activity_phase1._support import make_manager
+from test.test_att.test_runtime_contracts._fixtures import ModelStep
+from test.test_att.test_state_integrity._support import make_manager
 
 
 class PublicationCrashBoundaryTests(unittest.IsolatedAsyncioTestCase):
