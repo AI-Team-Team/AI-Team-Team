@@ -8,8 +8,6 @@ Declared coverage and actual execution outcomes are separate facts, as described
 
 This ledger does not enumerate every sentence in the archived blueprints or every clause of a compound matrix row.
 
-In particular, the [cooldown remaining-time response](../../../todo.md#tool-cooldown-remaining-time) is a known implementation gap despite the existing cooldown regressions.
-
 A42-03 maps separate voting and audit assertions: the audit test snapshots actual provider inputs, verifies that explicitly permitted evidence is present, and rejects an owned private-file sentinel from every prompt and instruction.
 
 Evidence-schema rejection and restricted-tool views provide additional boundaries but do not substitute for the input non-injection assertion.
@@ -159,7 +157,7 @@ Component fixtures retain their deliberate boundaries, while common-runtime prot
 | ID | Requirement | Behavioral evidence |
 | --- | --- | --- |
 | A16-01 | Correctable input and ordinary business/permission errors remain observations. | [test_native_and_text_failures_remain_observations_not_idle_or_team_failure](../../../test/test_att/test_agent_activity/test_notifications_and_tools.py); [test_invalid_sleep_is_correctable_without_cooling_the_control](../../../test/test_att/test_agent_activity/test_notifications_and_tools.py) |
-| A16-02 | Execution faults cool new same-tool calls without extending the deadline. | [test_execution_fault_cools_only_new_calls_to_the_same_tool](../../../test/test_att/test_agent_activity/test_notifications_and_tools.py) |
+| A16-02 | Execution faults cool new same-tool calls, and both protocols report the remaining time without extending the deadline. | [test_execution_fault_cools_only_new_calls_to_the_same_tool](../../../test/test_att/test_agent_activity/test_notifications_and_tools.py), [test_cooldown_reports_remaining_time_in_both_protocols](../../../test/test_att/test_agent_activity/test_notifications_and_tools.py#L185) |
 | A16-03 | Only typed eligible execution retries replay a tool. | [test_typed_transient_retry_policies](../../../test/test_att/test_tool_execution_hardening/test_tool_runtime.py); [test_each_real_execution_retry_has_evidence_but_an_auditor_denial_has_none](../../../test/test_att/test_agent_activity/test_runtime_boundaries.py) |
 | A16-04 | Provider retry waits remain separate from tool cooldowns. | [test_provider_wait_overrides_jitter_cap_and_refreshes_arrivals_on_retry](../../../test/test_att/test_agent_activity/test_model_requests.py) |
 

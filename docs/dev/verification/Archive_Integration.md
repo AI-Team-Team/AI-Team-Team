@@ -119,8 +119,6 @@ WorkItem remains a conceptual distinction, with deliberate plans and work judgme
 
 Confirmed clauses within a shared chapter need distinct explanations rather than a single chapter-to-guide link.
 
-The following routes make conversation, summary, and detector details explicit while retaining the known implementation difference separately.
-
 | Archived clause | Current explanation | Disposition |
 | --- | --- | --- |
 | [Ordinary activity and work](../../../docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/04_Ordinary_Activity.md) and [work artifacts](../../../docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/09_Work_Artifacts.md): people define work, collaboration, and completion without mandatory business records or a framework acceptance gate. | [Work, Conversation, and Completion](../../Personal_Activity.md#work-conversation-and-completion) | Preserves open-ended work, participant judgments, and the distinction between silence, personal intent, membership, execution, and institutional authority. |
@@ -138,11 +136,9 @@ The following routes make conversation, summary, and detector details explicit w
 | [Incident recovery](../../../docs_archive/dev/autonomous_activity/Schema_15.md#health-and-recovery): retained alert delivery resumes independently of health assessment execution. | [Domain Recovery](../../Database/Recovery_and_Publication.md#domain-recovery) | Receipt-owned notification outboxes may resume after publication without recreating auditors or rerunning the assessment. |
 | [Health design](../../../docs_archive/blueprints/Autonomous_Agent_Activity_Messaging_and_Background_Tasks/14_Health_Supervision.md): memberships do not reset an Agent's detection state. | [Triggering an assessment](../../Supervisory_Team.md#triggering-an-assessment) | Documented as continuing identity-owned evidence. |
 | [Health plan: evidence and triggers](../../../docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/12_Health_Supervision.md#121-evidence-and-triggers): count logical observations once and reject language or character style alone as semantic evidence. | [Triggering an assessment](../../Supervisory_Team.md#triggering-an-assessment) | Documented with duplicate-observer and internal-retry exclusions and Host detector responsibilities. |
-| [Personal-activity plan: failure isolation](../../../docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/05_Personal_Activity.md#54-failure-isolation): cooldown rejection returns remaining time. | [Registered Operations](../../Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md#registered-operations) and [tracked issue](../../../todo.md#tool-cooldown-remaining-time) | Open implementation difference: the rejection currently omits the duration. |
+| A rejection during tool cooldown reports the remaining time. [Failure isolation](../../../docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/05_Personal_Activity.md#54-failure-isolation) | [Registered Operations](../../Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md#registered-operations) | Both protocols report the remaining time in whole seconds. [A16-02](Verification_Coverage.md#tool-availability-and-retries) |
 
 The maintained matrix and 186-requirement ledger do not enumerate every archived sentence or establish that every clause in a compound row is exercised by its selected tests.
-
-The cooldown disclosure remains an explicit unresolved requirement even when existing cooldown tests pass.
 
 ## Maintained Artifacts and Historical Evidence
 

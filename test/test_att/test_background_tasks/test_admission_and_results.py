@@ -127,3 +127,27 @@ class AdmissionTests(BackgroundTestCase):
         self.assertNotIn("SENSITIVE_BODY", self.manager._executions.summary(self.root))
         self.assertFalse(self.records("chat_messages"))
         self.assertNotIn("SENSITIVE_BODY", str(self.root.message_history))
+
+    async def test_cooldown_overflow_keeps_background_admission_rejected(self):
+        from ai_team_team import RetryableToolError, ToolBusinessError
+
+        self.manager.register_runtime_clock(self.clock)
+        self.manager.config.activity.tool_cooldown_seconds = 1e308
+
+        async def operation() -> str:
+            raise RetryableToolError("Synthetic service failure.")
+
+        self.manager.register_tool("operation", func=operation, execution_contract=contract())
+        handle = await self.start("operation")
+        await self.finish(handle)
+        cooldowns = self.records("tool_cooldowns")
+        self.assertEqual(len(cooldowns), 1)
+        self.assertEqual(cooldowns[0].values["deadline"], 1e308)
+
+        with patch.object(self.clock, "wall_time", return_value=-1e308):
+            with self.assertRaisesRegex(ToolBusinessError, "too large to display") as rejected:
+                await self.start("operation")
+
+        self.assertEqual(rejected.exception.error_kind, "tool_cooldown")
+        self.assertEqual(self.records("tool_cooldowns"), cooldowns)
+        self.assertEqual(self.manager.list_background_tasks(actor=self.root).total_count, 1)

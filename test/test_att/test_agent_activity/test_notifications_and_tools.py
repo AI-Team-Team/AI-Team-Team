@@ -181,3 +181,49 @@ class NotificationAndToolTests(ActivityTestCase):
         self.assertFalse(self.root.agent_inbox)
         self.assertFalse(self.records("agent_notifications"))
         self.assertFalse(self.client.requests)
+
+    async def test_cooldown_reports_remaining_time_in_both_protocols(self):
+        self.manager.register_runtime_clock(self.clock)
+        self.manager.config.activity.tool_cooldown_seconds = 120.25
+        calls = 0
+
+        async def flaky():
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RetryableToolError("The declared service is temporarily unavailable.")
+            return "Service available after cooldown."
+
+        self.manager.register_tool("flaky", func=flaky)
+
+        async def invoke(*, native):
+            self.manager.config.tool_calling_mode = "native" if native else "text_react"
+            action = call("flaky") if native else LLMResponse(text="Action: flaky()")
+            self.steps(action, idle(native=native))
+            admission = await self.manager.activate_agent(self.root.agent_id)
+            await self.wait(admission)
+            await self.settle()
+            return self.client.requests[-1].prompt
+
+        await invoke(native=True)
+        original_cooldowns = self.records("tool_cooldowns")
+        self.assertEqual(len(original_cooldowns), 1)
+
+        for native, advance, seconds in ((True, 20, 101), (False, 100, 1)):
+            with self.subTest(native=native, seconds=seconds):
+                self.clock.advance(advance)
+                prompt = await invoke(native=native)
+                role = "tool" if native else "user"
+                prefix = "[business_error]" if native else "Observation [business_error]:"
+                observations = [message["content"] for message in prompt if message["role"] == role]
+                self.assertIn(f"{prefix} The tool is cooling down with {seconds} s remaining.", observations)
+                self.assertEqual(self.records("tool_cooldowns"), original_cooldowns)
+                self.assertEqual(calls, 1)
+
+        self.clock.advance(0.25)
+        await self.settle()
+        self.assertEqual(calls, 1, "Expiry must not replay the failed call.")
+        prompt = await invoke(native=False)
+        self.assertIn("Service available after cooldown.", json.dumps(prompt))
+        self.assertEqual(calls, 2)
+        self.assertEqual(self.client.unexpected_requests, 0)

@@ -922,7 +922,7 @@
     },
     {
       "verification_id": "A16-02",
-      "requirement": "Execution faults cool new same-tool calls without extending the deadline",
+      "requirement": "Execution faults cool new same-tool calls, and both protocols report the remaining time without extending the deadline",
       "documentation": [
         {
           "path": "docs/Autonomous_Agent_Runtime_Architecture/Model_and_Tool_Execution.md",
@@ -931,7 +931,8 @@
       ],
       "implementation": [
         "src/ai_team_team/core/manager/executions/outcomes.py",
-        "src/ai_team_team/core/manager/executions/dispatch.py"
+        "src/ai_team_team/core/manager/executions/dispatch.py",
+        "src/ai_team_team/core/manager/activity/context.py"
       ]
     },
     {

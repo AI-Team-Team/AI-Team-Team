@@ -5,6 +5,7 @@ import contextvars
 import hashlib
 import inspect
 import json
+import math
 import os
 import copy
 
@@ -101,8 +102,15 @@ class DispatchMixin:
                 raise PermissionError("The owner's lifecycle changed before execution admission.")
             self.check(context, team_required=tool.execution_contract.required_scope == "agent_team")
             cooling = self.manager._records.index.get(("tool_cooldowns", (owner.agent_id, tool.name)))
-            if cooling is not None and self.manager._activity.cooldown_remaining(cooling) > 0:
-                raise ToolBusinessError("The tool is cooling; no new execution was admitted.", error_kind="tool_cooldown")
+            remaining_seconds = (
+                self.manager._activity.cooldown_remaining(cooling) if cooling is not None else 0.0
+            )
+            if remaining_seconds > 0:
+                if math.isfinite(remaining_seconds):
+                    message = f"The tool is cooling down with {math.ceil(remaining_seconds)} s remaining."
+                else:
+                    message = "The tool is cooling down. The remaining time is too large to display."
+                raise ToolBusinessError(message, error_kind="tool_cooldown")
             records = admission
             if ("agent_activities", (owner.agent_id,)) not in self.manager._records.index:
                 records = (*records, capture(self.manager, "agent_activities", agent_id=owner.agent_id,

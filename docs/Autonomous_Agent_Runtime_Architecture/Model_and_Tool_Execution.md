@@ -60,11 +60,9 @@ Correctable input, missing paths, ordinary denial, and business refusal do not i
 
 Denied cooling calls neither extend the deadline nor cancel previously accepted healthy executions, and expiry does not replay a failed operation.
 
-A rejected new call during cooldown must report the remaining duration without executing the tool or extending the deadline.
+The `tool_cooldown` result reports a finite remaining duration at rejection in whole seconds, rounded up for display in Text ReAct and Native.
 
-The current implementation reports `error_kind="tool_cooldown"` but omits that duration.
-
-This [tracked implementation gap](../../todo.md#tool-cooldown-remaining-time) remains unresolved; the existing denial must not be interpreted as a remaining-time response.
+If calculating the duration overflows, the rejection reports that the remaining time is too large to display.
 
 Concurrent same-Agent/tool faults serialize their cooldown record versions, and the candidate monotonic deadline becomes live only after its matching accepted receipt.
 

@@ -8,18 +8,6 @@ Completed work belongs in its historical record, and unimplemented architectural
 
 ## Known Issues
 
-### Tool Cooldown Remaining Time
-
-New calls during an active same-Agent/tool cooldown are correctly rejected without repeating the service call, but the returned `tool_cooldown` observation does not disclose the remaining duration.
-
-The [blueprint contract](docs_archive/blueprints/Implementation_plan_Autonomous_Agent_Activity_Messaging_and_Background_Tasks/05_Personal_Activity.md#54-failure-isolation) and the [Tool availability and retries matrix row](docs/dev/verification/Verification_Matrix.md) require that remaining-time response.
-
-The admission gate in [dispatch.py](src/ai_team_team/core/manager/executions/dispatch.py) returns only `The tool is cooling; no new execution was admitted.` even when the runtime retains 600 seconds of cooldown.
-
-Expose the current remaining duration through the shared rejected-call result and add explicit Text/Native regression assertions for decreasing time, unchanged deadlines on rejection, and availability after expiry.
-
-Existing cooldown tests and successful full-suite runs do not establish that this response requirement is satisfied.
-
 ### Membership Ballot Visibility
 
 Membership ballots retain the actual voter identity, choice, rationale, and `public` preference, but the runtime has no anonymized membership-vote presentation.

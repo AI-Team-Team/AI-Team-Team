@@ -21,7 +21,7 @@ Review the actual assertions, applicable protocol/durability modes, valid input,
 
 One matrix row or ledger entry may contain several clauses, so a passing selector does not establish coverage for every clause in that row.
 
-The [known-issues list](../../../todo.md#known-issues) records demonstrated implementation differences, including the currently missing cooldown remaining-time response.
+Demonstrated implementation differences are tracked in the [known-issues list](../../../todo.md#known-issues).
 
 ## Default Discovery
 

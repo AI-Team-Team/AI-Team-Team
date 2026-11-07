@@ -1055,15 +1055,20 @@
     {
       "id": "A16-02",
       "area": "Tool availability and retries",
-      "requirement": "Execution faults cool new same-tool calls without extending the deadline",
+      "requirement": "Execution faults cool new same-tool calls, and both protocols report the remaining time without extending the deadline",
       "coverage": "covered",
       "selectors": [
-        "test.test_att.test_agent_activity.test_notifications_and_tools.NotificationAndToolTests.test_execution_fault_cools_only_new_calls_to_the_same_tool"
+        "test.test_att.test_agent_activity.test_notifications_and_tools.NotificationAndToolTests.test_execution_fault_cools_only_new_calls_to_the_same_tool",
+        "test.test_att.test_agent_activity.test_notifications_and_tools.NotificationAndToolTests.test_cooldown_reports_remaining_time_in_both_protocols"
       ],
       "sources": [
         {
           "path": "test/test_att/test_agent_activity/test_notifications_and_tools.py",
           "line": 40
+        },
+        {
+          "path": "test/test_att/test_agent_activity/test_notifications_and_tools.py",
+          "line": 185
         }
       ]
     },
